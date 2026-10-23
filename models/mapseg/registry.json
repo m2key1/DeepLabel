@@ -1,0 +1,19 @@
+{
+  "models": [
+    {
+      "id": "franciscan-cadastre-upernet",
+      "label": "Franciscan Cadastre",
+      "checkpoint": "cadastre_upernet.pth",
+      "input_size": 512,
+      "classes": [
+        {"id": 0, "name": "background", "color": [0, 0, 0]},
+        {"id": 1, "name": "buildings", "color": [255, 0, 195]},
+        {"id": 2, "name": "forests", "color": [137, 243, 54]},
+        {"id": 3, "name": "rivers", "color": [255, 0, 0]},
+        {"id": 4, "name": "roads", "color": [0, 255, 255]},
+        {"id": 5, "name": "urban", "color": [128, 0, 128]}
+      ],
+      "class_priority": ["buildings", "urban", "roads", "rivers", "forests", "background"]
+    }
+  ]
+}

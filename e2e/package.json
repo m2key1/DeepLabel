@@ -1,0 +1,18 @@
+{
+  "name": "deeplabel-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
+    "e2e:watch": "E2E_CURSOR=1 E2E_SLOWMO=300 playwright test --headed",
+    "e2e:ui": "playwright test --ui",
+    "stack:up": "docker compose -f ../compose.e2e.yml up -d --build",
+    "stack:down": "docker compose -f ../compose.e2e.yml down -v"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^24.13.2",
+    "typescript": "~6.0.2"
+  }
+}

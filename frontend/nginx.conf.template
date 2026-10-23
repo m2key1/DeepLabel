@@ -1,0 +1,101 @@
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    # 0 disables the body size check - uploads carry whole scanned volumes
+    client_max_body_size 0;
+
+    # A volume's transcript is megabytes of repetitive JSON, which compresses to a
+    # fraction of itself. Named types only: scans are already compressed, and gzipping a
+    # JPEG spends processor time to make it very slightly bigger.
+    gzip on;
+    gzip_proxied any;
+    gzip_min_length 1024;
+    gzip_vary on;
+    gzip_types application/json text/plain text/css application/javascript image/svg+xml;
+
+    # Serve static assets or fallback to index.html for SPA routing
+    location / {
+        try_files $uri /index.html;
+    }
+
+    # The entry document names the hashed bundles, so a browser holding an old copy of it
+    # goes on running the old app however often this is redeployed - and says nothing.
+    # It is a page of markup: revalidate it every time. The bundles carry their own hash
+    # and never change under it, so those are kept for a year.
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # Route auth endpoints directly to the auth service
+    location = /api/login         { proxy_set_header Host $host; proxy_pass ${AUTH_URL}; }
+    location = /api/auth/callback { proxy_set_header Host $host; proxy_pass ${AUTH_URL}; }
+    location = /api/logout        { proxy_set_header Host $host; proxy_pass ${AUTH_URL}; }
+    location = /api/me            { proxy_set_header Host $host; proxy_pass ${AUTH_URL}; }
+    location ^~ /api/users        { proxy_set_header Host $host; proxy_pass ${AUTH_URL}; }
+    location ^~ /api/settings     { proxy_set_header Host $host; proxy_pass ${AUTH_URL}; }
+    location ^~ /api/tokens       { proxy_set_header Host $host; proxy_pass ${AUTH_URL}; }
+    location ^~ /api/admin/tokens { proxy_set_header Host $host; proxy_pass ${AUTH_URL}; }
+    # Who a person is lives in the auth service; what they have done (/profile under it)
+    # is the backend's and takes the /api/ route below.
+    location ~ ^/api/people/[^/]+$ { proxy_set_header Host $host; proxy_pass ${AUTH_URL}; }
+
+    # Authenticate via /_authz, then forward to backend with identity and secret headers
+    location /api/ {
+        auth_request /_authz;
+        auth_request_set $auth_user $upstream_http_x_auth_user;
+        auth_request_set $auth_role $upstream_http_x_auth_role;
+        auth_request_set $auth_readonly $upstream_http_x_auth_readonly;
+        auth_request_set $auth_train_local $upstream_http_x_auth_train_local;
+        auth_request_set $auth_train_cluster $upstream_http_x_auth_train_cluster;
+        auth_request_set $auth_slurm_account $upstream_http_x_auth_slurm_account;
+        # What this person may ask the backend to do, resolved by the auth service out of
+        # their role and the exceptions an admin made. Without this line the backend sees
+        # no capabilities and refuses everything a plain role does not already allow.
+        auth_request_set $auth_caps $upstream_http_x_auth_caps;
+        proxy_set_header Host $host;
+        proxy_set_header X-Auth-User $auth_user;
+        proxy_set_header X-Auth-Role $auth_role;
+        proxy_set_header X-Auth-Readonly $auth_readonly;
+        proxy_set_header X-Auth-Train-Local $auth_train_local;
+        proxy_set_header X-Auth-Train-Cluster $auth_train_cluster;
+        proxy_set_header X-Auth-Slurm-Account $auth_slurm_account;
+        proxy_set_header X-Auth-Caps $auth_caps;
+        proxy_set_header X-Frontend-Secret ${FRONTEND_SECRET};
+        proxy_buffering off;
+        # Stream uploads straight to the backend instead of spooling them to the
+        # container's disk first - with no size cap the spool would be the real limit
+        proxy_request_buffering off;
+        proxy_read_timeout 1h;
+        proxy_pass ${BACKEND_URL};
+    }
+
+    # The backend's own OpenAPI schema and Swagger UI, so an API token holder can read
+    # what they may call. Behind the same gate: the backend only guards /api/ itself.
+    location ~ ^/(openapi\.json|docs)$ {
+        auth_request /_authz;
+        auth_request_set $auth_user $upstream_http_x_auth_user;
+        auth_request_set $auth_role $upstream_http_x_auth_role;
+        proxy_set_header Host $host;
+        proxy_set_header X-Auth-User $auth_user;
+        proxy_set_header X-Auth-Role $auth_role;
+        proxy_set_header X-Frontend-Secret ${FRONTEND_SECRET};
+        proxy_pass ${BACKEND_URL};
+    }
+
+    # Internal auth resolution subrequest
+    location = /_authz {
+        internal;
+        proxy_pass ${AUTH_URL}/validate;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Cookie $http_cookie;
+        # Scripts authenticate with a bearer token instead of the session cookie.
+        proxy_set_header Authorization $http_authorization;
+    }
+}

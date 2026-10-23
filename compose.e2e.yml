@@ -1,0 +1,120 @@
+name: deeplabel-e2e
+
+services:
+  backend:
+    build: ./backend
+    container_name: deeplabel-e2e-backend
+    ports:
+      # Overridable so the suite can run beside whatever else holds 8001 locally.
+      - "${E2E_BACKEND_PORT:-8001}:8000"
+    volumes:
+      - e2e-backend-data:/data
+    environment:
+      FRONTEND_SECRET: e2e-secret
+      SAVE_OCR_DATA: "false"
+      # A cluster that is merely configured, never reached: enough for the training
+      # dialog to offer the target, so the admin-only rule can be pinned in the UI.
+      SLURM_HOST: cluster.invalid
+      SLURM_USER: e2e
+      SLURM_GPUS: rtx6000bb:7,h200:8,l40s:4:inference
+      # Encrypts the API keys the LLM connections keep in app.db. Any string works; the
+      # Fernet key is derived from it.
+      LLM_SECRET_KEY: e2e-llm-secret
+      # The stub model backend (deeplabel-backends' stub/) serves every model: layout, lines
+      # and OCR on their task's default backend, one container each because a backend
+      # trains one snapshot kind; "edges" for area detection; and "stub", no task's default,
+      # for scenarios that point a model at a backend of its own.
+      MODEL_BACKENDS: layout,lines,ocr,edges,stub
+      MODEL_BACKEND_LAYOUT_URL: http://model-stub-layout:9100
+      MODEL_BACKEND_LAYOUT_SECRET: e2e-model-secret
+      MODEL_BACKEND_LINES_URL: http://model-stub-lines:9100
+      MODEL_BACKEND_LINES_SECRET: e2e-model-secret
+      MODEL_BACKEND_OCR_URL: http://model-stub:9100
+      MODEL_BACKEND_OCR_SECRET: e2e-model-secret
+      # A cluster run of a model on a backend needs that backend's image there; the cluster
+      # is never reached, so the file never has to exist.
+      MODEL_BACKEND_OCR_CLUSTER_IMAGE: /cluster/images/stub.sqsh
+      MODEL_BACKEND_LINES_CLUSTER_IMAGE: /cluster/images/stub.sqsh
+      MODEL_BACKEND_LAYOUT_CLUSTER_IMAGE: /cluster/images/stub.sqsh
+      MODEL_BACKEND_STUB_URL: http://model-stub:9100
+      MODEL_BACKEND_STUB_SECRET: e2e-model-secret
+      MODEL_BACKEND_EDGES_URL: http://model-stub:9100
+      MODEL_BACKEND_EDGES_SECRET: e2e-model-secret
+      MODEL_BACKEND_FETCH_URL: http://backend:8000
+
+  # A deterministic OpenAI-compatible provider (e2e/stub/llm/server.py). It runs under the
+  # backend image because that image already has a python and the stub is pure stdlib.
+  # The port is published so scenarios can
+  # read its call counter and prove a re-alignment cost no API call.
+  llm:
+    build: ./backend
+    container_name: deeplabel-e2e-llm
+    command: ["python", "/stub/llm/server.py"]
+    volumes:
+      - ./e2e/stub:/stub:ro
+    ports:
+      - "${E2E_LLM_PORT:-8002}:8000"
+
+  # Every task, deterministic and torch-free, served over the model backend contract.
+  # Built from a checkout of the deeplabel-backends repository, beside this one unless
+  # DEEPLABEL_BACKENDS_ROOT in .env says otherwise.
+  model-stub:
+    build:
+      context: ${DEEPLABEL_BACKENDS_ROOT:-../deeplabel-backends}
+      dockerfile: stub/Dockerfile
+    container_name: deeplabel-e2e-model-stub
+    environment:
+      MODEL_BACKEND_SECRET: e2e-model-secret
+      STUB_PREDICT_DELAY: "0.3"
+
+  model-stub-lines:
+    build:
+      context: ${DEEPLABEL_BACKENDS_ROOT:-../deeplabel-backends}
+      dockerfile: stub/Dockerfile
+    container_name: deeplabel-e2e-model-stub-lines
+    environment:
+      MODEL_BACKEND_SECRET: e2e-model-secret
+      STUB_TRAIN_SNAPSHOT: page-lines/1
+      STUB_PREDICT_DELAY: "0.3"
+
+  model-stub-layout:
+    build:
+      context: ${DEEPLABEL_BACKENDS_ROOT:-../deeplabel-backends}
+      dockerfile: stub/Dockerfile
+    container_name: deeplabel-e2e-model-stub-layout
+    environment:
+      MODEL_BACKEND_SECRET: e2e-model-secret
+      STUB_TRAIN_SNAPSHOT: page-boxes/1
+      STUB_PREDICT_DELAY: "0.3"
+
+  auth:
+    build: ./auth
+    container_name: deeplabel-e2e-auth
+    environment:
+      AUTH_DATA_DIR: /data
+      DEV_AUTH: "true"
+      SESSION_SECRET: e2e-insecure
+      SESSION_COOKIE_SECURE: "false"
+    volumes:
+      - e2e-auth-data:/data
+
+  frontend:
+    build: ./frontend
+    container_name: deeplabel-e2e-frontend
+    depends_on:
+      - auth
+      - backend
+      - llm
+      - model-stub
+      - model-stub-lines
+      - model-stub-layout
+    environment:
+      AUTH_URL: http://auth:8000
+      BACKEND_URL: http://backend:8000
+      FRONTEND_SECRET: e2e-secret
+    ports:
+      - "8090:80"
+
+volumes:
+  e2e-backend-data:
+  e2e-auth-data:

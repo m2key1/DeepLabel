@@ -1,0 +1,25 @@
+services:
+  auth:
+    build: ./auth
+    container_name: deeplabel-auth-dev
+    environment:
+      AUTH_DATA_DIR: /data
+      DEV_AUTH: "true"
+      SESSION_SECRET: dev-insecure
+      SESSION_COOKIE_SECURE: "false"
+    volumes:
+      - ./data/auth:/data
+
+  frontend:
+    build: ./frontend
+    container_name: deeplabel-frontend-dev
+    depends_on:
+      - auth
+    environment:
+      AUTH_URL: http://auth:8000
+      BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:8000}
+      FRONTEND_SECRET: ${FRONTEND_SECRET:-dev-secret}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"

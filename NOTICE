@@ -1,0 +1,9 @@
+DeepLabel
+Copyright 2026 David Fleischhacker and contributors
+
+This product is licensed under the Apache License 2.0 (LICENSE).
+
+It includes two fonts licensed under the SIL Open Font License 1.1, each with its licence
+beside it in frontend/public/fonts/:
+- Abbreviation Marks, a subset of Charis SIL, copyright SIL International
+- Schematismus Marks, copyright David Fleischhacker

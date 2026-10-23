@@ -1,0 +1,40 @@
+[project]
+name = "deeplabel-auth"
+version = "0.1.0"
+license = "Apache-2.0"
+authors = [{ name = "David Fleischhacker" }]
+description = "OIDC auth + server-side sessions + roles for DeepLabel"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "authlib>=1.7.2",
+    "itsdangerous>=2.2.0",
+    "httpx>=0.28.1",
+    "python-dotenv>=1.2.2",
+    # Uploaded pictures are decoded and re-encoded rather than served as they arrive,
+    # which is what settles the format, the dimensions and anything else the file was
+    # carrying. See app/avatars.py for the ceiling that keeps that from being a way in.
+    "pillow>=11",
+    # FastAPI parses a multipart upload through this; without it the import of any
+    # route taking an UploadFile fails, which takes the whole service with it.
+    "python-multipart>=0.0.20",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+ignore = ["B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,37 @@
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+frontend/dist/
+data/
+# Model checkpoints stay out of git, but the map-segmentation registry is tracked
+# (a bare negation under an ignored dir is dead — git never descends into it).
+models/*
+!models/mapseg/
+models/mapseg/*
+!models/mapseg/registry.json
+deploy/
+*.log
+
+.env
+.env.*
+!.env.*.example
+
+CLAUDE.md
+.claude/
+
+e2e/test-results/
+test-results/
+# Placeholders the backend compose mounts when MAPSEG_ROOT / EDGE_DETECT_ROOT are unset.
+.mapseg-absent/
+.edge-absent/
+e2e/playwright-report/
+e2e/.auth/
+**/.pytest_cache/
+**/.coverage
+**/htmlcov/
+# Checkpoints at the repo root only: a bare models/ also swallowed source directories
+# named models, such as the frontend's model components.
+/models/
+.claudeignore
+pyrightconfig.json

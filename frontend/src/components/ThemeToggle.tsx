@@ -1,0 +1,77 @@
+import { useSyncExternalStore } from 'react'
+import { Button } from './ui/Button'
+import { Segmented } from './ui/Segmented'
+import { ThemeIcon } from './icons'
+
+export type ThemeMode = 'system' | 'light' | 'dark'
+
+const THEME_KEY = 'deeplabel.theme'
+
+function storedTheme(): ThemeMode {
+  const v = localStorage.getItem(THEME_KEY)
+  return v === 'light' || v === 'dark' ? v : 'system'
+}
+
+function applyTheme(mode: ThemeMode) {
+  const dark =
+    mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  document.documentElement.classList.toggle('dark', dark)
+}
+
+// One mode for the whole app, so every switch that shows it - the profile's, the tile
+// editor's - and the shortcut that cycles it agree.
+let current: ThemeMode = 'system'
+const listeners = new Set<() => void>()
+
+export function initTheme() {
+  current = storedTheme()
+  applyTheme(current)
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (current === 'system') applyTheme('system')
+  })
+}
+
+export function setTheme(mode: ThemeMode) {
+  current = mode
+  localStorage.setItem(THEME_KEY, mode)
+  applyTheme(mode)
+  for (const listener of listeners) listener()
+}
+
+const LABELS: Record<ThemeMode, string> = { system: 'Auto', light: 'Light', dark: 'Dark' }
+const NEXT: Record<ThemeMode, ThemeMode> = { system: 'light', light: 'dark', dark: 'system' }
+
+export const cycleTheme = () => setTheme(NEXT[current])
+
+function subscribe(listener: () => void) {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+export function useTheme(): ThemeMode {
+  return useSyncExternalStore(subscribe, () => current)
+}
+
+export function ThemeToggle() {
+  const mode = useTheme()
+  return (
+    <Button variant="ghost" size="icon" onClick={cycleTheme} title={`Theme: ${LABELS[mode]}`} aria-label="Theme">
+      <ThemeIcon mode={mode} />
+    </Button>
+  )
+}
+
+export function ThemeChoice() {
+  const mode = useTheme()
+  return (
+    <div data-testid="theme-choice" role="group" aria-label="Theme">
+      <Segmented
+        value={mode}
+        onChange={setTheme}
+        options={(Object.keys(LABELS) as ThemeMode[]).map((value) => ({ value, label: LABELS[value] }))}
+      />
+    </div>
+  )
+}

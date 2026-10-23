@@ -1,0 +1,184 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* The Schematismus corpus writes its printer's marks as stand-in codepoints - U+2690 for
+   the flag, U+33CB for the ligature, U+24B7 and friends for the circled abbreviations -
+   whose ordinary Unicode shapes look nothing like what is on the page. This face carries
+   those 27 codepoints and no others, so it renders the marks as drawn and every other
+   character falls through to the reading font behind it. */
+@font-face {
+  font-family: 'Schematismus Marks';
+  src: url('/fonts/schematismus-marks.woff2') format('woff2');
+  font-display: swap;
+  /* It has to come first in the stack to win those codepoints back from any system font
+     that also draws them - but the first family in a stack is also the one whose metrics
+     set the line box's strut, and this face is tall (ascender 1313 of 1024 upem). Left
+     alone it grew every line in the app by a few pixels. Overriding the metrics to less
+     than any real text font keeps the strut out of the way, so line height stays with
+     the font the text is actually rendered in. */
+  ascent-override: 80%;
+  descent-override: 20%;
+  line-gap-override: 0%;
+}
+
+/* The palette offers the Latin Extended-D abbreviation letters - the per/pro/qui marks and
+   the suspension sign some ledgers use - and no reading font on the machine is bound to
+   have them: JetBrains Mono's latin-ext declares U+A720-A7FF in its unicode-range and then
+   ships none of it, so every one of them was falling through to whatever the reader's
+   system happened to carry, or to nothing. A 7 KB subset of Charis SIL settles it in one
+   place. Licence beside the file. */
+@font-face {
+  font-family: 'Abbreviation Marks';
+  src: url('/fonts/abbreviation-marks.woff2') format('woff2');
+  font-display: swap;
+  /* Kept out of the strut for the same reason as the face above it. */
+  ascent-override: 80%;
+  descent-override: 20%;
+  line-gap-override: 0%;
+}
+
+@theme {
+  --font-ocr: 'Schematismus Marks', 'Abbreviation Marks', 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* The chrome, figures, and the names of things. The OCR face above is a separate stack
+     on purpose: it carries the printer's marks and is what transcriptions are read in,
+     which is a different job from a column of counts. */
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: 'Spectral', Georgia, 'Times New Roman', serif;
+}
+
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+/* The one place a colour is decided. Everything else names a role - ground, ink, line -
+   so a page carries no light or dark value of its own and needs no `dark:` twin.
+   Migrating a page means swapping its literals for these; a page that still uses
+   gray/zinc/indigo literals keeps the old palette until it is moved over. */
+:root {
+  --ui-ground: #f4f4f1;
+  --ui-surface: #fcfcfa;
+  --ui-raised: #efefea;
+
+  --ui-ink: #191c1b;
+  --ui-ink-muted: #4f5653;
+  --ui-ink-subtle: #7c837f;
+
+  --ui-line: #dfdfd8;
+  --ui-line-strong: #c9cabf;
+
+  --ui-accent: #0e6e62;
+  --ui-accent-ink: #0a534a;
+  --ui-accent-wash: #dbeae6;
+  --ui-on-accent: #fcfcfa;
+
+  --ui-ok: #1c6b46;
+  --ui-warn: #8a5a12;
+  --ui-danger: #a33223;
+
+  /* Data series, in fixed order - slot 1 is always the first series, never recycled
+     when a filter drops one. Validated as a set against this surface for the lightness
+     band, the chroma floor, colour-vision separation and contrast; three of them sit
+     under 3:1 here, which is why every series carries a written label as well. */
+  --ui-series-1: #2a78d6;
+  --ui-series-2: #eb6834;
+  --ui-series-3: #1baf7a;
+  --ui-series-4: #eda100;
+  --ui-series-5: #e87ba4;
+  --ui-series-6: #008300;
+  --ui-series-7: #4a3aa7;
+  --ui-series-8: #e34948;
+}
+
+html.dark {
+  --ui-ground: #101311;
+  --ui-surface: #171a18;
+  --ui-raised: #1e2220;
+
+  --ui-ink: #e7e8e3;
+  --ui-ink-muted: #a3aaa5;
+  --ui-ink-subtle: #7b827d;
+
+  --ui-line: #2a2f2c;
+  --ui-line-strong: #3a403c;
+
+  --ui-accent: #4cc0a8;
+  --ui-accent-ink: #7fd6c3;
+  --ui-accent-wash: #16322d;
+  --ui-on-accent: #0b1614;
+
+  --ui-ok: #4fb488;
+  --ui-warn: #c99a42;
+  --ui-danger: #d9705f;
+
+  /* The same eight hues stepped for this surface, not an automatic flip of the above. */
+  --ui-series-1: #3987e5;
+  --ui-series-2: #d95926;
+  --ui-series-3: #199e70;
+  --ui-series-4: #c98500;
+  --ui-series-5: #d55181;
+  --ui-series-6: #008300;
+  --ui-series-7: #9085e9;
+  --ui-series-8: #e66767;
+}
+
+/* `inline` so the utilities resolve the custom property at use, which is what lets one
+   class answer to both themes instead of Tailwind baking a value in. */
+@theme inline {
+  --color-ground: var(--ui-ground);
+  --color-surface: var(--ui-surface);
+  --color-raised: var(--ui-raised);
+
+  --color-ink: var(--ui-ink);
+  --color-ink-muted: var(--ui-ink-muted);
+  --color-ink-subtle: var(--ui-ink-subtle);
+
+  --color-line: var(--ui-line);
+  --color-line-strong: var(--ui-line-strong);
+
+  --color-accent: var(--ui-accent);
+  --color-accent-ink: var(--ui-accent-ink);
+  --color-accent-wash: var(--ui-accent-wash);
+  --color-on-accent: var(--ui-on-accent);
+
+  --color-ok: var(--ui-ok);
+  --color-warn: var(--ui-warn);
+  --color-danger: var(--ui-danger);
+
+  --color-series-1: var(--ui-series-1);
+  --color-series-2: var(--ui-series-2);
+  --color-series-3: var(--ui-series-3);
+  --color-series-4: var(--ui-series-4);
+  --color-series-5: var(--ui-series-5);
+  --color-series-6: var(--ui-series-6);
+  --color-series-7: var(--ui-series-7);
+  --color-series-8: var(--ui-series-8);
+}
+
+/* Ahead of the reading font, not only in the OCR stack: it carries 27 codepoints and
+   nothing else, so every other character falls straight through and a mark stays a mark
+   wherever it is shown - palette, Settings, line editor, transcript. Prepended to the
+   theme's own stack rather than replacing it: writing the default out by hand puts the
+   app on a slightly different font, which moves every line by a pixel or two. */
+body {
+  font-family: 'Schematismus Marks', 'Abbreviation Marks', var(--font-sans);
+  @apply bg-ground text-ink;
+}
+
+/* Scrollable but with no visible scrollbars — the element still scrolls
+   programmatically and by wheel/drag, but the bars don't cover content at the
+   edges (used by the map tile editor so edge vertices stay reachable). */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Edge */
+}

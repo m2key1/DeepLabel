@@ -1,0 +1,144 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      args:
+        # The commit the image is built from, shown beside the version; build with
+        # GIT_COMMIT=$(git rev-parse --short HEAD) docker compose -f compose.backend.yml up -d --build
+        GIT_COMMIT: ${GIT_COMMIT:-}
+    container_name: deeplabel-backend
+    restart: unless-stopped
+    ports:
+      # Anyone who can reach this port and holds FRONTEND_SECRET can claim any username
+      # and any role, so publish it no wider than the frontend actually needs.
+      - "${BACKEND_BIND:-0.0.0.0}:8000:8000"
+    volumes:
+      # Optional: unset leaves an empty directory mounted, which the worker recognises as
+      # "no cadastre_segmentation here" and fails map tiling and pre-annotation with a
+      # clear message. Every other feature runs without it.
+      - type: bind
+        source: ${MAPSEG_ROOT:-./.mapseg-absent}
+        target: /Mapseg
+        read_only: true
+        bind:
+          create_host_path: true
+      # Same arrangement for the edge detectors: unset leaves /EdgeDetect empty, so the
+      # Detect tool reports itself unavailable and hand tracing is untouched.
+      - type: bind
+        source: ${EDGE_DETECT_ROOT:-./.edge-absent}
+        target: /EdgeDetect
+        read_only: true
+        bind:
+          create_host_path: true
+      - ./models:/models:ro
+      - ./data:/data
+      - ${SLURM_SSH_KEY_HOST:-/dev/null}:/run/secrets/slurm_key:ro
+    environment:
+      TZ: Europe/Vienna
+      LINE_CROP_MASK: ${LINE_CROP_MASK:-true}
+      LAYOUT_BATCH_SIZE: ${LAYOUT_BATCH_SIZE:-4}
+      FRONTEND_SECRET: ${FRONTEND_SECRET:?set FRONTEND_SECRET in .env}
+      SAVE_OCR_DATA: ${SAVE_OCR_DATA:-true}
+      # Job kinds offered by this deployment; see .env.backend.example.
+      ENABLE_TEXT: ${ENABLE_TEXT:-true}
+      ENABLE_MAP_SEGMENTATION: ${ENABLE_MAP_SEGMENTATION:-true}
+      ENABLE_MAP_LINES: ${ENABLE_MAP_LINES:-true}
+      # Upload guards; see .env.backend.example.
+      MAX_ZIP_EXTRACT_GB: ${MAX_ZIP_EXTRACT_GB:-50}
+      MAX_IMAGE_PIXELS: ${MAX_IMAGE_PIXELS:-1000000000}
+      INGEST_ROOTS: ${INGEST_ROOTS:-}
+      # LLM pre-annotation. Connections and keys are per person, set up under Settings;
+      # this only decides whether the feature exists and how its keys are encrypted at
+      # rest. See .env.backend.example.
+      ENABLE_LLM_OCR: ${ENABLE_LLM_OCR:-true}
+      LLM_SECRET_KEY: ${LLM_SECRET_KEY:-}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-600}
+      LLM_MAX_CONCURRENCY: ${LLM_MAX_CONCURRENCY:-4}
+      # Map-segmentation pre-annotation. The model code rides the /Mapseg mount above
+      # (MAPSEG_ROOT is left at its /Mapseg default) and the checkpoint the ./models mount;
+      # the torch venv does NOT ship in this (torch-free) image — build one from
+      # $MAPSEG_ROOT/requirements-inference.txt and point MAPSEG_PYTHON at it, else tiling
+      # and prediction are offered switched off, with the reason (empty = unavailable).
+      MAPSEG_PYTHON: ${MAPSEG_PYTHON:-}
+      MAPSEG_REGISTRY: /models/mapseg/registry.json
+      # Fallback checkpoint when a job has no model / the registry is absent.
+      MAPSEG_CHECKPOINT: /models/mapseg/cadastre_upernet.pth
+      MAPSEG_BATCH_SIZE: ${MAPSEG_BATCH_SIZE:-4}
+      MAPSEG_EPSILON: ${MAPSEG_EPSILON:-2.0}
+      MAPSEG_MIN_AREA: ${MAPSEG_MIN_AREA:-12}
+      # Edge detection for the area-detect tool. The methods ride the /EdgeDetect mount
+      # above; like the map runner, their interpreter is not in this (OpenCV-free) image —
+      # build one from $EDGE_DETECT_ROOT/requirements.txt and point EDGE_DETECT_PYTHON at
+      # it. Empty = the tool reports itself unavailable, which is a fine steady state.
+      EDGE_DETECT_ROOT: /EdgeDetect
+      EDGE_DETECT_PYTHON: ${EDGE_DETECT_PYTHON:-}
+      EDGE_REGISTRY: /models/edge/registry.json
+      EDGE_DETECT_TIMEOUT: ${EDGE_DETECT_TIMEOUT:-30}
+      # Model backends (docs/MODEL-BACKENDS.md). A backend named other than these seven needs
+      # its own four lines here as well.
+      WEIGHTS_DIR: ${WEIGHTS_DIR:-}
+      MODEL_BACKENDS: ${MODEL_BACKENDS:-}
+      MODEL_BACKEND_FETCH_URL: ${MODEL_BACKEND_FETCH_URL:-}
+      MODEL_BACKEND_LOAD_TIMEOUT: ${MODEL_BACKEND_LOAD_TIMEOUT:-}
+      MODEL_BACKEND_PREDICT_TIMEOUT: ${MODEL_BACKEND_PREDICT_TIMEOUT:-}
+      MODEL_BACKEND_LAYOUT_URL: ${MODEL_BACKEND_LAYOUT_URL:-}
+      MODEL_BACKEND_LAYOUT_SECRET: ${MODEL_BACKEND_LAYOUT_SECRET:-}
+      MODEL_BACKEND_LAYOUT_GPU_GROUP: ${MODEL_BACKEND_LAYOUT_GPU_GROUP:-}
+      MODEL_BACKEND_LAYOUT_CLUSTER_IMAGE: ${MODEL_BACKEND_LAYOUT_CLUSTER_IMAGE:-}
+      MODEL_BACKEND_LINES_URL: ${MODEL_BACKEND_LINES_URL:-}
+      MODEL_BACKEND_LINES_SECRET: ${MODEL_BACKEND_LINES_SECRET:-}
+      MODEL_BACKEND_LINES_GPU_GROUP: ${MODEL_BACKEND_LINES_GPU_GROUP:-}
+      MODEL_BACKEND_LINES_CLUSTER_IMAGE: ${MODEL_BACKEND_LINES_CLUSTER_IMAGE:-}
+      MODEL_BACKEND_OCR_URL: ${MODEL_BACKEND_OCR_URL:-}
+      MODEL_BACKEND_OCR_SECRET: ${MODEL_BACKEND_OCR_SECRET:-}
+      MODEL_BACKEND_OCR_GPU_GROUP: ${MODEL_BACKEND_OCR_GPU_GROUP:-}
+      MODEL_BACKEND_OCR_CLUSTER_IMAGE: ${MODEL_BACKEND_OCR_CLUSTER_IMAGE:-}
+      MODEL_BACKEND_MAPSEG_URL: ${MODEL_BACKEND_MAPSEG_URL:-}
+      MODEL_BACKEND_MAPSEG_SECRET: ${MODEL_BACKEND_MAPSEG_SECRET:-}
+      MODEL_BACKEND_MAPSEG_GPU_GROUP: ${MODEL_BACKEND_MAPSEG_GPU_GROUP:-}
+      MODEL_BACKEND_MAPSEG_CLUSTER_IMAGE: ${MODEL_BACKEND_MAPSEG_CLUSTER_IMAGE:-}
+      MODEL_BACKEND_EDGES_URL: ${MODEL_BACKEND_EDGES_URL:-}
+      MODEL_BACKEND_EDGES_SECRET: ${MODEL_BACKEND_EDGES_SECRET:-}
+      MODEL_BACKEND_EDGES_GPU_GROUP: ${MODEL_BACKEND_EDGES_GPU_GROUP:-}
+      MODEL_BACKEND_EDGES_CLUSTER_IMAGE: ${MODEL_BACKEND_EDGES_CLUSTER_IMAGE:-}
+      MODEL_BACKEND_RFDETR_LINES_URL: ${MODEL_BACKEND_RFDETR_LINES_URL:-}
+      MODEL_BACKEND_RFDETR_LINES_SECRET: ${MODEL_BACKEND_RFDETR_LINES_SECRET:-}
+      MODEL_BACKEND_RFDETR_LINES_GPU_GROUP: ${MODEL_BACKEND_RFDETR_LINES_GPU_GROUP:-}
+      MODEL_BACKEND_RFDETR_LINES_CLUSTER_IMAGE: ${MODEL_BACKEND_RFDETR_LINES_CLUSTER_IMAGE:-}
+      MODEL_BACKEND_KRAKEN_URL: ${MODEL_BACKEND_KRAKEN_URL:-}
+      MODEL_BACKEND_KRAKEN_SECRET: ${MODEL_BACKEND_KRAKEN_SECRET:-}
+      MODEL_BACKEND_KRAKEN_GPU_GROUP: ${MODEL_BACKEND_KRAKEN_GPU_GROUP:-}
+      MODEL_BACKEND_KRAKEN_CLUSTER_IMAGE: ${MODEL_BACKEND_KRAKEN_CLUSTER_IMAGE:-}
+      SLURM_HOST: ${SLURM_HOST:-}
+      SLURM_USER: ${SLURM_USER:-}
+      SLURM_PARTITION: ${SLURM_PARTITION:-}
+      SLURM_REMOTE_DIR: ${SLURM_REMOTE_DIR:-deeplabel-trainings}
+      SLURM_SSH_KEY: ${SLURM_SSH_KEY:-}
+      SLURM_CONTROL_PATH: ${SLURM_CONTROL_PATH:-/tmp/deeplabel-slurm.sock}
+      SLURM_ACCOUNT: ${SLURM_ACCOUNT:-}
+      SLURM_RSYNC_BWLIMIT: ${SLURM_RSYNC_BWLIMIT:-}
+      EVAL_MEMORY_LIMIT_GB: ${EVAL_MEMORY_LIMIT_GB:-}
+      SLURM_RSYNC_STALL: ${SLURM_RSYNC_STALL:-600}
+      SLURM_RSYNC_TIMEOUT: ${SLURM_RSYNC_TIMEOUT:-86400}
+      SLURM_GRES: ${SLURM_GRES:-gpu:1}
+      SLURM_GPUS: ${SLURM_GPUS:-}
+      SLURM_TIME: ${SLURM_TIME:-}
+      SLURM_MAX_RESUMES: ${SLURM_MAX_RESUMES:-3}
+      SLURM_CPUS: ${SLURM_CPUS:-16}
+      SLURM_MEM: ${SLURM_MEM:-64G}
+      SLURM_CPUS_PER_GPU: ${SLURM_CPUS_PER_GPU:-12}
+      SLURM_MEM_PER_GPU: ${SLURM_MEM_PER_GPU:-128G}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -o /dev/null -H \"X-Frontend-Secret: $$FRONTEND_SECRET\" -H 'X-Auth-User: healthcheck' -H 'X-Auth-Role: viewer' http://localhost:8000/api/jobs || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    # For the map runner, which still predicts in this container (decision 141).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

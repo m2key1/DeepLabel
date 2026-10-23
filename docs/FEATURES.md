@@ -1,0 +1,386 @@
+# Features
+
+A short guide to what DeepLabel does and how to use it. The [README](../README.md) has the
+overview and setup.
+
+## Contents
+
+- [Datasets and projects](#datasets-and-projects)
+- [Creating a dataset](#creating-a-dataset)
+- [The dataset page](#the-dataset-page)
+- [Layout classes and templates](#layout-classes-and-templates)
+- [Processing and re-runs](#processing-and-re-runs)
+- [Reading order](#reading-order)
+- [Page viewer and editor](#page-viewer-and-editor)
+- [Review and correction](#review-and-correction)
+- [Transcripts and exports](#transcripts-and-exports)
+- [Existing transcriptions](#existing-transcriptions)
+- [Corpus cut](#corpus-cut)
+- [Language models](#language-models)
+- [Models](#models)
+- [Training](#training)
+- [Evaluation](#evaluation)
+- [Maps](#maps)
+- [Collaboration](#collaboration)
+- [Accounts and permissions](#accounts-and-permissions)
+- [Profile and settings](#profile-and-settings)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [API](#api)
+
+## Datasets and projects
+
+The start page lists every dataset you can open, as a table or as cards.
+
+- Search, sort, filter to your own datasets or to those that need review, and pick which
+  columns to show.
+- Datasets are grouped into projects. Drag a dataset onto a project in the list or the
+  side rail to file it there, or onto Ungrouped to take it out.
+- Tick several datasets, or use a project's menu, to act on all of them at once: re-run,
+  re-read, re-detect lines, change processing settings, or move them to a project. Before
+  anything is queued, the confirmation says how many datasets and lines it covers and
+  names any dataset it will skip, with the reason.
+- A project's settings dialog sets the models, decoding and phases for every dataset in it.
+  Each control starts on "leave as it is", so only what you change is written.
+- Each dataset's Info panel shows who uploaded it, who it is shared with, page and line
+  counts, review progress, the models it uses, who has edited it and its size on disk.
+- Admins can view the list as a chosen person sees it.
+
+## Creating a dataset
+
+Choose **New job**, pick the task, name the dataset and add files.
+
+- Upload images, PDFs or zips, or (admins) point at a folder on the server. The form lists
+  every file and lets you remove any before sending.
+- Choose which phases run: layout detection, line detection and OCR. Layout is off by
+  default; lines are then detected on the whole page. With layout on, lines can be detected
+  inside each layout box instead.
+- Pick the model for each phase, the OCR decoding (beam search with a language model, beam
+  search reranked by the decoder, or fast greedy), and the transcription convention flags
+  the OCR model supports (for example long s or typographic punctuation).
+- Pick a layout template; it decides the dataset's layout classes.
+- Pages are sorted in natural order (`scan_2` before `scan_10`).
+- Photos are turned upright from their EXIF data, 16-bit scans are converted to 8-bit and
+  transparent backgrounds are laid on white.
+- A file identical to one already in the dataset is kept as a *duplicate* and skipped
+  everywhere. A file that cannot be read as an image is marked *unreadable* with the
+  reason; the rest of the dataset is processed as usual.
+- The owner of a dataset can add pages later from the dataset page.
+
+## The dataset page
+
+A dataset opens on a table of its pages with a preview of the selected scan beside it.
+
+- Filter chips narrow the table to pages that still need work, are reviewed, have no
+  layout, and so on. The arrow keys move the preview through the list.
+- Long datasets load a screenful at a time; **Show more** loads the next.
+- A run started elsewhere (another tab, a colleague, the API) shows up within seconds.
+- Anyone who can edit the dataset can delete pages and restore them from the Deleted
+  filter.
+
+## Layout classes and templates
+
+Every dataset has its own layout classes, copied from a template when it is created.
+
+- A class is either **content** (holds text, its lines are read) or a **container** (groups
+  the boxes inside it, read top to bottom like a column or left to right like a table).
+- **Layout templates** lists all templates. Create one from scratch, copy another, or save a
+  dataset's classes with **Save as template**. The built-in Schematismus template cannot be
+  changed, only copied.
+- Edit a dataset's classes from **Layout classes** on its page: rename, recolour, change
+  the type, or remove a class and delete or reassign its boxes. Every change can be undone.
+- When a layout model predicts labels the dataset does not have, the Processing dialog
+  asks which class each label becomes, or whether to leave it out.
+
+## Processing and re-runs
+
+Open **Processing** from a dataset's menu to change how it is processed. Changes apply to
+the next run; nothing already recognised is thrown away.
+
+- Choose the phases, the models, whether layout elements are boxes or polygons, and the
+  page structure used for reading order.
+- **Re-run** a phase over the dataset, a selection of pages, or a single page. The dialog
+  says what will be replaced before it runs.
+- Re-reading never touches lines a person has checked, unless you explicitly ask it to.
+- When lines are re-detected, the text of the old lines is kept and matched onto the new
+  ones. A correction lands back on its line where the shape barely changed, and is offered
+  as a reading where it changed more.
+- Vertical lines are read in both directions and the more confident reading is kept.
+- Turn a scan that arrived the wrong way up from the page viewer's **Run** menu. Boxes and
+  lines turn with it, and turning back restores the original file.
+- The **Queue** page shows everything running or waiting - datasets, trainings,
+  evaluations - in the order they will run, with live progress.
+
+## Reading order
+
+DeepLabel puts the lines of each page in reading order and keeps it up to date as you edit.
+
+- Without layout boxes, tell the dataset how its pages are set (one or two leaves, one,
+  two or three columns), or leave it on "work it out" to detect columns from the gaps
+  between lines. A single page can override the dataset's setting in the viewer.
+- With layout boxes, containers follow their own rules: a table is read column by column
+  from left to right, a column from top to bottom. Everything outside containers follows
+  the page structure setting.
+- Lines outside every box are read where they stand, between the boxes around them.
+- Drawing, moving, splitting, merging or deleting a box updates the order at once.
+- Each layout template sets how pages are read; a dataset follows the template of its
+  layout model.
+
+## Page viewer and editor
+
+The page viewer shows a scan with its layout boxes and lines, and the recognised text
+beside it.
+
+- Zoom with Ctrl and the mouse wheel or a trackpad pinch; scroll with the wheel; pan with
+  Alt-drag or middle-drag. On touch screens, pinch to zoom and drag to pan. Double-click
+  fits the page to the pane width.
+- The line under the pointer is magnified above the text, showing exactly the crop the OCR
+  model reads.
+- The footer names the layout, line and OCR models that produced the page.
+- Copy any scan to the clipboard as an image from the corner of the viewer.
+
+Press `e` to edit the page.
+
+- **Select** (`v`): click to pick a box or line, drag to move it. Shift-click or Shift-drag
+  to select several.
+- **Draw** (`d`): pick a class on the rail (or press its digit) and drag a box, or click
+  two corners. Draw a text line in three clicks: start of the line, its end, then its
+  height. Free polygons are drawn a corner per click and closed on the first corner.
+- Selected lines: drag a corner to resize, drag the ring to rotate (Shift snaps to 5
+  degrees), `,` and `.` turn by one degree. Switch a line to a polygon to follow a curved
+  baseline.
+- `s` splits along a stroke drawn across a box or line; `m` merges the selection.
+- **Erase** (Shift+E): sweep away line corners with a brush. Lines you or others have
+  checked are skipped unless you hold Shift.
+- Hold Space or Alt for the hand tool.
+- Delete a line straight from the text list, without entering edit mode.
+- Ctrl+Z undoes and Ctrl+Shift+Z redoes any edit, including merges and splits, in or out of
+  edit mode.
+
+## Review and correction
+
+- Move through lines with the arrow keys (or `j`/`k`). Enter edits a line; Shift+Enter
+  saves, checks it and moves to the next line, across page breaks.
+- **Review** on the dataset page walks the flagged, low-confidence lines of the whole dataset.
+- Every reading held for a line - the OCR model's, a language model's, an aligned
+  transcription, an earlier correction - is listed under it. Click one to make it the
+  line's text. The reading it replaces stays in the list, so nothing is lost.
+- Readings that matched no line are listed on the page; drag one onto the line it belongs
+  to.
+- The revert button puts a line back to its OCR text and unchecks it.
+- Mark a page's layout as complete separately from its lines; the page table filters on
+  both.
+- Build your own character keyboard under Settings, from a grid of characters grouped by
+  script or from presets, or let it fill itself with the characters the dataset uses. The
+  bar appears under the line editor.
+- The page header shows the live CER and WER of the OCR model against the lines people
+  have checked.
+
+## Transcripts and exports
+
+- **Transcript** reads a dataset as a volume: the scan on one side, its text on the other,
+  page by page. Turn pages with the arrows or `j`/`k`.
+- Search fuzzily, exactly, case-sensitively or by regular expression. `n` and `p` step
+  through the hits, and a strip along the edge shows which pages hold them.
+- `f` opens a distraction-free reading view.
+- Export a dataset as JSON, Markdown, plain text or a zip with images, either complete or
+  only what was reviewed. Lines inside tables and other containers are included.
+- A DeepLabel zip export can be uploaded to another instance and arrives with its classes,
+  text, corrections and review state intact.
+
+## Existing transcriptions
+
+Bring the ground truth you already have.
+
+- **Page transcriptions:** upload `scan_7.txt` next to `scan_7.png`. After OCR, each
+  transcription line is matched to the best-fitting recognised line. Near-exact matches
+  are checked automatically; if you say the transcription lists every line in reading
+  order, weaker matches that follow that order are checked too. Text files must be UTF-8
+  or UTF-16.
+- **PDF text layer:** tick "take the transcription from the text layer" for born-digital
+  PDFs. This text fills in corrections but is never checked automatically.
+- **Transkribus or eScriptorium:** upload a PAGE XML or ALTO export zipped with its images.
+  Pages, regions, line polygons and text are imported as they are, with no recognition run.
+- Change the alignment settings under Processing and re-run **Alignment** to match again.
+  Lines a person checked or corrected are kept; the aligned text is offered as a reading.
+
+## Corpus cut
+
+For transcriptions that exist as whole documents (a letter, an entry, a chapter) spanning
+several pages.
+
+- Upload the document `.txt` files beside the scans. Any `.txt` not named after an image is
+  treated as a document. The documents only need to sort in the same order as the pages.
+- After OCR, the corpus is cut onto the pages by anchoring recognised lines to corpus
+  lines. Each page gets a generous span of the document.
+- The dataset's **Corpus** page lists the documents, shows each page's span (pages that
+  anchored nothing first), and lets you cut again after the OCR or the corpus improves.
+- A language model can then read each page against its span, producing a diplomatic
+  transcription of the page as it stands. This text is matched to the lines like any
+  transcription, but is never checked automatically. Struck-out words are written as
+  `<del>` and additions as `<add>`.
+
+## Language models
+
+Any OpenAI-compatible endpoint (a hosted provider, vLLM, Ollama) can read pages as a second
+reader.
+
+- Add a connection under Settings. **Ask what it offers** tests it and lists its models.
+  Connections are private; an admin can publish one to everyone. API keys are stored
+  encrypted and never shown again in full.
+- Each model can have its own prompt, token limit and extra request fields. A dataset can
+  have its own prompt and up to four reference images (for example a glyph chart).
+- Start a reading from the dataset, a page selection, or a single page in the viewer. The
+  dialog shows the number of calls before anything is sent. A scan already read by the
+  same model and prompt is not sent again.
+- Readings are matched to the detected lines and offered on each line.
+- **Agreement:** when enough readers agree on a line, its text is filled in, and
+  optionally checked. Hover the agreement badge to compare every reader's text. The OCR
+  model does not vote by default. Agreement never overwrites a person's correction or
+  check.
+- **Re-apply LLM agreement** applies changed agreement settings to lines already read;
+  **Remove LLM readings** deletes a model's readings from a dataset.
+- A deployment can switch the feature off entirely.
+
+## Models
+
+Every model is served by a model backend, a separate service that runs it. Operators set
+backends up as described in [MODEL-BACKENDS.md](MODEL-BACKENDS.md).
+
+- The **Models** page has a tab per task (OCR, layout, lines) and a **Runs** tab. Models are
+  grouped into families: a base model and everything fine-tuned from it, drawn as a
+  version graph with each version's score.
+- Each model has its own page with its lineage, scores, decoding settings, evaluations,
+  notes and the run that produced it, plus **Evaluate**, **Set default**, **Edit** and
+  **Archive**.
+- Every task has a default model. Archived models leave the pickers but stay on record and
+  can be unarchived.
+- You manage the models your own trainings produced; people with the model-management
+  permission manage all of them.
+
+## Training
+
+Start a run with **Train model** on the Models page. Training runs on the model's backend, either on the
+local GPU or on a Slurm cluster (marked *highly experimental*).
+
+- Pick the base model, the datasets (by project, with search), the validation split and
+  optionally a whole dataset held out as a test set.
+- Train only on lines a person verified, or include lines settled by language-model
+  agreement.
+- Tune epochs, batch size, learning rate, early stopping and every other setting the
+  trainer offers; empty fields use the trainer's defaults, which are shown.
+- For OCR, optionally fit a language model to the training text. For line models, choose
+  the line shape to train on.
+- **Next** opens a pre-flight review of exactly the material the run will use: the split,
+  crop sizes, characters per line and a character table that flags rare characters,
+  lookalikes (such as a Cyrillic a in Latin text), characters only in validation, and
+  mixed Unicode forms. It warns but never blocks.
+- The run page has tabs for Overview, Curves, Data, Evaluations and Settings. Curves are
+  drawn per metric, with smoothing, log scale, zoom and a shared crosshair.
+- **Rerun** opens a finished run's settings in a new form.
+- **Augmentations** (under Models) builds augmentation pipelines from the trainer's
+  catalogue, with groups and a live preview on real line crops. Pipelines are private; an
+  admin can make one a task's default.
+- If the cluster asks for a second factor, an admin unlocks it from the training form.
+  Admins grant training per person and per target (local or cluster).
+
+## Evaluation
+
+- Evaluate any OCR model on any dataset's checked lines with **Evaluate...** on its page.
+  Training runs are evaluated automatically on their validation split and test set.
+- Each evaluation has a page with CER, WER, bag-of-words WER, error types and accuracy per
+  character class.
+- **Lines** lists every scored line with its crop, a character-level diff, CER and
+  confidence; sort, filter and search them, and open any line in the editor.
+  **Send to review** flags the current lines for review.
+- **Confusions**, **Characters** and **Context and calibration** break the errors down by
+  character, line length, dataset, page and confidence.
+
+## Maps
+
+Maps are a separate task with a tile editor, in two kinds: *map segmentation* (class
+polygons) and *line tracing* (boundary lines, open or closed).
+
+- Upload pre-cut tiles, or full map scans that are cut into square tiles (512 px unless you
+  choose another size). Near-blank tiles are skipped.
+- A segmentation model can pre-annotate every tile. If the deployment has no map model,
+  these options are switched off on the form.
+- Each dataset has its own class palette. Rank the classes to decide which wins where
+  polygons overlap; **Resolve overlaps** (`x`) clips them accordingly.
+- Draw shapes point by point, or trace freehand by holding the button. New points snap to
+  existing outlines, so neighbouring shapes share an edge. Bring a shape back to its first
+  point to close it; Enter, right-click or double-click finishes it anywhere.
+- Select to move whole shapes or groups of points, `m` merges, `s` cuts a line, `g` cuts a
+  hole, `p` reduces polygon points, and Shift+E erases points with a brush.
+- On line tiles, the **Detect** tool (`t`) traces edges inside an outlined area.
+- Re-predicting replaces model annotations but keeps human edits.
+- Reviewed tiles export as class-index PNG masks with geometry files for training.
+
+## Collaboration
+
+- **Projects and sharing:** share a dataset with people directly or through its project.
+- **Presence:** the navigation bar shows who is online, and datasets and pages show who is
+  in them. Opening a page someone else has open shows a notice. You can hide yourself or
+  hide others in Settings.
+- **Live edits:** a colleague's changes appear in your open page without a reload.
+- **Edit conflicts:** if someone saved a line, box or region after you loaded it, your save
+  is refused and both versions are shown, so you choose what to keep.
+- **Undo** only takes back your own edit, and is refused if someone else has built on it.
+
+## Accounts and permissions
+
+Sign-in is handled by Authentik.
+
+- Each account has a role - admin, member or viewer - which sets its permissions:
+  re-running phases, discarding checked work, deleting datasets, managing models and
+  training. Admins can grant or remove single permissions per person on the **Admin** page.
+  Buttons you cannot use are not shown.
+- The Admin page lists every account with its role, training access, last activity and
+  whether the person is online. Each row opens what they can reach, what they edited, their
+  sessions and a history of changes to the account.
+- Admins can invite people by email: the app creates the account and a one-time link to
+  set a password, which the admin sends. See [AUTHENTIK.md](../AUTHENTIK.md).
+- Admins can see and revoke every API token.
+
+## Profile and settings
+
+- Everyone has a profile at `/people/<username>` with their picture, role, groups, work
+  statistics (lines corrected and checked, pages signed off, trainings, models, best CER),
+  a year of activity and recent datasets.
+- Click your avatar on your profile to upload and crop a picture.
+- Your settings are tabs on your own profile: presence, which overlays a page opens with,
+  keyboard shortcuts, character keyboard, API tokens and language models.
+- Settings are stored with your account and follow you to every device.
+- The profile footer shows the DeepLabel version the deployment runs.
+
+## Keyboard shortcuts
+
+Every shortcut can be changed under Settings. Some commands (navigation, theme) start
+unbound.
+
+| Where | Key | Action |
+|---|---|---|
+| Page viewer | `e` | Toggle edit mode |
+| Page viewer | `j` / `k`, arrow keys | Next / previous line |
+| Page viewer | Enter / Shift+Enter | Edit line / save, check and go to next |
+| Page viewer | `i` | Step into the line's readings |
+| Page viewer | `o` | Re-read the focused line |
+| Page viewer | `r` / Shift+R | Rotate line clockwise / counter-clockwise |
+| Page viewer | `.` / `,` | Turn selected line by one degree |
+| Page viewer | Shift+V | Mark page layout complete |
+| Editors | `v` / `d` / Shift+E | Select / draw / erase tool |
+| Editors | Space or Alt (held) | Hand tool |
+| Editors | `s` / `m` | Split / merge |
+| Editors | `h` / `l` | Previous / next page |
+| Editors | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
+| Map editor | `t` | Detect edges (line tiles) |
+| Map editor | `g` / `p` / `x` | Cut hole / reduce polygons / resolve overlaps |
+| Transcript | `n` / `p` | Next / previous search hit |
+| Transcript | `f` | Reading view |
+
+## API
+
+Everything the interface does is available over HTTP. Create a token under your profile's
+**API tokens** tab and send it as `Authorization: Bearer <token>`. A token acts as you, can
+be made read-only, and expires when you choose. The schema is at `/docs` on a running
+deployment, and [API.md](API.md) has examples, including the Python client and the
+`deeplabel` command-line tool.

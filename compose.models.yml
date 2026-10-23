@@ -1,0 +1,32 @@
+x-backend: &backend
+  restart: unless-stopped
+  # PyTorch's data loader workers pass batches through shared memory; Docker's 64 MB is
+  # too little for a training run.
+  shm_size: ${MODEL_BACKEND_SHM_SIZE:-8gb}
+  deploy:
+    resources:
+      reservations:
+        devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+
+# Started together with the backend, so each is reachable by its service name:
+# docker compose -f compose.backend.yml -f compose.models.yml up -d
+services:
+  ocr:
+    <<: *backend
+    image: ${OCR_BACKEND_IMAGE:?set OCR_BACKEND_IMAGE in .env}
+    environment:
+      MODEL_BACKEND_SECRET: ${MODEL_BACKEND_OCR_SECRET:?set MODEL_BACKEND_OCR_SECRET in .env}
+      MODEL_CACHE_MAX_GB: ${OCR_BACKEND_CACHE_GB:-20}
+    volumes: [ocr-cache:/cache]
+
+  lines:
+    <<: *backend
+    image: ${LINES_BACKEND_IMAGE:?set LINES_BACKEND_IMAGE in .env}
+    environment:
+      MODEL_BACKEND_SECRET: ${MODEL_BACKEND_LINES_SECRET:?set MODEL_BACKEND_LINES_SECRET in .env}
+      MODEL_CACHE_MAX_GB: ${LINES_BACKEND_CACHE_GB:-5}
+    volumes: [lines-cache:/cache]
+
+volumes:
+  ocr-cache:
+  lines-cache:
