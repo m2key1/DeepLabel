@@ -65,6 +65,7 @@ export function formatRelative(iso: string, now: Date = new Date()): string {
  *  finished, stopped by hand, broken. The badge and the dashboard's row accent both
  *  read this, so they cannot say different things about the same job. */
 export const STATUS_TONE: Record<JobStatus, Tone> = {
+  uploading: 'neutral',
   queued: 'neutral',
   running: 'accent',
   done: 'ok',

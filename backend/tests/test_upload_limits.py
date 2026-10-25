@@ -148,3 +148,63 @@ def test_a_dataset_whose_creation_breaks_part_way_is_not_kept(client, tmp_path, 
     other = store.connect(tmp_path / 'app.db')
     assert other.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 0
     other.close()
+
+
+class TestHeldUpload:
+    """A volume too large for one request arrives in batches: the dataset waits as
+    'uploading', so the queue never starts it on part of its pages."""
+
+    def create_held(self, api):
+        png = png_bytes()
+        res = api.post('/api/jobs', data={'name': 'volume', 'hold': 'true'},
+                       files=[('files', ('p_001.png', png, 'image/png'))], headers=EDITOR)
+        assert res.status_code == 200, res.text
+        return res.json()['job_id']
+
+    def status(self, conn, job_id):
+        return conn.execute('SELECT status FROM jobs WHERE id = ?', (job_id,)).fetchone()['status']
+
+    def test_a_held_dataset_waits_while_batches_are_added(self, client):
+        api, conn = client
+        job_id = self.create_held(api)
+        assert self.status(conn, job_id) == 'uploading'
+
+        res = api.post(f'/api/jobs/{job_id}/pages/upload', headers=EDITOR,
+                       files=[('files', ('p_002.png', png_bytes(), 'image/png'))])
+
+        assert res.status_code == 200, res.text
+        assert self.status(conn, job_id) == 'uploading'
+        assert conn.execute('SELECT COUNT(*) c FROM pages WHERE job_id = ?', (job_id,)).fetchone()['c'] == 2
+
+    def test_starting_it_queues_it_once(self, client):
+        api, conn = client
+        job_id = self.create_held(api)
+
+        assert api.post(f'/api/jobs/{job_id}/start', headers=EDITOR).status_code == 200
+        assert self.status(conn, job_id) == 'queued'
+        again = api.post(f'/api/jobs/{job_id}/start', headers=EDITOR)
+        assert again.status_code == 409
+        assert self.status(conn, job_id) == 'queued'
+
+    def test_only_its_owner_starts_it(self, client):
+        api, conn = client
+        job_id = self.create_held(api)
+        bob = {**EDITOR, 'X-Auth-User': 'bob'}
+
+        assert api.post(f'/api/jobs/{job_id}/start', headers=bob).status_code in (403, 404)
+        assert self.status(conn, job_id) == 'uploading'
+
+    def test_a_dataset_created_without_hold_is_queued_at_once(self, client):
+        api, conn = client
+        res = api.post('/api/jobs', data={'name': 'small'}, headers=EDITOR,
+                       files=[('files', ('p.png', png_bytes(), 'image/png'))])
+        assert self.status(conn, res.json()['job_id']) == 'queued'
+
+    def test_answers_from_language_models_do_not_start_it(self, client):
+        from app import llm_gt
+        api, conn = client
+        job_id = self.create_held(api)
+
+        llm_gt._realign(conn, job_id)
+
+        assert self.status(conn, job_id) == 'uploading'

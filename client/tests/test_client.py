@@ -3,6 +3,7 @@ against a real HTTP server rather than a mock: a wrong field name or a missing
 Authorization header is a support ticket, not a stack trace.
 """
 import json
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -51,7 +52,12 @@ class Handler(BaseHTTPRequestHandler):
                                      'errors': [], 'pages': 2})
         if self.path.startswith('/api/jobs/j1'):
             return self._reply(200, {'id': 'j1', 'status': 'done', 'phase': None})
-        return self._reply(200, [{'id': 'j1', 'name': 'set', 'status': 'done', 'counters': {}}])
+        if self.path.startswith('/api/jobs/held'):
+            # A held upload that got as far as one scan and one PDF.
+            return self._reply(200, {'id': 'held', 'status': 'uploading', 'pages': [
+                {'filename': 'scan_1.png'}, {'filename': 'deed_p0001.png'}, {'filename': 'deed_p0002.png'}]})
+        return self._reply(200, [{'id': 'j1', 'name': 'set', 'status': 'done', 'counters': {}},
+                                 {'id': 'held', 'name': 'volume', 'status': 'uploading', 'counters': {}}])
 
     def do_DELETE(self):
         self._record()
@@ -116,6 +122,67 @@ def test_upload_sends_the_fields_the_backend_expects(client, tmp_path):
     assert body.count('name="files"') == 2
 
 
+def sent_files(record) -> list[str]:
+    return re.findall(r'filename="([^"]+)"', record['body'].decode('utf-8', 'replace'))
+
+
+def form_field(record, name: str) -> str | None:
+    found = re.search(rf'name="{name}"\r\n\r\n([^\r]*)', record['body'].decode('utf-8', 'replace'))
+    return found.group(1) if found else None
+
+
+class TestALargeUpload:
+    """A volume is sent in batches: the dataset is created held, every later batch is
+    appended, and only then is it started - so the queue never runs it on part of it."""
+
+    def volume(self, tmp_path, scans: int):
+        for i in range(1, scans + 1):
+            (tmp_path / f'scan_{i}.png').write_bytes(b'PNGDATA')
+        (tmp_path / 'scan_2.txt').write_text('Lieber Herr Doctor!')
+        return tmp_path
+
+    def test_it_is_created_held_appended_in_batches_and_started(self, client, tmp_path):
+        result = client.upload('volume', [self.volume(tmp_path, 5)], batch_size=2, run_ocr=False)
+
+        assert result['job_id'] == 'new'
+        assert [r['path'] for r in RECORDED] == [
+            '/api/jobs', '/api/jobs/new/pages/upload', '/api/jobs/new/pages/upload', '/api/jobs/new/start']
+        assert form_field(RECORDED[0], 'hold') == 'true'
+        assert form_field(RECORDED[0], 'run_ocr') == 'false'
+        # A transcription travels in the batch of the scan it belongs to.
+        assert [sent_files(r) for r in RECORDED[:3]] == [
+            ['scan_1.png', 'scan_2.png', 'scan_2.txt'], ['scan_3.png', 'scan_4.png'], ['scan_5.png']]
+
+    def test_one_batch_is_one_request_as_before(self, client, tmp_path):
+        client.upload('volume', [self.volume(tmp_path, 2)], batch_size=2)
+
+        assert [r['path'] for r in RECORDED] == ['/api/jobs']
+        assert form_field(RECORDED[0], 'hold') is None
+
+    def test_progress_is_reported_per_batch(self, client, tmp_path):
+        seen = []
+        client.upload('volume', [self.volume(tmp_path, 5)], batch_size=2,
+                      on_progress=lambda done, total: seen.append((done, total)))
+
+        assert seen == [(3, 6), (5, 6), (6, 6)]
+
+    def test_resuming_sends_only_what_the_held_dataset_lacks_and_starts_it(self, client, tmp_path):
+        self.volume(tmp_path, 3)
+        (tmp_path / 'deed.pdf').write_bytes(b'%PDF')
+        (tmp_path / 'will.pdf').write_bytes(b'%PDF')
+
+        result = client.upload('volume', [tmp_path], batch_size=10, resume=True)
+
+        assert result['job_id'] == 'held'
+        posts = [r for r in RECORDED if r['method'] == 'POST']
+        assert [r['path'] for r in posts] == ['/api/jobs/held/pages/upload', '/api/jobs/held/start']
+        assert sent_files(posts[0]) == ['scan_2.png', 'scan_2.txt', 'scan_3.png', 'will.pdf']
+
+    def test_resuming_needs_a_dataset_that_is_still_uploading(self, client, tmp_path):
+        with pytest.raises(ValueError, match='no dataset "set" is waiting for its upload'):
+            client.upload('set', [self.volume(tmp_path, 1)], resume=True)
+
+
 def test_upload_refuses_an_empty_selection(client, tmp_path):
     with pytest.raises(ValueError, match='no files'):
         client.upload('empty', [tmp_path])
@@ -150,6 +217,17 @@ def test_the_cli_uploads_and_reports_the_new_dataset(client, server, tmp_path, c
     monkeypatch.setenv('DEEPLABEL_TOKEN', 'dlp_test')
     assert cli.main(['upload', 'set', str(tmp_path)]) == 0
     assert capsys.readouterr().out.strip() == 'new'
+
+
+def test_the_cli_resumes_a_held_upload(client, server, tmp_path, capsys, monkeypatch):
+    from deeplabel import cli
+    (tmp_path / 'scan_1.png').write_bytes(b'PNGDATA')
+    (tmp_path / 'scan_9.png').write_bytes(b'PNGDATA')
+    monkeypatch.setenv('DEEPLABEL_URL', server)
+    monkeypatch.setenv('DEEPLABEL_TOKEN', 'dlp_test')
+    assert cli.main(['upload', 'volume', str(tmp_path), '--resume']) == 0
+    assert capsys.readouterr().out.strip() == 'held'
+    assert [sent_files(r) for r in RECORDED if r['path'].endswith('/pages/upload')] == [['scan_9.png']]
 
 
 def test_the_cli_reports_a_refusal_without_a_traceback(server, capsys, monkeypatch):

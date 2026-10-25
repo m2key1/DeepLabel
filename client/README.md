@@ -31,6 +31,7 @@ deeplabel jobs                                   # list datasets
 deeplabel show <job-id>                          # one dataset as JSON
 deeplabel upload "Kurrent 1876" ./scans --wait   # images + any .txt siblings
 deeplabel upload "Raw scans" ./scans --no-ocr    # skip pipeline phases
+deeplabel upload "Kurrent 1876" ./scans --resume # finish an interrupted upload
 deeplabel import "HSA letters" export.zip        # PAGE/ALTO zip with images
 deeplabel export <job-id> --format txt --reviewed -o transcript.txt
 deeplabel wait <job-id>                          # block until the pipeline settles
@@ -83,3 +84,8 @@ except DeepLabelError as error:
 
 `upload()` accepts files or directories, and passes pipeline options straight through
 (`run_layout`, `run_lines`, `run_ocr`, `gt_autocheck`, ...).
+
+More than 200 scans (or 512 MB) are sent in parts. The dataset waits as *uploading* until the
+last part is in, then starts. If the upload breaks off, run the same command with `--resume`
+(or `upload(..., resume=True)`) to send only what is missing. `on_progress(sent, total)` reports
+each part.

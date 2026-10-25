@@ -36,7 +36,11 @@ def cmd_show(args, client):
 def cmd_upload(args, client):
     options = {'run_layout': not args.no_layout, 'run_lines': not args.no_lines,
                'run_ocr': not args.no_ocr, 'gt_autocheck': args.autocheck}
-    job_id = client.upload(args.name, [Path(p) for p in args.paths], **options)['job_id']
+    def progress(sent, total):
+        print(f'uploaded {sent}/{total} files', file=sys.stderr)
+
+    job_id = client.upload(args.name, [Path(p) for p in args.paths], resume=args.resume,
+                           on_progress=progress, **options)['job_id']
     print(job_id)
     if args.wait:
         _wait(client, job_id)
@@ -156,6 +160,8 @@ def build_parser() -> argparse.ArgumentParser:
     upload.add_argument('--no-ocr', action='store_true', help='skip recognition')
     upload.add_argument('--autocheck', action='store_true',
                         help='mark lines reviewed where a transcription matches exactly')
+    upload.add_argument('--resume', action='store_true',
+                        help='finish an interrupted upload of this dataset, sending only what it lacks')
     upload.add_argument('--wait', action='store_true', help='block until the pipeline finishes')
     upload.set_defaults(run=cmd_upload)
 

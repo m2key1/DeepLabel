@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   cancelJob,
+  startJob,
   redetectPreview,
   reocr,
   reocrPreview,
@@ -326,6 +327,8 @@ export function JobDetailPage() {
   }, [refetch])
 
   const active = job !== null && (job.status === 'queued' || job.status === 'running')
+  // Sent in parts by the client: it waits until the last part is in, then is started.
+  const uploading = job?.status === 'uploading'
   // What the backend lets through for the settings that decide how the dataset is
   // processed, and for queueing work on it: the owner, or an admin.
   const canOwn = job !== null && (isAdmin || job.owner === user)
@@ -967,7 +970,16 @@ export function JobDetailPage() {
                 who may run at least one of them - and the dialog offers only those. A
                 read-only account is refused every write before its capabilities are
                 looked at, so a capability it was given draws nothing. */}
-            {canEdit && canOwn && !active && !isMap
+            {canOwn && uploading && (
+              <Button
+                data-testid="start-job"
+                onClick={() => startJob(jobId).then(refetch).catch((e: Error) => setError(e.message))}
+                title="This dataset was uploaded in parts and waits for the rest. Start it once every part is in."
+              >
+                Start processing
+              </Button>
+            )}
+            {canEdit && canOwn && !active && !uploading && !isMap
               && ['pipeline.layout', 'pipeline.lines', 'pipeline.ocr'].some(can) && (
               <Button onClick={() => setRerunOpen(true)}>Re-run</Button>
             )}
@@ -979,7 +991,7 @@ export function JobDetailPage() {
                 Cancel
               </button>
             )}
-            {canEdit && can('pipeline.ocr') && !active && !isMap && reocrCount > 0 && (
+            {canEdit && can('pipeline.ocr') && !active && !uploading && !isMap && reocrCount > 0 && (
               <Button
                 onClick={() => reocr(jobId).then(refetch).catch((e: Error) => setError(e.message))}
                 title="Re-read the text of edited or newly drawn lines"

@@ -130,9 +130,11 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
                model_ocr_id: int | None = Form(None), ocr_decode: str = Form(decode.DEFAULT_DECODE),
                gt_autocheck: bool = Form(False), gt_ordered: bool = Form(False),
                gt_from_pdf: bool = Form(False), layout_template_id: int | None = Form(None),
+               hold: bool = Form(False),
                files: list[UploadFile] = None, conn=Depends(get_db),
                user: str = Depends(get_user), _editor=Depends(require_role('admin', 'member'))):
-    """Create a dataset from uploaded files - a .txt beside an image is ingested as that page's transcription."""
+    """Create a dataset from uploaded files - a .txt beside an image is ingested as that page's transcription.
+    With `hold`, it waits as 'uploading' while more batches are added, until it is started."""
     if not files:
         raise HTTPException(400, 'no files uploaded')
     ingest.valid_task(task)
@@ -192,12 +194,12 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
         'INSERT INTO jobs (id, name, owner, line_mode, task, run_layout, run_lines, run_ocr, '
         'run_predict, model_id, run_tile, tile_size, tile_skip_blank, line_width, '
         'model_layout_id, model_lines_id, model_ocr_id, ocr_decode, gt_autocheck, gt_ordered, '
-        'gt_from_pdf, reading_order) '
-        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'gt_from_pdf, reading_order, status) '
+        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         (job_id, name, user, line_mode, task, int(run_layout), int(run_lines), int(run_ocr),
          int(run_predict), model_id, int(run_tile), tile_size, int(tile_skip_blank), line_width,
          models['layout'], models['lines'], models['ocr'], ocr_decode, int(gt_autocheck),
-         int(gt_ordered), int(gt_from_pdf), page_reading_order))
+         int(gt_ordered), int(gt_from_pdf), page_reading_order, UPLOADING if hold else 'queued'))
     # Tiling jobs register the uploads as full maps (job_maps); the tile phase produces
     # the page rows. Non-tiling jobs treat each upload as a ready tile (a page).
     if run_tile:
@@ -357,6 +359,30 @@ def create_job_from_path(body: PathJob, conn=Depends(get_db), user: str = Depend
             'skipped_symlinks': skipped_symlinks}
 
 
+UPLOADING = 'uploading'
+
+
+def _queue_unless_held(conn, job_id: str) -> None:
+    """Added pages are processed next - unless the dataset is still waiting for the rest
+    of its upload, which its start queues all at once."""
+    conn.execute("UPDATE jobs SET status = 'queued', phase = NULL, error = NULL "
+                 "WHERE id = ? AND status != ?", (job_id, UPLOADING))
+
+
+@router.post('/api/jobs/{job_id}/start')
+def start_held(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Queue a dataset that waited while its upload arrived in batches."""
+    require_job_owner(conn, job_id, user)
+    job = store.get_job(conn, job_id)
+    if job is None:
+        raise HTTPException(404)
+    if job['status'] != UPLOADING:
+        raise HTTPException(409, f'this dataset is {job["status"]}, not waiting for its upload')
+    conn.execute("UPDATE jobs SET status = 'queued' WHERE id = ?", (job_id,))
+    conn.commit()
+    return {'ok': True}
+
+
 def _require_appendable(conn, job_id: str) -> dict:
     job = store.get_job(conn, job_id)
     if job is None:
@@ -421,7 +447,7 @@ def append_uploads(job_id: str, files: list[UploadFile] = None, conn=Depends(get
             _discard_uploads(job_id, saved)
             raise HTTPException(e.status_code, e.detail)
         documents = _append_text_pages(conn, job_id, saved, texts, corpus_texts)
-    conn.execute("UPDATE jobs SET status = 'queued', phase = NULL, error = NULL WHERE id = ?", (job_id,))
+    _queue_unless_held(conn, job_id)
     conn.commit()
     return {'ok': True, 'added': len(saved), 'documents': documents}
 
@@ -454,7 +480,7 @@ def append_path(job_id: str, body: AppendPath, conn=Depends(get_db),
         documents = 0
     else:
         documents = _append_text_pages(conn, job_id, entries, texts, corpus_texts)
-    conn.execute("UPDATE jobs SET status = 'queued', phase = NULL, error = NULL WHERE id = ?", (job_id,))
+    _queue_unless_held(conn, job_id)
     conn.commit()
     return {'ok': True, 'added': len(entries), 'documents': documents,
             'skipped_symlinks': skipped_symlinks}

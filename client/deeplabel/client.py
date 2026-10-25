@@ -1,5 +1,6 @@
 import json
 import mimetypes
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -8,6 +9,10 @@ import uuid
 from pathlib import Path
 
 DEFAULT_TIMEOUT = 120
+# A batch is answered once the server has stored and probed every file in it.
+UPLOAD_TIMEOUT = 900
+BATCH_SCANS = 200
+BATCH_BYTES = 512 * 1024 * 1024
 POLL_SECONDS = 3
 FINISHED = ('done', 'error', 'cancelled')
 
@@ -37,7 +42,7 @@ class DeepLabel:
 
     def _request(self, method: str, path: str, *, params: dict | None = None,
                  body: bytes | None = None, content_type: str | None = None,
-                 raw: bool = False):
+                 raw: bool = False, timeout: int | None = None):
         target = self.url + path
         if params:
             # doseq: a repeated parameter such as model_ids is a list on this side
@@ -49,7 +54,7 @@ class DeepLabel:
         if content_type:
             request.add_header('Content-Type', content_type)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with urllib.request.urlopen(request, timeout=timeout or self.timeout) as response:
                 payload = response.read()
         except urllib.error.HTTPError as error:
             raise DeepLabelError(error.code, _detail(error.read()))
@@ -67,15 +72,53 @@ class DeepLabel:
     def job(self, job_id: str) -> dict:
         return self._request('GET', f'/api/jobs/{job_id}')
 
-    def upload(self, name: str, paths: list[Path], **options) -> dict:
+    def upload(self, name: str, paths: list[Path], *, batch_size: int = BATCH_SCANS,
+               resume: bool = False, on_progress=None, **options) -> dict:
         """Create a dataset from image files. A .txt beside an image, passed in the same
-        call, is ingested as that page's transcription."""
-        files = [(p, p.name) for p in _expand(paths)]
-        if not files:
+        call, is ingested as that page's transcription.
+
+        More scans than one batch holds are sent in parts: the dataset waits as
+        'uploading' until the last part is in, and is started then. `resume` finishes
+        such an upload by the dataset's name, sending only the files it lacks.
+        `on_progress(files_sent, files_total)` is called after every part."""
+        groups = _scan_groups(_expand(paths))
+        if not groups:
             raise ValueError('no files to upload')
-        fields = {'name': name, **{k: _form_value(v) for k, v in options.items()}}
-        body, content_type = _multipart(fields, [('files', p, n) for p, n in files])
-        return self._request('POST', '/api/jobs', body=body, content_type=content_type)
+        job_id = None
+        if resume:
+            job_id = self._held_upload(name)
+            have = {page['filename'] for page in self.job(job_id).get('pages', [])}
+            groups = [g for g in groups if not _already_uploaded(g[0], have)]
+        batches = _batches(groups, batch_size)
+        total = sum(len(batch) for batch in batches)
+        sent = documents = 0
+        for batch in batches:
+            if job_id is None:
+                fields = {'name': name, **{k: _form_value(v) for k, v in options.items()}}
+                if len(batches) > 1:
+                    fields['hold'] = 'true'
+                answer = self._send_files('/api/jobs', fields, batch)
+                job_id = answer['job_id']
+            else:
+                answer = self._send_files(f'/api/jobs/{job_id}/pages/upload', {}, batch)
+            documents += answer.get('documents', 0)
+            sent += len(batch)
+            if on_progress:
+                on_progress(sent, total)
+        if resume or len(batches) > 1:
+            self._request('POST', f'/api/jobs/{job_id}/start')
+        return {'job_id': job_id, 'documents': documents}
+
+    def _send_files(self, path: str, fields: dict, files: list[Path]) -> dict:
+        body, content_type = _multipart(fields, [('files', p, p.name) for p in files])
+        return self._request('POST', path, body=body, content_type=content_type,
+                             timeout=max(self.timeout, UPLOAD_TIMEOUT))
+
+    def _held_upload(self, name: str) -> str:
+        for job in self.jobs():
+            if job['name'] == name and job['status'] == 'uploading':
+                return job['id']
+        raise ValueError(f'no dataset "{name}" is waiting for its upload')
 
     def import_export_zip(self, name: str, archive: Path, reviewed: bool = False) -> dict:
         """Import a Transkribus / eScriptorium zip: PAGE or ALTO XML plus the images."""
@@ -195,6 +238,43 @@ def _expand(paths: list[Path]) -> list[Path]:
         path = Path(path)
         found.extend(sorted(p for p in path.iterdir() if p.is_file()) if path.is_dir() else [path])
     return found
+
+
+def _scan_groups(files: list[Path]) -> list[list[Path]]:
+    """Each scan with the transcription beside it, which the server pairs only within one
+    request. A text file without a scan is a corpus document and travels on its own."""
+    scans = {(f.parent, f.stem): [f] for f in files if f.suffix.lower() != '.txt'}
+    groups = list(scans.values())
+    for f in files:
+        if f.suffix.lower() == '.txt':
+            scan = scans.get((f.parent, f.stem))
+            if scan:
+                scan.append(f)
+            else:
+                groups.append([f])
+    order = {f: i for i, f in enumerate(files)}
+    return sorted(groups, key=lambda g: order[g[0]])
+
+
+def _batches(groups: list[list[Path]], scans_per_batch: int) -> list[list[Path]]:
+    batches, batch, scans, size = [], [], 0, 0
+    for group in groups:
+        group_size = sum(f.stat().st_size for f in group)
+        if batch and (scans >= scans_per_batch or size + group_size > BATCH_BYTES):
+            batches.append(batch)
+            batch, scans, size = [], 0, 0
+        batch += group
+        scans += 1
+        size += group_size
+    return batches + [batch] if batch else batches
+
+
+def _already_uploaded(source: Path, page_names: set[str]) -> bool:
+    """A PDF is cut into pages named <stem>_p0001 and on, all in the request that sent it."""
+    if source.suffix.lower() == '.pdf':
+        pattern = re.compile(rf'{re.escape(source.stem)}_p\d{{4}}\.')
+        return any(pattern.match(name) for name in page_names)
+    return source.name in page_names
 
 
 def _multipart(fields: dict, files: list[tuple[str, Path, str]]) -> tuple[bytes, str]:

@@ -350,11 +350,11 @@ def _reocr_batch_loop():
             "JOIN elements e ON l.element_id = e.id JOIN pages p ON e.page_id = p.id "
             "JOIN jobs j ON j.id = p.job_id "
             "WHERE l.needs_ocr = 1 AND l.deleted = 0 AND j.run_ocr = 1 "
-            "AND j.status NOT IN ('queued', 'running')").fetchall()
+            "AND j.status NOT IN ('queued', 'running', 'uploading')").fetchall()
         for row in rows:
             conn.execute(
                 "UPDATE jobs SET status = 'queued', phase = NULL, error = NULL "
-                "WHERE id = ? AND status NOT IN ('queued', 'running')", (row['job_id'],))
+                "WHERE id = ? AND status NOT IN ('queued', 'running', 'uploading')", (row['job_id'],))
         conn.commit()
 
 

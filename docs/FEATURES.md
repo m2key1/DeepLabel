@@ -65,6 +65,7 @@ Choose **New job**, pick the task, name the dataset and add files.
   everywhere. A file that cannot be read as an image is marked *unreadable* with the
   reason; the rest of the dataset is processed as usual.
 - The owner of a dataset can add pages later from the dataset page.
+- A large volume sent with the Python client arrives in parts; the dataset shows as *uploading* until the last part is in. If the upload broke off, resume it from the client, or start it as it is with **Start processing**.
 
 ## The dataset page
 

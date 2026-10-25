@@ -1,5 +1,5 @@
 import { test, expect } from '../helpers/test'
-import { getJob, uniqueName, waitForJobStatus } from '../helpers/api'
+import { backendFetch, getJob, uniqueName, waitForJobStatus } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 
 interface PageRow { id: number; filename: string; status: string }
@@ -53,5 +53,31 @@ test.describe('Scenario: what ingest makes of the scans uploaded', () => {
     await expect(rows).toHaveCount(3)
     expect(await rows.evaluateAll((els) => els.map((el) => Number(el.getAttribute('data-page-row')))))
       .toEqual(pages.map((p) => p.id))
+  })
+})
+
+test.describe('Scenario: a volume uploaded in parts by the client', () => {
+  test('the dataset waits as uploading until its owner starts it', async ({ page }) => {
+    const form = new FormData()
+    form.append('name', uniqueName('Held volume'))
+    form.append('hold', 'true')
+    form.append('files', new Blob([new Uint8Array(scanPng(600, 800, 41))], { type: 'image/png' }), 'scan_1.png')
+    const { job_id: jobId } = await backendFetch('/api/jobs', { method: 'POST', body: form })
+    const more = new FormData()
+    more.append('files', new Blob([new Uint8Array(scanPng(600, 800, 42))], { type: 'image/png' }), 'scan_2.png')
+    await backendFetch(`/api/jobs/${jobId}/pages/upload`, { method: 'POST', body: more })
+
+    await page.goto(`/jobs/${jobId}`)
+    await expect(page.getByTestId('status-badge')).toHaveText('uploading')
+    // Re-running would start it on part of its pages: only the start is offered.
+    await expect(page.getByRole('button', { name: 'Re-run' })).toHaveCount(0)
+    expect((await getJob(jobId)).status).toBe('uploading')
+
+    await page.getByTestId('start-job').click()
+    await expect(page.getByTestId('status-badge')).toHaveText('done', { timeout: 30_000 })
+    const job = await waitForJobStatus(jobId, 'done')
+    expect(job.pages.map((p: PageRow) => p.filename).sort()).toEqual(['scan_1.png', 'scan_2.png'])
+    await expect(page.getByTestId('start-job')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Re-run' })).toBeVisible()
   })
 })

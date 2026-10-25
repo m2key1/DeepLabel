@@ -1,4 +1,4 @@
-export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled'
+export type JobStatus = 'uploading' | 'queued' | 'running' | 'done' | 'error' | 'cancelled'
 export type Phase = 'ingest' | 'layout' | 'lines' | 'ocr' | 'predict' | 'tile'
 export type ExportFormat = 'json' | 'md' | 'txt' | 'zip'
 export type Task = 'text' | 'map_segmentation' | 'map_lines'
@@ -984,6 +984,10 @@ export function getQueue(): Promise<QueueState> {
 
 export function getReviewQueue(jobId: string, maxConf: number): Promise<ReviewQueue> {
   return request(`/api/jobs/${jobId}/review?max_conf=${maxConf}`)
+}
+
+export function startJob(jobId: string): Promise<{ ok: boolean }> {
+  return request(`/api/jobs/${jobId}/start`, { method: 'POST' })
 }
 
 export function cancelJob(jobId: string): Promise<{ ok: boolean }> {
