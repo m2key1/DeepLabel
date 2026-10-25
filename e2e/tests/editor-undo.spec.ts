@@ -63,7 +63,7 @@ test.describe('Scenario: taking an edit back without losing the ones made after 
       .toEqual(near(original))
     const after = (await lineById(jobId, pageId, line.id))!
     expect(after.corrected_text).toBe('Corrected after the reshape')
-    expect(after.checked).toBe(true)
+    expect(after.checked).toBe(false)
   })
 
   test('a line thrown away from the reading list comes back with Ctrl+Z', async ({ page }) => {

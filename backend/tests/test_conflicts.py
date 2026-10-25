@@ -188,8 +188,8 @@ class TestConflicts:
 class TestPageChanges:
     def test_reports_only_revisions_that_touch_the_page(self, stack):
         client, conn = stack
-        patch_line(client, 1, BOB, corrected_text='a')
-        patch_line(client, 3, BOB, corrected_text='other page')
+        patch_line(client, 1, BOB, corrected_text='a', checked=True)
+        patch_line(client, 3, BOB, corrected_text='other page', checked=True)
         client.patch('/api/elements/1', json={'checked': True}, headers=BOB)
         client.patch('/api/regions/1', json={'checked': True}, headers=BOB)
         client.patch('/api/pages/1', json={'layout_checked': True}, headers=BOB)
@@ -213,7 +213,7 @@ class TestPageChanges:
         """A tab skips its own echo by this id rather than by author, so the same person's
         other tab still hears it - and a write that sent none, a script's, is nobody's echo."""
         client, conn = stack
-        patch_line(client, 1, {**BOB, 'X-Client-Id': 'tab-one'}, corrected_text='from tab one')
+        patch_line(client, 1, {**BOB, 'X-Client-Id': 'tab-one'}, corrected_text='from tab one', checked=True)
         client.patch('/api/elements/1', json={'checked': True}, headers={**BOB, 'X-Client-Id': 'tab-two'})
         patch_line(client, 1, BOB, corrected_text='from a script')
 

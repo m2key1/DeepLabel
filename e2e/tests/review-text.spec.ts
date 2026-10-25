@@ -29,11 +29,13 @@ test.describe('Scenario: reviewing OCR text', () => {
       await page.getByTitle('Insert ä', { exact: true }).click()
       await page.keyboard.press('Enter')
 
-      // Typing is itself a review: the correction lands checked.
+      // Saving is not a review: the correction lands unchecked, and checking it is a click.
       await expect(page.getByText('edited', { exact: true })).toBeVisible()
-      await expect.poll(stateOf).toEqual({ corrected_text: 'Grüße from e2eä', checked: true })
+      await expect.poll(stateOf).toEqual({ corrected_text: 'Grüße from e2eä', checked: false })
       const corrected = page.getByTestId('line-row').filter({ has: page.getByTitle('Revert to OCR text') })
-      await expect(corrected.getByRole('checkbox')).toBeChecked()
+      await expect(corrected.getByRole('checkbox')).not.toBeChecked()
+      await corrected.getByRole('checkbox').check()
+      await expect.poll(stateOf).toEqual({ corrected_text: 'Grüße from e2eä', checked: true })
 
       await page.getByTitle('Revert to OCR text').click()
       await expect(page.getByText('edited', { exact: true })).not.toBeVisible()

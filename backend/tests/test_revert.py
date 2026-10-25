@@ -380,7 +380,7 @@ class TestYourOwnLaterEdits:
     def test_undoing_a_reshape_keeps_the_text_corrected_afterwards(self, stack):
         client, conn = stack
         reshape = patch_line(client, 1, polygon=RESHAPED).json()['span']
-        patch_line(client, 1, corrected_text='Corrected later')
+        patch_line(client, 1, corrected_text='Corrected later', checked=True)
 
         assert undo(client, 1, reshape).status_code == 200
         first = line(conn, 1)

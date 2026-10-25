@@ -51,9 +51,9 @@ def patch_line(line_id: int, body: LinePatch, conn=Depends(get_db), user: str = 
     mark = store.begin_span(conn)
     fields = body.model_fields_set
     if 'corrected_text' in fields:
-        # Editing the text is itself a review, unless the call says otherwise. A revert
-        # withdraws the person's judgement: approving the OCR text is a second, explicit click.
-        checked = body.checked if body.checked is not None else body.corrected_text is not None
+        # A check is given to one text, so new text - typed, taken from a reading, or the
+        # OCR text a revert restores - is unchecked unless the call checks it as well.
+        checked = bool(body.checked)
         corrected_by = user if body.corrected_text is not None else None
         if body.from_reading or body.corrected_text is None:
             _offer_displaced_correction(conn, row, line_id, body.corrected_text)

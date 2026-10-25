@@ -93,12 +93,28 @@ def live_lines(conn, element_id=1):
 
 
 class TestCorrecting:
-    def test_typing_a_correction_counts_as_reviewing_it(self, client, conn):
+    def test_typing_a_correction_leaves_it_unchecked(self, client, conn):
+        """Checking is its own, explicit step: a correction saved by leaving the line
+        is not yet a review."""
         response = client.patch('/api/lines/1', json={'corrected_text': 'First line'},
                                 headers=ALICE)
 
         assert response.status_code == 200, response.text
         assert line(conn, 1)['corrected_text'] == 'First line'
+        assert line(conn, 1)['checked'] == 0
+
+    def test_correcting_a_checked_line_unchecks_it(self, client, conn):
+        """The check was given to the text that was there."""
+        client.patch('/api/lines/1', json={'checked': True}, headers=ALICE)
+
+        client.patch('/api/lines/1', json={'corrected_text': 'First line'}, headers=ALICE)
+
+        assert line(conn, 1)['checked'] == 0
+
+    def test_a_correction_and_its_check_can_be_saved_together(self, client, conn):
+        client.patch('/api/lines/1', json={'corrected_text': 'First line', 'checked': True},
+                     headers=ALICE)
+
         assert line(conn, 1)['checked'] == 1
 
     def test_a_typed_correction_is_stored_decomposed_like_the_model_writes(self, client, conn):
@@ -266,10 +282,10 @@ class TestALineTheModelsSettled:
         row = line(conn, line_id)
         return row['checked'], row['check_source']
 
-    def test_a_correction_makes_it_the_persons(self, client, conn):
+    def test_a_correction_withdraws_the_machine_check(self, client, conn):
         client.patch('/api/lines/1', json={'corrected_text': 'First line!'}, headers=ALICE)
 
-        assert self.source(conn, 1) == (1, None)
+        assert self.source(conn, 1) == (0, None)
         assert self.source(conn, 2) == (1, 'llm')
         assert (line(conn, 1)['corrected_by'], line(conn, 2)['corrected_by']) == ('alice', 'llm:consensus@2')
 

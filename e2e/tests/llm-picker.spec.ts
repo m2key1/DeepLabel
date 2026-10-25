@@ -66,12 +66,12 @@ test.describe('Scenario: choosing between what the readers said', () => {
 
       await candidates.filter({ hasText: TYPO_READING }).getByTestId('accept-candidate').click()
 
-      // Backend oracle: choosing is the same as typing it - corrected and checked, and
+      // Backend oracle: choosing is the same as typing it - corrected, not yet checked, and
       // recorded as a person's doing rather than the models'.
       await expect.poll(async () =>
         (await pageLines(jobId, pageId)).find((l) => l.id === disputed.id),
       ).toMatchObject({
-        corrected_text: TYPO_READING, checked: true, check_source: null,
+        corrected_text: TYPO_READING, checked: false, check_source: null,
       })
 
       // And they have swapped: the reading taken is the line now, so it is no longer one

@@ -158,8 +158,9 @@ Press `e` to edit the page.
 
 ## Review and correction
 
-- Move through lines with the arrow keys (or `j`/`k`). Enter edits a line; Shift+Enter
-  saves, checks it and moves to the next line, across page breaks.
+- Move through lines with the arrow keys (or `j`/`k`). Enter edits a line; Enter, Escape
+  or clicking away saves it without checking; Shift+Enter saves, checks it and moves to the
+  next line, across page breaks.
 - **Review** on the dataset page walks the flagged, low-confidence lines of the whole dataset.
 - Every reading held for a line - the OCR model's, a language model's, an aligned
   transcription, an earlier correction - is listed under it. Click one to make it the

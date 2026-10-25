@@ -61,10 +61,11 @@ async function settled(jobId: string, pageId: number, lineId: number) {
 }
 
 /** Open a line's editor from its row, type over it, and save with Enter. */
-async function correctInEditor(page: Page, shown: string, text: string) {
+// Enter saves the text unchecked; Shift+Enter saves and checks it.
+async function correctInEditor(page: Page, shown: string, text: string, { check = false } = {}) {
   await page.getByTestId('line-row').filter({ hasText: shown }).getByTestId('line-text').click()
   await page.getByTestId('line-editor').fill(text)
-  await page.keyboard.press('Enter')
+  await page.keyboard.press(check ? 'Shift+Enter' : 'Enter')
 }
 
 test.describe('Scenario: the page measuring the model against the people checking it', () => {
@@ -91,7 +92,7 @@ test.describe('Scenario: the page measuring the model against the people checkin
       await expect(page.getByTestId('page-error-rate')).toHaveCount(0)
 
       // One letter swapped: one character error over twenty, one word over four.
-      await correctInEditor(page, 'Sample Header line 1', 'Sample Header line X')
+      await correctInEditor(page, 'Sample Header line 1', 'Sample Header line X', { check: true })
       const pill = page.getByTestId('page-error-rate')
       await expect(pill).toHaveAttribute('data-lines', '1')
       await expect(pill).toHaveAttribute('data-cer', '0.0500')
@@ -190,14 +191,14 @@ test.describe('Scenario: the model\'s own read stays one click away', () => {
       for (const text of ['Typed by hand', 'Typed over again', 'And once more']) {
         await correctInEditor(page, shown, text)
         await expect.poll(() => settled(jobId, pageId, header.id))
-          .toEqual({ corrected_text: text, checked: true, check_source: null })
+          .toEqual({ corrected_text: text, checked: false, check_source: null })
         await expectOnlyTheModelsRead()
         shown = text
       }
 
       await offered.getByTestId('accept-candidate').click()
       await expect.poll(() => settled(jobId, pageId, header.id))
-        .toEqual({ corrected_text: 'Sample Header line 1', checked: true, check_source: null })
+        .toEqual({ corrected_text: 'Sample Header line 1', checked: false, check_source: null })
       // What the line says is the line, and is not offered again.
       await expect(page.getByTestId('line-row').filter({ hasText: 'Sample Header line 1' }))
         .toHaveCount(1)
@@ -276,7 +277,7 @@ test.describe('Scenario: a corrected line is cut in two', () => {
 
     await humanRow.getByTestId('accept-candidate').click()
     await expect.poll(() => settled(jobId, pageId, first.id))
-      .toEqual({ corrected_text: 'Corrected by hand', checked: true, check_source: null })
+      .toEqual({ corrected_text: 'Corrected by hand', checked: false, check_source: null })
   })
 })
 
@@ -297,7 +298,7 @@ test.describe('Scenario: a typed correction displaced by a model\'s reading', ()
 
       await correctInEditor(page, DISPUTED, 'Typed by hand')
       await expect.poll(() => settled(jobId, pageId, disputed.id))
-        .toEqual({ corrected_text: 'Typed by hand', checked: true, check_source: null })
+        .toEqual({ corrected_text: 'Typed by hand', checked: false, check_source: null })
       // Both readers' words are on offer under the corrected line: the one that read it
       // as the OCR model did, and the one that did not.
       const offered = page.getByTestId('line-candidate')
@@ -306,7 +307,7 @@ test.describe('Scenario: a typed correction displaced by a model\'s reading', ()
 
       await offered.filter({ hasText: TYPO_READING }).getByTestId('accept-candidate').click()
       await expect.poll(() => settled(jobId, pageId, disputed.id))
-        .toEqual({ corrected_text: TYPO_READING, checked: true, check_source: null })
+        .toEqual({ corrected_text: TYPO_READING, checked: false, check_source: null })
 
       // Oracle: the pool now holds what was typed, on this line, under the person's name.
       await expect.poll(async () =>
@@ -326,7 +327,7 @@ test.describe('Scenario: a typed correction displaced by a model\'s reading', ()
       // Taking it back is the same gesture, and lands the line where the person left it.
       await typed.getByTestId('accept-candidate').click()
       await expect.poll(() => settled(jobId, pageId, disputed.id))
-        .toEqual({ corrected_text: 'Typed by hand', checked: true, check_source: null })
+        .toEqual({ corrected_text: 'Typed by hand', checked: false, check_source: null })
       await expect(typed).toHaveCount(0)
       await expect(offered.filter({ hasText: TYPO_READING })).toHaveCount(1)
     })
@@ -345,7 +346,7 @@ test.describe('Scenario: a typed correction reverted to the OCR text', () => {
 
       await correctInEditor(page, 'Sample Header line 1', 'Typed by hand')
       await expect.poll(() => settled(jobId, pageId, header.id))
-        .toEqual({ corrected_text: 'Typed by hand', checked: true, check_source: null })
+        .toEqual({ corrected_text: 'Typed by hand', checked: false, check_source: null })
 
       await page.getByTestId('line-row').filter({ hasText: 'Typed by hand' })
         .getByTitle('Revert to OCR text').click()
@@ -367,7 +368,7 @@ test.describe('Scenario: a typed correction reverted to the OCR text', () => {
 
       await typed.getByTestId('accept-candidate').click()
       await expect.poll(() => settled(jobId, pageId, header.id))
-        .toEqual({ corrected_text: 'Typed by hand', checked: true, check_source: null })
+        .toEqual({ corrected_text: 'Typed by hand', checked: false, check_source: null })
       await expect(typed).toHaveCount(0)
       await expect(offered.filter({ hasText: 'Sample Header line 1' })).toHaveCount(1)
     })
