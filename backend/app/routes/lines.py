@@ -15,6 +15,11 @@ from app.routes.pipeline import PHASE_CAPABILITY
 router = APIRouter(tags=['lines'])
 
 
+def decomposed(text: str | None) -> str | None:
+    """Stored the way the model reads and writes it, whatever keyboard typed it."""
+    return None if text is None else unicodedata.normalize('NFD', text)
+
+
 class LinePatch(BaseModel):
     corrected_text: str | None = None
     checked: bool | None = None
@@ -26,11 +31,7 @@ class LinePatch(BaseModel):
     # offered back under the person's name rather than lost.
     from_reading: bool = False
 
-    @field_validator('corrected_text')
-    @classmethod
-    def decomposed(cls, text: str | None) -> str | None:
-        """Stored the way the model reads and writes it, whatever keyboard typed it."""
-        return None if text is None else unicodedata.normalize('NFD', text)
+    _decomposed = field_validator('corrected_text')(decomposed)
 
 
 @router.patch('/api/lines/{line_id}')
@@ -38,11 +39,7 @@ def patch_line(line_id: int, body: LinePatch, conn=Depends(get_db), user: str = 
                auth: dict = Depends(current_user)):
     """Correct a line's text, geometry, orientation or reviewed flag."""
     require_line_access(conn, line_id, auth)
-    row = conn.execute(
-        'SELECT l.element_id, l.order_idx, l.polygon, l.text, l.checked, l.corrected_text, '
-        'l.corrected_by, e.page_id, j.run_ocr '
-        'FROM lines l JOIN elements e ON l.element_id = e.id JOIN pages p ON e.page_id = p.id '
-        'JOIN jobs j ON j.id = p.job_id WHERE l.id = ?', (line_id,)).fetchone()
+    row = _line_row(conn, line_id)
     if row is None:
         raise HTTPException(404)
     store.write_lock(conn)
@@ -51,15 +48,7 @@ def patch_line(line_id: int, body: LinePatch, conn=Depends(get_db), user: str = 
     mark = store.begin_span(conn)
     fields = body.model_fields_set
     if 'corrected_text' in fields:
-        # A check is given to one text, so new text - typed, taken from a reading, or the
-        # OCR text a revert restores - is unchecked unless the call checks it as well.
-        checked = bool(body.checked)
-        corrected_by = user if body.corrected_text is not None else None
-        if body.from_reading or body.corrected_text is None:
-            _offer_displaced_correction(conn, row, line_id, body.corrected_text)
-        conn.execute('UPDATE lines SET corrected_text = ?, corrected_by = ? WHERE id = ?',
-                     (body.corrected_text, corrected_by, line_id))
-        store.check_line_as_person(conn, line_id, checked)
+        _write_text(conn, row, line_id, body.corrected_text, bool(body.checked), user, body.from_reading)
     elif body.checked is not None:
         store.check_line_as_person(conn, line_id, body.checked)
     if 'polygon' in fields and body.polygon is not None:
@@ -79,7 +68,7 @@ def patch_line(line_id: int, body: LinePatch, conn=Depends(get_db), user: str = 
     # and only untouched lines when the job OCRs; the batch worker picks these up.
     if reshaped and row['run_ocr'] and not row['checked'] and row['corrected_text'] is None:
         conn.execute('UPDATE lines SET needs_ocr = 1 WHERE id = ?', (line_id,))
-    if 'corrected_text' in fields or body.checked is True:
+    if body.checked is True:
         conn.execute('UPDATE lines SET needs_ocr = 0 WHERE id = ?', (line_id,))  # review cancels re-OCR
     store.log_line(conn, line_id, user, 'update')
     span = store.end_span(conn, mark)
@@ -89,6 +78,76 @@ def patch_line(line_id: int, body: LinePatch, conn=Depends(get_db), user: str = 
     # Checking, editing or reshaping all change the training pair (or whether there is one).
     training.enqueue(line_id)
     return {**serializers.get_line(conn, line_id), 'span': span}
+
+
+def _write_text(conn, row, line_id: int, text: str | None, checked: bool, user: str,
+                from_reading: bool = False) -> None:
+    """A check is given to one text, so new text - typed, taken from a reading, or the
+    OCR text a revert restores - is unchecked unless the call checks it as well."""
+    if from_reading or text is None:
+        _offer_displaced_correction(conn, row, line_id, text)
+    conn.execute('UPDATE lines SET corrected_text = ?, corrected_by = ?, needs_ocr = 0 WHERE id = ?',
+                 (text, user if text is not None else None, line_id))
+    store.check_line_as_person(conn, line_id, checked)
+
+
+MAX_TEXTS_PER_REQUEST = 5000
+
+
+class LineText(BaseModel):
+    id: int
+    text: str
+    checked: bool = False
+    revision: int | None = None
+
+    _decomposed = field_validator('text')(decomposed)
+
+
+@router.post('/api/lines/texts')
+def set_texts(body: list[LineText], conn=Depends(get_db), user: str = Depends(get_user),
+              auth: dict = Depends(current_user)):
+    """Correct many lines in one request, each as a single edit would. A line that cannot
+    be written is listed with the reason, and the rest are written."""
+    if len(body) > MAX_TEXTS_PER_REQUEST:
+        raise HTTPException(413, f'at most {MAX_TEXTS_PER_REQUEST} lines per request')
+    store.write_lock(conn)
+    written, failed = [], []
+    for item in body:
+        row = _line_row(conn, item.id)
+        reason = _unwritable(conn, item, row, auth)
+        if reason:
+            failed.append({'id': item.id, 'reason': reason})
+            continue
+        store.ensure_origin(conn, 'line', item.id, user)
+        _write_text(conn, row, item.id, item.text, item.checked, user)
+        store.log_line(conn, item.id, user, 'update')
+        written.append(item.id)
+    conn.commit()
+    for line_id in written:
+        training.enqueue(line_id)
+    return {'written': written, 'failed': failed}
+
+
+def _line_row(conn, line_id: int):
+    return conn.execute(
+        'SELECT l.element_id, l.order_idx, l.polygon, l.text, l.checked, l.corrected_text, '
+        'l.corrected_by, l.deleted, e.page_id, j.run_ocr '
+        'FROM lines l JOIN elements e ON l.element_id = e.id JOIN pages p ON e.page_id = p.id '
+        'JOIN jobs j ON j.id = p.job_id WHERE l.id = ?', (line_id,)).fetchone()
+
+
+def _unwritable(conn, item: LineText, row, auth: dict) -> str | None:
+    if row is None:
+        return 'not found'
+    try:
+        require_line_access(conn, item.id, auth)
+    except HTTPException:
+        return 'not found'
+    if row['deleted']:
+        return 'deleted'
+    if item.revision is not None and store.latest_revision(conn, 'line', item.id) != item.revision:
+        return f'edited since revision {item.revision}'
+    return None
 
 
 def _offer_displaced_correction(conn, row, line_id: int, taken: str | None) -> None:

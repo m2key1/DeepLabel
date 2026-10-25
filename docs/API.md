@@ -48,6 +48,16 @@ dl.wait(job_id)
 Path('transcript.json').write_bytes(dl.export(job_id, reviewed_only=True))
 ```
 
+`POST /api/lines/texts` corrects many lines in one request (up to 5000), each as a single
+edit would; the lines it could not write come back with the reason:
+
+```bash
+curl -H "Authorization: Bearer $DEEPLABEL_TOKEN" -H 'Content-Type: application/json' \
+  -d '[{"id": 812, "text": "Lieber Herr Doctor!", "checked": true}, {"id": 813, "text": "Ihr Brief", "revision": 4}]' \
+  $DEEPLABEL_URL/api/lines/texts
+# {"written": [812], "failed": [{"id": 813, "reason": "edited since revision 4"}]}
+```
+
 A read-only token refuses every write with `403 read-only API token`, so it is the safe
 thing to paste into a notebook or a CI job. Managing tokens and administering accounts answer
 `403 needs a signed-in session, not an API token` whatever the token's owner may do.

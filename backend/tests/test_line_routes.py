@@ -182,6 +182,76 @@ class TestCorrecting:
 
 
 
+class TestSettingManyTexts:
+    """A scripted import writes thousands of lines; one request carries them all, and a
+    line that cannot be written is reported rather than failing the rest."""
+
+    def test_every_line_is_written_unchecked_unless_the_request_checks_it(self, client, conn):
+        response = client.post('/api/lines/texts', headers=ALICE, json=[
+            {'id': 1, 'text': 'First line'}, {'id': 2, 'text': 'Second line.', 'checked': True}])
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {'written': [1, 2], 'failed': []}
+        assert (line(conn, 1)['corrected_text'], line(conn, 1)['checked']) == ('First line', 0)
+        assert (line(conn, 2)['corrected_text'], line(conn, 2)['checked']) == ('Second line.', 1)
+
+    def test_new_text_on_a_checked_line_unchecks_it_as_a_single_edit_would(self, client, conn):
+        client.patch('/api/lines/1', json={'checked': True}, headers=ALICE)
+
+        client.post('/api/lines/texts', headers=ALICE, json=[{'id': 1, 'text': 'First line'}])
+
+        assert line(conn, 1)['checked'] == 0
+
+    def test_a_line_edited_since_its_revision_is_reported_and_the_rest_written(self, client, conn):
+        client.patch('/api/lines/1', json={'corrected_text': 'Mine'}, headers=ALICE)
+
+        response = client.post('/api/lines/texts', headers=ALICE, json=[
+            {'id': 1, 'text': 'Theirs', 'revision': 0}, {'id': 2, 'text': 'Second line.'}])
+
+        assert response.json() == {'written': [2], 'failed': [
+            {'id': 1, 'reason': 'edited since revision 0'}]}
+        assert line(conn, 1)['corrected_text'] == 'Mine'
+        assert line(conn, 2)['corrected_text'] == 'Second line.'
+
+    def test_a_deleted_line_is_reported(self, client, conn):
+        conn.execute('UPDATE lines SET deleted = 1 WHERE id = 1')
+        conn.commit()
+
+        response = client.post('/api/lines/texts', headers=ALICE, json=[
+            {'id': 1, 'text': 'First line'}, {'id': 2, 'text': 'Second line.'}])
+
+        assert response.json() == {'written': [2], 'failed': [{'id': 1, 'reason': 'deleted'}]}
+        assert line(conn, 1)['corrected_text'] is None
+
+    def test_a_line_that_is_missing_or_out_of_reach_is_not_found(self, client, conn):
+        response = client.post('/api/lines/texts', headers=BOB, json=[
+            {'id': 1, 'text': 'First line'}, {'id': 99, 'text': 'Nowhere'}])
+
+        assert response.json() == {'written': [], 'failed': [
+            {'id': 1, 'reason': 'not found'}, {'id': 99, 'reason': 'not found'}]}
+        assert line(conn, 1)['corrected_text'] is None
+
+    def test_each_line_is_written_to_the_history_and_stored_decomposed(self, client, conn):
+        client.post('/api/lines/texts', headers=ALICE, json=[
+            {'id': 1, 'text': f'Puci{C_ACUTE}'}, {'id': 2, 'text': 'Second line.'}])
+
+        assert line(conn, 1)['corrected_text'] == f'Pucic{ACUTE}'
+        authors = conn.execute(
+            "SELECT target_id, author FROM revisions WHERE target_type = 'line' AND action = 'update' "
+            'ORDER BY target_id'
+        ).fetchall()
+        assert [tuple(r) for r in authors] == [(1, 'alice'), (2, 'alice')]
+
+    def test_a_request_over_the_limit_is_refused_whole(self, client, conn, monkeypatch):
+        monkeypatch.setattr('app.routes.lines.MAX_TEXTS_PER_REQUEST', 1)
+
+        response = client.post('/api/lines/texts', headers=ALICE, json=[
+            {'id': 1, 'text': 'First line'}, {'id': 2, 'text': 'Second line.'}])
+
+        assert response.status_code == 413
+        assert line(conn, 1)['corrected_text'] is None
+
+
 class TestTakingAReading:
     """Choosing a reading overwrites the correction like typing does, but it is the one
     gesture that must be reversible without retyping: the typed text it displaces joins the

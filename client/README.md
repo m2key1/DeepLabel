@@ -94,3 +94,8 @@ each part.
 `cancel_job()`, `cancel_training()` and `cancel_evaluation()` stop a queued or running run;
 `cancel_llm_reads()` and `cancel_groundtruth()` drop the readings not yet sent and return how
 many.
+
+`set_texts([{'id': 812, 'text': 'Lieber Herr Doctor!', 'checked': True}, ...])` corrects many
+lines by id in one call. New text is saved unchecked unless `checked` is True; a `revision` per
+line refuses lines edited since. It returns the ids written and the lines that could not be,
+each with its reason.

@@ -13,6 +13,7 @@ DEFAULT_TIMEOUT = 120
 UPLOAD_TIMEOUT = 900
 BATCH_SCANS = 200
 BATCH_BYTES = 512 * 1024 * 1024
+TEXTS_PER_REQUEST = 1000
 POLL_SECONDS = 3
 FINISHED = ('done', 'error', 'cancelled')
 
@@ -136,6 +137,19 @@ class DeepLabel:
     def cancel_job(self, job_id: str) -> None:
         """Stop a queued or running dataset."""
         self._request('POST', f'/api/jobs/{job_id}/cancel')
+
+    def set_texts(self, lines: list[dict], *, batch_size: int = TEXTS_PER_REQUEST) -> dict:
+        """Correct many lines by id: each {'id', 'text'}, optionally 'checked' and 'revision'.
+        New text is saved unchecked unless 'checked' is True. Returns the ids written and
+        the lines that could not be, each with its reason."""
+        result = {'written': [], 'failed': []}
+        for start in range(0, len(lines), batch_size):
+            part = self._request('POST', '/api/lines/texts',
+                                 body=json.dumps(lines[start:start + batch_size]).encode(),
+                                 content_type='application/json')
+            result['written'] += part['written']
+            result['failed'] += part['failed']
+        return result
 
     def cancel_llm_reads(self, job_id: str, page_ids: list[int] | None = None,
                          in_flight: bool = False) -> int:

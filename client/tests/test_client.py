@@ -73,6 +73,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._reply(200, {'stored': 2, 'skipped': [], 'documents': 2})
         if self.path.endswith('/llm/cancel') or self.path.endswith('/groundtruth/cancel'):
             return self._reply(200, {'cancelled': 4})
+        if self.path == '/api/lines/texts':
+            sent = json.loads(RECORDED[-1]['body'])
+            return self._reply(200, {'written': [line['id'] for line in sent if line['id'] != 3],
+                                     'failed': [{'id': 3, 'reason': 'deleted'}] if any(
+                                         line['id'] == 3 for line in sent) else []})
         if self.path.endswith('/cancel'):
             return self._reply(200, {'ok': True})
         # Exactly what the backend returns - a stub that also offers 'id' would hide
@@ -350,3 +355,22 @@ class TestCancelling:
         assert cli.main(argv) == 0
         assert RECORDED[-1]['path'] == path
         assert capsys.readouterr().out.strip() == out
+
+
+class TestSettingLineTexts:
+    def test_the_lines_go_in_one_request_as_the_backend_reads_them(self, client):
+        result = client.set_texts([{'id': 1, 'text': 'Lieber'}, {'id': 2, 'text': 'Herr', 'checked': True}])
+
+        assert result == {'written': [1, 2], 'failed': []}
+        assert [r['path'] for r in RECORDED] == ['/api/lines/texts']
+        assert json.loads(RECORDED[-1]['body']) == [
+            {'id': 1, 'text': 'Lieber'}, {'id': 2, 'text': 'Herr', 'checked': True}]
+
+    def test_a_long_list_is_sent_in_parts_and_the_answers_joined(self, client):
+        lines = [{'id': i, 'text': f'line {i}'} for i in range(1, 6)]
+
+        result = client.set_texts(lines, batch_size=2)
+
+        assert len(RECORDED) == 3
+        assert [len(json.loads(r['body'])) for r in RECORDED] == [2, 2, 1]
+        assert result == {'written': [1, 2, 4, 5], 'failed': [{'id': 3, 'reason': 'deleted'}]}
