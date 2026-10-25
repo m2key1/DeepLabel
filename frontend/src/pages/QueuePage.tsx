@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { getQueue } from '../api'
+import { cancelEvaluation, cancelJob, cancelTraining, getQueue } from '../api'
 import type { PendingReocr, QueueEntry, QueueState } from '../api'
+import { useAuth } from '../auth'
 import { useCrumb } from '../components/NavBar'
+import { Button } from '../components/ui/Button'
 import { formatDate, formatRunTime, overallProgress, parseStamp } from '../util'
 import { Badge } from '../components/ui/Badge'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -82,6 +84,12 @@ function pageOf(entry: QueueEntry): string | null {
   return entry.accessible ? `/jobs/${entry.id}` : null
 }
 
+const CANCEL: Record<QueueEntry['kind'], (id: QueueEntry['id']) => Promise<unknown>> = {
+  dataset: (id) => cancelJob(String(id)),
+  training: (id) => cancelTraining(Number(id)),
+  evaluation: (id) => cancelEvaluation(Number(id)),
+}
+
 /** A queue is read down in order, so the columns are fixed and the position comes
  *  first - which is the one thing a row is looked up by. */
 interface Waiting {
@@ -90,6 +98,8 @@ interface Waiting {
   waiting: boolean
   /** The page's clock, so every row's timer ticks from one interval. */
   now: number
+  /** Set when the viewer may stop this row: its owner, or an admin. */
+  onCancel?: () => void
 }
 
 /** How long a row has run, or waited: from when it left the queue, else from when it
@@ -152,6 +162,13 @@ const QUEUE_COLUMNS: Column<Waiting>[] = [
     width: '35%',
     cell: ({ entry, waiting }) => <ProgressCell entry={entry} waiting={waiting} />,
   },
+  {
+    key: 'cancel',
+    label: '',
+    cell: ({ onCancel }) => onCancel && (
+      <Button variant="ghost" size="xs" data-testid="queue-cancel" onClick={onCancel}>Cancel</Button>
+    ),
+  },
 ]
 
 function QueueTable({ rows, caption }: { rows: Waiting[]; caption: string }) {
@@ -195,6 +212,7 @@ function PendingReocrRow({ pending }: { pending: PendingReocr }) {
 
 export function QueuePage() {
   useCrumb('Queue')
+  const { isAdmin, user } = useAuth()
   const [queue, setQueue] = useState<QueueState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -204,17 +222,18 @@ export function QueuePage() {
     return () => clearInterval(t)
   }, [])
 
+  const refresh = useCallback(() => getQueue()
+    .then((next) => {
+      setQueue(next)
+      setError(null)
+    })
+    .catch((e: Error) => setError(`Could not read the queue: ${e.message}`)), [])
+
   useEffect(() => {
-    const refresh = () => getQueue()
-      .then((next) => {
-        setQueue(next)
-        setError(null)
-      })
-      .catch((e: Error) => setError(`Could not read the queue: ${e.message}`))
     refresh()
     const t = setInterval(refresh, 3000)
     return () => clearInterval(t)
-  }, [])
+  }, [refresh])
 
   const failure = error && (
     <p role="alert" data-testid="queue-error" className="mb-3 text-sm text-danger">{error}</p>
@@ -222,16 +241,20 @@ export function QueuePage() {
   if (!queue) {
     return failure ? <div className={pageShell}><PageHeader title="Queue" />{failure}</div> : null
   }
+  const cancelOf = (entry: QueueEntry) => (isAdmin || entry.owner === user)
+    ? () => { CANCEL[entry.kind](entry.id).then(refresh).catch((e: Error) => setError(e.message)) }
+    : undefined
   const { running, queued } = queue.gpu
   const local: Waiting[] = [
-    ...(running ? [{ entry: running, position: '►', waiting: false, now }] : []),
-    ...queued.map((entry, i) => ({ entry, position: String(i + 1), waiting: true, now })),
+    ...(running ? [{ entry: running, position: '►', waiting: false, now, onCancel: cancelOf(running) }] : []),
+    ...queued.map((entry, i) => ({ entry, position: String(i + 1), waiting: true, now, onCancel: cancelOf(entry) })),
   ]
   const cluster: Waiting[] = queue.cluster.map((entry) => ({
     entry,
     position: entry.status === 'queued' ? '◌' : '►',
     waiting: entry.status === 'queued',
     now,
+    onCancel: cancelOf(entry),
   }))
   return (
     <div className={pageShell}>

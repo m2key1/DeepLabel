@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -117,6 +118,36 @@ def set_state(conn, eval_id: int, **fields):
     conn.commit()
 
 
+def finish(conn, eval_id: int, **fields):
+    """The runner's last word, written only while the evaluation still runs, so a cancel
+    that lands just before it stays a cancel."""
+    sets, params = store.state_update(fields)
+    conn.execute(f"UPDATE evaluations SET {sets} WHERE id = ? AND status = 'running'",
+                 (*params, eval_id))
+    conn.commit()
+
+
+def cancel(conn, eval_id: int) -> bool:
+    """Stop an evaluation that is still to finish, and say whether there was one."""
+    evaluation = get_evaluation(conn, eval_id)
+    cancelled = conn.execute(
+        "UPDATE evaluations SET status = 'cancelled' WHERE id = ? AND status IN ('queued', 'running')",
+        (eval_id,)).rowcount
+    conn.commit()
+    if not cancelled:
+        return False
+    if evaluation.get('pid'):
+        _stop(evaluation['pid'])
+    return True
+
+
+def _stop(pid: int):
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+
 def _spawn(conn, evaluation: dict) -> subprocess.Popen:
     env = os.environ.copy()
     env['PYTHONPATH'] = str(BACKEND_DIR)
@@ -195,22 +226,25 @@ def run_local(conn, eval_id: int):
         return
     ceiling = memory_ceiling()
     lines_path(eval_id).unlink(missing_ok=True)
+    set_state(conn, eval_id, status='running')
     proc = _spawn(conn, evaluation)
-    set_state(conn, eval_id, status='running', pid=proc.pid)
+    set_state(conn, eval_id, pid=proc.pid)
+    if get_evaluation(conn, eval_id)['status'] != 'running':
+        _stop(proc.pid)
     overrun = _wait_within(proc, ceiling)
-    current = get_evaluation(conn, eval_id)
-    if current and current['status'] == 'running':
-        if overrun is not None:
-            set_state(conn, eval_id, status='error',
-                      error=f'stopped at {overrun / 1024 ** 3:.1f} GB, over the '
-                            f'{ceiling / 1024 ** 3:.0f} GB an evaluation may hold')
-        elif proc.returncode:
-            set_state(conn, eval_id, status='error', error='evaluation runner exited unexpectedly')
-        else:
-            set_state(conn, eval_id, status='done')
+    if overrun is not None:
+        finish(conn, eval_id, status='error',
+               error=f'stopped at {overrun / 1024 ** 3:.1f} GB, over the '
+                     f'{ceiling / 1024 ** 3:.0f} GB an evaluation may hold')
+    elif proc.returncode:
+        finish(conn, eval_id, status='error', error='evaluation runner exited unexpectedly')
+    else:
+        finish(conn, eval_id, status='done')
     finished = get_evaluation(conn, eval_id)
     if finished is None:
         return
+    if finished['status'] != 'done':
+        lines_path(eval_id).unlink(missing_ok=True)
     if finished['status'] == 'done':
         try:
             eval_lines.import_file(conn, eval_id, lines_path(eval_id))

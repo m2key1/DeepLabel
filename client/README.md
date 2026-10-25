@@ -32,6 +32,7 @@ deeplabel show <job-id>                          # one dataset as JSON
 deeplabel upload "Kurrent 1876" ./scans --wait   # images + any .txt siblings
 deeplabel upload "Raw scans" ./scans --no-ocr    # skip pipeline phases
 deeplabel upload "Kurrent 1876" ./scans --resume # finish an interrupted upload
+deeplabel cancel evaluation 31                   # also dataset, training, llm, groundtruth
 deeplabel import "HSA letters" export.zip        # PAGE/ALTO zip with images
 deeplabel export <job-id> --format txt --reviewed -o transcript.txt
 deeplabel wait <job-id>                          # block until the pipeline settles
@@ -89,3 +90,7 @@ More than 200 scans (or 512 MB) are sent in parts. The dataset waits as *uploadi
 last part is in, then starts. If the upload breaks off, run the same command with `--resume`
 (or `upload(..., resume=True)`) to send only what is missing. `on_progress(sent, total)` reports
 each part.
+
+`cancel_job()`, `cancel_training()` and `cancel_evaluation()` stop a queued or running run;
+`cancel_llm_reads()` and `cancel_groundtruth()` drop the readings not yet sent and return how
+many.

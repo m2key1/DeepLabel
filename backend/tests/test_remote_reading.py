@@ -58,6 +58,7 @@ def test_an_evaluation_scores_what_the_engine_reads(conn, tmp_path):
     conn.execute("UPDATE lines SET text = 'Anno', checked = 1")
     conn.commit()
     eval_id = evaluator.create(conn, 1, {'jobs': ['j1']}, 'beam', 'alice')
+    evaluator.set_state(conn, eval_id, status='running')
 
     class Engine:
         def predict_batch(self, images, contexts=None):
@@ -73,6 +74,7 @@ def test_an_evaluation_scores_what_the_engine_reads(conn, tmp_path):
 
 def test_an_evaluation_of_a_model_on_no_backend_fails_saying_so(conn, tmp_path, monkeypatch):
     eval_id = evaluator.create(conn, 1, {'jobs': ['j1']}, 'beam', 'alice')
+    evaluator.set_state(conn, eval_id, status='running')
     monkeypatch.setattr(sys, 'argv', ['eval_run', '--evaluation-id', str(eval_id),
                                       '--db-path', conn.execute('PRAGMA database_list').fetchone()[2]])
 

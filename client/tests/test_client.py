@@ -71,6 +71,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._reply(200, {'queued': 3, 'reused': 0, 'pages': 3})
         if self.path.endswith('/documents'):
             return self._reply(200, {'stored': 2, 'skipped': [], 'documents': 2})
+        if self.path.endswith('/llm/cancel') or self.path.endswith('/groundtruth/cancel'):
+            return self._reply(200, {'cancelled': 4})
+        if self.path.endswith('/cancel'):
+            return self._reply(200, {'ok': True})
         # Exactly what the backend returns - a stub that also offers 'id' would hide
         # a client reading a key the API has never sent.
         self._reply(200, {'job_id': 'new', 'pages': 2, 'lines': 5})
@@ -310,3 +314,39 @@ class TestTheCorpusCommands:
         assert cli.main(['corpus', 'j1']) == 0
         out = capsys.readouterr().out
         assert 'letter-01' in out and '2 lines' in out and '3 pages' in out
+
+
+class TestCancelling:
+    @pytest.mark.parametrize('call, path', [
+        (lambda c: c.cancel_job('j1'), '/api/jobs/j1/cancel'),
+        (lambda c: c.cancel_training(12), '/api/trainings/12/cancel'),
+        (lambda c: c.cancel_evaluation(31), '/api/evaluations/31/cancel'),
+    ])
+    def test_each_run_is_cancelled_at_its_own_endpoint(self, client, call, path):
+        assert call(client) is None
+        assert (RECORDED[-1]['method'], RECORDED[-1]['path']) == ('POST', path)
+
+    def test_llm_readings_report_how_many_were_dropped(self, client):
+        assert client.cancel_llm_reads('j1', page_ids=[7], in_flight=True) == 4
+        assert RECORDED[-1]['path'] == '/api/jobs/j1/llm/cancel'
+        assert json.loads(RECORDED[-1]['body']) == {'page_ids': [7], 'in_flight': True}
+
+    def test_diplomatic_readings_report_how_many_were_dropped(self, client):
+        assert client.cancel_groundtruth('j1') == 4
+        assert RECORDED[-1]['path'] == '/api/jobs/j1/groundtruth/cancel'
+
+    @pytest.mark.parametrize('argv, path, out', [
+        (['cancel', 'dataset', 'j1'], '/api/jobs/j1/cancel', 'cancelled'),
+        (['cancel', 'training', '12'], '/api/trainings/12/cancel', 'cancelled'),
+        (['cancel', 'evaluation', '31'], '/api/evaluations/31/cancel', 'cancelled'),
+        (['cancel', 'llm', 'j1'], '/api/jobs/j1/llm/cancel', 'dropped 4 readings'),
+        (['cancel', 'groundtruth', 'j1'], '/api/jobs/j1/groundtruth/cancel', 'dropped 4 readings'),
+    ])
+    def test_the_cli_cancels_each_kind(self, server, capsys, monkeypatch, argv, path, out):
+        from deeplabel import cli
+        RECORDED.clear()
+        monkeypatch.setenv('DEEPLABEL_URL', server)
+        monkeypatch.setenv('DEEPLABEL_TOKEN', 'dlp_test')
+        assert cli.main(argv) == 0
+        assert RECORDED[-1]['path'] == path
+        assert capsys.readouterr().out.strip() == out

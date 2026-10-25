@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { getEvaluation, getEvaluationSummary } from '../api'
+import { cancelEvaluation, getEvaluation, getEvaluationSummary, retryEvaluation } from '../api'
 import type { EvalSummary, EvaluationDetail, OcrDecode } from '../api'
 import { useAuth } from '../auth'
 import { useSetCrumbs } from '../components/NavBar'
@@ -11,7 +11,7 @@ import { Headline } from '../components/evaluation/Headline'
 import { LinesTab } from '../components/evaluation/LinesTab'
 import { count } from '../components/evaluation/format'
 import { Badge } from '../components/ui/Badge'
-import { buttonClass } from '../components/ui/Button'
+import { Button, buttonClass } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { PageHeader } from '../components/ui/PageHeader'
 import { SectionNav } from '../components/ui/SectionNav'
@@ -42,7 +42,8 @@ function EvaluationView({ id }: { id: string | undefined }) {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const setCrumbs = useSetCrumbs()
-  const { canEdit } = useAuth()
+  const { canEdit, isAdmin, user } = useAuth()
+  const [actionError, setActionError] = useState<string | null>(null)
   const [evaluation, setEvaluation] = useState<EvaluationDetail | null>(null)
   const [summary, setSummary] = useState<EvalSummary | null>(null)
   const [missing, setMissing] = useState(!Number.isFinite(evalId))
@@ -51,7 +52,8 @@ function EvaluationView({ id }: { id: string | undefined }) {
   // A finished run's lines are imported just after it reports done, so an empty answer
   // is asked once more before it is believed.
   const [doneChecks, setDoneChecks] = useState(0)
-  const settled = evaluation !== null && (evaluation.status === 'error' || evaluation.line_rows > 0
+  const settled = evaluation !== null && (evaluation.status === 'error' || evaluation.status === 'cancelled'
+    || evaluation.line_rows > 0
     || doneChecks >= 2)
   useEffect(() => {
     if (!Number.isFinite(evalId)) return
@@ -101,6 +103,14 @@ function EvaluationView({ id }: { id: string | undefined }) {
   }
   if (evaluation === null) return <div className={widePageShell} />
 
+  const canRun = isAdmin || evaluation.owner === user
+  const active = evaluation.status === 'queued' || evaluation.status === 'running'
+  const act = (action: (id: number) => Promise<unknown>) => () => {
+    setActionError(null)
+    action(evaluation.id).then(() => getEvaluation(evaluation.id)).then(setEvaluation)
+      .catch((e: Error) => setActionError(e.message))
+  }
+
   const switchDecode = (decode: OcrDecode) => {
     const target = evaluation.decodes.find((d) => d.decode === decode)
     if (!target || target.evaluation_id === evaluation.id) return
@@ -113,13 +123,25 @@ function EvaluationView({ id }: { id: string | undefined }) {
     <div className={widePageShell}>
       <PageHeader
         title={<span data-testid="evaluation-title">{evaluation.model_name ?? `Model ${evaluation.model_id}`}</span>}
-        actions={evaluation.decodes.length > 1 && (
-          <span className="flex items-center gap-2" data-testid="decode-switch">
-            <span className="text-xs text-ink-subtle">Decode</span>
-            <Segmented value={evaluation.decode} onChange={switchDecode}
-                       options={evaluation.decodes.map((d) => ({ value: d.decode, label: d.decode }))} />
-          </span>
-        )}
+        actions={<>
+          {evaluation.decodes.length > 1 && (
+            <span className="flex items-center gap-2" data-testid="decode-switch">
+              <span className="text-xs text-ink-subtle">Decode</span>
+              <Segmented value={evaluation.decode} onChange={switchDecode}
+                         options={evaluation.decodes.map((d) => ({ value: d.decode, label: d.decode }))} />
+            </span>
+          )}
+          {canRun && active && (
+            <Button variant="ghost" size="xs" data-testid="cancel-evaluation" onClick={act(cancelEvaluation)}>
+              Cancel
+            </Button>
+          )}
+          {canRun && (evaluation.status === 'error' || evaluation.status === 'cancelled') && (
+            <Button variant="ghost" size="xs" data-testid="retry-evaluation" onClick={act(retryEvaluation)}>
+              Retry
+            </Button>
+          )}
+        </>}
       >
         Scored on {evaluation.source_label}
         {evaluation.training_id !== null && (
@@ -136,6 +158,10 @@ function EvaluationView({ id }: { id: string | undefined }) {
         )}
       </PageHeader>
 
+      {actionError && <p role="alert" className="mb-3 text-sm text-danger">{actionError}</p>}
+      {evaluation.status === 'cancelled' && (
+        <EmptyState>This evaluation was cancelled before it finished; nothing it scored is kept.</EmptyState>
+      )}
       {evaluation.status === 'error' && (
         <EmptyState>This evaluation failed{evaluation.error ? `: ${evaluation.error}` : ''}.</EmptyState>
       )}

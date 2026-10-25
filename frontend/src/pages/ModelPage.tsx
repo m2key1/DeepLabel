@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  getLayoutTemplates, getModelUsage, listEvaluations, listModels, listTrainings, patchModel, retryEvaluation,
+  cancelEvaluation, getLayoutTemplates, getModelUsage, listEvaluations, listModels, listTrainings, patchModel,
+  retryEvaluation,
 } from '../api'
 import type { Evaluation, LayoutTemplate, ModelUsage, RegistryModel, Training } from '../api'
 import { useAuth } from '../auth'
@@ -58,7 +59,9 @@ function Lineage({ family, version }: { family: Family; version: Version }) {
   )
 }
 
-function EvaluationLine({ ev, canRetry, onRetry }: { ev: Evaluation; canRetry: boolean; onRetry: () => void }) {
+function EvaluationLine({ ev, canRun, onRetry, onCancel }: {
+  ev: Evaluation; canRun: boolean; onRetry: () => void; onCancel: () => void
+}) {
   const [open, setOpen] = useState(false)
   return (
     <div>
@@ -76,9 +79,14 @@ function EvaluationLine({ ev, canRetry, onRetry }: { ev: Evaluation; canRetry: b
         <Link to={`/evaluations/${ev.id}`} data-testid="evaluation-page" className="ml-2 text-ink-subtle hover:text-accent-ink">
           open
         </Link>
-        {canRetry && (
+        {canRun && (ev.status === 'error' || ev.status === 'cancelled') && (
           <button data-testid="retry-evaluation" onClick={onRetry} className="ml-2 text-ink-subtle hover:text-accent-ink">
             retry
+          </button>
+        )}
+        {canRun && (ev.status === 'queued' || ev.status === 'running') && (
+          <button data-testid="cancel-evaluation" onClick={onCancel} className="ml-2 text-ink-subtle hover:text-danger">
+            cancel
           </button>
         )}
         {(ev.breakdown?.length ?? 0) > 0 && (
@@ -259,8 +267,9 @@ export function ModelPage() {
         {evals.length === 0
           ? <p className="text-xs text-ink-subtle">Not evaluated yet.</p>
           : <div className="space-y-1">{evals.map((ev) => (
-              <EvaluationLine key={ev.id} ev={ev} canRetry={ev.status === 'error' && (isAdmin || ev.owner === user)}
-                              onRetry={() => retryEvaluation(ev.id).then(refresh).catch((e: Error) => setError(e.message))} />
+              <EvaluationLine key={ev.id} ev={ev} canRun={isAdmin || ev.owner === user}
+                              onRetry={() => retryEvaluation(ev.id).then(refresh).catch((e: Error) => setError(e.message))}
+                              onCancel={() => cancelEvaluation(ev.id).then(refresh).catch((e: Error) => setError(e.message))} />
             ))}</div>}
       </Section>
 

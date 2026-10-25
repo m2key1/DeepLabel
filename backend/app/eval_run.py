@@ -24,7 +24,7 @@ def score(conn, evaluation: dict, make_engine, lines_out: Path | None) -> None:
     batches = batches_of(conn, evaluation)
     first = next(batches, None)
     if first is None:
-        evaluator.set_state(conn, evaluation['id'], status='error', error='no checked material to evaluate on')
+        evaluator.finish(conn, evaluation['id'], status='error', error='no checked material to evaluate on')
         return
 
     engine = make_engine()
@@ -48,7 +48,7 @@ def score(conn, evaluation: dict, make_engine, lines_out: Path | None) -> None:
     if records:
         records.close()
     cer, wer = corpus_scores(references, hypotheses)
-    evaluator.set_state(conn, evaluation['id'], status='done',
+    evaluator.finish(conn, evaluation['id'], status='done',
                         cer=cer, wer=wer, line_count=len(references),
                         breakdown=group_breakdown(references, hypotheses, groups))
 
@@ -67,7 +67,7 @@ def main():
         raise SystemExit(1)
     client = backend_client.client_for(conn, evaluation['model_id'])
     if client is None:
-        evaluator.set_state(conn, evaluation['id'], status='error',
+        evaluator.finish(conn, evaluation['id'], status='error',
                             error=f'model {evaluation["model_id"]} is not on a configured model backend')
         return
     score(conn, evaluation,

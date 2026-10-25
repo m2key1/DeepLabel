@@ -109,7 +109,8 @@ the next run; nothing already recognised is thrown away.
 - Turn a scan that arrived the wrong way up from the page viewer's **Run** menu. Boxes and
   lines turn with it, and turning back restores the original file.
 - The **Queue** page shows everything running or waiting - datasets, trainings,
-  evaluations - in the order they will run, with live progress.
+  evaluations - in the order they will run, with live progress. Their owner, or an admin,
+  can cancel them there.
 
 ## Reading order
 
@@ -290,6 +291,8 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
 
 - Evaluate any OCR model on any dataset's checked lines with **Evaluate...** on its page.
   Training runs are evaluated automatically on their validation split and test set.
+- A queued or running evaluation can be cancelled by its owner or an admin. It keeps its
+  place in the list without scores, and **Retry** runs it again.
 - Each evaluation has a page with CER, WER, bag-of-words WER, error types and accuracy per
   character class.
 - **Lines** lists every scored line with its crop, a character-level diff, CER and

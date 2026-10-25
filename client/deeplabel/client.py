@@ -133,6 +133,19 @@ class DeepLabel:
     def delete_job(self, job_id: str) -> None:
         self._request('DELETE', f'/api/jobs/{job_id}')
 
+    def cancel_job(self, job_id: str) -> None:
+        """Stop a queued or running dataset."""
+        self._request('POST', f'/api/jobs/{job_id}/cancel')
+
+    def cancel_llm_reads(self, job_id: str, page_ids: list[int] | None = None,
+                         in_flight: bool = False) -> int:
+        """Drop the LLM readings not yet sent (with in_flight, also those already sent).
+        Returns how many were dropped."""
+        payload = {'page_ids': page_ids, 'in_flight': in_flight}
+        return self._request('POST', f'/api/jobs/{job_id}/llm/cancel',
+                             body=json.dumps(payload).encode(),
+                             content_type='application/json')['cancelled']
+
     def wait(self, job_id: str, poll: int = POLL_SECONDS, timeout: int | None = None,
              on_progress=None) -> dict:
         """Block until the dataset stops running. Returns its final state."""
@@ -194,6 +207,10 @@ class DeepLabel:
                              body=json.dumps(payload).encode(),
                              content_type='application/json')
 
+    def cancel_groundtruth(self, job_id: str) -> int:
+        """Drop the diplomatic readings not yet sent. Returns how many were dropped."""
+        return self._request('POST', f'/api/jobs/{job_id}/groundtruth/cancel')['cancelled']
+
     def groundtruth_status(self, job_id: str) -> dict:
         return self._request('GET', f'/api/jobs/{job_id}/groundtruth/status')
 
@@ -218,6 +235,13 @@ class DeepLabel:
 
     def trainings(self) -> dict:
         return self._request('GET', '/api/trainings')
+
+    def cancel_training(self, training_id: int) -> None:
+        self._request('POST', f'/api/trainings/{training_id}/cancel')
+
+    def cancel_evaluation(self, evaluation_id: int) -> None:
+        """Stop a queued or running evaluation. It keeps its row, without scores."""
+        self._request('POST', f'/api/evaluations/{evaluation_id}/cancel')
 
 
 def _detail(body: bytes) -> str:

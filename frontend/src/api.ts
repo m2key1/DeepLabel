@@ -613,7 +613,7 @@ export interface ProgressPoint {
   cer_by_dataset?: Record<string, number>
 }
 
-export type EvaluationStatus = 'queued' | 'running' | 'done' | 'error'
+export type EvaluationStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled'
 
 export interface Evaluation {
   id: number
@@ -2040,7 +2040,12 @@ export function retryTraining(trainingId: number): Promise<Training> {
   return request(`/api/trainings/${trainingId}/retry`, { method: 'POST' })
 }
 
-/** Queue a failed evaluation again, in place. */
+/** Stop a queued or running evaluation; its row stays, without scores. */
+export function cancelEvaluation(evalId: number): Promise<{ ok: boolean }> {
+  return request(`/api/evaluations/${evalId}/cancel`, { method: 'POST' })
+}
+
+/** Queue a failed or cancelled evaluation again, in place. */
 export function retryEvaluation(evalId: number): Promise<Evaluation> {
   return request(`/api/evaluations/${evalId}/retry`, { method: 'POST' })
 }

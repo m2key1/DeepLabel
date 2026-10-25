@@ -112,6 +112,20 @@ def cmd_groundtruth(args, client):
         _wait_groundtruth(client, args.job_id)
 
 
+CANCEL = {
+    'dataset': lambda client, run_id: client.cancel_job(run_id),
+    'training': lambda client, run_id: client.cancel_training(int(run_id)),
+    'evaluation': lambda client, run_id: client.cancel_evaluation(int(run_id)),
+    'llm': lambda client, run_id: client.cancel_llm_reads(run_id),
+    'groundtruth': lambda client, run_id: client.cancel_groundtruth(run_id),
+}
+
+
+def cmd_cancel(args, client):
+    dropped = CANCEL[args.kind](client, args.id)
+    print('cancelled' if dropped is None else f'dropped {dropped} readings')
+
+
 def _wait_groundtruth(client: DeepLabel, job_id: str):
     seen = {}
 
@@ -207,6 +221,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help='read every page again, not only those whose wording or cut has moved')
     gt.add_argument('--wait', action='store_true', help='block until every page is read')
     gt.set_defaults(run=cmd_groundtruth)
+
+    cancel = sub.add_parser('cancel', help='stop a dataset, training or evaluation, or drop '
+                                           'the LLM readings still to be sent')
+    cancel.add_argument('kind', choices=list(CANCEL))
+    cancel.add_argument('id', help='dataset id for dataset, llm and groundtruth; '
+                                   'run id for training and evaluation')
+    cancel.set_defaults(run=cmd_cancel)
 
     sub.add_parser('models', help='list registered models').set_defaults(run=cmd_models)
     return parser

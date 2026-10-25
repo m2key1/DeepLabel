@@ -92,14 +92,26 @@ def retry_evaluation(eval_id: int, conn=Depends(get_db), user: dict = Depends(cu
         raise HTTPException(404)
     if user['role'] != 'admin' and evaluation['owner'] != user['username']:
         raise HTTPException(403, 'not permitted')
-    if evaluation['status'] != 'error':
-        raise HTTPException(409, 'only a failed evaluation can be retried')
+    if evaluation['status'] not in ('error', 'cancelled'):
+        raise HTTPException(409, 'only a failed or cancelled evaluation can be retried')
     snapshot = json.loads(evaluation['source'] or '{}').get('snapshot')
     if snapshot is not None and not (config.training_dir(snapshot) / 'snapshot' / 'valid').is_dir():
         raise HTTPException(409, 'the frozen split it scored on is gone')
     evaluator.set_state(conn, eval_id, status='queued', error=None, pid=None)
     return evaluator.payload(
         conn.execute('SELECT * FROM evaluations WHERE id = ?', (eval_id,)).fetchone())
+
+
+@router.post('/api/evaluations/{eval_id}/cancel')
+def cancel_evaluation(eval_id: int, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Stop a queued or running evaluation. Its row stays, without scores, for a retry."""
+    evaluation = _evaluation_or_404(conn, eval_id)
+    if user['role'] != 'admin' and evaluation['owner'] != user['username']:
+        raise HTTPException(403, 'not permitted')
+    if not evaluator.cancel(conn, eval_id):
+        raise HTTPException(409, f'this evaluation is already {evaluation["status"]} - '
+                                 'only a queued or running one can be cancelled')
+    return {'ok': True}
 
 
 def _evaluation_or_404(conn, eval_id: int) -> dict:

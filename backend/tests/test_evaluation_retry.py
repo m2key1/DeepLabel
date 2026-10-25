@@ -7,7 +7,7 @@ import shutil
 import pytest
 from fastapi.testclient import TestClient
 
-from app import store
+from app import evaluator, store
 from app.deps import get_db
 from app.main import app
 
@@ -88,3 +88,84 @@ def test_an_evaluation_whose_frozen_split_is_gone_is_refused(client, tmp_path):
     assert response.status_code == 409
     assert response.json()['detail'] == 'the frozen split it scored on is gone'
     assert conn.execute('SELECT status FROM evaluations WHERE id = 1').fetchone()['status'] == 'error'
+
+
+@pytest.mark.parametrize('status', ['queued', 'running'])
+def test_the_owner_may_cancel_a_waiting_or_running_evaluation(client, status):
+    api, conn = client
+    seed(conn, 1, status)
+    response = api.post('/api/evaluations/1/cancel', headers=OWNER)
+    assert response.status_code == 200, response.text
+    assert conn.execute('SELECT status FROM evaluations WHERE id = 1').fetchone()['status'] == 'cancelled'
+
+
+def test_cancelling_a_running_evaluation_stops_its_runner(client, monkeypatch):
+    api, conn = client
+    seed(conn, 1, 'running')
+    conn.execute('UPDATE evaluations SET pid = 4242 WHERE id = 1')
+    conn.commit()
+    killed = []
+    monkeypatch.setattr('app.evaluator.os.kill', lambda pid, sig: killed.append(pid))
+    assert api.post('/api/evaluations/1/cancel', headers=OWNER).status_code == 200
+    assert killed == [4242]
+
+
+def test_an_admin_may_cancel_someone_elses(client):
+    api, conn = client
+    seed(conn, 1, 'queued')
+    assert api.post('/api/evaluations/1/cancel', headers=ADMIN).status_code == 200
+    assert conn.execute('SELECT status FROM evaluations WHERE id = 1').fetchone()['status'] == 'cancelled'
+
+
+def test_another_member_may_not_cancel(client):
+    api, conn = client
+    seed(conn, 1, 'queued')
+    assert api.post('/api/evaluations/1/cancel', headers=STRANGER).status_code == 403
+    assert conn.execute('SELECT status FROM evaluations WHERE id = 1').fetchone()['status'] == 'queued'
+
+
+@pytest.mark.parametrize('status', ['done', 'error', 'cancelled'])
+def test_a_finished_evaluation_cannot_be_cancelled(client, status):
+    api, conn = client
+    seed(conn, 1, status)
+    assert api.post('/api/evaluations/1/cancel', headers=OWNER).status_code == 409
+    assert conn.execute('SELECT status FROM evaluations WHERE id = 1').fetchone()['status'] == status
+
+
+def test_a_cancelled_evaluation_can_be_retried(client):
+    api, conn = client
+    seed(conn, 1, 'cancelled')
+    assert api.post('/api/evaluations/1/retry', headers=OWNER).status_code == 200
+    assert conn.execute('SELECT status FROM evaluations WHERE id = 1').fetchone()['status'] == 'queued'
+
+
+def test_the_runner_finishing_late_does_not_undo_a_cancel(client):
+    """The runner writes its scores itself; a cancel that lands just before must win."""
+    _, conn = client
+    seed(conn, 1, 'cancelled')
+    evaluator.finish(conn, 1, status='done', cer=0.1, wer=0.2, line_count=5)
+    row = conn.execute('SELECT status, cer FROM evaluations WHERE id = 1').fetchone()
+    assert (row['status'], row['cer']) == ('cancelled', None)
+
+
+def test_a_cancelled_run_discards_its_scored_lines(client, tmp_path, monkeypatch):
+    _, conn = client
+    monkeypatch.setattr('app.config.EVALS_DIR', tmp_path / 'evals')
+    (tmp_path / 'evals').mkdir()
+    seed(conn, 1, 'queued')
+
+    class CancelledMidway:
+        pid = 4242
+        returncode = -15
+
+        def wait(self, timeout=None):
+            evaluator.lines_path(1).write_text('{"line_id": 1}\n')
+            conn.execute("UPDATE evaluations SET status = 'cancelled' WHERE id = 1")
+            conn.commit()
+
+    monkeypatch.setattr(evaluator, '_spawn', lambda conn, ev: CancelledMidway())
+    monkeypatch.setattr(evaluator, 'memory_ceiling', lambda: None)
+    evaluator.run_local(conn, 1)
+    assert conn.execute('SELECT status FROM evaluations WHERE id = 1').fetchone()['status'] == 'cancelled'
+    assert conn.execute('SELECT COUNT(*) FROM eval_lines WHERE evaluation_id = 1').fetchone()[0] == 0
+    assert not evaluator.lines_path(1).exists()
