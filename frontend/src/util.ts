@@ -271,6 +271,30 @@ export function clampKeyboardSize(size: KeyboardSize): KeyboardSize {
   }
 }
 
+// Where the keyboard was dragged to, as its centre in fractions of the canvas, or null
+// while it sits in its place above the footer.
+const KEYBOARD_PLACE_KEY = 'deeplabel.keyboardPlace'
+
+export interface KeyboardPlace {
+  x: number
+  y: number
+}
+
+export function getKeyboardPlace(): KeyboardPlace | null {
+  try {
+    const held = JSON.parse(localStorage.getItem(KEYBOARD_PLACE_KEY) ?? 'null') as KeyboardPlace | null
+    const inside = (v: unknown) => typeof v === 'number' && v >= 0 && v <= 1
+    return held && inside(held.x) && inside(held.y) ? { x: held.x, y: held.y } : null
+  } catch {
+    return null
+  }
+}
+
+export function setKeyboardPlace(place: KeyboardPlace | null): void {
+  if (place) localStorage.setItem(KEYBOARD_PLACE_KEY, JSON.stringify(place))
+  else localStorage.removeItem(KEYBOARD_PLACE_KEY)
+}
+
 const PEN_CLASS_KEY = 'deeplabel.penClass'
 
 /** The class the next stroke draws. Which tool is in hand is not kept: an editor opens

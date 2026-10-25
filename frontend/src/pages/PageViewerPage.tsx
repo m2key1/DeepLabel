@@ -85,9 +85,9 @@ import { simplifyPolyline } from '../lib/geometry/core'
 import { eraseFromGeom } from '../lib/geometry/region'
 import {
   REVIEW_THRESHOLDS, classColor, confBadgeClass, getHiddenClasses, setClassColors, getLinePenShape, getOcrFrac,
-  getPenClass, clampKeyboardSize, clampLoupeHeight, getKeyboardSize, getLoupeHeight,
+  getPenClass, clampKeyboardSize, clampLoupeHeight, getKeyboardPlace, getKeyboardSize, getLoupeHeight,
   getReadingsFrac, setHiddenClasses, setLoupeHeight,
-  setKeyboardSize, setLinePenShape, setOcrFrac, setPenClass, setReadingsFrac, setReviewConf,
+  setKeyboardPlace, setKeyboardSize, setLinePenShape, setOcrFrac, setPenClass, setReadingsFrac, setReviewConf,
 } from '../util'
 import type { LinePenShape } from '../util'
 import { clamp01, polyCenter, polyMaxX, polyMinX } from '../lib/geometry/core'
@@ -291,6 +291,7 @@ export function PageViewerPage() {
   const [ocrFrac, setOcrFracState] = useState(getOcrFrac)
   const [readingsFrac, setReadingsFracState] = useState(getReadingsFrac)
   const [kbSize, setKbSize] = useState(getKeyboardSize)
+  const [kbPlace, setKbPlace] = useState(getKeyboardPlace)
   const [loupeH, setLoupeH] = useState(getLoupeHeight)
   const lastFrac = useRef(0.5)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -326,6 +327,12 @@ export function PageViewerPage() {
   const drag = usePointerDrag(overlayBox)
   const divider = useRef<HTMLDivElement>(null)
   const dividerDrag = usePointerDrag(divider)
+  // The keyboard's handles capture the pointer themselves: a capture elsewhere would send
+  // their double-clicks there.
+  const kbHandle = useRef<HTMLSpanElement | null>(null)
+  const kbMoveDrag = usePointerDrag(kbHandle)
+  const kbGrip = useRef<HTMLSpanElement | null>(null)
+  const kbResizeDrag = usePointerDrag(kbGrip)
   // The panel the readings and the lines share, measured when their divider is dragged.
   const listRef = useRef<HTMLDivElement | null>(null)
   const rowRefs = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -1128,6 +1135,7 @@ export function PageViewerPage() {
   useEffect(() => setOcrFrac(ocrFrac), [ocrFrac])
   useEffect(() => setReadingsFrac(readingsFrac), [readingsFrac])
   useEffect(() => setKeyboardSize(kbSize), [kbSize])
+  useEffect(() => setKeyboardPlace(kbPlace), [kbPlace])
   useEffect(() => setLoupeHeight(loupeH), [loupeH])
 
   useEffect(() => {
@@ -1182,11 +1190,32 @@ export function PageViewerPage() {
   const beginKeyboardResize = (e: React.PointerEvent) => {
     e.preventDefault()
     const from = { x: e.clientX, y: e.clientY, ...kbSize }
-    dividerDrag.begin(e, {
+    kbResizeDrag.begin(e, {
       onMove: (ev) => setKbSize(clampKeyboardSize({
-        span: from.span + ((from.x - ev.clientX) * 2) / window.innerWidth,
+        span: from.span + ((from.x - ev.clientX) * 2) / (kbRef.current?.parentElement?.clientWidth ?? window.innerWidth),
         key: from.key + (from.y - ev.clientY) / 5,
       })),
+      onEnd: () => undefined,
+    })
+  }
+
+  // Drag the keyboard by its handle. It is placed by its centre, so resizing it afterwards
+  // still grows it from both sides; a double-click puts it back above the footer.
+  const beginKeyboardMove = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const board = kbRef.current?.getBoundingClientRect()
+    const area = kbRef.current?.parentElement?.getBoundingClientRect()
+    if (!board || !area) return
+    const from = {
+      x: e.clientX, y: e.clientY,
+      cx: board.left + board.width / 2 - area.left, cy: board.top + board.height / 2 - area.top,
+    }
+    const fraction = (v: number, of: number) => Math.min(1, Math.max(0, v / of))
+    kbMoveDrag.begin(e, {
+      onMove: (ev) => setKbPlace({
+        x: fraction(from.cx + ev.clientX - from.x, area.width),
+        y: fraction(from.cy + ev.clientY - from.y, area.height),
+      }),
       onEnd: () => undefined,
     })
   }
@@ -1859,25 +1888,37 @@ export function PageViewerPage() {
   const palette = keyboardSource === 'dataset' && filled.length > 0 ? filled : vkbd
   const hasKeys = palette.length > 0
 
-  // The keyboard reserves vertical space through --vkbd-h so it never covers the
-  // OCR list or the scan: the panels' max-height calc subtracts it.
+  // In its place above the footer the keyboard reserves vertical space through --vkbd-h,
+  // so it never covers the OCR list or the scan: the panels' max-height calc subtracts it.
+  // Dragged elsewhere it floats where it was put and reserves nothing.
   const kbRef = useRef<HTMLDivElement | null>(null)
-  const [kbHeight, setKbHeight] = useState(0)
+  const [kbBox, setKbBox] = useState({ width: 0, height: 0, areaWidth: 0, areaHeight: 0 })
   const kbVisible =
     canEdit && hasKeys &&
     (keyboardMode === 'show' || (keyboardMode === 'auto' && editingId !== null))
   useLayoutEffect(() => {
     const el = kbRef.current
-    if (!el) {
-      setKbHeight(0)
+    const area = el?.parentElement
+    if (!el || !area) {
+      setKbBox({ width: 0, height: 0, areaWidth: 0, areaHeight: 0 })
       return
     }
-    const measure = () => setKbHeight(el.offsetHeight + 12)
+    const measure = () => setKbBox({
+      width: el.offsetWidth, height: el.offsetHeight,
+      areaWidth: area.clientWidth, areaHeight: area.clientHeight,
+    })
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
+    ro.observe(area)
     return () => ro.disconnect()
   }, [kbVisible])
+  const kbHeight = kbBox.height && !kbPlace ? kbBox.height + 12 : 0
+  const within = (at: number, size: number, of: number) => Math.max(0, Math.min(of - size, at - size / 2))
+  const kbFloat = kbPlace && {
+    left: within(kbPlace.x * kbBox.areaWidth, kbBox.width, kbBox.areaWidth),
+    top: within(kbPlace.y * kbBox.areaHeight, kbBox.height, kbBox.areaHeight),
+  }
 
   const cycleKeyboardMode = () => {
     const next = keyboardMode === 'auto' ? 'show' : keyboardMode === 'show' ? 'hide' : 'auto'
@@ -3810,15 +3851,22 @@ export function PageViewerPage() {
       {kbVisible && (
         <div
           ref={kbRef}
-          // A width, not a ceiling: the keys are fewer than the window is wide, so a cap
+          data-testid="virtual-keyboard"
+          // Anywhere on the board, not only on a key: a press that misses one must not take
+          // the focus, or the edit closes and saves.
+          onMouseDown={(e) => e.preventDefault()}
+          // A width, not a ceiling: the keys are fewer than the canvas is wide, so a cap
           // they never reach would leave the board the same size whatever it was set to.
-          style={{ width: `${kbSize.span * 100}vw`, maxWidth: '98vw' }}
-          className={`fixed bottom-3 left-1/2 z-30 flex -translate-x-1/2 flex-wrap justify-center gap-1 p-1.5 shadow-lg transition-opacity ${
+          style={{ width: `${kbSize.span * 100}%`, maxWidth: '98%', ...kbFloat }}
+          className={`absolute z-30 flex flex-wrap justify-center gap-1 p-1.5 shadow-lg transition-opacity ${
+            kbFloat ? '' : 'bottom-3 left-1/2 -translate-x-1/2'
+          } ${
             editingId === null ? 'opacity-50' : ''
           } ${boxChrome}`}
         >
           {canEdit && (
             <span
+              ref={kbGrip}
               onPointerDown={beginKeyboardResize}
               onDoubleClick={() => setKbSize({ span: 0.92, key: 28 })}
               data-testid="keyboard-grip"
@@ -3828,15 +3876,23 @@ export function PageViewerPage() {
               className="absolute -left-1 -top-1 h-3 w-3 cursor-nwse-resize rounded-sm border border-line-strong bg-white"
             />
           )}
+          {canEdit && (
+            <span
+              ref={kbHandle}
+              onPointerDown={beginKeyboardMove}
+              onDoubleClick={() => setKbPlace(null)}
+              data-testid="keyboard-move"
+              role="button"
+              aria-label="Move the keyboard"
+              title="Drag to move · double-click to put it back above the footer"
+              className="absolute -top-1.5 left-1/2 h-3 w-12 -translate-x-1/2 cursor-move rounded-full border border-line-strong bg-white"
+            />
+          )}
           {palette.map((c, i) => (
             <button
               key={i}
               type="button"
-              // mousedown, not click: preventDefault keeps the edit input focused (no blur/save)
-              onMouseDown={(e) => {
-                e.preventDefault()
-                insertChar(c)
-              }}
+              onMouseDown={() => insertChar(c)}
               title={`Insert ${c}`}
               style={{ height: kbSize.key, minWidth: kbSize.key,
                        fontSize: Math.max(10, Math.round(kbSize.key * 0.5)) }}

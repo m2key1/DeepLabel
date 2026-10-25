@@ -88,6 +88,80 @@ test.describe('Scenario: customizing hotkeys', () => {
     await expect.poll(async () =>
       (await page.getByTitle('Insert ä', { exact: true }).boundingBox())!.height)
       .toBeCloseTo(settled, 0)
+
+    // A double-click on the corner puts the default size back: 28 px keys.
+    expect(settled).not.toBeCloseTo(28, 0)
+    await page.getByTestId('keyboard-grip').dblclick()
+    await expect.poll(async () =>
+      (await page.getByTitle('Insert ä', { exact: true }).boundingBox())!.height)
+      .toBeCloseTo(28, 0)
+  })
+
+  test('a click on the keyboard between its keys leaves the edit open and the line unchecked', async ({ page }) => {
+    const jobId = await seedCompletedJob(uniqueName('Vkbd miss'), 1, LANDSCAPE)
+    const [pageId] = await jobPageIds(jobId)
+    await openViewer(page, jobId, pageId)
+    const [first] = await pageLines(jobId, pageId)
+    await page.getByTestId('line-text').first().click()
+    const editor = page.getByTestId('line-editor')
+    await editor.press('End')
+    await editor.pressSequentially('x')
+
+    // The board's own padding, past the last key: no character, so nothing to insert.
+    const board = (await page.getByTestId('virtual-keyboard').boundingBox())!
+    await page.mouse.click(board.x + board.width - 2, board.y + board.height - 2)
+
+    await expect(editor).toBeFocused()
+    await expect(editor).toHaveValue(`${first.text}x`)
+    const stored = (await pageLines(jobId, pageId)).find((l) => l.id === first.id)!
+    expect(stored.corrected_text).toBeNull()
+    expect(stored.checked).toBe(false)
+  })
+
+  test('the keyboard sits above the footer, moves where it is dragged, and docks again', async ({ page }) => {
+    const jobId = await seedCompletedJob(uniqueName('Vkbd place'), 1, LANDSCAPE)
+    const [pageId] = await jobPageIds(jobId)
+    await openViewer(page, jobId, pageId)
+    await page.getByTestId('line-text').first().click()
+
+    const board = page.getByTestId('virtual-keyboard')
+    const footer = page.getByRole('contentinfo')
+    await expect(board).toBeVisible()
+    await expect(footer).toHaveCount(1)
+    const docked = async () => {
+      const [b, f] = [(await board.boundingBox())!, (await footer.boundingBox())!]
+      return b.y + b.height <= f.y
+    }
+    await expect.poll(docked).toBe(true)
+
+    const handle = page.getByTestId('keyboard-move')
+    const from = (await board.boundingBox())!
+    const at = (await handle.boundingBox())!
+    await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2)
+    await page.mouse.down()
+    // The board spans most of the canvas, so there is little room to the side.
+    await page.mouse.move(at.x + at.width / 2 - 40, at.y + at.height / 2 - 200, { steps: 10 })
+    await page.mouse.up()
+    await expect.poll(async () => Math.round((await board.boundingBox())!.y)).toBe(Math.round(from.y - 200))
+    expect(Math.round((await board.boundingBox())!.x)).toBe(Math.round(from.x - 40))
+
+    // Remembered across pages, like its size.
+    await openViewer(page, jobId, pageId)
+    await page.getByTestId('line-text').first().click()
+    await expect.poll(async () => Math.round((await board.boundingBox())!.y)).toBe(Math.round(from.y - 200))
+
+    // Dragged far past the bottom it stops at the canvas edge, never over the footer.
+    const moved = (await handle.boundingBox())!
+    await page.mouse.move(moved.x + moved.width / 2, moved.y + moved.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(moved.x + moved.width / 2, moved.y + 2000, { steps: 10 })
+    await page.mouse.up()
+    await expect.poll(async () => Math.round((await board.boundingBox())!.y)).toBeGreaterThan(Math.round(from.y - 200))
+    expect(await docked()).toBe(true)
+
+    await handle.dblclick()
+    await expect.poll(async () => Math.round((await board.boundingBox())!.y)).toBe(Math.round(from.y))
+    expect(Math.round((await board.boundingBox())!.x)).toBe(Math.round(from.x))
   })
 
   test('a character typed into Settings joins the palette and reaches the line editor', async ({ page }) => {
