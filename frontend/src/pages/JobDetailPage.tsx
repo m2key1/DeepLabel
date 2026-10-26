@@ -41,6 +41,7 @@ import { useCommand } from '../commands'
 import { usePresence, usePresenceLocation } from '../presence'
 import { useSetCrumbs } from '../components/NavBar'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
+import { Modal, modalBtn, modalPrimaryBtn } from '../components/Modal'
 import { StatusBadge } from '../components/StatusBadge'
 import { Badge } from '../components/ui/Badge'
 import { PhaseStrip } from '../components/job/PhaseStrip'
@@ -102,8 +103,10 @@ const PHASE_LABELS: Record<PagePhase, string> = {
   ocr: 'A re-read',
 }
 
+const TEST_PAGE_MEANING = 'Test data - no training uses these pages, nor pages with the same scan'
+
 type SortKey = 'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'checked' | 'confidence'
-  | 'llm' | 'regions'
+  | 'llm' | 'regions' | 'test'
 
 /** What a run changes on a dataset, as one string two looks at it can be compared by. */
 const runState = (job: Pick<JobWithoutPages, 'status' | 'counters'>) =>
@@ -153,6 +156,7 @@ const TEXT_COLUMNS: Column[] = [
   { key: 'checked', label: 'OCR checked', title: 'Lines whose text has been reviewed' },
   { key: 'confidence', label: 'Confidence', title: 'Worst / average line confidence' },
   { key: 'llm', label: 'LLM', title: 'Language models holding a reading of this page' },
+  { key: 'test', label: 'Test', title: TEST_PAGE_MEANING },
 ]
 
 // Without a layout there is nothing to mark complete, and the review unit is the line.
@@ -791,12 +795,6 @@ export function JobDetailPage() {
                   className={`truncate hover:underline ${page.deleted ? 'line-through' : ''}`}>
               {page.filename}
             </Link>
-            {page.is_test && (
-              <Badge data-testid="page-test" className="shrink-0"
-                     title="Test data - no training uses this page, nor any page with the same scan">
-                test
-              </Badge>
-            )}
             {page.status === 'duplicate' && (
               <Badge data-testid="page-duplicate" className="shrink-0"
                      title="The same scan as another page here - not counted, nothing to review">
@@ -858,6 +856,25 @@ export function JobDetailPage() {
         ) : (
           <span className="text-ink-subtle">-</span>
         )
+      case 'test':
+        return canOwn ? (
+          <button
+            data-testid="page-test"
+            aria-pressed={page.is_test}
+            aria-label={`Test page: ${page.filename}`}
+            title={page.is_test ? 'Test page - click to let training use it again' : 'Click to make this a test page'}
+            onClick={(e) => {
+              e.stopPropagation()
+              markTest([page.id], !page.is_test)
+            }}
+            className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${page.is_test
+              ? 'bg-accent-wash text-accent-ink' : 'text-ink-subtle hover:bg-raised hover:text-ink'}`}
+          >
+            {page.is_test ? 'test' : 'no'}
+          </button>
+        ) : page.is_test ? (
+          <Badge data-testid="page-test" title={TEST_PAGE_MEANING}>test</Badge>
+        ) : null
       case 'llm': {
         const models = page.llm_models ?? 0
         return models > 0 ? (
@@ -950,11 +967,7 @@ export function JobDetailPage() {
                 setJob((p) => (p ? { ...p, new_pages_test: on } : p))
                 setNewPagesTest(jobId, on).catch((err: Error) => setError(err.message))
               }}
-              onMarkAll={(test) => {
-                if (test || confirm('Unmark every page of this dataset as test data? Training may then use them.')) {
-                  markTest(null, test)
-                }
-              }}
+              onMarkAll={(test) => markTest(null, test)}
             />
           )}
           <div className="ml-auto flex items-center gap-2">
@@ -1698,26 +1711,82 @@ function TestDataControls({ testPages, pages, newPagesTest, canOwn, onSwitch, on
   onSwitch: (on: boolean) => void
   onMarkAll: (test: boolean) => void
 }) {
-  const summary = testPages === 0 ? null : testPages === pages ? 'test set' : `${testPages} of ${pages} test pages`
+  const [open, setOpen] = useState(false)
+  const state = testPages === 0 ? 'none' : testPages === pages && newPagesTest ? 'whole' : 'some'
+  const summary = state === 'none' ? 'none' : state === 'whole' ? 'whole dataset' : `${testPages} of ${pages} pages`
   if (!canOwn) {
-    return summary && <span data-testid="job-test-pages" className="text-xs text-ink-subtle">{summary}</span>
+    return state !== 'none' && (
+      <span data-testid="job-test-pages" className="text-xs text-ink-subtle" title={TEST_PAGE_MEANING}>
+        Test data: {summary}
+      </span>
+    )
   }
-  const link = 'text-xs text-ink-subtle underline underline-offset-2 hover:text-accent-ink'
   return (
-    <span className="flex items-center gap-2">
-      {summary && <span data-testid="job-test-pages" className="text-xs text-ink-subtle">{summary}</span>}
-      <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-subtle"
-             title="Pages added from now on arrive as test data, which no training uses">
-        <input type="checkbox" data-testid="new-pages-test" checked={newPagesTest}
-               onChange={(e) => onSwitch(e.target.checked)} className="cursor-pointer accent-accent" />
-        New pages are test pages
-      </label>
-      {testPages < pages && (
-        <button data-testid="mark-all-test" className={link} onClick={() => onMarkAll(true)}>Mark all pages</button>
+    <>
+      <Button size="xs" data-testid="job-test-pages" onClick={() => setOpen(true)} title={TEST_PAGE_MEANING}>
+        Test data: {summary}
+      </Button>
+      {open && (
+        <TestDataDialog
+          state={state}
+          testPages={testPages}
+          onClose={() => setOpen(false)}
+          onSave={(next) => {
+            setOpen(false)
+            if (next === 'whole') onMarkAll(true)
+            else if (next === 'none') onMarkAll(false)
+            else if (newPagesTest) onSwitch(false)
+          }}
+        />
       )}
-      {testPages > 0 && (
-        <button data-testid="unmark-all-test" className={link} onClick={() => onMarkAll(false)}>Unmark all pages</button>
+    </>
+  )
+}
+
+type TestDataState = 'none' | 'some' | 'whole'
+
+function TestDataDialog({ state, testPages, onClose, onSave }: {
+  state: TestDataState
+  testPages: number
+  onClose: () => void
+  onSave: (next: TestDataState) => void
+}) {
+  const [choice, setChoice] = useState<TestDataState>(state)
+  const choices: [TestDataState, string][] = [
+    ['none', 'No test pages'],
+    ...(state === 'some' ? [['some', `Keep the ${testPages} test page${testPages === 1 ? '' : 's'} marked now`] as [TestDataState, string]] : []),
+    ['whole', 'The whole dataset, including pages added later'],
+  ]
+  return (
+    <Modal title="Test data" onClose={onClose}>
+      <p className="mb-3 text-sm text-ink-muted">
+        Test pages are kept out of every training run, so a model can be scored on pages it
+        never saw. Pages with the same scan as a test page are kept out of training too.
+      </p>
+      <fieldset className="mb-3 space-y-1.5" data-testid="test-data-choice">
+        {choices.map(([value, label]) => (
+          <label key={value} className="flex cursor-pointer items-center gap-2 text-sm text-ink">
+            <input type="radio" name="test-data" value={value} checked={choice === value}
+                   onChange={() => setChoice(value)} className="accent-accent" />
+            {label}
+          </label>
+        ))}
+      </fieldset>
+      {choice === 'none' && testPages > 0 && (
+        <p className="mb-3 text-sm text-warn" data-testid="test-data-unmark-warning">
+          Training may then use the {testPages} page{testPages === 1 ? '' : 's'} marked now.
+        </p>
       )}
-    </span>
+      <p className="mb-4 text-xs text-ink-muted">
+        Single pages: click a row's Test cell, select rows and choose Mark as test pages, or
+        switch Test page in the page viewer.
+      </p>
+      <div className="flex justify-end gap-2">
+        <button onClick={onClose} className={modalBtn}>Cancel</button>
+        <button onClick={() => onSave(choice)} disabled={choice === state} className={`${modalPrimaryBtn} disabled:opacity-40`}>
+          Save
+        </button>
+      </div>
+    </Modal>
   )
 }

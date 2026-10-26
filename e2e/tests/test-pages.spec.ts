@@ -5,7 +5,7 @@ import {
 } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { pickDataset } from '../helpers/training'
-import { enterEditMode, openViewer } from '../helpers/viewer'
+import { openViewer } from '../helpers/viewer'
 
 // Every scan here is TEST_SCAN_WIDTH wide: a test page keeps every page of the same scan
 // out of training, and the common stub scans are in every spec.
@@ -19,61 +19,84 @@ test.describe('Scenario: marking test data on a dataset', () => {
 
     const rows = page.locator('[data-page-row]')
     await expect(rows).toHaveCount(3)
+    await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: none')
     await page.getByRole('checkbox', { name: 'Select scan_1.png' }).click()
     await page.getByRole('checkbox', { name: 'Select scan_2.png' }).click()
     await page.getByTestId('bulk-test-pages').click()
 
     await expect.poll(() => testFlags(jobId)).toEqual([true, true, false])
     expect(await switchOf(jobId)).toBe(false)
-    await expect(page.getByTestId('job-test-pages')).toHaveText('2 of 3 test pages')
-    await expect(rows.getByTestId('page-test')).toHaveCount(2)
+    await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: 2 of 3 pages')
+    await expect(rows.locator('[data-testid="page-test"][aria-pressed="true"]')).toHaveCount(2)
+    await expect(rows.locator('[data-testid="page-test"][aria-pressed="false"]')).toHaveCount(1)
     await expect(page.getByTestId('page-filter-test-pages')).toHaveText('Test pages · 2')
 
     // Marked already, so the same selection's button undoes it.
     await expect(page.getByTestId('bulk-test-pages')).toHaveText('Unmark test pages')
     await page.getByTestId('bulk-test-pages').click()
     await expect.poll(() => testFlags(jobId)).toEqual([false, false, false])
-    await expect(page.getByTestId('job-test-pages')).toHaveCount(0)
+    await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: none')
   })
 
-  test('Mark all pages turns the switch on, and an upload can still add pages that are not test data',
+  test("a row's Test cell marks that one page", async ({ page }) => {
+    const jobId = await seedDistinctPagesJob(uniqueName('Row test page'), 2, 5, TEST_SCAN_WIDTH)
+    await page.goto(`/jobs/${jobId}`)
+
+    const cell = page.getByRole('button', { name: 'Test page: scan_2.png' })
+    await expect(cell).toHaveAttribute('aria-pressed', 'false')
+    await cell.click()
+
+    await expect.poll(() => testFlags(jobId)).toEqual([false, true])
+    await expect(cell).toHaveAttribute('aria-pressed', 'true')
+    await expect(page).toHaveURL(new RegExp(`/jobs/${jobId}$`))
+    await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: 1 of 2 pages')
+  })
+
+  test('the whole dataset is test data, and an upload can still add pages that are not',
     async ({ page }) => {
       const jobId = await seedDistinctPagesJob(uniqueName('Whole test set'), 2, 10, TEST_SCAN_WIDTH)
       await page.goto(`/jobs/${jobId}`)
-      await expect(page.getByTestId('new-pages-test')).not.toBeChecked()
 
-      await page.getByTestId('mark-all-test').click()
+      await page.getByTestId('job-test-pages').click()
+      const dialog = page.getByRole('dialog', { name: 'Test data' })
+      await dialog.getByRole('radio', { name: 'The whole dataset, including pages added later' }).check()
+      await dialog.getByRole('button', { name: 'Save' }).click()
 
       await expect.poll(() => testFlags(jobId)).toEqual([true, true])
       expect(await switchOf(jobId)).toBe(true)
-      await expect(page.getByTestId('job-test-pages')).toHaveText('test set')
-      await expect(page.getByTestId('new-pages-test')).toBeChecked()
+      await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: whole dataset')
       await expect(page.getByTestId('add-as-test')).toBeChecked()
 
       await page.getByTestId('add-as-test').uncheck()
       await page.locator('input[type="file"]').setInputFiles(
         [{ name: 'extra.png', mimeType: 'image/png', buffer: scanPng(TEST_SCAN_WIDTH, 800, 13) }])
       await expect.poll(() => testFlags(jobId)).toEqual([true, true, false])
-      expect(await switchOf(jobId)).toBe(true)
+      await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: 2 of 3 pages')
     })
 
-  test('the switch alone marks nothing that is there, only what is added', async ({ page }) => {
-    const jobId = await seedDistinctPagesJob(uniqueName('Switched on'), 1, 20, TEST_SCAN_WIDTH)
+  test('No test pages unmarks every page and warns first', async ({ page }) => {
+    const jobId = await seedDistinctPagesJob(uniqueName('Unmarked whole'), 2, 20, TEST_SCAN_WIDTH)
+    await markTestPages(jobId)
     await page.goto(`/jobs/${jobId}`)
 
-    await page.getByTestId('new-pages-test').check()
+    await page.getByTestId('job-test-pages').click()
+    const dialog = page.getByRole('dialog', { name: 'Test data' })
+    await expect(dialog.getByRole('radio', { name: 'The whole dataset, including pages added later' })).toBeChecked()
+    await expect(dialog.getByTestId('test-data-unmark-warning')).toHaveCount(0)
+    await dialog.getByRole('radio', { name: 'No test pages' }).check()
+    await expect(dialog.getByTestId('test-data-unmark-warning')).toHaveText(
+      'Training may then use the 2 pages marked now.')
+    await dialog.getByRole('button', { name: 'Save' }).click()
 
-    await expect.poll(() => switchOf(jobId)).toBe(true)
-    expect(await testFlags(jobId)).toEqual([false])
-    await expect(page.getByTestId('add-as-test')).toBeChecked()
+    await expect.poll(() => testFlags(jobId)).toEqual([false, false])
+    expect(await switchOf(jobId)).toBe(false)
+    await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: none')
   })
 
   test('the page viewer marks the page it shows', async ({ page }) => {
     const jobId = await seedDistinctPagesJob(uniqueName('Viewer test page'), 2, 30, TEST_SCAN_WIDTH)
     const [, second] = await jobPageIds(jobId)
     await openViewer(page, jobId, second)
-    // Beside Layout complete and Lines complete, where a page's own flags are set.
-    await enterEditMode(page)
 
     const toggle = page.getByTestId('page-test-toggle')
     await expect(toggle).toHaveAttribute('aria-pressed', 'false')

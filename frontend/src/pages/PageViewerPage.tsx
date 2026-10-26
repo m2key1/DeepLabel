@@ -3519,12 +3519,6 @@ export function PageViewerPage() {
           <Toggle on={!!page?.lines_checked} onClick={toggleLinesChecked} className="w-full">
             Lines complete
           </Toggle>
-          {job && (isAdmin || job.owner === user) && (
-            <Toggle on={!!page?.is_test} onClick={toggleTestPage} className="w-full" data-testid="page-test-toggle"
-                    title="Test data - no training uses this page, nor any page with the same scan">
-              Test page
-            </Toggle>
-          )}
           <div className="flex gap-1">
             <Button size="xs" onClick={deleteCurrent} disabled={curSelId() === null} className="flex-1">
               Delete
@@ -3792,6 +3786,12 @@ export function PageViewerPage() {
                     </Button>
                   ))}
               </>
+            )}
+            {job && page && (isAdmin || job.owner === user) && (
+              <Toggle on={!!page.is_test} onClick={toggleTestPage} data-testid="page-test-toggle"
+                      title="Test data - no training uses this page, nor any page with the same scan">
+                Test page
+              </Toggle>
             )}
             {canEdit && (
               <Toggle on={editing} title="e" onClick={() => setEditing((v) => !v)}>

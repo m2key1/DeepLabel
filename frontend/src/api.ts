@@ -1328,7 +1328,7 @@ export type PageFilter =
   | 'no-layout' | 'test-pages' | 'deleted'
 
 export type PageSort =
-  'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'checked' | 'confidence' | 'llm'
+  'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'checked' | 'confidence' | 'llm' | 'test'
 
 export interface PageRowsQuery {
   filter?: PageFilter

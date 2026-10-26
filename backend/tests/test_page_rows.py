@@ -171,6 +171,13 @@ def test_the_order_is_applied_before_the_slice(client):
     assert [r['id'] for r in body['rows']] == [2, 5]
 
 
+def test_test_pages_sort_first_descending(client, conn):
+    conn.execute('UPDATE pages SET is_test = 1 WHERE id = 5')
+    conn.commit()
+
+    assert [r['id'] for r in get(client, sort='test', desc=True, limit=2).json()['rows']] == [5, 1]
+
+
 def test_a_descending_sort_turns_it_round(client):
     body = get(client, sort='confidence', desc=True, limit=3).json()
 

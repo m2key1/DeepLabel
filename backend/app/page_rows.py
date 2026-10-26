@@ -82,6 +82,7 @@ SORTS = {
     'checked': 'CAST(lines_reviewed AS REAL) / NULLIF(lines_total, 0)',
     'confidence': 'min_confidence',
     'llm': 'llm_models',
+    'test': 'is_test',
     'regions': 'CAST(regions_checked AS REAL) / NULLIF(regions_total, 0)',
     # A line job's ratio is always 1, so its column sorts by how many were traced.
     'regions-total': 'regions_total',

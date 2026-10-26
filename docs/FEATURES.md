@@ -84,10 +84,12 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
 - A page is test data or not. No training uses a test page, nor any page with the same scan;
   a run leaves those out and says how many ("12 pages left out: same scan as test pages in
   Zollbuecher").
-- The owner of a dataset, or an admin, marks pages as test data from a selection in the page
-  table, with **Test page** in the page viewer, or all at once with **Mark all pages**.
-- **New pages are test pages** makes pages added later test data; **Mark all pages** turns it
-  on. Uploads have an **Add as test pages** checkbox, preset from it.
+- The owner of a dataset, or an admin, marks pages as test data: one page with its **Test**
+  cell in the page table or **Test page** in the page viewer, a selection with **Mark as test
+  pages**, or the whole dataset with **Test data** in the dataset's title.
+- **Test data** shows how much of the dataset is test data. Choosing the whole dataset there
+  makes pages added later test data too. Uploads have an **Add as test pages** checkbox,
+  preset from it.
 - Test pages stay fully editable. The dataset list shows "test set" or "40 of 300 test pages"
   and filters by **Test data**.
 
