@@ -104,7 +104,7 @@ test.describe('Scenario: running a phase on one page', () => {
 
     await expect(page.getByText('the scan is missing')).toBeVisible()
     // The button lets go, so the page can be run again once the reason is dealt with.
-    await expect(page.getByTestId('run-menu')).toHaveText('Run…')
+    await expect(page.getByTestId('run-menu')).toHaveText('Run')
   })
 })
 

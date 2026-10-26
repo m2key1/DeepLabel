@@ -4,6 +4,7 @@ import {
   type PageRunCosts,
 } from '../../api'
 import { useAuth } from '../../auth'
+import { CaretIcon, PlayIcon } from '../icons'
 import { Button } from '../ui/Button'
 import { popoverChrome } from '../ui/Card'
 import { menuTrigger, useDismiss } from '../ui/menu'
@@ -114,7 +115,7 @@ export function RunMenu({
           setOpen(!open)
         }}
       >
-        {busy ? 'Running…' : 'Run…'}
+        {busy ? 'Running…' : <><PlayIcon /> Run <CaretIcon /></>}
       </Button>
       {open && (
         <div

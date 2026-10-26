@@ -52,10 +52,10 @@ import { PresenceBanner } from '../components/presence/PresenceBanner'
 import { LineConflict, type Conflict } from '../components/viewer/LineConflict'
 import { usePresence, usePresenceLocation } from '../presence'
 import type { Crumb } from '../components/NavBar'
-import { Button, Toggle } from '../components/ui/Button'
+import { BarDivider, Button, ButtonGroup, GroupButton, Toggle } from '../components/ui/Button'
 import { Select } from '../components/ui/Field'
 import { Segmented } from '../components/ui/Segmented'
-import { PanelIcon, PolygonIcon, TurnedBoxIcon } from '../components/icons'
+import { KeyboardIcon, PanelIcon, PenIcon, PolygonIcon, RotateIcon, TurnedBoxIcon } from '../components/icons'
 import { boxChrome } from '../components/chrome'
 import { Splitter } from '../components/ui/Splitter'
 import { LineLoupe } from '../components/viewer/LineLoupe'
@@ -3755,23 +3755,16 @@ export function PageViewerPage() {
           )}
         </>),
         actions: (<>
-            <Toggle on={showLayout} onClick={() => setShowLayout((v) => !v)}>
-              Layout
-            </Toggle>
-            <Toggle on={showLinePolys} onClick={toggleLinePolys}>
-              Lines
-            </Toggle>
-            <Toggle on={showLabels} onClick={() => setShowLabels((v) => !v)}>
-              Labels
-            </Toggle>
-            <Toggle on={showConfidence} onClick={() => setShowConfidence((v) => !v)}>
-              Confidence
-            </Toggle>
-            <Toggle on={showOrder} onClick={() => setShowOrder((v) => !v)}>
-              Order
-            </Toggle>
+            <ButtonGroup aria-label="Show on the scan">
+              <GroupButton on={showLayout} onClick={() => setShowLayout((v) => !v)}>Layout</GroupButton>
+              <GroupButton on={showLinePolys} onClick={toggleLinePolys}>Lines</GroupButton>
+              <GroupButton on={showLabels} onClick={() => setShowLabels((v) => !v)}>Labels</GroupButton>
+              <GroupButton on={showConfidence} onClick={() => setShowConfidence((v) => !v)}>Confidence</GroupButton>
+              <GroupButton on={showOrder} onClick={() => setShowOrder((v) => !v)}>Order</GroupButton>
+            </ButtonGroup>
             {canEdit && page && (
               <>
+                <BarDivider />
                 <RunMenu
                   pageId={page.id}
                   jobId={jobId}
@@ -3781,13 +3774,10 @@ export function PageViewerPage() {
                   onReadPage={() => setReadOpen(true)}
                   onError={setError}
                 />
-                {/* The same glyphs the loupe turns a line crop by, so the symbol means the
-                    same thing wherever it is - here it turns the scan itself, for good. */}
-                {([[-90, 'anticlockwise', '\u27f2'], [90, 'clockwise', '\u27f3']] as const).map(
-                  ([degrees, way, glyph]) => (
-                    <Button
+                <ButtonGroup aria-label="Turn the scan">
+                  {([[-90, 'anticlockwise'], [90, 'clockwise']] as const).map(([degrees, way]) => (
+                    <GroupButton
                       key={degrees}
-                      size="xs"
                       data-testid="turn-page"
                       data-degrees={degrees}
                       disabled={runningJob}
@@ -3795,36 +3785,49 @@ export function PageViewerPage() {
                       title={`Turn the scan ${way} - it and everything drawn on it, for good`}
                       onClick={() => turnScan(degrees)}
                     >
-                      {glyph}
-                    </Button>
+                      <RotateIcon way={way} />
+                    </GroupButton>
                   ))}
+                </ButtonGroup>
               </>
             )}
-            {canEdit && (
-              <Toggle on={editing} title="e" onClick={() => setEditing((v) => !v)}>
-                Edit <span className="opacity-60">e</span>
-              </Toggle>
-            )}
-            <Toggle
-              on={ocrFrac <= 0.03}
-              onClick={toggleEnlarge}
-              title={ocrFrac <= 0.03 ? 'Show the OCR panel' : 'Enlarge - collapse the OCR panel'}
-            >
-              <PanelIcon collapsed={ocrFrac <= 0.03} />
-            </Toggle>
+            <BarDivider />
             {canEdit && (
               // With no keys there is nothing to show - but taking the control away with
               // them leaves the keyboard with no way back from the page that wants it,
               // so it stays and points at the one place that can fill it.
-              <Toggle
-                on={hasKeys && keyboardMode !== 'hide'}
+              <Button
+                variant="ghost"
+                size="xs"
+                aria-pressed={hasKeys && keyboardMode !== 'hide'}
+                aria-label={`Keys ${hasKeys ? keyboardMode : 'none'}`}
                 onClick={hasKeys ? cycleKeyboardMode : () => navigate('/settings?section=characters')}
                 title={hasKeys
                   ? 'Virtual keyboard: auto shows it while editing a line'
                   : 'The character keyboard has no keys yet - pick them in Settings'}
+                className={hasKeys && keyboardMode !== 'hide' ? 'text-accent-ink' : ''}
               >
-                Keys <span className="opacity-60">{hasKeys ? keyboardMode : 'none'}</span>
-              </Toggle>
+                <KeyboardIcon /> <span className="opacity-70">{hasKeys ? keyboardMode : 'none'}</span>
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-pressed={ocrFrac <= 0.03}
+              onClick={toggleEnlarge}
+              title={ocrFrac <= 0.03 ? 'Show the OCR panel' : 'Enlarge - collapse the OCR panel'}
+            >
+              <PanelIcon collapsed={ocrFrac <= 0.03} />
+            </Button>
+            {canEdit && (
+              <ButtonGroup aria-label="Mode">
+                <GroupButton on={!editing} onClick={() => setEditing(false)} title="Look and read - Esc">
+                  View
+                </GroupButton>
+                <GroupButton on={editing} onClick={() => setEditing((v) => !v)} title="Edit boxes and lines - e" strong>
+                  Edit <span className="[&_svg]:size-3"><PenIcon /></span> <span className="opacity-60">e</span>
+                </GroupButton>
+              </ButtonGroup>
             )}
         </>),
       }}
