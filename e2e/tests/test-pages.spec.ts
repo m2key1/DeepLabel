@@ -27,8 +27,8 @@ test.describe('Scenario: marking test data on a dataset', () => {
     await expect.poll(() => testFlags(jobId)).toEqual([true, true, false])
     expect(await switchOf(jobId)).toBe(false)
     await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: 2 of 3 pages')
-    await expect(rows.locator('[data-testid="page-test"][aria-pressed="true"]')).toHaveCount(2)
-    await expect(rows.locator('[data-testid="page-test"][aria-pressed="false"]')).toHaveCount(1)
+    await expect(rows.locator('[data-testid="page-test"][aria-checked="true"]')).toHaveCount(2)
+    await expect(rows.locator('[data-testid="page-test"][aria-checked="false"]')).toHaveCount(1)
     await expect(page.getByTestId('page-filter-test-pages')).toHaveText('Test pages · 2')
 
     // Marked already, so the same selection's button undoes it.
@@ -42,12 +42,12 @@ test.describe('Scenario: marking test data on a dataset', () => {
     const jobId = await seedDistinctPagesJob(uniqueName('Row test page'), 2, 5, TEST_SCAN_WIDTH)
     await page.goto(`/jobs/${jobId}`)
 
-    const cell = page.getByRole('button', { name: 'Test page: scan_2.png' })
-    await expect(cell).toHaveAttribute('aria-pressed', 'false')
+    const cell = page.getByRole('switch', { name: 'Test page: scan_2.png' })
+    await expect(cell).toHaveAttribute('aria-checked', 'false')
     await cell.click()
 
     await expect.poll(() => testFlags(jobId)).toEqual([false, true])
-    await expect(cell).toHaveAttribute('aria-pressed', 'true')
+    await expect(cell).toHaveAttribute('aria-checked', 'true')
     await expect(page).toHaveURL(new RegExp(`/jobs/${jobId}$`))
     await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: 1 of 2 pages')
   })
@@ -99,11 +99,11 @@ test.describe('Scenario: marking test data on a dataset', () => {
     await openViewer(page, jobId, second)
 
     const toggle = page.getByTestId('page-test-toggle')
-    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
     await toggle.click()
 
     await expect.poll(() => testFlags(jobId)).toEqual([false, true])
-    await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    await expect(toggle).toHaveAttribute('aria-checked', 'true')
   })
 
   test('a dataset created as test pages keeps its switch on', async ({ page }) => {

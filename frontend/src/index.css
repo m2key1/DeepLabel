@@ -83,6 +83,13 @@ html.dark {
   --ui-warn: #8a5a12;
   --ui-danger: #a33223;
 
+  /* A note anyone can read - a sticky note - and test data, which training never sees.
+     Their own roles, so neither reads as a warning or as the accent's "on". */
+  --ui-note: #6f5200;
+  --ui-note-wash: #fbefc2;
+  --ui-test: #5a3fae;
+  --ui-test-wash: #ebe5fa;
+
   /* Data series, in fixed order - slot 1 is always the first series, never recycled
      when a filter drops one. Validated as a set against this surface for the lightness
      band, the chroma floor, colour-vision separation and contrast; three of them sit
@@ -118,6 +125,11 @@ html.dark {
   --ui-warn: #c99a42;
   --ui-danger: #d9705f;
 
+  --ui-note: #e6c463;
+  --ui-note-wash: #3a3114;
+  --ui-test: #b8a5f0;
+  --ui-test-wash: #2a2342;
+
   /* The same eight hues stepped for this surface, not an automatic flip of the above. */
   --ui-series-1: #3987e5;
   --ui-series-2: #d95926;
@@ -151,6 +163,11 @@ html.dark {
   --color-ok: var(--ui-ok);
   --color-warn: var(--ui-warn);
   --color-danger: var(--ui-danger);
+
+  --color-note: var(--ui-note);
+  --color-note-wash: var(--ui-note-wash);
+  --color-test: var(--ui-test);
+  --color-test-wash: var(--ui-test-wash);
 
   --color-series-1: var(--ui-series-1);
   --color-series-2: var(--ui-series-2);

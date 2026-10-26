@@ -45,6 +45,7 @@ import type {
   PagePhase, RegistryModel, ReviewQueue, RevertResult,
 } from '../api'
 import { NoteTag } from '../components/NoteTag'
+import { TestDataChip, TestPageSwitch } from '../components/TestPage'
 import { useSetCrumbs } from '../components/NavBar'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
 import { PresenceBanner } from '../components/presence/PresenceBanner'
@@ -3685,6 +3686,16 @@ export function PageViewerPage() {
       header={{
         left: (<>
           {page && <span className="min-w-0 truncate text-xs text-ink-subtle">{page.filename}</span>}
+          {page && (
+            <NoteTag note={page.note} title={page.filename} canEdit={canEdit} addable onSave={async (text) => {
+              const note = await setPageNote(page.id, text)
+              setPage((p) => (p ? { ...p, note } : p))
+              return note
+            }} />
+          )}
+          {page && job && (isAdmin || job.owner === user)
+            ? <TestPageSwitch on={page.is_test} onClick={toggleTestPage} data-testid="page-test-toggle" />
+            : page?.is_test && <TestDataChip data-testid="page-test-chip">Test page</TestDataChip>}
           {page && <PresenceBanner entries={onPage(page.id)} />}
           {accuracy && (
             <span data-testid="page-error-rate"
@@ -3788,19 +3799,6 @@ export function PageViewerPage() {
                     </Button>
                   ))}
               </>
-            )}
-            {page && (
-              <NoteTag note={page.note} title={page.filename} canEdit={canEdit} addable onSave={async (text) => {
-                const note = await setPageNote(page.id, text)
-                setPage((p) => (p ? { ...p, note } : p))
-                return note
-              }} />
-            )}
-            {job && page && (isAdmin || job.owner === user) && (
-              <Toggle on={!!page.is_test} onClick={toggleTestPage} data-testid="page-test-toggle"
-                      title="Test data - no training uses this page, nor any page with the same scan">
-                Test page
-              </Toggle>
             )}
             {canEdit && (
               <Toggle on={editing} title="e" onClick={() => setEditing((v) => !v)}>

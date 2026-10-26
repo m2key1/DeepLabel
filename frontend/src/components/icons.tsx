@@ -204,3 +204,25 @@ export function WandIcon() {
     </svg>
   )
 }
+
+// A sticky note with a folded corner: a remark left on a dataset or a page.
+export function NoteIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 4h16v11l-5 5H4z" />
+      <path d="M15 20v-5h5" />
+    </svg>
+  )
+}
+
+// A lab flask: test data, kept out of training to measure a model on.
+export function FlaskIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3" />
+      <path d="M7 15h10" />
+    </svg>
+  )
+}

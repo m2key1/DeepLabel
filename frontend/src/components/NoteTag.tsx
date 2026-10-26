@@ -2,34 +2,38 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Note } from '../api'
 import { formatDate } from '../util'
+import { NoteIcon } from './icons'
 import { Modal, modalBtn, modalDangerBtn, modalPrimaryBtn } from './Modal'
 
 /** A dataset's or a page's shared note: a small tag that opens it. Editors can add one
- *  where `addable`, from a faint "+ Note"; everywhere else the tag shows only once there
+ *  where `addable`, from a faint dashed "+ Note"; everywhere else the tag shows only once there
  *  is a note. */
-export function NoteTag({ note, title, canEdit, addable = false, onSave }: {
+export function NoteTag({ note, title, canEdit, addable = false, compact = false, onSave }: {
   note: Note | null | undefined
   /** What the note is on, as the dialog's title says it. */
   title: string
   canEdit: boolean
   addable?: boolean
+  /** Only the icon, for a row whose name needs the room; otherwise the first words too. */
+  compact?: boolean
   onSave: (text: string) => Promise<Note | null>
 }) {
   const [open, setOpen] = useState(false)
   if (!note && !(canEdit && addable)) return null
   return (
     // The tag sits in clickable rows, and the dialog's events bubble through the portal.
-    <span onClick={(e) => e.stopPropagation()} className="inline-flex">
+    <span onClick={(e) => e.stopPropagation()} className="inline-flex min-w-0">
       <button
         data-testid={note ? 'note-tag' : 'note-add'}
         aria-label={note ? 'Note' : 'Add note'}
         title={note ? 'Show the note' : 'Add a note others can read'}
         onClick={() => setOpen(true)}
-        className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${note
-          ? 'bg-accent-wash text-accent-ink hover:bg-accent/20'
-          : 'text-ink-subtle hover:bg-raised hover:text-ink'}`}
+        className={`inline-flex min-w-0 shrink-0 items-center gap-1 rounded-full ${compact ? 'p-1' : 'px-2 py-0.5'} text-[11px] font-medium ${note
+          ? 'bg-note-wash text-note hover:brightness-95'
+          : 'border border-dashed border-line-strong text-ink-subtle hover:border-note hover:text-note'}`}
       >
-        {note ? 'Note' : '+ Note'}
+        <NoteIcon />
+        {note ? !compact && <span className="max-w-[14rem] truncate">{note.text.split('\n')[0]}</span> : '+ Note'}
       </button>
       {open && createPortal(
         <span onClick={(e) => e.stopPropagation()}>

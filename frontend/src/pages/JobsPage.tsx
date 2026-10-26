@@ -27,10 +27,10 @@ import { StatusBadge } from '../components/StatusBadge'
 import { Button } from '../components/ui/Button'
 import { Check, Input } from '../components/ui/Field'
 import { NoteTag } from '../components/NoteTag'
+import { TestDataChip } from '../components/TestPage'
 import { useDropPlacement } from '../components/ui/dropPlacement'
 import { menuTrigger, useDismiss } from '../components/ui/menu'
 import { Modal } from '../components/Modal'
-import { Badge } from '../components/ui/Badge'
 import type { Tone } from '../components/ui/Badge'
 import { usePresence } from '../presence'
 import { STATUS_TONE, compactCount, overallProgress } from '../util'
@@ -703,14 +703,14 @@ export function JobsPage() {
     const test = job.test_pages ?? 0
     if (!test) return null
     return (
-      <Badge tone="neutral" variant="chip" data-testid="test-pages-label" className="shrink-0">
+      <TestDataChip data-testid="test-pages-label">
         {test === job.pages_total ? 'test set' : `${compactCount(test)} of ${compactCount(job.pages_total ?? 0)} test pages`}
-      </Badge>
+      </TestDataChip>
     )
   }
 
   const noteTag = (job: Job) => (
-    <NoteTag note={job.note} title={job.name} canEdit={canEdit} onSave={async (text) => {
+    <NoteTag note={job.note} title={job.name} canEdit={canEdit} compact onSave={async (text) => {
       const note = await setJobNote(job.id, text)
       setJobs((rows) => rows && rows.map((j) => (j.id === job.id ? { ...j, note } : j)))
       return note

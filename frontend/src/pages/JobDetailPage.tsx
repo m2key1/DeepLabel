@@ -45,6 +45,8 @@ import { useSetCrumbs } from '../components/NavBar'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
 import { Modal, modalBtn, modalPrimaryBtn } from '../components/Modal'
 import { NoteTag } from '../components/NoteTag'
+import { FlaskIcon } from '../components/icons'
+import { TEST_PAGE_MEANING, TestDataChip, TestPageSwitch } from '../components/TestPage'
 import { StatusBadge } from '../components/StatusBadge'
 import { Badge } from '../components/ui/Badge'
 import { PhaseStrip } from '../components/job/PhaseStrip'
@@ -105,8 +107,6 @@ const PHASE_LABELS: Record<PagePhase, string> = {
   lines: 'Line detection',
   ocr: 'A re-read',
 }
-
-const TEST_PAGE_MEANING = 'Test data - no training uses these pages, nor pages with the same scan'
 
 type SortKey = 'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'checked' | 'confidence'
   | 'llm' | 'regions' | 'test'
@@ -811,7 +811,7 @@ export function JobDetailPage() {
                 unreadable
               </Badge>
             )}
-            <NoteTag note={page.note} title={page.filename} canEdit={canEdit} onSave={async (text) => {
+            <NoteTag note={page.note} title={page.filename} canEdit={canEdit} compact onSave={async (text) => {
               const note = await setPageNote(page.id, text)
               refetch()
               return note
@@ -867,22 +867,18 @@ export function JobDetailPage() {
         )
       case 'test':
         return canOwn ? (
-          <button
+          <TestPageSwitch
+            compact
+            on={!!page.is_test}
             data-testid="page-test"
-            aria-pressed={page.is_test}
             aria-label={`Test page: ${page.filename}`}
-            title={page.is_test ? 'Test page - click to let training use it again' : 'Click to make this a test page'}
             onClick={(e) => {
               e.stopPropagation()
               markTest([page.id], !page.is_test)
             }}
-            className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${page.is_test
-              ? 'bg-accent-wash text-accent-ink' : 'text-ink-subtle hover:bg-raised hover:text-ink'}`}
-          >
-            {page.is_test ? 'test' : 'no'}
-          </button>
+          />
         ) : page.is_test ? (
-          <Badge data-testid="page-test" title={TEST_PAGE_MEANING}>test</Badge>
+          <TestDataChip data-testid="page-test">test</TestDataChip>
         ) : null
       case 'llm': {
         const models = page.llm_models ?? 0
@@ -1729,17 +1725,17 @@ function TestDataControls({ testPages, pages, newPagesTest, canOwn, onSwitch, on
   const state = testPages === 0 ? 'none' : testPages === pages && newPagesTest ? 'whole' : 'some'
   const summary = state === 'none' ? 'none' : state === 'whole' ? 'whole dataset' : `${testPages} of ${pages} pages`
   if (!canOwn) {
-    return state !== 'none' && (
-      <span data-testid="job-test-pages" className="text-xs text-ink-subtle" title={TEST_PAGE_MEANING}>
-        Test data: {summary}
-      </span>
-    )
+    return state !== 'none' && <TestDataChip data-testid="job-test-pages">Test data: {summary}</TestDataChip>
   }
   return (
     <>
-      <Button size="xs" data-testid="job-test-pages" onClick={() => setOpen(true)} title={TEST_PAGE_MEANING}>
+      <button type="button" data-testid="job-test-pages" onClick={() => setOpen(true)} title={TEST_PAGE_MEANING}
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                state === 'none' ? 'border-line-strong text-ink-muted hover:text-ink' : 'border-test/40 bg-test-wash text-test'
+              }`}>
+        <FlaskIcon />
         Test data: {summary}
-      </Button>
+      </button>
       {open && (
         <TestDataDialog
           state={state}
