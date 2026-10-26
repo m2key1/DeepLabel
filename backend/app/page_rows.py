@@ -8,7 +8,7 @@ from app import caches, ingest
 # GROUP BY over the lot, which is what makes this expensive on a large volume.
 _ROWS = """
 SELECT p.id, p.idx, p.filename, p.width, p.height, p.status,
-       p.layout_checked, p.lines_checked, p.deleted, p.rotation,
+       p.layout_checked, p.lines_checked, p.deleted, p.rotation, p.is_test,
        (SELECT COUNT(*) FROM elements e
          WHERE e.page_id = p.id AND e.deleted = 0 AND e.kind = 'content'
            AND e.class_name != 'Divider') elements_total,
@@ -56,6 +56,7 @@ FILTERS = {
     'unreviewed-lines': f'{_WORK} AND lines_reviewed < lines_total',
     'layout-unchecked': f'{_WORK} AND layout_checked = 0',
     'no-layout': f'{_WORK} AND elements_total = 0',
+    'test-pages': f'{_WORK} AND is_test = 1',
     'deleted': 'deleted = 1',
 }
 
@@ -177,9 +178,12 @@ def counts(conn: sqlite3.Connection, job_id: str, *, task: str) -> dict[str, int
     return answer
 
 
-def forget_counts() -> None:
-    """For a test that has just written behind the stamp's back."""
-    _counts.clear()
+def forget_counts(conn: sqlite3.Connection | None = None, job_id: str | None = None) -> None:
+    """For a write behind the stamp's back: one dataset's, or every held answer."""
+    if job_id is None:
+        _counts.clear()
+    else:
+        _counts.pop((caches.db_key(conn), job_id), None)
 
 
 def _filters(task: str) -> dict[str, str]:
@@ -190,6 +194,6 @@ def _filters(task: str) -> dict[str, str]:
 
 def _as_page(row: sqlite3.Row) -> dict:
     page = dict(row)
-    for flag in ('layout_checked', 'lines_checked', 'deleted'):
+    for flag in ('layout_checked', 'lines_checked', 'deleted', 'is_test'):
         page[flag] = bool(page[flag])
     return page

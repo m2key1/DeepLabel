@@ -48,12 +48,12 @@ def test_counts_exclude_deleted_pages_elements_and_lines(conn):
 
     # j1 keeps pages 1 and 2; page 3 is deleted. Layout is checked on page 1 alone.
     assert rollup['j1'] == {
-        'pages_total': 2, 'layout_checked_pages': 1,
+        'pages_total': 2, 'layout_checked_pages': 1, 'test_pages': 0,
         # lines 1, 2, 3 survive. Line 4 is deleted and line 5 hangs off a deleted element.
         'lines_total': 3, 'lines_done': 2,
     }
     assert rollup['j2'] == {
-        'pages_total': 1, 'layout_checked_pages': 0,
+        'pages_total': 1, 'layout_checked_pages': 0, 'test_pages': 0,
         'lines_total': 1, 'lines_done': 0,
     }
 
@@ -239,7 +239,7 @@ def test_a_duplicate_page_is_not_one_to_review(conn):
     rollup = caches.job_progress(conn)
 
     assert rollup['j2'] == {
-        'pages_total': 1, 'layout_checked_pages': 0,
+        'pages_total': 1, 'layout_checked_pages': 0, 'test_pages': 0,
         'lines_total': 1, 'lines_done': 0,
     }
 

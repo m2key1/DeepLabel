@@ -1410,3 +1410,41 @@ def test_a_database_from_before_queued_at_stamps_work_queued_again(tmp_path):
     queued_at, now = conn.execute("SELECT queued_at, datetime('now') FROM jobs WHERE id = 'j1'").fetchone()
     assert queued_at == now
     conn.close()
+
+
+class TestTestPages:
+    def test_a_fresh_database_has_the_flags_off(self, tmp_path):
+        conn = store.connect(tmp_path / 'app.db')
+        conn.execute("INSERT INTO jobs (id, name) VALUES ('j1', 'Volume')")
+        conn.execute("INSERT INTO pages (job_id, idx, filename, source_file) VALUES ('j1', 0, 'a.png', '/a.png')")
+        assert conn.execute('SELECT is_test FROM pages').fetchone()[0] == 0
+        assert conn.execute('SELECT new_pages_test FROM jobs').fetchone()[0] == 0
+        conn.close()
+
+    def test_an_older_database_marks_the_datasets_runs_were_tested_on(self, tmp_path):
+        """Before pages were marked, a run named whole datasets as its test set. Their pages
+        become test pages, so no later run trains on what an earlier one was scored on."""
+        db = tmp_path / 'app.db'
+        conn = store.connect(db)
+        conn.executescript("""
+            INSERT INTO jobs (id, name) VALUES ('test', 'Held out'), ('train', 'Trained on');
+            INSERT INTO pages (job_id, idx, filename, source_file) VALUES
+                ('test', 0, 'a.png', '/a.png'), ('test', 1, 'b.png', '/b.png'),
+                ('train', 0, 'c.png', '/c.png');
+            INSERT INTO trainings (task, name, test_job_ids) VALUES ('ocr', 'run', '["test"]');
+        """)
+        conn.commit()
+        conn.close()
+        raw = sqlite3.connect(db)
+        raw.execute('ALTER TABLE pages DROP COLUMN is_test')
+        raw.execute('ALTER TABLE jobs DROP COLUMN new_pages_test')
+        raw.commit()
+        raw.close()
+
+        conn = store.connect(db)
+        store.connect(db).close()
+        marked = conn.execute('SELECT job_id, SUM(is_test), COUNT(*) FROM pages GROUP BY job_id ORDER BY job_id').fetchall()
+        assert [tuple(r) for r in marked] == [('test', 2, 2), ('train', 0, 1)]
+        switches = conn.execute('SELECT id, new_pages_test FROM jobs ORDER BY id').fetchall()
+        assert [tuple(r) for r in switches] == [('test', 1), ('train', 0)]
+        conn.close()

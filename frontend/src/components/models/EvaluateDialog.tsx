@@ -14,8 +14,11 @@ interface EvaluateDialogProps {
 export function EvaluateDialog({ model, onClose, onStarted }: EvaluateDialogProps) {
   const [jobs, setJobs] = useState<Job[] | null>(null)
   const [groups, setGroups] = useState<Group[]>([])
-  const [counts, setCounts] = useState<Record<string, number>>({})
+  const [allCounts, setAllCounts] = useState<Record<string, number>>({})
+  const [testCounts, setTestCounts] = useState<Record<string, number>>({})
   const [chosen, setChosen] = useState<Set<string>>(new Set())
+  // Unset follows the selection: test pages when a chosen dataset has some.
+  const [pages, setPages] = useState<'test' | 'all' | null>(null)
   const [decode, setDecode] = useState<OcrDecode>('beam')
   const [error, setError] = useState<string | null>(null)
   useAutoClear(error, setError)
@@ -26,8 +29,10 @@ export function EvaluateDialog({ model, onClose, onStarted }: EvaluateDialogProp
       .then(async (rows) => {
         setJobs(rows)
         if (rows.length) {
-          const res = await trainingPreview('ocr', rows.map((j) => j.id))
-          setCounts(res.counts)
+          const ids = rows.map((j) => j.id)
+          const [all, test] = await Promise.all([trainingPreview('ocr', ids, 'all'), trainingPreview('ocr', ids, 'test')])
+          setAllCounts(all.counts)
+          setTestCounts(test.counts)
         }
       })
       .catch((e: Error) => setError(e.message))
@@ -52,13 +57,16 @@ export function EvaluateDialog({ model, onClose, onStarted }: EvaluateDialogProp
       return next
     })
 
-  const totalLines = [...chosen].reduce((sum, id) => sum + (counts[id] ?? 0), 0)
+  const hasTestPages = [...chosen].some((id) => (jobs?.find((j) => j.id === id)?.test_pages ?? 0) > 0)
+  const scored = pages ?? (hasTestPages ? 'test' : 'all')
+  const scoredCounts = scored === 'test' ? testCounts : allCounts
+  const totalLines = [...chosen].reduce((sum, id) => sum + (scoredCounts[id] ?? 0), 0)
 
   const start = async () => {
     setBusy(true)
     setError(null)
     try {
-      await createEvaluation({ model_id: model.id, job_ids: [...chosen], decode })
+      await createEvaluation({ model_id: model.id, job_ids: [...chosen], decode, pages: scored })
       onClose()
       onStarted()
     } catch (e) {
@@ -81,11 +89,23 @@ export function EvaluateDialog({ model, onClose, onStarted }: EvaluateDialogProp
       <DatasetPicker
         jobs={jobs}
         groups={groups}
-        counts={counts}
+        counts={allCounts}
         chosen={chosen}
         onToggle={toggle}
         onSetMany={setMany}
       />
+      {hasTestPages && (
+        <fieldset className="mb-3" data-testid="eval-pages">
+          <legend className="mb-1 text-sm font-medium text-ink">Pages</legend>
+          {([['test', 'Test pages only'], ['all', 'All pages']] as const).map(([value, label]) => (
+            <label key={value} className="mr-4 inline-flex items-center gap-1.5 text-sm text-ink">
+              <input type="radio" name="eval-pages" value={value} checked={scored === value}
+                     onChange={() => setPages(value)} className="accent-accent" />
+              {label}
+            </label>
+          ))}
+        </fieldset>
+      )}
       <label className="mb-1 block text-sm font-medium text-ink" htmlFor="eval-decode">
         Decoding
       </label>

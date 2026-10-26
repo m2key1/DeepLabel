@@ -29,6 +29,7 @@ import { Check, Input } from '../components/ui/Field'
 import { useDropPlacement } from '../components/ui/dropPlacement'
 import { menuTrigger, useDismiss } from '../components/ui/menu'
 import { Modal } from '../components/Modal'
+import { Badge } from '../components/ui/Badge'
 import type { Tone } from '../components/ui/Badge'
 import { usePresence } from '../presence'
 import { STATUS_TONE, compactCount, overallProgress } from '../util'
@@ -251,6 +252,7 @@ export function JobsPage() {
   }
   const onlyMine = params.get('mine') === '1'
   const needsReview = params.get('review') === '1'
+  const onlyTest = params.get('test') === '1'
   const scope = params.get('group')
   const setScope = (value: string | null) => param('group', value, '')
   const sort = (SORTS.some((o) => o.key === params.get('sort'))
@@ -266,7 +268,7 @@ export function JobsPage() {
     window.clearTimeout(queryWrite.current)
     setParams((prev) => {
       const next = new URLSearchParams(prev)
-      for (const key of ['q', 'mine', 'review', 'group', 'as']) next.delete(key)
+      for (const key of ['q', 'mine', 'review', 'test', 'group', 'as']) next.delete(key)
       return next
     }, { replace: true })
   }
@@ -394,6 +396,7 @@ export function JobsPage() {
     else if (scope !== null) rows = rows.filter((j) => j.group_id === Number(scope))
     if (onlyMine) rows = rows.filter((j) => j.owner === viewer)
     if (needsReview) rows = rows.filter((j) => (j.lines_done ?? 0) < (j.lines_total ?? 0))
+    if (onlyTest) rows = rows.filter((j) => (j.test_pages ?? 0) > 0)
     const terms = fold(query).split(/\s+/).filter(Boolean)
     if (terms.length) {
       const named = (j: Job) => fold(`${j.name} ${groups.find((g) => g.id === j.group_id)?.name ?? ''}`)
@@ -408,7 +411,7 @@ export function JobsPage() {
         (b.lines_total ? (b.lines_done ?? 0) / b.lines_total : 1),
     }
     return [...rows].sort(by[sort])
-  }, [reached, groups, scope, onlyMine, needsReview, query, sort, viewer])
+  }, [reached, groups, scope, onlyMine, needsReview, onlyTest, query, sort, viewer])
 
   /** The list's sections, whatever it is divided by. A project section carries the group
    *  itself, because renaming, sharing and running belong to the group and not to the
@@ -427,7 +430,7 @@ export function JobsPage() {
       const key = job.group_id ?? null
       byGroup.set(key, [...(byGroup.get(key) ?? []), job])
     }
-    const filtering = query.trim() !== '' || onlyMine || needsReview || scope !== null
+    const filtering = query.trim() !== '' || onlyMine || needsReview || onlyTest || scope !== null
     const out: { key: SectionKey; title: string; rows: Job[]; group?: Group }[] = reached.groups
       .map((group) => ({ key: group.id as SectionKey, title: group.name,
                          rows: byGroup.get(group.id) ?? [], group }))
@@ -443,7 +446,7 @@ export function JobsPage() {
       out.push({ key: 'unlisted', title: 'Groups not loaded', rows: unlisted })
     }
     return out
-  }, [visible, reached, groupBy, viewerIsAdmin, viewer, query, onlyMine, needsReview, scope, groupsFailed])
+  }, [visible, reached, groupBy, viewerIsAdmin, viewer, query, onlyMine, needsReview, onlyTest, scope, groupsFailed])
 
   const reviewCount = useMemo(
     () => reached.jobs.filter((j) => (j.lines_done ?? 0) < (j.lines_total ?? 0)).length,
@@ -695,6 +698,16 @@ export function JobsPage() {
       </span>
     )
 
+  const testLabel = (job: Job) => {
+    const test = job.test_pages ?? 0
+    if (!test) return null
+    return (
+      <Badge tone="neutral" variant="chip" data-testid="test-pages-label" className="shrink-0">
+        {test === job.pages_total ? 'test set' : `${compactCount(test)} of ${compactCount(job.pages_total ?? 0)} test pages`}
+      </Badge>
+    )
+  }
+
   const cellFor = (job: Job, key: string) => {
     const active = job.status === 'queued' || job.status === 'running'
     switch (key) {
@@ -753,6 +766,7 @@ export function JobsPage() {
           overflows ? 'sticky left-0 z-10 bg-inherit' : ''}`}>
         <div className="flex min-w-0 items-center gap-2">
           {nameCell(job, prefix)}
+          {testLabel(job)}
           {sharedLabel(job)}
           <PresenceAvatars entries={onJob(job.id)} />
           <StatusBadge status={job.status} />
@@ -784,6 +798,7 @@ export function JobsPage() {
           {selectBox(job)}
           {nameCell(job)}
           <span className="ml-auto flex shrink-0 items-center gap-2">
+            {testLabel(job)}
             {sharedLabel(job)}
             <PresenceAvatars entries={onJob(job.id)} />
             <StatusBadge status={job.status} />
@@ -987,6 +1002,10 @@ export function JobsPage() {
       <button className={chip(needsReview)} aria-pressed={needsReview}
               onClick={() => param('review', needsReview ? '0' : '1', '0')}>
         Needs review
+      </button>
+      <button className={chip(onlyTest)} aria-pressed={onlyTest}
+              onClick={() => param('test', onlyTest ? '0' : '1', '0')}>
+        Test data
       </button>
       {isAdmin && (
         <div className="relative">

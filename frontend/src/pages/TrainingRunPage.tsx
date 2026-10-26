@@ -241,8 +241,8 @@ export function TrainingRunPage() {
           </Section>
         )}
         {testEvaluation && (
-          <Section title="Test datasets"
-                   description="Held out of training and of the run's choices, read once it was trained by the base model and by the new one.">
+          <Section title="Test pages"
+                   description="Test pages, never trained on, read once the run was trained by the base model and by the new one.">
             <TestEvaluationTable evaluation={testEvaluation} datasets={datasets} />
           </Section>
         )}

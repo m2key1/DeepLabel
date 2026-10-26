@@ -181,7 +181,7 @@ export async function listEvaluations(): Promise<
     id: number
     model_id: number
     training_id: number | null
-    source: { snapshot?: number; jobs?: string[] }
+    source: { snapshot?: number; jobs?: string[]; test_pages?: boolean }
     decode: string
     status: string
     cer: number | null
@@ -537,7 +537,7 @@ export async function pageCandidates(pageId: number): Promise<Candidate[]> {
  *  seeded by createJob are byte-identical, which is fine for annotation but makes any
  *  per-scan count - what a language-model run costs, say - ambiguous. */
 export async function seedDistinctPagesJob(
-  name: string, pageCount = 2, variantBase = 0,
+  name: string, pageCount = 2, variantBase = 0, width = 600,
 ): Promise<string> {
   const form = new FormData()
   form.append('name', name)
@@ -545,12 +545,30 @@ export async function seedDistinctPagesJob(
   for (let i = 0; i < pageCount; i++) {
     // Raise variantBase for scans no other dataset holds - readings are keyed by the scan,
     // so two datasets seeded from the same base deliberately share what was paid for.
-    const png = scanPng(600, 800, variantBase + i + 1)
+    const png = scanPng(width, 800, variantBase + i + 1)
     form.append('files', new Blob([new Uint8Array(png)], { type: 'image/png' }), `scan_${i + 1}.png`)
   }
   const { job_id: jobId } = await backendFetch('/api/jobs', { method: 'POST', body: form })
   await waitForJobStatus(jobId, 'done')
   return jobId
+}
+
+/** Scans this wide are seeded for test pages alone. A test page keeps every page of the
+ *  same scan out of training, and scanPng's variants repeat every 120, so a variant base
+ *  of its own is not enough: at the common width a test page is some other spec's scan. */
+export const TEST_SCAN_WIDTH = 640
+
+/** Mark a dataset's pages as test data - those given, or every page. */
+export async function markTestPages(jobId: string, pageIds?: number[]) {
+  return backendFetch(`/api/jobs/${jobId}/test-pages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...(pageIds ? { page_ids: pageIds } : {}), test: true }),
+  })
+}
+
+/** Each page's test flag, in page order. */
+export async function testFlags(jobId: string): Promise<boolean[]> {
+  return ((await getJob(jobId)).pages as { is_test: boolean }[]).map((p) => p.is_test)
 }
 
 /** The model ids the stub provider serves, so a scenario counts what it actually offers

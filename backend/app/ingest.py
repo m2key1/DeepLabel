@@ -122,9 +122,13 @@ def page_count(conn, job_id: str) -> int:
     return conn.execute('SELECT COUNT(*) c FROM pages WHERE job_id = ?', (job_id,)).fetchone()['c']
 
 
-def insert_pages(conn, job_id: str, files: list[tuple]) -> dict[str, int]:
+def insert_pages(conn, job_id: str, files: list[tuple], as_test: bool | None = None) -> dict[str, int]:
     """Pages in the order given, which is reading order. idx continues past any existing
-    pages so appending to a job never collides. Returns the new page ids by source."""
+    pages so appending to a job never collides. They are test pages when `as_test` says
+    so, or else when the dataset's new pages are. Returns the new page ids by source."""
+    if as_test is None:
+        as_test = bool(conn.execute('SELECT new_pages_test FROM jobs WHERE id = ?',
+                                    (job_id,)).fetchone()['new_pages_test'])
     base = conn.execute(
         'SELECT COALESCE(MAX(idx), -1) + 1 n FROM pages WHERE job_id = ?', (job_id,)).fetchone()['n']
     page_ids = {}
@@ -132,9 +136,9 @@ def insert_pages(conn, job_id: str, files: list[tuple]) -> dict[str, int]:
         filename, source = entry[0], entry[1]
         source_pdf, source_page = (entry[2], entry[3]) if len(entry) > 2 else (None, None)
         page_ids[source] = conn.execute(
-            'INSERT INTO pages (job_id, idx, filename, source_file, source_pdf, source_page) '
-            'VALUES (?,?,?,?,?,?)',
-            (job_id, base + offset, filename, source, source_pdf, source_page)).lastrowid
+            'INSERT INTO pages (job_id, idx, filename, source_file, source_pdf, source_page, is_test) '
+            'VALUES (?,?,?,?,?,?,?)',
+            (job_id, base + offset, filename, source, source_pdf, source_page, int(as_test))).lastrowid
     store.recount_pages(conn, job_id, commit=False)
     return page_ids
 

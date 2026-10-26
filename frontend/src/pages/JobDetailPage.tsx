@@ -21,6 +21,8 @@ import {
   renditionUrl,
   setJobChecked,
   setLineWidth,
+  setNewPagesTest,
+  markTestPages,
   setPageLayoutChecked,
   setPagesDeleted,
   runPagesPhase,
@@ -138,6 +140,7 @@ const pageFilters = (isMap: boolean, noLayout: boolean): PageFilterDef[] => [
   // offered where layout runs: without it every page has no boxes and the chip means
   // nothing.
   ...(isMap || noLayout ? [] : [{ key: 'no-layout' as PageFilter, label: 'No layout' }]),
+  ...(isMap ? [] : [{ key: 'test-pages' as PageFilter, label: 'Test pages' }]),
   { key: 'deleted', label: 'Deleted', editorsOnly: true },
 ]
 
@@ -198,6 +201,8 @@ export function JobDetailPage() {
   const dragDepth = useRef(0)
   const [upload, setUpload] = useState<UploadState | null>(null)
   const fileInput = useRef<HTMLInputElement | null>(null)
+  // Unset follows the dataset's "New pages are test pages".
+  const [addAsTest, setAddAsTest] = useState<boolean | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [anchor, setAnchor] = useState<number | null>(null)
   const [purgeOpen, setPurgeOpen] = useState(false)
@@ -574,7 +579,7 @@ export function JobDetailPage() {
     setError(null)
     setUpload({ loaded: 0, total: files.reduce((sum, f) => sum + f.size, 0) })
     try {
-      await uploadPages(jobId, files, (loaded, total) => setUpload({ loaded, total }))
+      await uploadPages(jobId, files, (loaded, total) => setUpload({ loaded, total }), addAsTest ?? undefined)
       refetch()
     } catch (e) {
       setError((e as Error).message)
@@ -594,6 +599,7 @@ export function JobDetailPage() {
   const selectedLive = selectedPages.length
   // Nothing left to mark means the button's job is to unmark instead - see bulkLayoutChecked.
   const allChecked = selectedLive > 0 && selectedPages.every((p) => p.layout_checked)
+  const allTest = selectedLive > 0 && selectedPages.every((p) => p.is_test)
 
   const toggleRow = (page: PageSummary, shift: boolean) => {
     setSelected((prev) => {
@@ -655,6 +661,17 @@ export function JobDetailPage() {
     refetch()
     const refused = outcomes.find((o): o is PromiseRejectedResult => o.status === 'rejected')
     if (refused) setError((refused.reason as Error).message)
+  }
+
+  // As with the layout flag: a selection already all test pages is unmarked instead.
+  const markTest = async (pageIds: number[] | null, test: boolean) => {
+    try {
+      const counts = await markTestPages(jobId, pageIds, test)
+      setJob((j) => (j ? { ...j, new_pages_test: counts.new_pages_test } : j))
+      refetch()
+    } catch (e) {
+      setError((e as Error).message)
+    }
   }
 
   const onCancel = async () => {
@@ -774,6 +791,12 @@ export function JobDetailPage() {
                   className={`truncate hover:underline ${page.deleted ? 'line-through' : ''}`}>
               {page.filename}
             </Link>
+            {page.is_test && (
+              <Badge data-testid="page-test" className="shrink-0"
+                     title="Test data - no training uses this page, nor any page with the same scan">
+                test
+              </Badge>
+            )}
             {page.status === 'duplicate' && (
               <Badge data-testid="page-duplicate" className="shrink-0"
                      title="The same scan as another page here - not counted, nothing to review">
@@ -917,6 +940,23 @@ export function JobDetailPage() {
           <span className="text-xs text-ink-subtle" title="Owner">
             {job.owner}
           </span>
+          {!isMap && (
+            <TestDataControls
+              testPages={chipCounts['test-pages'] ?? 0}
+              pages={job.pages_live ?? 0}
+              newPagesTest={job.new_pages_test ?? false}
+              canOwn={canOwn}
+              onSwitch={(on) => {
+                setJob((p) => (p ? { ...p, new_pages_test: on } : p))
+                setNewPagesTest(jobId, on).catch((err: Error) => setError(err.message))
+              }}
+              onMarkAll={(test) => {
+                if (test || confirm('Unmark every page of this dataset as test data? Training may then use them.')) {
+                  markTest(null, test)
+                }
+              }}
+            />
+          )}
           <div className="ml-auto flex items-center gap-2">
             {!isMap && (
               <Link
@@ -1317,6 +1357,12 @@ export function JobDetailPage() {
               )}
             </>
           )}
+          {canOwn && !isMap && selectedLive > 0 && (
+            <button data-testid="bulk-test-pages" className={actionClass}
+                    onClick={() => markTest(selectedPages.map((p) => p.id), !allTest)}>
+              {allTest ? 'Unmark test pages' : 'Mark as test pages'}
+            </button>
+          )}
           {selectedLive > 0 && (
             <button onClick={bulkLayoutChecked} data-testid="bulk-layout-checked" className={actionClass}>
               {isMap
@@ -1348,7 +1394,7 @@ export function JobDetailPage() {
             const active = filter.key === f.key
             // An empty Deleted or No-layout chip is noise on the datasets that have
             // neither, but both have to stay put while one is the selected filter.
-            if (count === 0 && !active && (f.key === 'deleted' || f.key === 'no-layout')) return null
+            if (count === 0 && !active && (f.key === 'deleted' || f.key === 'no-layout' || f.key === 'test-pages')) return null
             return (
               <button
                 key={f.key}
@@ -1532,6 +1578,13 @@ export function JobDetailPage() {
           )}
         </button>
       )}
+      {canOwn && !active && !upload && !isMap && (
+        <label className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 text-xs text-ink-muted">
+          <input type="checkbox" data-testid="add-as-test" checked={addAsTest ?? job.new_pages_test ?? false}
+                 onChange={(e) => setAddAsTest(e.target.checked)} className="cursor-pointer accent-accent" />
+          Add as test pages
+        </label>
+      )}
       {canOwn && !active && ungrantedPhase && (
         <p data-testid="add-pages-locked" className="mt-1 text-center text-xs text-ink-muted">
           Adding pages runs {ungrantedPhase} on them, which you have not been granted.
@@ -1631,5 +1684,40 @@ function UnreadablePages({ pages }: { pages: UnreadablePage[] }) {
         {pages.map((page) => <li key={page.id}>{page.error}</li>)}
       </ul>
     </div>
+  )
+}
+
+
+/** How much of the dataset is test data, and for its owner the switch and the dataset-wide
+ *  marking. Test pages are never trained on, nor any page with the same scan. */
+function TestDataControls({ testPages, pages, newPagesTest, canOwn, onSwitch, onMarkAll }: {
+  testPages: number
+  pages: number
+  newPagesTest: boolean
+  canOwn: boolean
+  onSwitch: (on: boolean) => void
+  onMarkAll: (test: boolean) => void
+}) {
+  const summary = testPages === 0 ? null : testPages === pages ? 'test set' : `${testPages} of ${pages} test pages`
+  if (!canOwn) {
+    return summary && <span data-testid="job-test-pages" className="text-xs text-ink-subtle">{summary}</span>
+  }
+  const link = 'text-xs text-ink-subtle underline underline-offset-2 hover:text-accent-ink'
+  return (
+    <span className="flex items-center gap-2">
+      {summary && <span data-testid="job-test-pages" className="text-xs text-ink-subtle">{summary}</span>}
+      <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-subtle"
+             title="Pages added from now on arrive as test data, which no training uses">
+        <input type="checkbox" data-testid="new-pages-test" checked={newPagesTest}
+               onChange={(e) => onSwitch(e.target.checked)} className="cursor-pointer accent-accent" />
+        New pages are test pages
+      </label>
+      {testPages < pages && (
+        <button data-testid="mark-all-test" className={link} onClick={() => onMarkAll(true)}>Mark all pages</button>
+      )}
+      {testPages > 0 && (
+        <button data-testid="unmark-all-test" className={link} onClick={() => onMarkAll(false)}>Unmark all pages</button>
+      )}
+    </span>
   )
 }

@@ -255,44 +255,6 @@ test.describe("Scenario: rerunning somebody else's run", () => {
     })
 })
 
-test.describe('Scenario: a test dataset that overlaps the training data', () => {
-  // README: the form "warns when the split would come out empty and when the test dataset
-  // shares image content with the training selection".
-  test('the form warns when the test dataset shares image content with the training selection',
-    async ({ page }) => {
-      // createJob uploads byte-identical scans, so these two datasets hold the same page
-      // under two ids - exactly what an honest test set must not do. The third is cut from
-      // different pixels.
-      const trainName = uniqueName('Overlap train')
-      const sameName = uniqueName('Overlap same scan')
-      const distinctName = uniqueName('Overlap distinct scan')
-      const trainJob = await seedCompletedJob(trainName, 1)
-      const sameJob = await seedCompletedJob(sameName, 1)
-      const distinctJob = await seedDistinctPagesJob(distinctName, 1, 90)
-      for (const jobId of [trainJob, sameJob, distinctJob]) await markLinesChecked(jobId, 3)
-
-      // Backend oracle: one content hash in common, none with the distinct scan.
-      const overlap = async (testJob: string) => (await backendFetch('/api/trainings/preview', {
-        method: 'POST', headers: JSON_HEADERS,
-        body: JSON.stringify({ task: 'ocr', job_ids: [trainJob], test_job_ids: [testJob] }),
-      })).test_overlap_pages
-      expect(await overlap(sameJob)).toBe(1)
-      expect(await overlap(distinctJob)).toBe(0)
-
-      await page.goto('/models/train?task=ocr')
-      await pickDataset(page, trainName)
-      await expect(page.getByText('3 checked lines selected')).toBeVisible()
-      await page.getByLabel('Test dataset').selectOption({ label: `${sameName} (3)` })
-      await expect(page.getByTestId('test-overlap-warning')).toHaveText(
-        '1 page of the test dataset also appears in the training datasets - its score would be inflated.')
-
-      // The same control, a scan nothing in the selection shares: the warning goes.
-      await page.getByLabel('Test dataset').selectOption({ label: `${distinctName} (3)` })
-      await expect(page.getByTestId('submit-summary')).toContainText(`test: ${distinctName}`)
-      await expect(page.getByTestId('test-overlap-warning')).toHaveCount(0)
-    })
-})
-
 test.describe('Scenario: renaming a model', () => {
   // README: a name "is refused while another run is still training under it ... and stays
   // taken by an archived model, which is retired from the pickers but still on record under

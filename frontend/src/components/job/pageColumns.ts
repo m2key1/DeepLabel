@@ -39,6 +39,7 @@ export const PAGE_FILTERS = [
   { key: 'unreviewed-lines', label: 'Unreviewed lines', textOnly: true },
   { key: 'layout-unchecked', label: 'Layout unchecked', mapLabel: 'Not reviewed' },
   { key: 'no-layout', label: 'No layout', textOnly: true },
+  { key: 'test-pages', label: 'Test pages', textOnly: true },
   { key: 'deleted', label: 'Deleted', editorsOnly: true },
 ] as const
 

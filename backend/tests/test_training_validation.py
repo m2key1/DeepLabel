@@ -349,16 +349,18 @@ class TestHowTheSplitIsMade:
 
 
 class TestTheTestSet:
-    def test_a_test_dataset_cannot_also_be_trained_on(self, client, data):
+    def test_a_test_dataset_without_test_pages_is_refused(self, client, data):
         response = start(client, test_job_ids=['j-train'])
 
         assert response.status_code == 400
-        assert 'must not also be training datasets' in detail(response)
+        assert detail(response).endswith('has no test pages')
 
-    def test_a_test_dataset_with_nothing_checked_is_refused(self, client, conn):
+    def test_test_pages_with_nothing_checked_are_refused(self, client, conn):
         seed_checked_lines(conn, 'j-train')
         conn.execute("INSERT INTO jobs (id, name, owner, status) "
                      "VALUES ('j-test', 'Test', 'root', 'done')")
+        conn.execute("INSERT INTO pages (job_id, idx, filename, source_file, is_test) "
+                     "VALUES ('j-test', 0, 'p.png', '/p.png', 1)")
         conn.commit()
 
         response = start(client, test_job_ids=['j-test'])

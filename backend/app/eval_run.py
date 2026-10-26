@@ -14,7 +14,8 @@ def batches_of(conn, evaluation: dict):
     if 'snapshot' in source:
         return eval_material.snapshot_batches(config.training_dir(source['snapshot']) / 'snapshot', conn=conn)
     return eval_material.job_batches(conn, source.get('jobs', []),
-                                     human_checked_only=source.get('human_checked_only', False))
+                                     human_checked_only=source.get('human_checked_only', False),
+                                     test_pages_only=source.get('test_pages', False))
 
 
 def score(conn, evaluation: dict, make_engine, lines_out: Path | None) -> None:

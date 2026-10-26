@@ -1,11 +1,12 @@
 import json
 import threading
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app import (augmentations, backend_client, config, line_shapes, preflight, registry, remote_training,
-                 slurm_session, store, trainer, tunables)
+                 slurm_session, store, train_snapshot, trainer, tunables)
 from app.deps import can_access_job, current_user, get_db, require_job_access, require_role
 
 router = APIRouter(tags=['training'])
@@ -101,35 +102,26 @@ def list_trainings(conn=Depends(get_db), user: dict = Depends(current_user)):
 class PreviewRequest(BaseModel):
     task: str
     job_ids: list[str] = []
-    test_job_ids: list[str] = []
+    # What to count: what a run may train on, the test pages, or every page.
+    pages: Literal['train', 'test', 'all'] = 'train'
 
 
 # A read, but a POST: the dialog opens by previewing every dataset there is, and past
 # 626 of them that many ids no longer fit in a request line a proxy will accept.
 @router.post('/api/trainings/preview')
 def preview(body: PreviewRequest, conn=Depends(get_db), user: dict = Depends(current_user)):
-    """How much reviewed material the chosen datasets would contribute to a training,
-    and - when a test dataset is named - how many of its pages also sit in the
-    training selection, which would inflate its score."""
+    """How much reviewed material the chosen datasets would contribute to a training, and
+    how many of their pages it leaves out for sharing a scan with test pages."""
     task = body.task
     if task not in registry.TASKS:
         raise HTTPException(400, f'task must be one of {registry.TASKS}')
-    ids, test_ids = body.job_ids, body.test_job_ids
-    for job_id in ids + test_ids:
+    ids = body.job_ids
+    for job_id in ids:
         require_job_access(conn, job_id, user)
     # Besides the totals, what language models settled among themselves - a run may leave
     # it out and train only on what a person verified.
-    payload = trainer.preview_counts(conn, task, ids)
-    if test_ids and ids:
-        marks_test = ','.join('?' * len(test_ids))
-        marks_train = ','.join('?' * len(ids))
-        payload['test_overlap_pages'] = conn.execute(
-            'SELECT COUNT(DISTINCT a.content_hash) n FROM pages a '
-            'JOIN pages b ON a.content_hash = b.content_hash '
-            f'WHERE a.job_id IN ({marks_test}) AND b.job_id IN ({marks_train}) '
-            'AND a.deleted = 0 AND b.deleted = 0 AND a.content_hash IS NOT NULL',
-            (*test_ids, *ids)).fetchone()['n']
-    return payload
+    left_out = train_snapshot.left_out(conn, ids) if body.pages == 'train' else []
+    return {**trainer.preview_counts(conn, task, ids, body.pages), 'left_out': left_out}
 
 
 def _trained_on(conn, task: str, base_model_id: int | None):
@@ -384,17 +376,19 @@ def _validate_settings(conn, body: TrainingCreate, user: dict) -> dict:
             raise HTTPException(400, 'valid_job_ids only applies to the holdout strategy')
         if not 0.0 < body.val_fraction <= 0.5:
             raise HTTPException(400, 'val_fraction must be between 0 and 0.5')
-    if set(body.test_job_ids) & set(body.dataset_job_ids):
-        raise HTTPException(400, 'test datasets must not also be training datasets')
     for job_id in body.test_job_ids:
         require_job_access(conn, job_id, user)
-        if store.get_job(conn, job_id) is None:
+        job = store.get_job(conn, job_id)
+        if job is None:
             raise HTTPException(404, f'dataset {job_id} not found')
+        if conn.execute('SELECT 1 FROM pages WHERE job_id = ? AND is_test = 1 AND deleted = 0',
+                        (job_id,)).fetchone() is None:
+            raise HTTPException(400, f'{job["name"]} has no test pages')
     if body.test_job_ids:
         test_counts = trainer.eligible_counts(conn, body.task, body.test_job_ids,
-                                              body.human_checked_only)
+                                              body.human_checked_only, pages='test')
         if sum(test_counts.values()) == 0:
-            raise HTTPException(400, 'the test datasets contain no checked material for this task')
+            raise HTTPException(400, 'the test pages contain no checked material for this task')
     counts = trainer.eligible_counts(conn, body.task, body.dataset_job_ids,
                                      body.human_checked_only)
     if sum(counts.values()) == 0:

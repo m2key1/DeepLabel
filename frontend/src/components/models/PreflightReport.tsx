@@ -546,7 +546,7 @@ function Settings({ result }: { result: PreflightResult }) {
     ['steps per epoch', count(s.steps_per_epoch)],
     ['total steps', s.total_steps === null ? '-' : count(s.total_steps)],
     ['validation', s.validation],
-    ['test datasets', String(s.test_datasets)],
+    ['test sets', String(s.test_datasets)],
     ...(result.task === 'ocr'
       ? [['person-verified only', s.human_checked_only ? 'yes' : 'no'] as [string, string]] : []),
     ...(s.line_shape ? [['line shape', lineShapeLabel(s.line_shape)] as [string, string]] : []),

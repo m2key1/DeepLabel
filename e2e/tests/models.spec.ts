@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { test, expect } from '../helpers/test'
-import { OCR_READER, backendFetch, createGroup, createJob, createTraining, getTrainingProgress, identity, importStubModel, listEvaluations, listRegistryModels, listTrainings, markLinesChecked, moveJobToGroup, seedCompletedJob, seedDistinctPagesJob, uniqueName, waitForJobStatus } from '../helpers/api'
+import { OCR_READER, backendFetch, createGroup, createJob, createTraining, getTrainingProgress, identity, importStubModel, listEvaluations, listRegistryModels, listTrainings, markLinesChecked, markTestPages, moveJobToGroup, seedCompletedJob, seedDistinctPagesJob, TEST_SCAN_WIDTH, uniqueName, waitForJobStatus } from '../helpers/api'
 import { seedSession, useSession } from '../helpers/session'
 import { cancelledRun, datasetOption, pickDataset, startTraining, taskSection, versionRow } from '../helpers/training'
 
@@ -245,15 +245,16 @@ test.describe('Scenario: the model registry', () => {
   test('a finished run reopens prefilled, and its batch follows the target', async ({ page }) => {
     const jobId = await seedCompletedJob(uniqueName('Rerunnable'), 2)
     await markLinesChecked(jobId, 12)
-    const holdoutId = await seedCompletedJob(uniqueName('Rerun holdout'), 1)
+    const holdoutId = await seedDistinctPagesJob(uniqueName('Rerun test set'), 1, 100, TEST_SCAN_WIDTH)
     await markLinesChecked(holdoutId, 6)
+    await markTestPages(holdoutId)
     const sourceName = uniqueName('Local run')
     // Someone else's run, submitted with settings no default would produce.
     await createTraining({
       task: 'ocr', name: sourceName, dataset_job_ids: [jobId], target: 'local',
       description: 'the one worth repeating',
       epochs: 1, batch_size: 4, val_fraction: 0.3,
-      split_strategy: 'holdout', valid_job_ids: [holdoutId], test_job_ids: [holdoutId],
+      split_strategy: 'stratified', test_job_ids: [holdoutId],
       hyperparams: { learning_rate: 0.00005, patience: 5, warmup_epochs: 2 },
     })
     await expect
@@ -273,8 +274,8 @@ test.describe('Scenario: the model registry', () => {
     await expect(page.getByLabel('Model name')).toHaveValue(`${sourceName} rerun`)
     await expect(page.getByLabel('Description')).toHaveValue('the one worth repeating')
     await expect(page.getByText('12 checked lines selected')).toBeVisible()
-    await expect(page.getByLabel('Test dataset')).toHaveValue(holdoutId)
-    await expect(page.getByTestId('steer-by-test')).toBeChecked()
+    await expect(page.getByLabel('Test set')).toHaveValue(holdoutId)
+    await expect(page.getByLabel('Validation data')).toHaveValue('stratified')
     // The run left the trainer its own stack, so the rerun does too - the task's default
     // pipeline does not get adopted underneath it.
     await expect(page.getByLabel('Augmentation', { exact: true })).toHaveValue('builtin')
@@ -312,9 +313,9 @@ test.describe('Scenario: the model registry', () => {
       .poll(async () => (await listTrainings()).find((t) => t.name === rerunName), { timeout: 30_000 })
       .toMatchObject({
         task: 'ocr', target: 'local', owner: 'dev', batch_size: 4, gpu_type: null, gpu_count: null,
-        epochs: 1, val_fraction: 0.3, split_strategy: 'holdout', augmentation: null,
+        epochs: 1, val_fraction: 0.3, split_strategy: 'stratified', augmentation: null,
         description: 'the one worth repeating',
-        dataset_job_ids: [jobId], valid_job_ids: [holdoutId], test_job_ids: [holdoutId],
+        dataset_job_ids: [jobId], valid_job_ids: [], test_job_ids: [holdoutId],
         hyperparams: { learning_rate: 0.00005, patience: 5, warmup_epochs: 2 },
       })
     const rerun = page.getByTestId('training-row').filter({ hasText: rerunName })
@@ -419,13 +420,14 @@ test.describe('Scenario: the model registry', () => {
     await expect(line.getByTestId('breakdown-row').filter({ hasText: name })).toContainText('3 lines')
   })
 
-  test('a test dataset is held out, steers validation only when asked, and is scored', async ({ page }) => {
+  test('the test pages of a dataset are held out of training and scored', async ({ page }) => {
     const trainName = uniqueName('Testset train')
     const testName = uniqueName('Testset held out')
     const trainJob = await seedCompletedJob(trainName, 1)
-    const testJob = await seedCompletedJob(testName, 1)
+    const testJob = await seedDistinctPagesJob(testName, 1, 105, TEST_SCAN_WIDTH)
     await markLinesChecked(trainJob, 3)
     await markLinesChecked(testJob, 2)
+    await markTestPages(testJob)
     const modelName = uniqueName('OCR testset')
 
     await page.goto('/models')
@@ -434,49 +436,37 @@ test.describe('Scenario: the model registry', () => {
 
     await page.getByLabel('Model name').fill(modelName)
     await pickDataset(page, trainName)
-    await page.getByLabel('Test dataset').selectOption({ label: `${testName} (2)` })
-
-    // Steering swaps the split controls for the test dataset itself.
+    await page.getByLabel('Test set').selectOption({ label: `${testName} - 1 test page` })
     await page.getByTestId('advanced-toggle').click()
-    await expect(page.getByLabel('Validation split')).toBeVisible()
-    await page.getByTestId('steer-by-test').check()
-    await expect(page.getByLabel('Validation split')).toHaveCount(0)
     await page.getByLabel('Epochs', { exact: true }).fill('1')
     // The summary names what will actually run, hidden defaults included.
-    await expect(page.getByTestId('submit-summary')).toContainText('validated on the test dataset')
     await expect(page.getByTestId('submit-summary')).toContainText(`test: ${testName}`)
     await startTraining(page)
 
     const run = page.getByTestId('training-row').filter({ hasText: modelName })
     await expect(run.getByText('done')).toBeVisible({ timeout: 30_000 })
 
-    // Backend oracle: every checked line of the training dataset trains, every
-    // checked line of the test dataset validates - exact counts, no leakage.
+    // Backend oracle: the training dataset's checked lines train, the test pages neither
+    // train nor validate.
     await expect
       .poll(async () => (await listTrainings()).find((t) => t.name === modelName))
-      .toMatchObject({
-        split_strategy: 'holdout',
-        valid_job_ids: [testJob],
-        test_job_ids: [testJob],
-        snapshot_counts: { train: 3, val: 2 },
-      })
+      .toMatchObject({ split_strategy: 'uniform', valid_job_ids: [], test_job_ids: [testJob],
+                       snapshot_counts: { train: 3, val: 0 } })
 
     // Finishing queued a test-set score for the new model and its base alike - one
-    // headline number each, in the decode the model actually runs in.
+    // headline number each, in the decode the model actually runs in, on the test pages.
     const trainingId = (await listTrainings()).find((t) => t.name === modelName)!.id
     await expect
       .poll(async () =>
         (await listEvaluations())
           .filter((e) => e.training_id === trainingId && e.source.jobs?.[0] === testJob)
-          .map((e) => e.decode))
-      .toEqual(['beam', 'beam'])
+          .map((e) => [e.decode, e.source.test_pages]))
+      .toEqual([['beam', true], ['beam', true]])
 
-    // The model page lists every evaluation, the test-set score among them, and leads
-    // with that score.
+    // The model page leads with that score.
     const modelId = (await listRegistryModels()).find((m) => m.name === modelName)!.id
     await page.goto(`/models/${modelId}`)
-    await expect(page.getByTestId('eval-row')).toHaveCount(4)
-    await expect(page.getByTestId('eval-row').filter({ hasText: testName })).toHaveCount(1)
+    await expect(page.getByTestId('eval-row').filter({ hasText: `test pages of ${testName}` })).toHaveCount(1)
     const testScoreOf = async () => (await listEvaluations()).find(
       (e) => e.model_id === modelId && e.training_id === trainingId && e.source.jobs?.[0] === testJob)
     await expect.poll(async () => (await testScoreOf())?.status, { timeout: 30_000 }).toBe('done')
@@ -539,10 +529,11 @@ test.describe('Scenario: the model registry', () => {
     const testName = uniqueName('Testchart held out')
     const trainJob = await seedCompletedJob(trainName, 1)
     const validJob = await seedCompletedJob(validName, 1)
-    const testJob = await seedCompletedJob(testName, 1)
+    const testJob = await seedDistinctPagesJob(testName, 1, 110, TEST_SCAN_WIDTH)
     await markLinesChecked(trainJob, 3)
     await markLinesChecked(validJob, 2)
     await markLinesChecked(testJob, 2)
+    await markTestPages(testJob)
 
     const start = async (name: string, baseModelId: number | null) => {
       await createTraining({ task: 'ocr', name, dataset_job_ids: [trainJob],

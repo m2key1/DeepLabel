@@ -1,7 +1,6 @@
-"""A test dataset is held out from training entirely: it never trains, and by default
-it never steers early stopping either - it is scored once with the base model and once
-with the new model when the training finishes, so "did it help?" has an untouched
-answer. Steering by it is the explicit holdout strategy, not the default.
+"""A run's test set is the test pages of the datasets it names: they never train and never
+steer early stopping - they are scored once with the base model and once with the new
+model when the training finishes, so "did it help?" has an untouched answer.
 """
 import json
 
@@ -26,11 +25,13 @@ def client(tmp_path, monkeypatch, training_backend):
     conn.close()
 
 
-def seed_checked_lines(conn, job_id: str, count: int, content_hash: str | None = None):
-    conn.execute("INSERT INTO jobs (id, name, owner, status) VALUES (?, ?, 'root', 'done')",
-                 (job_id, f'Set {job_id}'))
-    page = conn.execute("INSERT INTO pages (job_id, idx, filename, source_file, content_hash) "
-                        "VALUES (?, 0, 'p.png', '/p.png', ?)", (job_id, content_hash)).lastrowid
+def seed_checked_lines(conn, job_id: str, count: int, content_hash: str | None = None,
+                       is_test: bool = False):
+    if conn.execute('SELECT 1 FROM jobs WHERE id = ?', (job_id,)).fetchone() is None:
+        conn.execute("INSERT INTO jobs (id, name, owner, status) VALUES (?, ?, 'root', 'done')",
+                     (job_id, f'Set {job_id}'))
+    page = conn.execute("INSERT INTO pages (job_id, idx, filename, source_file, content_hash, is_test) "
+                        "VALUES (?, 0, 'p.png', '/p.png', ?, ?)", (job_id, content_hash, int(is_test))).lastrowid
     el = conn.execute("INSERT INTO elements (page_id, order_idx, class_name, bbox) "
                       "VALUES (?, 0, 'Paragraph', '[]')", (page,)).lastrowid
     for i in range(count):
@@ -47,47 +48,61 @@ def create(api, **overrides):
 def test_test_datasets_are_stored_and_returned(client):
     api, conn = client
     seed_checked_lines(conn, 'j-train', 3)
-    seed_checked_lines(conn, 'j-test', 2)
+    seed_checked_lines(conn, 'j-test', 2, is_test=True)
     res = create(api, test_job_ids=['j-test'])
     assert res.status_code == 200, res.text
     assert res.json()['test_job_ids'] == ['j-test']
     assert res.json()['split_strategy'] == 'uniform'
 
 
-def test_a_test_dataset_must_not_also_train(client):
+def test_a_dataset_may_train_on_some_pages_and_hold_the_test_set_on_others(client):
     api, conn = client
     seed_checked_lines(conn, 'j-train', 3)
+    seed_checked_lines(conn, 'j-train', 2, is_test=True)
     res = create(api, test_job_ids=['j-train'])
-    assert res.status_code == 400
-    assert 'must not also be training' in res.json()['detail']
+    assert res.status_code == 200, res.text
 
 
-def test_a_test_dataset_without_checked_material_is_refused(client):
+def test_a_test_dataset_without_test_pages_is_refused(client):
     api, conn = client
     seed_checked_lines(conn, 'j-train', 3)
-    seed_checked_lines(conn, 'j-test', 0)
+    seed_checked_lines(conn, 'j-test', 2)
     res = create(api, test_job_ids=['j-test'])
     assert res.status_code == 400
-    assert 'test datasets contain no checked material' in res.json()['detail']
+    assert res.json()['detail'] == 'Set j-test has no test pages'
 
 
-def test_preview_reports_page_counts_and_test_content_overlap(client):
-    """The dialog warns before a training starts: the split divides pages, and a test
-    dataset sharing image content with the training data would score dishonestly."""
+def test_test_pages_without_checked_material_are_refused(client):
+    api, conn = client
+    seed_checked_lines(conn, 'j-train', 3)
+    seed_checked_lines(conn, 'j-test', 0, is_test=True)
+    res = create(api, test_job_ids=['j-test'])
+    assert res.status_code == 400
+    assert res.json()['detail'] == 'the test pages contain no checked material for this task'
+
+
+def test_a_run_of_nothing_but_test_data_is_refused(client):
+    api, conn = client
+    seed_checked_lines(conn, 'j-train', 3, is_test=True)
+    res = create(api)
+    assert res.status_code == 400
+    assert res.json()['detail'] == 'the selected datasets contain no checked material for this task'
+
+
+def test_preview_counts_only_what_can_train_and_says_what_is_left_out(client):
+    """A page that is test data, or shares its scan with test data, is no training material;
+    the dialog says how many such pages it leaves out, and where their test pages are."""
     api, conn = client
     seed_checked_lines(conn, 'j-train', 3, content_hash='shared-scan')
-    seed_checked_lines(conn, 'j-test', 2, content_hash='shared-scan')
-    seed_checked_lines(conn, 'j-clean', 2, content_hash='other-scan')
+    seed_checked_lines(conn, 'j-train', 4, content_hash='own-scan')
+    seed_checked_lines(conn, 'j-train', 5, content_hash='marked', is_test=True)
+    seed_checked_lines(conn, 'j-test', 2, content_hash='shared-scan', is_test=True)
 
-    res = api.post('/api/trainings/preview', headers=ADMIN,
-                   json={'task': 'ocr', 'job_ids': ['j-train'], 'test_job_ids': ['j-test']})
+    res = api.post('/api/trainings/preview', headers=ADMIN, json={'task': 'ocr', 'job_ids': ['j-train']})
     assert res.status_code == 200
-    assert res.json() == {'counts': {'j-train': 3}, 'pages': {'j-train': 1},
+    assert res.json() == {'counts': {'j-train': 4}, 'pages': {'j-train': 1},
                           'machine_settled': {'j-train': 0}, 'human_checked_pages': {'j-train': 1},
-                          'test_overlap_pages': 1}
-    res = api.post('/api/trainings/preview', headers=ADMIN,
-                   json={'task': 'ocr', 'job_ids': ['j-train'], 'test_job_ids': ['j-clean']})
-    assert res.json()['test_overlap_pages'] == 0
+                          'left_out': [{'job_id': 'j-test', 'name': 'Set j-test', 'pages': 1}]}
 
 
 def test_preview_takes_its_datasets_in_the_body(client):
@@ -101,7 +116,8 @@ def test_preview_takes_its_datasets_in_the_body(client):
                    json={'task': 'ocr', 'job_ids': ['j-train']})
     assert res.status_code == 200, res.text
     assert res.json() == {'counts': {'j-train': 3}, 'pages': {'j-train': 1},
-                          'machine_settled': {'j-train': 0}, 'human_checked_pages': {'j-train': 1}}
+                          'machine_settled': {'j-train': 0}, 'human_checked_pages': {'j-train': 1},
+                          'left_out': []}
     assert api.get('/api/trainings/preview?task=ocr&job_ids=j-train',
                    headers=ADMIN).status_code == 405
 
@@ -126,7 +142,7 @@ def test_preview_says_what_a_person_only_run_would_keep(client):
     assert res.json() == {'counts': {'j-train': 3, 'j-settled': 2},
                           'pages': {'j-train': 1, 'j-settled': 1},
                           'machine_settled': {'j-train': 1, 'j-settled': 2},
-                          'human_checked_pages': {'j-train': 1, 'j-settled': 0}}
+                          'human_checked_pages': {'j-train': 1, 'j-settled': 0}, 'left_out': []}
 
 
 def test_eval_breakdown_is_labeled_and_redacted(client):
@@ -198,7 +214,7 @@ def test_finishing_queues_test_evals_for_base_and_new_model(client, tmp_path):
                          'ORDER BY id').fetchall()
     test_evals = [(e['model_id'], json.loads(e['source'])) for e in evals
                   if 'jobs' in e['source']]
-    assert test_evals == [(model_id, {'jobs': ['j-test']}), (7, {'jobs': ['j-test']})]
+    assert test_evals == [(model_id, {'jobs': ['j-test'], 'test_pages': True}), (7, {'jobs': ['j-test'], 'test_pages': True})]
     assert all(e['status'] == 'queued' and e['training_id'] == 1 for e in evals
                if 'jobs' in e['source'])
 
@@ -220,14 +236,14 @@ def test_a_person_only_run_scores_its_test_set_on_person_verified_lines_only(cli
 
     test_evals = [(e['model_id'], json.loads(e['source'])) for e in conn.execute(
         "SELECT model_id, source FROM evaluations WHERE source LIKE '%jobs%' ORDER BY id")]
-    assert test_evals == [(model_id, {'jobs': ['j-test'], 'human_checked_only': True}),
-                          (7, {'jobs': ['j-test'], 'human_checked_only': True})]
+    assert test_evals == [(model_id, {'jobs': ['j-test'], 'test_pages': True, 'human_checked_only': True}),
+                          (7, {'jobs': ['j-test'], 'test_pages': True, 'human_checked_only': True})]
 
 
 def test_a_person_only_run_refuses_a_test_set_only_models_settled(client):
     api, conn = client
     seed_checked_lines(conn, 'j-train', 3)
-    seed_checked_lines(conn, 'j-test', 2)
+    seed_checked_lines(conn, 'j-test', 2, is_test=True)
     conn.execute("UPDATE lines SET check_source = 'llm' WHERE element_id IN ("
                  "SELECT e.id FROM elements e JOIN pages p ON e.page_id = p.id "
                  "WHERE p.job_id = 'j-test')")
@@ -236,7 +252,7 @@ def test_a_person_only_run_refuses_a_test_set_only_models_settled(client):
     assert create(api, name='mixed', test_job_ids=['j-test']).status_code == 200
     res = create(api, name='people', test_job_ids=['j-test'], human_checked_only=True)
     assert res.status_code == 400
-    assert 'test datasets contain no checked material' in res.json()['detail']
+    assert res.json()['detail'] == 'the test pages contain no checked material for this task'
 
 
 def test_the_test_set_is_scored_in_the_same_mode_the_model_will_run(client, tmp_path):
@@ -266,7 +282,7 @@ def test_the_test_set_is_scored_in_the_same_mode_the_model_will_run(client, tmp_
 @pytest.mark.parametrize('task', ['ocr', 'layout', 'lines'])
 def test_preview_reads_every_dataset_in_one_query(client, task):
     """The dialog previews every dataset there is; per-dataset queries were thousands of
-    statements for 626 of them."""
+    statements for 626 of them. One query counts them, one more finds what is left out."""
     api, conn = client
     for n in range(6):
         seed_checked_lines(conn, f'j-{n}', n + 1)
@@ -280,7 +296,7 @@ def test_preview_reads_every_dataset_in_one_query(client, task):
 
     assert res.status_code == 200, res.text
     counting = [s for s in statements if 'FROM lines' in s or 'FROM pages' in s]
-    assert len(counting) == 1, counting
+    assert len(counting) == 2, counting
 
 
 def test_preview_counts_match_what_a_run_would_check(client):
@@ -309,10 +325,23 @@ def test_preview_counts_match_what_a_run_would_check(client):
 
     assert preview('ocr') == {'counts': {'j-a': 3, 'j-b': 2}, 'pages': {'j-a': 1, 'j-b': 1},
                               'machine_settled': {'j-a': 0, 'j-b': 1},
-                              'human_checked_pages': {'j-a': 1, 'j-b': 1}}
+                              'human_checked_pages': {'j-a': 1, 'j-b': 1}, 'left_out': []}
     assert preview('layout') == {'counts': {'j-a': 1, 'j-b': 1}, 'pages': {'j-a': 1, 'j-b': 0},
                                  'machine_settled': {'j-a': 0, 'j-b': 0},
-                                 'human_checked_pages': {'j-a': 1, 'j-b': 0}}
+                                 'human_checked_pages': {'j-a': 1, 'j-b': 0}, 'left_out': []}
     assert preview('lines') == {'counts': {'j-a': 1, 'j-b': 1}, 'pages': {'j-a': 1, 'j-b': 0},
                                 'machine_settled': {'j-a': 0, 'j-b': 0},
-                                'human_checked_pages': {'j-a': 1, 'j-b': 0}}
+                                'human_checked_pages': {'j-a': 1, 'j-b': 0}, 'left_out': []}
+
+
+@pytest.mark.parametrize('pages, counted', [('train', 3), ('test', 2), ('all', 5)])
+def test_preview_counts_the_pages_asked_for(client, pages, counted):
+    """An evaluation of all pages, or of the test pages, counts what it would score."""
+    api, conn = client
+    seed_checked_lines(conn, 'j-a', 3)
+    seed_checked_lines(conn, 'j-a', 2, is_test=True)
+
+    res = api.post('/api/trainings/preview', headers=ADMIN,
+                   json={'task': 'ocr', 'job_ids': ['j-a'], 'pages': pages})
+
+    assert res.json()['counts'] == {'j-a': counted}

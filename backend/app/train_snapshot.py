@@ -46,8 +46,54 @@ def _split_key(page) -> str:
     """One key per page, derived from the scanned image itself. Splitting whole pages
     keeps a page's lines from straddling the split, and keying on the content hash puts
     identical pages - the same scan ingested into several datasets - on the same side,
-    so the model never validates on an image it trained on."""
+    so the model never validates on an image it trained on. A test page is its own key:
+    it goes to a run's test set or nowhere."""
+    if page['is_test']:
+        return f"test:{page['id']}"
     return f"page:{page['content_hash'] or page['id']}"
+
+
+# The part a page goes to when the run must not read it at all.
+LEFT_OUT = 'left_out'
+
+
+def test_scans(conn) -> set[str]:
+    """The scans of every test page. A page of the same scan anywhere is never trained on."""
+    return {row[0] for row in conn.execute(
+        'SELECT DISTINCT content_hash FROM pages WHERE is_test = 1 AND deleted = 0 '
+        'AND content_hash IS NOT NULL')}
+
+
+def page_filter(alias: str = '', pages: str = 'train') -> str:
+    """SQL for the pages a run trains on - not test data, nor a scan of it - or for the
+    'test' pages, or for 'all' of them."""
+    a = f'{alias}.' if alias else ''
+    if pages == 'all':
+        return '1 = 1'
+    if pages == 'test':
+        return f'{a}is_test = 1'
+    return (f'{a}is_test = 0 AND ({a}content_hash IS NULL OR {a}content_hash NOT IN ('
+            'SELECT content_hash FROM pages WHERE is_test = 1 AND deleted = 0 AND content_hash IS NOT NULL))')
+
+
+def _kept_out(key: str, scans: set[str]) -> bool:
+    return key.startswith('test:') or key.removeprefix('page:') in scans
+
+
+def _keeping_tests_out(split, read: list[str], tests: list[str], scans: set[str]):
+    """The split with test data kept out of training: a test page goes to the test set
+    when its dataset is one of the run's test sets, and every other page that is test
+    data, shares a scan with test data, or sits in a test set the run does not train on,
+    is left out."""
+    read, tests = set(read), set(tests)
+
+    def guarded(job_id: str, key: str) -> str:
+        if key.startswith('test:'):
+            return 'test' if job_id in tests else LEFT_OUT
+        if job_id not in read or _kept_out(key, scans):
+            return LEFT_OUT
+        return split(job_id, key)
+    return guarded
 
 
 def _holdout_splitter(valid_job_ids: list[str]):
@@ -62,20 +108,20 @@ def _task_keys(conn, task: str, job_id: str, human_checked_only: bool = False) -
     """The split keys the task's builder will ask about, mirroring its selection."""
     if task == 'ocr':
         rows = conn.execute(
-            'SELECT DISTINCT p.id, p.content_hash FROM pages p '
+            'SELECT DISTINCT p.id, p.content_hash, p.is_test FROM pages p '
             'JOIN elements e ON e.page_id = p.id JOIN lines l ON l.element_id = e.id '
             f"WHERE p.job_id = ? AND {counted_page('p')} "
             f'AND l.checked = 1 AND l.deleted = 0 AND e.deleted = 0 {checked_by(human_checked_only)}',
             (job_id,)).fetchall()
     elif task == 'layout':
         rows = conn.execute(
-            'SELECT id, content_hash FROM pages '
+            'SELECT id, content_hash, is_test FROM pages '
             f"WHERE job_id = ? AND layout_checked = 1 AND {counted_page()} "
             'AND content_hash IS NOT NULL AND width IS NOT NULL AND height IS NOT NULL',
             (job_id,)).fetchall()
     else:
         rows = conn.execute(
-            'SELECT id, content_hash FROM pages '
+            'SELECT id, content_hash, is_test FROM pages '
             f"WHERE job_id = ? AND lines_checked = 1 AND {counted_page()} "
             'AND width IS NOT NULL', (job_id,)).fetchall()
     return [_split_key(r) for r in rows]
@@ -92,11 +138,15 @@ def _rank_split(keys: set[str], val_fraction: float, at_least_one: bool = False)
     return set(ranked[:min(picked, max(len(ranked) - 1, 0))])
 
 
+def _trainable_keys(conn, task: str, job_id: str, human_checked_only: bool, scans: set[str]) -> set[str]:
+    return {key for key in _task_keys(conn, task, job_id, human_checked_only) if not _kept_out(key, scans)}
+
+
 def _uniform_splitter(conn, task: str, job_ids: list[str], val_fraction: float,
-                      human_checked_only: bool = False):
-    """val_fraction of all distinct pages lands in valid, picked by hash rank."""
+                      human_checked_only: bool = False, scans: frozenset = frozenset()):
+    """val_fraction of all distinct trainable pages lands in valid, picked by hash rank."""
     keys = {key for job_id in job_ids
-            for key in _task_keys(conn, task, job_id, human_checked_only)}
+            for key in _trainable_keys(conn, task, job_id, human_checked_only, scans)}
     val_keys = _rank_split(keys, val_fraction)
 
     def split(job_id: str, key: str) -> str:
@@ -105,13 +155,13 @@ def _uniform_splitter(conn, task: str, job_ids: list[str], val_fraction: float,
 
 
 def _stratified_splitter(conn, task: str, job_ids: list[str], val_fraction: float,
-                         human_checked_only: bool = False):
+                         human_checked_only: bool = False, scans: frozenset = frozenset()):
     """Exactly val_fraction of every dataset's pages lands in valid, and at least one page
     of every dataset that has two. Keys are ranked by hash so the picks are deterministic
     yet uncorrelated with insertion order."""
     val_keys: set[str] = set()
     for job_id in job_ids:
-        val_keys |= _rank_split(set(_task_keys(conn, task, job_id, human_checked_only)),
+        val_keys |= _rank_split(_trainable_keys(conn, task, job_id, human_checked_only, scans),
                                 val_fraction, at_least_one=True)
 
     def split(job_id: str, key: str) -> str:
@@ -129,7 +179,7 @@ def ocr_pages(conn, job_ids: list[str], split, human_checked_only: bool = False)
     only whitespace, is still listed - the cut leaves it out, and the pre-flight reports it."""
     for job_id in job_ids:
         pages = conn.execute(
-            'SELECT id, source_file, content_hash, filename, width, height FROM pages '
+            'SELECT id, source_file, content_hash, filename, width, height, is_test FROM pages '
             f"WHERE job_id = ? AND {counted_page()}", (job_id,)).fetchall()
         for page in pages:
             lines = []
@@ -143,7 +193,9 @@ def ocr_pages(conn, job_ids: list[str], split, human_checked_only: bool = False)
                 target = characters.training_target(stored or '')
                 lines.append({**dict(row), 'stored': stored or '',
                               'target': target if target.strip() else ''})
-            yield job_id, page, split(job_id, _split_key(page)), lines
+            part = split(job_id, _split_key(page))
+            if part != LEFT_OUT:
+                yield job_id, page, part, lines
 
 
 def _ocr_work(conn, job_ids: list[str], dirs: dict, split,
@@ -226,7 +278,7 @@ def layout_images(conn, job_ids: list[str], split, remap: dict | None = None):
         page_by_name = {
             coco.image_name(job_id, p['content_hash'], p['filename']): p
             for p in conn.execute(
-                'SELECT id, content_hash, filename FROM pages '
+                'SELECT id, content_hash, filename, is_test FROM pages '
                 f"WHERE job_id = ? AND {counted_page()} "
                 'AND content_hash IS NOT NULL', (job_id,))}
         annos_by_image: dict[int, list] = {}
@@ -237,8 +289,10 @@ def layout_images(conn, job_ids: list[str], split, remap: dict | None = None):
         for img in dataset['doc']['images']:
             page = page_by_name.get(img['file_name'])
             key = _split_key(page) if page else f'page:{img["file_name"]}'
-            yield (job_id, split(job_id, key), img, annos_by_image.get(img['id'], []),
-                   dataset['files'][img['file_name']], page)
+            part = split(job_id, key)
+            if part != LEFT_OUT:
+                yield (job_id, part, img, annos_by_image.get(img['id'], []),
+                       dataset['files'][img['file_name']], page)
 
 
 def segmentation_lines(conn, job_ids: list[str], split, line_shape: str = 'polygon'):
@@ -247,7 +301,7 @@ def segmentation_lines(conn, job_ids: list[str], split, line_shape: str = 'polyg
     it sits in)). A page without a line is skipped, as the cut skips it."""
     for job_id in job_ids:
         pages = conn.execute(
-            'SELECT id, source_file, content_hash, filename, width, height FROM pages '
+            'SELECT id, source_file, content_hash, filename, width, height, is_test FROM pages '
             f"WHERE job_id = ? AND lines_checked = 1 AND {counted_page()} "
             'AND width IS NOT NULL', (job_id,)).fetchall()
         for page in pages:
@@ -260,8 +314,9 @@ def segmentation_lines(conn, job_ids: list[str], split, line_shape: str = 'polyg
                     'WHERE e.page_id = ? AND l.deleted = 0 AND e.deleted = 0 ORDER BY e.order_idx, l.order_idx',
                     (page['id'],))
             ]
-            if lines:
-                yield job_id, page, split(job_id, _split_key(page)), lines
+            part = split(job_id, _split_key(page))
+            if lines and part != LEFT_OUT:
+                yield job_id, page, part, lines
 
 
 def segmentation_pages(conn, job_ids: list[str], split, line_shape: str = 'polygon'):
@@ -343,23 +398,37 @@ def _without_empty_test(counts: dict) -> dict:
     return counts if counts['test'] else {key: n for key, n in counts.items() if key != 'test'}
 
 
-def with_tests(split, test_job_ids: list[str]):
-    """The split with every page of a test dataset sent to the test part."""
-    tests = set(test_job_ids)
-    return lambda job_id, key: 'test' if job_id in tests else split(job_id, key)
-
-
 def splitter(conn, task: str, job_ids: list[str], val_fraction: float = 0.1,
              split_strategy: str = 'uniform', valid_job_ids: list[str] | None = None,
-             human_checked_only: bool = False):
+             human_checked_only: bool = False, test_job_ids: list[str] | None = None):
     """The split a run cuts with, as (split, every dataset it reads): a holdout run reads
-    its validation datasets beside the training ones."""
+    its validation datasets beside the training ones, and a run with a test set the
+    test pages of its test datasets. Test data never trains or validates."""
+    scans = frozenset(test_scans(conn))
     if split_strategy == 'holdout':
-        return (_holdout_splitter(valid_job_ids or []),
-                job_ids + [j for j in valid_job_ids or [] if j not in job_ids])
-    if split_strategy == 'stratified':
-        return _stratified_splitter(conn, task, job_ids, val_fraction, human_checked_only), job_ids
-    return _uniform_splitter(conn, task, job_ids, val_fraction, human_checked_only), job_ids
+        split = _holdout_splitter(valid_job_ids or [])
+        read = job_ids + [j for j in valid_job_ids or [] if j not in job_ids]
+    elif split_strategy == 'stratified':
+        split, read = _stratified_splitter(conn, task, job_ids, val_fraction, human_checked_only, scans), job_ids
+    else:
+        split, read = _uniform_splitter(conn, task, job_ids, val_fraction, human_checked_only, scans), job_ids
+    tests = test_job_ids or []
+    return (_keeping_tests_out(split, read, tests, scans),
+            read + [j for j in tests if j not in read])
+
+
+def left_out(conn, job_ids: list[str]) -> list[dict]:
+    """Pages of these datasets left out of training for sharing a scan with test pages,
+    counted per dataset that holds those test pages."""
+    if not job_ids:
+        return []
+    marks = ', '.join('?' * len(job_ids))
+    return [dict(row) for row in conn.execute(
+        'SELECT t.job_id, j.name, COUNT(DISTINCT p.id) pages FROM pages p '
+        'JOIN pages t ON t.content_hash = p.content_hash AND t.is_test = 1 AND t.deleted = 0 '
+        'JOIN jobs j ON j.id = t.job_id '
+        f"WHERE p.job_id IN ({marks}) AND p.is_test = 0 AND {counted_page('p')} "
+        'GROUP BY t.job_id ORDER BY j.name', job_ids)]
 
 
 # Each task's cut, in the contract's kind (6.3).
@@ -377,11 +446,9 @@ def build(conn, training_id: int, task: str, job_ids: list[str], val_fraction: f
     dest = config.training_dir(training_id) / 'snapshot'
     shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True, exist_ok=True)
+    # An OCR run scores its test set itself, from the datasets, once it is trained.
     split, job_ids = splitter(conn, task, job_ids, val_fraction, split_strategy, valid_job_ids,
-                              human_checked_only)
-    tests = [j for j in test_job_ids or [] if j not in job_ids] if task != 'ocr' else []
-    if tests:
-        split, job_ids = with_tests(split, tests), job_ids + tests
+                              human_checked_only, test_job_ids if task != 'ocr' else [])
     builder = BUILDERS[task]
     # Only the OCR cut is long enough to need reporting or interrupting.
     extra = ({'on_progress': on_progress, 'should_stop': should_stop,

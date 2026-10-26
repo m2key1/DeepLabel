@@ -8,6 +8,7 @@ overview and setup.
 - [Datasets and projects](#datasets-and-projects)
 - [Creating a dataset](#creating-a-dataset)
 - [The dataset page](#the-dataset-page)
+- [Test data](#test-data)
 - [Layout classes and templates](#layout-classes-and-templates)
 - [Processing and re-runs](#processing-and-re-runs)
 - [Reading order](#reading-order)
@@ -77,6 +78,18 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
 - A run started elsewhere (another tab, a colleague, the API) shows up within seconds.
 - Anyone who can edit the dataset can delete pages and restore them from the Deleted
   filter.
+
+## Test data
+
+- A page is test data or not. No training uses a test page, nor any page with the same scan;
+  a run leaves those out and says how many ("12 pages left out: same scan as test pages in
+  Zollbuecher").
+- The owner of a dataset, or an admin, marks pages as test data from a selection in the page
+  table, with **Test page** in the page viewer, or all at once with **Mark all pages**.
+- **New pages are test pages** makes pages added later test data; **Mark all pages** turns it
+  on. Uploads have an **Add as test pages** checkbox, preset from it.
+- Test pages stay fully editable. The dataset list shows "test set" or "40 of 300 test pages"
+  and filters by **Test data**.
 
 ## Layout classes and templates
 
@@ -267,7 +280,8 @@ Start a run with **Train model** on the Models page. Training runs on the model'
 local GPU or on a Slurm cluster (marked *highly experimental*).
 
 - Pick the base model, the datasets (by project, with search), the validation split and
-  optionally a whole dataset held out as a test set.
+  optionally a test set: the test pages of a dataset, scored with the base and the new model
+  once the run is trained.
 - Train only on lines a person verified, or include lines settled by language-model
   agreement.
 - Tune epochs, batch size, learning rate, early stopping and every other setting the
@@ -289,8 +303,9 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
 
 ## Evaluation
 
-- Evaluate any OCR model on any dataset's checked lines with **Evaluate...** on its page.
-  Training runs are evaluated automatically on their validation split and test set.
+- Evaluate any OCR model on any dataset's checked lines with **Evaluate...** on its page; a
+  dataset with test pages is scored on those, unless **All pages** is chosen. Training runs
+  are evaluated automatically on their validation split and test pages.
 - A queued or running evaluation can be cancelled by its owner or an admin. It keeps its
   place in the list without scores, and **Retry** runs it again.
 - Each evaluation has a page with CER, WER, bag-of-words WER, error types and accuracy per

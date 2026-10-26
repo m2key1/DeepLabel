@@ -60,7 +60,7 @@ def unprobed(monkeypatch):
 @pytest.fixture
 def material(tmp_path, monkeypatch):
     """Three datasets, laid out so every warning the pre-flight raises fires exactly once:
-    jA trains, jV validates (holdout), jT is the test set and holds a copy of jA's first scan."""
+    jA trains, jV validates (holdout) on a copy of jA's second scan, jT holds the test page."""
     monkeypatch.setattr('app.config.TRAININGS_DIR', tmp_path / 'trainings')
     unprobed(monkeypatch)
     conn = store.connect(tmp_path / 'app.db')
@@ -68,8 +68,9 @@ def material(tmp_path, monkeypatch):
         add_job(conn, job_id)
     add_page(conn, tmp_path, 1, 'jA', 'h1')
     add_page(conn, tmp_path, 2, 'jA', 'h2')
-    add_page(conn, tmp_path, 3, 'jV', 'h3')
-    add_page(conn, tmp_path, 4, 'jT', 'h1')
+    add_page(conn, tmp_path, 3, 'jV', 'h2')
+    add_page(conn, tmp_path, 4, 'jT', 'h4')
+    conn.execute('UPDATE pages SET is_test = 1 WHERE id = 4')
     add_line(conn, 1, 1, 'abc')
     add_line(conn, 2, 1, f'S{CYRILLIC_A}me', check_source='llm')
     add_line(conn, 3, 1, 'abc', polygon=SLIVER, check_source='align')
@@ -115,10 +116,10 @@ class TestSplit:
     def test_a_scan_in_two_splits_is_a_duplicate(self, material):
         split = preflight.compute(material, HOLDOUT)['split']
         assert split['duplicate_count'] == 1
-        assert split['duplicates'][0]['content_hash'] == 'h1'
-        assert split['duplicates'][0]['splits'] == ['train', 'test']
+        assert split['duplicates'][0]['content_hash'] == 'h2'
+        assert split['duplicates'][0]['splits'] == ['train', 'val']
         assert {(p['job_id'], p['page_id']) for p in split['duplicates'][0]['pages']} == {
-            ('jA', 1), ('jT', 4)}
+            ('jA', 2), ('jV', 3)}
 
     def test_matches_what_the_snapshot_cuts(self, material):
         """The pre-flight reads the run's own selection and split, not a copy of it: its
@@ -439,7 +440,7 @@ class TestApi:
     @pytest.mark.parametrize('settings, detail', [
         ({'epochs': 0}, 'epochs must be at least 1'),
         ({'split_strategy': 'uniform'}, 'valid_job_ids only applies to the holdout strategy'),
-        ({'test_job_ids': ['jA']}, 'test datasets must not also be training datasets'),
+        ({'test_job_ids': ['jA']}, 'Set jA has no test pages'),
         ({'gpu_count': 2}, 'gpu_count needs a gpu_type'),
     ])
     def test_settings_a_submit_refuses_are_refused_for_review_alike(self, client, settings, detail):
@@ -564,9 +565,8 @@ class TestApi:
             assert [e['line_id'] for e in full['result'][section][flag]['examples']] == [line_id]
             assert redacted['result'][section][flag]['examples'] == []
             assert redacted['result'][section][flag]['count'] == 1
-        assert [p['job_id'] for p in full['result']['split']['duplicates'][0]['pages']] == ['jA', 'jT']
-        assert redacted['result']['split']['duplicates'][0]['pages'] == [
-            {'job_id': 'jT', 'page_id': 4, 'filename': 'scan4.png'}]
+        assert [p['job_id'] for p in full['result']['split']['duplicates'][0]['pages']] == ['jA', 'jV']
+        assert redacted['result']['split']['duplicates'][0]['pages'] == []
         tall = lambda payload: next(b for b in payload['result']['crops']['height']['bins'] if b['lo'] == 32)
         assert [e['line_id'] for e in tall(full)['examples']] == [1, 2, 7, 8, 9, 10, 11, 12]
         assert [e['line_id'] for e in tall(redacted)['examples']] == [9]

@@ -5,7 +5,7 @@ import {
 } from '../../api'
 import type {
   AugmentPipeline, AugmentSpec, ClusterSession, Group, Job, LineShape, ModelTask, RegistryModel,
-  SplitStrategy, Training, TrainingOptions, TrainingTargets, Tunable, TunableValue,
+  LeftOut, SplitStrategy, Training, TrainingOptions, TrainingTargets, Tunable, TunableValue,
 } from '../../api'
 import { modalBtn, modalPrimaryBtn } from '../Modal'
 import { DatasetPicker, datasetSections } from './DatasetPicker'
@@ -55,7 +55,7 @@ const labelClass = 'mb-1 block text-xs font-medium text-ink-muted'
 const HAND_RENDERED = new Set(['learning_rate', 'patience'])
 
 const VAL_PERCENTS = ['5', '10', '15', '20', '30']
-const OVERLAP_DEBOUNCE_MS = 300
+const LEFT_OUT_DEBOUNCE_MS = 300
 
 /** The placeholder a blank field shows: the value the trainer will use, when declared. */
 function formatDefault(value: TunableValue | null | undefined): string {
@@ -169,7 +169,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
   const [humanOnly, setHumanOnly] = useState(from?.human_checked_only ?? false)
   const [pages, setPages] = useState<Record<string, number>>({})
   const [humanCheckedPages, setHumanCheckedPages] = useState<Record<string, number>>({})
-  const [overlap, setOverlap] = useState(0)
+  const [leftOut, setLeftOut] = useState<LeftOut[]>([])
   const [chosen, setChosen] = useState<Set<string>>(() => new Set(from?.dataset_job_ids ?? []))
   // Datasets the run trained on that this account cannot open, or that are gone.
   const [droppedDatasets, setDroppedDatasets] = useState(0)
@@ -190,10 +190,8 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
   }, [from, baseTouched, baseId, defaultModel])
   const { isAdmin } = useAuth()
   const restoredTarget = from && targets[from.target] ? from.target : null
-  // A run validated on a dataset that is not its test set predates the steer-by-test
-  // checkbox, and there is no field here that says it.
-  const lostHoldout = !!from && from.split_strategy === 'holdout' &&
-    !(from.valid_job_ids.length === 1 && from.valid_job_ids[0] === from.test_job_ids[0])
+  // A run validated on datasets of its own has no field here that says it.
+  const lostHoldout = !!from && from.split_strategy === 'holdout'
   const [target, setTarget] = useState<'local' | 'slurm'>(
     restoredTarget ?? (targets.local ? 'local' : 'slurm'))
   const [advanced, setAdvanced] = useState(!!from)
@@ -217,13 +215,9 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
     if (Number(gpuCount) > gpuTypes[type]) setGpuCount(String(gpuTypes[type]))
   }
   const [valPct, setValPct] = useState(from ? restoredValPct(from) : '10')
-  // A holdout run is one steered by its test dataset; the dropdown keeps a real split
-  // strategy underneath for when the steering is switched back off.
   const [strategy, setStrategy] = useState<SplitStrategy>(
     from && from.split_strategy !== 'holdout' ? from.split_strategy : 'uniform')
   const [testId, setTestId] = useState(from?.test_job_ids[0] ?? '')
-  const [steerByTest, setSteerByTest] = useState(
-    !!from && from.split_strategy === 'holdout' && !lostHoldout)
   const [buildLm, setBuildLm] = useState(from?.build_lm ?? false)
   const [options, setOptions] = useState<TrainingOptions | null>(null)
   const [cannotTrain, setCannotTrain] = useState<string | null>(null)
@@ -299,9 +293,8 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
           const reachable = from.dataset_job_ids.filter((id) => rows.some((j) => j.id === id))
           setChosen(new Set(reachable))
           setDroppedDatasets(from.dataset_job_ids.length - reachable.length)
-          if (from.test_job_ids[0] && !rows.some((j) => j.id === from.test_job_ids[0])) {
+          if (from.test_job_ids[0] && !rows.some((j) => j.id === from.test_job_ids[0] && j.test_pages)) {
             setTestId('')
-            setSteerByTest(false)
           }
         }
         if (rows.length) {
@@ -328,25 +321,25 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
       return next
     })
 
-  // A test dataset sharing image content with the training selection would score
-  // dishonestly - the server compares content hashes and the dialog warns up front.
+  // Pages sharing a scan with test pages are left out of the selection; the dialog says
+  // how many, and where their test pages are.
   useEffect(() => {
-    if (!testId || chosen.size === 0) {
-      setOverlap(0)
+    if (chosen.size === 0) {
+      setLeftOut([])
       return
     }
     // Asked once ticking settles, and only the newest answer is shown.
     let live = true
     const timer = window.setTimeout(() => {
-      trainingPreview(task, [...chosen], [testId])
-        .then((res) => { if (live) setOverlap(res.test_overlap_pages ?? 0) })
-        .catch(() => { if (live) setOverlap(0) })
-    }, OVERLAP_DEBOUNCE_MS)
+      trainingPreview(task, [...chosen])
+        .then((res) => { if (live) setLeftOut(res.left_out) })
+        .catch(() => { if (live) setLeftOut([]) })
+    }, LEFT_OUT_DEBOUNCE_MS)
     return () => {
       live = false
       window.clearTimeout(timer)
     }
-  }, [task, testId, chosen])
+  }, [task, chosen])
 
   const toggle = (id: string) => {
     setChosen((prev) => {
@@ -355,10 +348,6 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
       else next.add(id)
       return next
     })
-    if (id === testId) {
-      setTestId('')
-      setSteerByTest(false)
-    }
   }
 
   const checkedInChosen = [...chosen].reduce((sum, id) => sum + (counts[id] ?? 0), 0)
@@ -382,7 +371,8 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
     : chosenPipeline?.spec ?? builtinStack
   const setKnob = (key: string, value: string) => setTuned((prev) => ({ ...prev, [key]: value }))
   const totalPages = [...chosen].reduce((sum, id) => sum + (trainPages[id] ?? 0), 0)
-  const testCandidates = (jobs ?? []).filter((j) => !chosen.has(j.id) && (counts[j.id] ?? 0) > 0)
+  const testCandidates = (jobs ?? []).filter((j) => (j.test_pages ?? 0) > 0)
+  const leftOutPages = leftOut.reduce((sum, row) => sum + row.pages, 0)
   const nameTaken = takenNames.some((n) => n.trim().toLowerCase() === name.trim().toLowerCase())
   // The stored batch was measured for the hardware that run used, so a rerun on other
   // hardware starts from that target's own default instead.
@@ -405,7 +395,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
       : []),
     ...(target !== from.target ? ['batch size is cleared, so the new target measures its own'] : []),
     ...(lostHoldout
-      ? ['it validated on a dataset of its own - a split is cut from the training data instead']
+      ? ['it validated on datasets of its own - a split is cut from the training data instead']
       : []),
     ...(unknownKnobs.length > 0
       ? [`${unknownKnobs.join(', ')} ${unknownKnobs.length === 1 ? 'is' : 'are'} no longer offered`]
@@ -439,8 +429,8 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
         ...(earlyStop && patience.trim() !== '' ? { patience: Number(patience) } : {}),
       },
       val_fraction: Number(valPct) / 100,
-      split_strategy: steerByTest && testId ? 'holdout' : strategy,
-      valid_job_ids: steerByTest && testId ? [testId] : [],
+      split_strategy: strategy,
+      valid_job_ids: [],
       test_job_ids: testId ? [testId] : [],
       build_lm: lmOffered && buildLm,
       human_checked_only: humanOnly,
@@ -561,20 +551,17 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
 
         <div>
         <label className={labelClass} htmlFor="training-test-set">
-          Test dataset
+          Test set
         </label>
         <p className="mb-1 text-xs text-ink-muted">
-          Optional - held out entirely and scored with the base and the new model once the
-          training finishes.
+          Optional - the test pages of a dataset, never trained on and scored with the base
+          and the new model once the training finishes.
         </p>
         <select
           id="training-test-set"
           value={testId}
-          onChange={(e) => {
-            setTestId(e.target.value)
-            if (e.target.value === '') setSteerByTest(false)
-          }}
-          className={`${inputClass} ${testId ? 'mb-1' : 'mb-3'}`}
+          onChange={(e) => setTestId(e.target.value)}
+          className={`${inputClass} mb-3`}
         >
           <option value="">None</option>
           {sections.map((section) => {
@@ -582,7 +569,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
             if (options.length === 0) return null
             const items = options.map((job) => (
               <option key={job.id} value={job.id}>
-                {job.name} ({counts[job.id] ?? 0})
+                {job.name} - {job.test_pages} test page{job.test_pages === 1 ? '' : 's'}
               </option>
             ))
             return section.label
@@ -624,19 +611,6 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
             </span>
           </span>
         </label>
-        )}
-        {testId && (
-          <label className="mb-3 flex items-center gap-1.5 text-xs text-ink-muted">
-            <input
-              type="checkbox"
-              data-testid="steer-by-test"
-              checked={steerByTest}
-              onChange={(e) => setSteerByTest(e.target.checked)}
-              className="cursor-pointer accent-accent"
-            />
-            Also steer early stopping by it - its score then shapes the training, instead of a
-            split cut from the training datasets.
-          </label>
         )}
 
         <label className={labelClass} htmlFor="training-base">
@@ -895,41 +869,34 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
               </div>
             </div>
           )}
-          {steerByTest ? (
-            <p className="text-xs text-ink-muted">
-              Validation comes from the test dataset (steering enabled above), so no split is
-              cut from the training datasets.
-            </p>
-          ) : (
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <label className={labelClass} htmlFor="training-strategy">
-                  Validation data
-                </label>
-                <select
-                  id="training-strategy"
-                  className={inputClass}
-                  value={strategy}
-                  onChange={(e) => setStrategy(e.target.value as SplitStrategy)}
-                >
-                  <option value="uniform">Random split</option>
-                  <option value="stratified">Split within each dataset</option>
-                </select>
-              </div>
-              <div className="flex-1">
-                <label className={labelClass} htmlFor="training-val">
-                  Validation split
-                </label>
-                <select id="training-val" value={valPct} onChange={(e) => setValPct(e.target.value)} className={inputClass}>
-                  {VAL_PERCENTS.map((p) => (
-                    <option key={p} value={p}>
-                      {p}%
-                    </option>
-                  ))}
-                </select>
-              </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className={labelClass} htmlFor="training-strategy">
+                Validation data
+              </label>
+              <select
+                id="training-strategy"
+                className={inputClass}
+                value={strategy}
+                onChange={(e) => setStrategy(e.target.value as SplitStrategy)}
+              >
+                <option value="uniform">Random split</option>
+                <option value="stratified">Split within each dataset</option>
+              </select>
             </div>
-          )}
+            <div className="flex-1">
+              <label className={labelClass} htmlFor="training-val">
+                Validation split
+              </label>
+              <select id="training-val" value={valPct} onChange={(e) => setValPct(e.target.value)} className={inputClass}>
+                {VAL_PERCENTS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}%
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           {/* Every other knob the train module exposes, grouped as the manifest groups
               them. Blank means the trainer's own default, which the placeholder names. */}
           {knobGroups.map((group) => {
@@ -965,25 +932,23 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
           `batch ${batchSize.trim() || batchDefault}`,
           `lr ${learningRate.trim() || lrDefault}`,
           earlyStop ? `early stop after ${patience.trim() || '10'}` : 'no early stop',
-          steerByTest
-            ? 'validated on the test dataset'
-            : `${valPct}% ${strategy === 'uniform' ? 'random' : 'per-dataset'} validation split`,
+          `${valPct}% ${strategy === 'uniform' ? 'random' : 'per-dataset'} validation split`,
           ...(testId ? [`test: ${jobs?.find((j) => j.id === testId)?.name ?? ''}`] : []),
           ...(target === 'slurm' ? [`${gpuCount}x ${GPU_LABELS[gpuType] ?? gpuType}`] : []),
           `augmentation: ${stackLabel}`,
           ...(tunedCount > 0 ? [`${tunedCount} more knob${tunedCount === 1 ? '' : 's'} tuned`] : []),
         ].join(' · ')}
       </p>
-      {totalItems > 0 && !steerByTest && expectedValPages < 1 && (
+      {totalItems > 0 && expectedValPages < 1 && (
         <p data-testid="empty-val-warning" className="mb-1 text-xs text-warn">
           At {valPct}% none of the {totalPages} eligible page{totalPages === 1 ? '' : 's'} would
           land in validation - the baseline/result comparison would be skipped.
         </p>
       )}
-      {overlap > 0 && (
-        <p data-testid="test-overlap-warning" className="mb-1 text-xs text-warn">
-          {overlap} page{overlap === 1 ? '' : 's'} of the test dataset also appear
-          {overlap === 1 ? 's' : ''} in the training datasets - its score would be inflated.
+      {leftOutPages > 0 && (
+        <p data-testid="left-out-notice" className="mb-1 text-xs text-ink-muted">
+          {leftOutPages} page{leftOutPages === 1 ? '' : 's'} left out: same scan as test pages
+          in {leftOut.map((row) => row.name).join(', ')}
         </p>
       )}
       {errorLine}

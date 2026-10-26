@@ -344,12 +344,12 @@ def test_a_layout_run_gets_the_contracts_page_boxes(seeded, tmp_path):
 
 
 def add_test_dataset(conn, job_id='job2', page_id=2):
-    """A second checked dataset, a copy of job1's page under its own content."""
+    """A second checked dataset of one test page, a copy of job1's page under its own content."""
     scan = conn.execute('SELECT source_file FROM pages WHERE id = 1').fetchone()[0]
     conn.execute('INSERT INTO jobs (id, name) VALUES (?, ?)', (job_id, job_id))
     conn.execute(
         'INSERT INTO pages (id, job_id, idx, filename, source_file, content_hash, width, height, '
-        "status, layout_checked, lines_checked) VALUES (?, ?, 0, 'scan.png', ?, ?, 400, 300, 'done', 1, 1)",
+        "status, layout_checked, lines_checked, is_test) VALUES (?, ?, 0, 'scan.png', ?, ?, 400, 300, 'done', 1, 1, 1)",
         (page_id, job_id, scan, f'hash{page_id}'))
     conn.execute("INSERT INTO elements (id, page_id, order_idx, class_name, bbox, kind) "
                  "VALUES (?, ?, 0, 'Paragraph', '[0.1, 0.1, 0.9, 0.9]', 'content')", (page_id, page_id))

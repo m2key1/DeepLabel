@@ -26,7 +26,8 @@ def _source_label(conn, source: dict, user: dict) -> str:
         row = conn.execute('SELECT name FROM jobs WHERE id = ?', (job_id,)).fetchone()
         if row is not None:
             names.append(row['name'] if can_access_job(conn, job_id, user) else 'another dataset')
-    return ', '.join(names) or 'datasets'
+    label = ', '.join(names) or 'datasets'
+    return f'test pages of {label}' if source.get('test_pages') else label
 
 
 @router.get('/api/evaluations')
@@ -54,6 +55,9 @@ class EvaluationCreate(BaseModel):
     model_id: int
     job_ids: list[str]
     decode: str = decode_modes.DEFAULT_DECODE
+    # 'test' scores the test pages only, 'all' every page; left out, the test pages when
+    # any of the datasets has some.
+    pages: Literal['test', 'all'] | None = None
 
 
 @router.post('/api/evaluations')
@@ -73,13 +77,23 @@ def create_evaluation(body: EvaluationCreate, conn=Depends(get_db),
         require_job_access(conn, job_id, user)
         if store.get_job(conn, job_id) is None:
             raise HTTPException(404, f'dataset {job_id} not found')
-    counts = trainer.eligible_counts(conn, 'ocr', body.job_ids)
-    if sum(counts.values()) == 0:
+    test_pages = body.pages == 'test' or (body.pages is None and _have_test_pages(conn, body.job_ids))
+    if test_pages:
+        counts = trainer.eligible_counts(conn, 'ocr', body.job_ids, pages='test')
+        if sum(counts.values()) == 0:
+            raise HTTPException(400, 'the test pages of the selected datasets contain no checked lines')
+    elif sum(trainer.eligible_counts(conn, 'ocr', body.job_ids, pages='all').values()) == 0:
         raise HTTPException(400, 'the selected datasets contain no checked lines')
-    eval_id = evaluator.create(conn, body.model_id, {'jobs': body.job_ids},
-                               body.decode, user['username'])
+    source = {'jobs': body.job_ids, **({'test_pages': True} if test_pages else {})}
+    eval_id = evaluator.create(conn, body.model_id, source, body.decode, user['username'])
     return evaluator.payload(
         conn.execute('SELECT * FROM evaluations WHERE id = ?', (eval_id,)).fetchone())
+
+
+def _have_test_pages(conn, job_ids: list[str]) -> bool:
+    marks = ', '.join('?' * len(job_ids))
+    return conn.execute(f'SELECT 1 FROM pages WHERE job_id IN ({marks}) AND is_test = 1 AND deleted = 0 LIMIT 1',
+                        job_ids).fetchone() is not None
 
 
 @router.post('/api/evaluations/{eval_id}/retry')

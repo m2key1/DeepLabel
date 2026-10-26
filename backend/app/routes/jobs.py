@@ -130,7 +130,7 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
                model_ocr_id: int | None = Form(None), ocr_decode: str = Form(decode.DEFAULT_DECODE),
                gt_autocheck: bool = Form(False), gt_ordered: bool = Form(False),
                gt_from_pdf: bool = Form(False), layout_template_id: int | None = Form(None),
-               hold: bool = Form(False),
+               hold: bool = Form(False), as_test: bool = Form(False),
                files: list[UploadFile] = None, conn=Depends(get_db),
                user: str = Depends(get_user), _editor=Depends(require_role('admin', 'member'))):
     """Create a dataset from uploaded files - a .txt beside an image is ingested as that page's transcription.
@@ -194,12 +194,13 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
         'INSERT INTO jobs (id, name, owner, line_mode, task, run_layout, run_lines, run_ocr, '
         'run_predict, model_id, run_tile, tile_size, tile_skip_blank, line_width, '
         'model_layout_id, model_lines_id, model_ocr_id, ocr_decode, gt_autocheck, gt_ordered, '
-        'gt_from_pdf, reading_order, status) '
-        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'gt_from_pdf, reading_order, new_pages_test, status) '
+        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         (job_id, name, user, line_mode, task, int(run_layout), int(run_lines), int(run_ocr),
          int(run_predict), model_id, int(run_tile), tile_size, int(tile_skip_blank), line_width,
          models['layout'], models['lines'], models['ocr'], ocr_decode, int(gt_autocheck),
-         int(gt_ordered), int(gt_from_pdf), page_reading_order, UPLOADING if hold else 'queued'))
+         int(gt_ordered), int(gt_from_pdf), page_reading_order, int(as_test),
+         UPLOADING if hold else 'queued'))
     # Tiling jobs register the uploads as full maps (job_maps); the tile phase produces
     # the page rows. Non-tiling jobs treat each upload as a ready tile (a page).
     if run_tile:
@@ -392,10 +393,11 @@ def _require_appendable(conn, job_id: str) -> dict:
     return job
 
 
-def _append_text_pages(conn, job_id: str, entries: list, gt_texts: dict, corpus_texts: dict) -> int:
+def _append_text_pages(conn, job_id: str, entries: list, gt_texts: dict, corpus_texts: dict,
+                       as_test: bool | None = None) -> int:
     """Adds a text dataset's pages with the ground truth that came with them and keeps the
     corpus documents among them; returns how many documents were kept."""
-    ingest.attach_ground_truth(conn, ingest.insert_pages(conn, job_id, entries), gt_texts)
+    ingest.attach_ground_truth(conn, ingest.insert_pages(conn, job_id, entries, as_test), gt_texts)
     return corpus.store_documents(conn, job_id, corpus_texts)
 
 
@@ -411,9 +413,10 @@ def _discard_uploads(job_id: str, saved: list[tuple]) -> None:
 
 
 @router.post('/api/jobs/{job_id}/pages/upload')
-def append_uploads(job_id: str, files: list[UploadFile] = None, conn=Depends(get_db),
-                   user: dict = Depends(current_user)):
-    """Add pages to an existing dataset by upload."""
+def append_uploads(job_id: str, files: list[UploadFile] = None, as_test: bool | None = Form(None),
+                   conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Add pages to an existing dataset by upload. `as_test` says whether they are test
+    pages; left out, they follow the dataset's "New pages are test pages"."""
     require_job_owner(conn, job_id, user)
     job = _require_appendable(conn, job_id)
     _require_phase_grants(user, **{phase: bool(job[phase]) for phase, _ in PHASE_CAPABILITIES})
@@ -435,7 +438,7 @@ def append_uploads(job_id: str, files: list[UploadFile] = None, conn=Depends(get
             raise HTTPException(400, f'{detail} (skipped {", ".join(skipped[:5])})')
         raise HTTPException(400, detail)
     if is_map:
-        ingest.insert_maps(conn, job_id, saved) if tiling else ingest.insert_pages(conn, job_id, saved)
+        ingest.insert_maps(conn, job_id, saved) if tiling else ingest.insert_pages(conn, job_id, saved, as_test)
         documents = 0
     else:
         # gt_from_pdf is a property of the dataset, so appended pages are treated
@@ -446,7 +449,7 @@ def append_uploads(job_id: str, files: list[UploadFile] = None, conn=Depends(get
         except ingest.IngestError as e:
             _discard_uploads(job_id, saved)
             raise HTTPException(e.status_code, e.detail)
-        documents = _append_text_pages(conn, job_id, saved, texts, corpus_texts)
+        documents = _append_text_pages(conn, job_id, saved, texts, corpus_texts, as_test)
     _queue_unless_held(conn, job_id)
     conn.commit()
     return {'ok': True, 'added': len(saved), 'documents': documents}
@@ -502,7 +505,7 @@ def list_jobs(conn=Depends(get_db), user: dict = Depends(current_user)):
     shared: dict[str, list[str]] = {}
     for r in conn.execute('SELECT job_id, username FROM job_assignees ORDER BY username'):
         shared.setdefault(r['job_id'], []).append(r['username'])
-    empty = {'pages_total': 0, 'layout_checked_pages': 0, 'lines_total': 0, 'lines_done': 0}
+    empty = {'pages_total': 0, 'layout_checked_pages': 0, 'test_pages': 0, 'lines_total': 0, 'lines_done': 0}
     payloads = []
     for row in rows:
         job = _job_payload(conn, row, shared.get(row['id'], []))
@@ -613,6 +616,7 @@ def get_job(job_id: str, pages: bool = True, conn=Depends(get_db),
          'layout_checked': bool(p['layout_checked']),
          'lines_checked': bool(p['lines_checked']),
          'deleted': bool(p['deleted']),
+         'is_test': bool(p['is_test']),
          'llm_models': readers.get(p['id'], 0),
          'min_confidence': stats[p['id']]['mn'] if p['id'] in stats else None,
          'avg_confidence': stats[p['id']]['av'] if p['id'] in stats else None,
@@ -621,7 +625,7 @@ def get_job(job_id: str, pages: bool = True, conn=Depends(get_db),
          'lines_total': line_counts[p['id']]['total'] if p['id'] in line_counts else 0,
          'lines_reviewed': (line_counts[p['id']]['done'] or 0) if p['id'] in line_counts else 0}
         for p in conn.execute(
-            'SELECT id, idx, filename, width, height, status, layout_checked, lines_checked, deleted '
+            'SELECT id, idx, filename, width, height, status, layout_checked, lines_checked, deleted, is_test '
             'FROM pages WHERE job_id = ? ORDER BY idx', (job_id,))]
     return job
 
@@ -808,6 +812,8 @@ class JobPatch(BaseModel):
     # The models this dataset is read with, settable without starting a read - which is
     # otherwise the only thing that writes them.
     llm_model_ids: list[int] | None = None
+    # Whether pages added from now on arrive as test pages.
+    new_pages_test: bool | None = None
 
 
 PROCESSING_FIELDS = ('line_mode', 'run_layout', 'run_lines', 'run_ocr')
@@ -925,6 +931,10 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
         if chosen is not None and chosen != job[column]:
             _require_model_choice(conn, chosen, task)
         conn.execute(f'UPDATE jobs SET {column} = ? WHERE id = ?', (chosen, job_id))
+    if 'new_pages_test' in fields and body.new_pages_test is not None:
+        if user['role'] != 'admin' and job['owner'] != user['username']:
+            raise HTTPException(403, 'not permitted')
+        conn.execute('UPDATE jobs SET new_pages_test = ? WHERE id = ?', (int(body.new_pages_test), job_id))
     for column in ('gt_autocheck', 'gt_ordered'):
         # Whether alignment checks lines off, and whether the transcription is complete and
         # in reading order so that order alone may - the owner's claim to make, as checking
@@ -1017,7 +1027,8 @@ def patch_job(job_id: str, body: JobPatch, conn=Depends(get_db), user: dict = De
                        'model_lines_id, model_ocr_id, ocr_decode, llm_consensus_min, llm_autocheck, '
                        'llm_prompt, gt_prompt, reference_overlap, gt_autocheck, gt_ordered, line_mode, '
                        'run_layout, run_lines, run_ocr, reading_order, tile_size, '
-                       'llm_consensus_with_ocr, ocr_convention FROM jobs WHERE id = ?', (job_id,)).fetchone()
+                       'llm_consensus_with_ocr, ocr_convention, new_pages_test FROM jobs WHERE id = ?',
+                       (job_id,)).fetchone()
     return {'id': job_id, 'name': row['name'], 'checked': bool(row['checked']),
             'gt_autocheck': bool(row['gt_autocheck']), 'gt_ordered': bool(row['gt_ordered']),
             'auto_redetect': bool(row['auto_redetect']), 'group_id': row['group_id'],
@@ -1031,7 +1042,8 @@ def patch_job(job_id: str, body: JobPatch, conn=Depends(get_db), user: dict = De
             'llm_consensus_with_ocr': bool(row['llm_consensus_with_ocr']),
             'line_mode': row['line_mode'], 'run_layout': bool(row['run_layout']),
             'run_lines': bool(row['run_lines']), 'run_ocr': bool(row['run_ocr']),
-            'reading_order': row['reading_order'], 'tile_size': row['tile_size']}
+            'reading_order': row['reading_order'], 'tile_size': row['tile_size'],
+            'new_pages_test': bool(row['new_pages_test'])}
 
 
 class Share(BaseModel):
@@ -1048,6 +1060,37 @@ def share_job(job_id: str, body: Share, conn=Depends(get_db), user: dict = Depen
                      [(job_id, n) for n in names])
     conn.commit()
     return {'job_id': job_id, 'shared_with': names}
+
+
+class TestPages(BaseModel):
+    # The pages to mark or unmark; left out, every page of the dataset, and the dataset's
+    # "New pages are test pages" follows.
+    page_ids: list[int] | None = None
+    test: bool
+
+
+@router.post('/api/jobs/{job_id}/test-pages')
+def mark_test_pages(job_id: str, body: TestPages, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Mark pages as test data, which no training uses, or unmark them."""
+    require_job_owner(conn, job_id, user)
+    if body.page_ids is None:
+        conn.execute('UPDATE pages SET is_test = ? WHERE job_id = ?', (int(body.test), job_id))
+        conn.execute('UPDATE jobs SET new_pages_test = ? WHERE id = ?', (int(body.test), job_id))
+    else:
+        conn.executemany('UPDATE pages SET is_test = ? WHERE id = ? AND job_id = ?',
+                         [(int(body.test), page_id, job_id) for page_id in body.page_ids])
+    conn.commit()
+    caches.refresh_progress(conn, job_id)
+    page_rows.forget_counts(conn, job_id)
+    return test_page_counts(conn, job_id)
+
+
+def test_page_counts(conn, job_id: str) -> dict:
+    row = conn.execute(
+        'SELECT COUNT(*) pages, COALESCE(SUM(is_test), 0) test_pages, '
+        '(SELECT new_pages_test FROM jobs WHERE id = ?) new_pages_test '
+        f'FROM pages WHERE job_id = ? AND {caches.counted_page()}', (job_id, job_id)).fetchone()
+    return {'test_pages': row['test_pages'], 'pages': row['pages'], 'new_pages_test': bool(row['new_pages_test'])}
 
 
 @router.post('/api/jobs/{job_id}/cancel')

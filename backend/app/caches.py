@@ -116,6 +116,15 @@ def job_progress(conn) -> dict[str, dict[str, int]]:
         return rollup
 
 
+def refresh_progress(conn, job_id: str):
+    """Count one dataset again now, for a write that adds no row the stamp would see."""
+    key = db_key(conn)
+    with _progress_lock:
+        held = _progress.get(key)
+        if held is not None:
+            held[2].update(_count_progress(conn, {job_id}))
+
+
 def warm_progress(conn):
     """Counts the list once at startup, so the first visit after a deploy does not wait."""
     with _progress_lock:
@@ -160,11 +169,13 @@ def _count_progress(conn, jobs: set[str] | None = None) -> dict[str, dict[str, i
     # A container's lines are out of the reading - no work to do, as the dataset's own
     # page counts it.
     for row in conn.execute(
-            'SELECT job_id, COUNT(*) pages_total, SUM(layout_checked) layout_checked_pages '
+            'SELECT job_id, COUNT(*) pages_total, SUM(layout_checked) layout_checked_pages, '
+            'SUM(is_test) test_pages '
             f"FROM pages WHERE {counted_page()} {only('job_id')}GROUP BY job_id", args):
         rollup[row['job_id']] = {
             'pages_total': row['pages_total'],
             'layout_checked_pages': row['layout_checked_pages'] or 0,
+            'test_pages': row['test_pages'] or 0,
             'lines_total': 0, 'lines_done': 0}
     for row in conn.execute(
             'SELECT p.job_id job_id, COUNT(*) lines_total, SUM(l.checked) lines_done '
@@ -172,7 +183,7 @@ def _count_progress(conn, jobs: set[str] | None = None) -> dict[str, dict[str, i
             "WHERE l.deleted = 0 AND e.deleted = 0 AND e.kind != 'container' "
             f"AND {counted_page('p')} {only('p.job_id')}GROUP BY p.job_id", args):
         entry = rollup.setdefault(row['job_id'], {
-            'pages_total': 0, 'layout_checked_pages': 0, 'lines_total': 0, 'lines_done': 0})
+            'pages_total': 0, 'layout_checked_pages': 0, 'test_pages': 0, 'lines_total': 0, 'lines_done': 0})
         entry['lines_total'] = row['lines_total']
         entry['lines_done'] = row['lines_done'] or 0
     # When a person last touched it, which is what "recently worked on" means - the

@@ -33,6 +33,7 @@ import {
   READING_ORDERS,
   READING_ORDER_LABEL,
   setPageLayoutChecked,
+  markTestPages,
   setPageLinesChecked,
   setPageReadingOrder,
   tilesUrl,
@@ -1067,6 +1068,17 @@ export function PageViewerPage() {
       setJob((j) =>
         j ? { ...j, pages: j.pages.map((x) => (x.id === page.id ? { ...x, layout_checked: next } : x)) } : j,
       )
+    } catch (e) {
+      fail(e)
+    }
+  }
+
+  const toggleTestPage = async () => {
+    if (!page) return
+    const next = !page.is_test
+    try {
+      await markTestPages(jobId, [page.id], next)
+      setPage((p) => (p ? { ...p, is_test: next } : p))
     } catch (e) {
       fail(e)
     }
@@ -3507,6 +3519,12 @@ export function PageViewerPage() {
           <Toggle on={!!page?.lines_checked} onClick={toggleLinesChecked} className="w-full">
             Lines complete
           </Toggle>
+          {job && (isAdmin || job.owner === user) && (
+            <Toggle on={!!page?.is_test} onClick={toggleTestPage} className="w-full" data-testid="page-test-toggle"
+                    title="Test data - no training uses this page, nor any page with the same scan">
+              Test page
+            </Toggle>
+          )}
           <div className="flex gap-1">
             <Button size="xs" onClick={deleteCurrent} disabled={curSelId() === null} className="flex-1">
               Delete

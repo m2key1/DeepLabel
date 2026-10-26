@@ -59,6 +59,7 @@ export function NewJobPage() {
   const [picks, setPicks] = useState<Record<ModelTask, string>>({ layout: '', lines: '', ocr: '' })
   const [ocrDecode, setOcrDecode] = useState<OcrDecode>('rescored')
   const [gtAutocheck, setGtAutocheck] = useState(false)
+  const [asTest, setAsTest] = useState(false)
   const [gtOrdered, setGtOrdered] = useState(false)
   const [gtFromPdf, setGtFromPdf] = useState(false)
   const [importReviewed, setImportReviewed] = useState(true)
@@ -228,6 +229,7 @@ export function NewJobPage() {
           gtFromPdf,
           structure,
           isMap ? null : templateId,
+          !isMap && asTest,
         )
         job_id = res.job_id
       } else {
@@ -919,6 +921,18 @@ export function NewJobPage() {
               ))}
             </div>
           </div>
+        )}
+        {mode === 'upload' && !archive && !isMap && (
+          <label className="flex items-start gap-1.5 text-sm text-ink">
+            <input type="checkbox" data-testid="as-test" checked={asTest}
+                   onChange={(e) => setAsTest(e.target.checked)} className="mt-1" />
+            <span>
+              Add as test pages
+              <span className="block text-xs text-ink-muted">
+                Test data that no training uses - for scoring models on. Pages added later follow.
+              </span>
+            </span>
+          </label>
         )}
         {progress && <UploadProgress progress={progress} />}
         {error && <p className="text-sm text-danger">{error}</p>}

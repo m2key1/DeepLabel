@@ -147,18 +147,20 @@ def lm_build_outcome(training: dict) -> str | None:
 
 
 def eligible_counts(conn, task: str, job_ids: list[str],
-                    human_checked_only: bool = False) -> dict[str, int]:
-    """How much checked material each dataset would contribute to a snapshot."""
+                    human_checked_only: bool = False, pages: str = 'train') -> dict[str, int]:
+    """How much checked material each dataset would contribute to a snapshot's training
+    and validation, or on its 'test' pages, or on 'all' of them."""
     queries = {
         'ocr': ('SELECT COUNT(*) n FROM lines l JOIN elements e ON l.element_id = e.id '
                 'JOIN pages p ON e.page_id = p.id '
                 f"WHERE p.job_id = ? AND {caches.counted_page('p')} "
+                f"AND {train_snapshot.page_filter('p', pages)} "
                 'AND l.checked = 1 AND l.deleted = 0 AND e.deleted = 0 '
                 + train_snapshot.checked_by(human_checked_only)),
         'layout': f'SELECT COUNT(*) n FROM pages WHERE job_id = ? AND layout_checked = 1 '
-                  f'AND {caches.counted_page()}',
+                  f'AND {caches.counted_page()} AND {train_snapshot.page_filter(pages=pages)}',
         'lines': f'SELECT COUNT(*) n FROM pages WHERE job_id = ? AND lines_checked = 1 '
-                 f'AND {caches.counted_page()}',
+                 f'AND {caches.counted_page()} AND {train_snapshot.page_filter(pages=pages)}',
     }
     return {job_id: conn.execute(queries[task], (job_id,)).fetchone()['n'] for job_id in job_ids}
 
@@ -166,7 +168,7 @@ def eligible_counts(conn, task: str, job_ids: list[str],
 PREVIEW_CHUNK = 500
 
 
-def _preview_sql(task: str, marks: str) -> str:
+def _preview_sql(task: str, marks: str, pages: str = 'train') -> str:
     """Per dataset: checked items and pages, and of each what a person checked. The pages
     are the ones the split would divide, so they follow train_snapshot._task_keys."""
     if task == 'ocr':
@@ -177,6 +179,7 @@ def _preview_sql(task: str, marks: str) -> str:
                 'FROM lines l JOIN elements e ON l.element_id = e.id '
                 'JOIN pages p ON e.page_id = p.id '
                 f"WHERE p.job_id IN ({marks}) AND {caches.counted_page('p')} "
+                f"AND {train_snapshot.page_filter('p', pages)} "
                 'AND l.checked = 1 AND l.deleted = 0 AND e.deleted = 0 GROUP BY p.job_id')
     flag, splittable = {
         'layout': ('layout_checked',
@@ -186,10 +189,10 @@ def _preview_sql(task: str, marks: str) -> str:
     return (f'SELECT job_id, COUNT(*) items, COUNT(*) human_items, SUM({splittable}) pages, '
             f'SUM({splittable}) human_pages FROM pages '
             f'WHERE job_id IN ({marks}) AND {flag} = 1 AND {caches.counted_page()} '
-            'GROUP BY job_id')
+            f'AND {train_snapshot.page_filter(pages=pages)} GROUP BY job_id')
 
 
-def preview_counts(conn, task: str, job_ids: list[str]) -> dict[str, dict[str, int]]:
+def preview_counts(conn, task: str, job_ids: list[str], pages: str = 'train') -> dict[str, dict[str, int]]:
     """How much checked material each dataset would contribute, how many pages it spans -
     the split is cut per page, so that is what a fraction divides - and of both what a
     person rather than agreeing language models checked. One grouped query per chunk of
@@ -198,7 +201,7 @@ def preview_counts(conn, task: str, job_ids: list[str]) -> dict[str, dict[str, i
     for start in range(0, len(job_ids), PREVIEW_CHUNK):
         chunk = job_ids[start:start + PREVIEW_CHUNK]
         found.update({r['job_id']: r for r in conn.execute(
-            _preview_sql(task, ', '.join('?' * len(chunk))), chunk)})
+            _preview_sql(task, ', '.join('?' * len(chunk)), pages), chunk)})
 
     def column(name):
         return {job_id: found[job_id][name] if job_id in found else 0 for job_id in job_ids}
@@ -324,7 +327,7 @@ def register_result(conn, training: dict, out_dir: Path) -> int:
         # base model and new model alike, so "did it help?" has an untouched answer.
         test_ids = json.loads(training.get('test_job_ids') or '[]')
         if test_ids:
-            test_source = {'jobs': test_ids}
+            test_source = {'jobs': test_ids, 'test_pages': True}
             if training.get('human_checked_only'):
                 test_source['human_checked_only'] = True
             # One headline number per model, in the mode they actually run in.

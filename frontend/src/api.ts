@@ -82,6 +82,10 @@ export interface Job {
   shared_with: string[]
   pages_total?: number
   layout_checked_pages?: number
+  /** Pages marked as test data, which no training uses. */
+  test_pages?: number
+  /** Whether pages added from now on arrive as test pages. */
+  new_pages_test?: boolean
   lines_total?: number
   lines_done?: number
   /** When a person last touched it - the pipeline's own passes do not count. Absent on a
@@ -108,6 +112,8 @@ export interface PageSummary {
   layout_checked: boolean
   lines_checked: boolean
   deleted: boolean
+  /** Test data: never trained on, and what a run's test set is scored on. */
+  is_test?: boolean
   /** Degrees the scan has been turned since it arrived. Renditions are served immutable,
    *  so a turned page's pictures are asked for under this. Absent from the dataset
    *  detail's own page list, which the table falls back to on an older backend only. */
@@ -280,6 +286,8 @@ export interface PageDetail {
   height: number
   layout_checked: boolean
   lines_checked: boolean
+  /** Test data: never trained on, nor any page with the same scan. */
+  is_test: boolean
   /** How far the scan has been turned, 0/90/180/270. */
   rotation: number
   elements: PageElement[]
@@ -1016,8 +1024,10 @@ export function uploadJob(
   gtFromPdf?: boolean,
   readingOrder = 'auto',
   layoutTemplateId?: number | null,
+  asTest = false,
 ): Promise<{ job_id: string }> {
   const form = new FormData()
+  if (asTest) form.append('as_test', 'true')
   form.append('name', name)
   form.append('line_mode', lineMode)
   form.append('page_reading_order', readingOrder)
@@ -1104,8 +1114,10 @@ export function uploadPages(
   jobId: string,
   files: File[],
   onProgress: (loaded: number, total: number) => void,
+  asTest?: boolean,
 ): Promise<{ added: number }> {
   const form = new FormData()
+  if (asTest !== undefined) form.append('as_test', String(asTest))
   for (const file of files) form.append('files', file)
   return uploadForm(`/api/jobs/${jobId}/pages/upload`, form, onProgress)
 }
@@ -1229,6 +1241,10 @@ export function setLineWidth(jobId: string, lineWidth: number): Promise<{ line_w
   return request(`/api/jobs/${jobId}`, json('PATCH', { line_width: lineWidth }))
 }
 
+export function setNewPagesTest(jobId: string, newPagesTest: boolean): Promise<{ new_pages_test: boolean }> {
+  return request(`/api/jobs/${jobId}`, json('PATCH', { new_pages_test: newPagesTest }))
+}
+
 export function setAutoRedetect(jobId: string, autoRedetect: boolean): Promise<{ auto_redetect: boolean }> {
   return request(`/api/jobs/${jobId}`, json('PATCH', { auto_redetect: autoRedetect }))
 }
@@ -1309,7 +1325,7 @@ export interface BulkPreview {
  *  filtered set rather than the first N pages of everything. */
 export type PageFilter =
   'all' | 'reviewed' | 'lines-reviewed' | 'layout-reviewed' | 'unreviewed-lines' | 'layout-unchecked'
-  | 'no-layout' | 'deleted'
+  | 'no-layout' | 'test-pages' | 'deleted'
 
 export type PageSort =
   'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'checked' | 'confidence' | 'llm'
@@ -1625,6 +1641,7 @@ export function createEvaluation(body: {
   model_id: number
   job_ids: string[]
   decode: OcrDecode
+  pages?: 'test' | 'all'
 }): Promise<Evaluation> {
   return request('/api/evaluations', json('POST', body))
 }
@@ -1641,10 +1658,19 @@ export function listTrainings(): Promise<{
   return request('/api/trainings')
 }
 
+/** Pages a run leaves out for sharing a scan with test pages, per dataset holding those. */
+export interface LeftOut {
+  job_id: string
+  name: string
+  pages: number
+}
+
+/** What the datasets would contribute to a run: by default what it may train on, or the
+ *  checked material on their 'test' pages, or on 'all' of them. */
 export function trainingPreview(
   task: ModelTask,
   jobIds: string[],
-  testJobIds: string[] = [],
+  pages: 'train' | 'test' | 'all' = 'train',
 ): Promise<{
   counts: Record<string, number>
   pages: Record<string, number>
@@ -1652,10 +1678,18 @@ export function trainingPreview(
   machine_settled: Record<string, number>
   /** The pages left once that is set aside, which is what a person-only split divides. */
   human_checked_pages: Record<string, number>
-  test_overlap_pages?: number
+  left_out: LeftOut[]
 }> {
-  return request('/api/trainings/preview',
-    json('POST', { task, job_ids: jobIds, test_job_ids: testJobIds }))
+  return request('/api/trainings/preview', json('POST', { task, job_ids: jobIds, pages }))
+}
+
+/** Mark pages as test data or unmark them; no page ids means every page of the dataset,
+ *  and its "New pages are test pages" follows. */
+export function markTestPages(
+  jobId: string, pageIds: number[] | null, test: boolean,
+): Promise<{ test_pages: number; pages: number; new_pages_test: boolean }> {
+  return request(`/api/jobs/${jobId}/test-pages`,
+    json('POST', { ...(pageIds ? { page_ids: pageIds } : {}), test }))
 }
 
 export interface ClusterSession {

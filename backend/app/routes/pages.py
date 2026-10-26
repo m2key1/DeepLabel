@@ -119,7 +119,8 @@ def page_results(job_id: str, page_id: int, conn=Depends(get_db), user: dict = D
             # this doubles as what tells a browser its copy is of the old way up.
             'rotation': page['rotation'] or 0,
             'layout_checked': bool(page['layout_checked']),
-            'lines_checked': bool(page['lines_checked']), 'elements': elements, 'regions': regions,
+            'lines_checked': bool(page['lines_checked']), 'is_test': bool(page['is_test']),
+            'elements': elements, 'regions': regions,
             # What the lines of a page with no layout are ordered by: this page's own
             # answer if it has one, and the dataset's, which is what it falls back to.
             'reading_order': page['reading_order'],

@@ -257,7 +257,7 @@ class TestAnEmptyValidSplit:
         model_id = trainer.register_result(conn, trainer.get_training(conn, 1), out)
 
         assert [(e['model_id'], json.loads(e['source'])) for e in evaluations(conn)] == [
-            (model_id, {'jobs': ['j-test']}), (1, {'jobs': ['j-test']})]
+            (model_id, {'jobs': ['j-test'], 'test_pages': True}), (1, {'jobs': ['j-test'], 'test_pages': True})]
 
 
 class TestTheCeiling:

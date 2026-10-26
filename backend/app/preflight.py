@@ -217,15 +217,18 @@ def job_order(request: dict) -> list[str]:
 
 
 def _material(conn, request: dict, reader):
-    """The run's own selection and split, then its test datasets, through one of the
-    snapshot's readers - so the review covers exactly what the cut would take."""
-    task = request['task']
+    """The run's own selection, split and test set, through one of the snapshot's readers
+    - so the review covers exactly what the cut would take."""
     split, job_ids = train_snapshot.splitter(
-        conn, task, list(request['dataset_job_ids']), request.get('val_fraction', 0.1),
+        conn, request['task'], list(request['dataset_job_ids']), request.get('val_fraction', 0.1),
         request.get('split_strategy', 'uniform'), request.get('valid_job_ids') or [],
-        bool(request.get('human_checked_only')))
+        bool(request.get('human_checked_only')), request.get('test_job_ids') or [])
     yield from reader(conn, job_ids, split)
-    yield from reader(conn, request.get('test_job_ids') or [], lambda job_id, key: 'test')
+
+
+def trained_from(request: dict) -> list[str]:
+    """The datasets a run trains or validates on."""
+    return list(dict.fromkeys([*request['dataset_job_ids'], *(request.get('valid_job_ids') or [])]))
 
 
 def _ocr_sections(conn, request: dict, tally: Tally) -> tuple[dict, dict, dict, list]:
@@ -490,8 +493,13 @@ def _split_findings(split: dict, request: dict) -> list[dict]:
                'The valid split is empty - early stopping has nothing to watch and the '
                'baseline and result evaluations are skipped'),
         *_flag(bool(request.get('test_job_ids')) and totals['test']['items'] == 0, 'empty_split', 'warn',
-               'The test datasets hold no checked material for this task'),
+               'The test pages hold no checked material for this task'),
     ]
+    if split['left_out']:
+        pages = sum(row['pages'] for row in split['left_out'])
+        names = ', '.join(row['name'] for row in split['left_out'])
+        findings += _flag(pages, 'left_out', 'info',
+                          f'{plural(pages, "page")} left out: same scan as test pages in {names}')
     n = split['duplicate_count']
     return findings + _flag(n, 'duplicates', 'warn',
                             f'{plural(n, "scan sits", "scans sit")} in more than one split, so a score '
@@ -511,7 +519,8 @@ def compute(conn, request: dict) -> dict:
         classes, findings = _layout_classes(conn, request, tally)
     else:
         _segmentation(conn, request, tally)
-    split = tally.section(job_order(request))
+    split = {**tally.section(job_order(request)),
+             'left_out': train_snapshot.left_out(conn, trained_from(request))}
     # A recognizer batches line crops; the layout and line models batch whole pages.
     batched = 'items' if task == 'ocr' else 'pages'
     return {'task': task, 'unit': UNITS[task], 'split': split, 'crops': crops, 'text': text,

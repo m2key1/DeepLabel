@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     -- This dataset's own prompt, which replaces the model's rather than adding to it -
     -- material this specific is usually worth saying in full. Empty uses the model's.
     llm_prompt TEXT NOT NULL DEFAULT '',
+    -- Whether pages added to this dataset arrive as test pages.
+    new_pages_test INTEGER NOT NULL DEFAULT 0,
     -- Wording for the diplomatic reading that turns a corpus span into ground truth. It
     -- is a different question from llm_prompt - it carries the page's reference text -
     -- so it is asked separately. Empty uses the shipped one.
@@ -100,7 +102,10 @@ CREATE TABLE IF NOT EXISTS pages (
     -- This page's own layout when it differs from the volume's; NULL follows the dataset.
     reading_order TEXT,
     -- Why ingest could not read this scan, beside status 'unreadable'.
-    error TEXT
+    error TEXT,
+    -- Test data: never trained on, nor any page with the same scan, and what a run's
+    -- test set is scored on.
+    is_test INTEGER NOT NULL DEFAULT 0
 );
 -- Full map scans awaiting/after tiling (run_tile map jobs). A map is the source of
 -- tiles, never annotated itself; its tiles are ordinary pages referencing it via
@@ -668,6 +673,19 @@ PROVENANCE_BACKFILL = 3
 TEXT_COMPOSED = 4
 
 
+def _mark_former_test_sets(conn: sqlite3.Connection) -> None:
+    """Before pages were marked, a run named whole datasets as its test set. Their pages
+    become test pages, so no later run trains on what an earlier one was scored on."""
+    conn.execute('ALTER TABLE pages ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0')
+    if 'new_pages_test' not in {row[1] for row in conn.execute('PRAGMA table_info(jobs)')}:
+        conn.execute('ALTER TABLE jobs ADD COLUMN new_pages_test INTEGER NOT NULL DEFAULT 0')
+    tested = {job_id for row in conn.execute('SELECT test_job_ids FROM trainings')
+              for job_id in json.loads(row['test_job_ids'] or '[]')}
+    for job_id in tested:
+        conn.execute('UPDATE pages SET is_test = 1 WHERE job_id = ?', (job_id,))
+        conn.execute('UPDATE jobs SET new_pages_test = 1 WHERE id = ?', (job_id,))
+
+
 def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
@@ -888,6 +906,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE trainings ADD COLUMN preflight_id INTEGER REFERENCES training_preflights(id)')
     if 'lm_build' not in training_cols:
         conn.execute('ALTER TABLE trainings ADD COLUMN lm_build TEXT')
+    if 'is_test' not in page_cols:
+        _mark_former_test_sets(conn)
     if 'grad_accum_steps' not in training_cols:
         conn.execute('ALTER TABLE trainings ADD COLUMN grad_accum_steps INTEGER')
         conn.execute('ALTER TABLE trainings ADD COLUMN lr_scale REAL')
@@ -1290,6 +1310,7 @@ def job_row_to_dict(row: sqlite3.Row) -> dict:
     job['llm_consensus_with_ocr'] = bool(job.get('llm_consensus_with_ocr', 0))
     job['gt_autocheck'] = bool(job.get('gt_autocheck', 0))
     job['gt_ordered'] = bool(job.get('gt_ordered', 0))
+    job['new_pages_test'] = bool(job.get('new_pages_test', 0))
     job.pop('pid', None)
     return job
 

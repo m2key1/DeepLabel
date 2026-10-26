@@ -69,15 +69,17 @@ def snapshot_batches(snapshot: Path, held: int = HELD_AT_ONCE, conn=None):
 
 
 def job_batches(conn, job_ids: list[str], held: int = HELD_AT_ONCE,
-                human_checked_only: bool = False):
+                human_checked_only: bool = False, test_pages_only: bool = False):
     """Checked lines of live datasets, cut from their pages as they are reached. The page
     is opened once for all of its lines and closed before the next one. A run trained only
-    on what a person verified is scored only on that too."""
+    on what a person verified is scored only on that too, and a test set only on its test
+    pages."""
     batch = []
     for job_id in job_ids:
         pages = conn.execute(
             'SELECT id, source_file FROM pages '
-            f'WHERE job_id = ? AND {counted_page()} ORDER BY id', (job_id,)).fetchall()
+            f'WHERE job_id = ? AND {counted_page()} {"AND is_test = 1 " if test_pages_only else ""}'
+            'ORDER BY id', (job_id,)).fetchall()
         for page in pages:
             lines = conn.execute(
                 'SELECT l.id, l.polygon, l.orientation, l.text, l.corrected_text, l.order_idx, e.class_name '
