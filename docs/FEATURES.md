@@ -75,6 +75,10 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
 - Filter chips narrow the table to pages that still need work, are reviewed, have no
   layout, and so on. The arrow keys move the preview through the list.
 - Long datasets load a screenful at a time; **Show more** loads the next.
+- The **Run** menu holds everything that runs models on the whole dataset. Work your edits
+  left behind, such as lines to read again or boxes whose lines need detecting again, is
+  counted on the menu and listed first. Rarer actions (layout classes, language model
+  readings, purging deleted pages) are in the **⋯** menu.
 - A run started elsewhere (another tab, a colleague, the API) shows up within seconds.
 - Anyone who can edit the dataset can delete pages and restore them from the Deleted
   filter.
@@ -102,8 +106,9 @@ Every dataset has its own layout classes, copied from a template when it is crea
 - **Layout templates** lists all templates. Create one from scratch, copy another, or save a
   dataset's classes with **Save as template**. The built-in Schematismus template cannot be
   changed, only copied.
-- Edit a dataset's classes from **Layout classes** on its page: rename, recolour, change
-  the type, or remove a class and delete or reassign its boxes. Every change can be undone.
+- Edit a dataset's classes from **Layout classes** in the **⋯** menu on its page: rename,
+  recolour, change the type, or remove a class and delete or reassign its boxes. Every
+  change can be undone.
 - When a layout model predicts labels the dataset does not have, the Processing dialog
   asks which class each label becomes, or whether to leave it out.
 
@@ -114,8 +119,8 @@ the next run; nothing already recognised is thrown away.
 
 - Choose the phases, the models, whether layout elements are boxes or polygons, and the
   page structure used for reading order.
-- **Re-run** a phase over the dataset, a selection of pages, or a single page. The dialog
-  says what will be replaced before it runs.
+- **Re-run** a phase over the dataset (from the **Run** menu on its page), a selection of
+  pages, or a single page. The dialog says what will be replaced before it runs.
 - Re-reading never touches lines a person has checked, unless you explicitly ask it to.
 - When lines are re-detected, the text of the old lines is kept and matched onto the new
   ones. A correction lands back on its line where the shape barely changed, and is offered
@@ -256,8 +261,9 @@ reader.
   optionally checked. Hover the agreement badge to compare every reader's text. The OCR
   model does not vote by default. Agreement never overwrites a person's correction or
   check.
-- **Re-apply LLM agreement** applies changed agreement settings to lines already read;
-  **Remove LLM readings** deletes a model's readings from a dataset.
+- **Re-apply LLM agreement** (in the dataset page's **⋯** menu) applies changed agreement
+  settings to lines already read; **Remove LLM readings** deletes a model's readings from a
+  dataset.
 - A deployment can switch the feature off entirely.
 
 ## Models

@@ -4,6 +4,7 @@ import {
   seedLlmConnection, uniqueName,
 } from '../helpers/api'
 import { pickModel } from '../helpers/llm'
+import { datasetAction } from '../helpers/dataset'
 
 const DEV = identity('dev', 'admin')
 // Answers with the prompt it was given: the only honest oracle for whose wording won.
@@ -42,7 +43,7 @@ test.describe('Scenario: a model with wording of its own', () => {
     await resetLlmStats()
 
     await page.goto(`/jobs/${jobId}`)
-    await page.getByTestId('llm-read-open').click()
+    await datasetAction(page, 'llm-read-open')
     await pickModel(page, connection, ECHO).check()
     await page.getByTestId('llm-start').click()
 
@@ -60,7 +61,7 @@ test.describe('Scenario: a model with wording of its own', () => {
       const jobId = await seedDistinctPagesJob(uniqueName('Editor seed'), 1, 60)
 
       await page.goto(`/jobs/${jobId}`)
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await pickModel(page, connection, ECHO).check()
       const section = page.getByTestId('llm-what-they-see')
       if ((await section.getAttribute('aria-expanded')) === 'false') await section.click()

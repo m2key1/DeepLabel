@@ -5,6 +5,7 @@ import {
   waitForJobStatus,
 } from '../helpers/api'
 import { scanPng } from '../helpers/image'
+import { datasetAction } from '../helpers/dataset'
 
 // The identity helpers/api.ts seeds under, which is who a correction made there is by.
 const SEEDER = 'e2e-seeder'
@@ -33,7 +34,7 @@ const lineReading = async (jobId: string, text: string) => {
  *  wait until the runner is through. */
 async function rerunAlignment(page: Page, jobId: string) {
   await page.goto(`/jobs/${jobId}`)
-  await page.getByRole('button', { name: 'Re-run', exact: true }).click()
+  await datasetAction(page, 'rerun-open')
   await page.locator('[data-testid="rerun-phase"][data-phase="align"]').check()
   const answer = page.waitForResponse((r) =>
     r.url().endsWith(`/api/jobs/${jobId}/rerun`) && r.request().method() === 'POST')

@@ -7,6 +7,7 @@ import {
 import { startLlmRead } from '../helpers/llm'
 import { openViewer } from '../helpers/viewer'
 import { pickDataset, taskSection } from '../helpers/training'
+import { datasetAction, openDatasetMenu } from '../helpers/dataset'
 
 const DEV = identity('dev', 'admin')
 
@@ -359,8 +360,9 @@ test.describe('Scenario: applying changed agreement settings to lines already re
       // Settling again is an explicit step on the dataset, and it says what it would touch
       // before it touches it.
       await page.goto(`/jobs/${jobId}`)
-      await expect(page.getByTestId('llm-settle-again')).toHaveText('Re-apply LLM agreement')
-      await page.getByTestId('llm-settle-again').click()
+      const more = await openDatasetMenu(page, 'dataset-more')
+      await expect(more.getByTestId('llm-settle-again')).toHaveAccessibleName('Re-apply LLM agreement…')
+      await more.getByTestId('llm-settle-again').click()
       // The rules it applies are spelled out, from the dataset's own settings.
       await expect(page.getByTestId('llm-settle-again-rules')).toHaveText(
         "A line takes the language models' reading when at least 2 of them read it the same way, "
@@ -420,7 +422,7 @@ test.describe('Scenario: removing language model readings', () => {
 
       // One model's readings, from the dataset.
       await page.goto(`/jobs/${jobId}`)
-      await page.getByTestId('remove-readings').click()
+      await datasetAction(page, 'remove-readings')
       await expect(page.getByTestId('remove-readings-option')).toHaveCount(3)
       await page.locator('[data-testid="remove-readings-option"]').filter({ hasText: SECOND }).getByRole('radio').check()
       await expect(page.getByTestId('remove-readings-warning')).toContainText('1 reading is deleted for good')
@@ -439,7 +441,7 @@ test.describe('Scenario: removing language model readings', () => {
 
       // And every model's.
       await page.getByRole('button', { name: 'Close' }).click()
-      await page.getByTestId('remove-readings').click()
+      await datasetAction(page, 'remove-readings')
       await page.getByTestId('remove-readings-confirm').click()
       await expect(page.getByTestId('remove-readings-result')).toHaveText('Removed 1 reading.')
       expect(await left()).toEqual([])

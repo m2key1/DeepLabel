@@ -4,6 +4,7 @@ import {
   seedDistinctPagesJob, seedLlmConnection, uniqueName,
 } from '../helpers/api'
 import { openViewer } from '../helpers/viewer'
+import { datasetAction } from '../helpers/dataset'
 
 const DEV = identity('dev', 'admin')
 
@@ -15,7 +16,7 @@ const TARGET = 'Sample Paragraph line 3'
 
 async function readOnePage(page: import('@playwright/test').Page, jobId: string, connection: string) {
   await page.goto(`/jobs/${jobId}`)
-  await page.getByTestId('llm-read-open').click()
+  await datasetAction(page, 'llm-read-open')
   await page.locator(`[data-testid="llm-pick"][data-label="${connection} ${EXTRA}"]`)
     .getByRole('checkbox').check()
   await page.getByTestId('llm-start').click()

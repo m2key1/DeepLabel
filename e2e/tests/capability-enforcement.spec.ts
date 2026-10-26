@@ -5,6 +5,7 @@ import {
   patchJob, seedCompletedJob, shareJob, uniqueName, waitForJobStatus,
 } from '../helpers/api'
 import { asSession, seedSession, useSession, userRecord } from '../helpers/session'
+import { datasetAction, openDatasetMenu } from '../helpers/dataset'
 
 async function signInAs(context: BrowserContext, role: 'member' | 'admin', username: string) {
   const session = seedSession(role, username)
@@ -177,7 +178,7 @@ test.describe('Scenario: a member re-runs a dataset', () => {
       await markLinesChecked(jobId, 1)
 
       await page.goto(`/jobs/${jobId}`)
-      await page.getByRole('button', { name: 'Re-run', exact: true }).click()
+      await datasetAction(page, 'rerun-open')
       await page.locator('[data-testid="rerun-phase"][data-phase="ocr"]').check()
       // The careful answer is the default: checked lines are left as they are.
       await expect(page.locator('[data-testid="rerun-choice"][data-keep="true"]')).toBeChecked()
@@ -202,7 +203,9 @@ test.describe('Scenario: a member re-runs a dataset', () => {
     await page.goto(`/jobs/${jobId}`)
     // The dataset is open to them, but the re-run is not offered.
     await expect(page.getByRole('heading', { name })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Re-run', exact: true })).toHaveCount(0)
+    const run = await openDatasetMenu(page, 'dataset-run')
+    await expect(run.getByTestId('llm-read-open')).toBeVisible()
+    await expect(run.getByTestId('rerun-open')).toHaveCount(0)
 
     const refused = await asSession(session, `/api/jobs/${jobId}/rerun`, {
       method: 'POST', body: JSON.stringify({ from_phase: 'ocr' }),

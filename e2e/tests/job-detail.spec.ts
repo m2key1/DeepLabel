@@ -1,10 +1,11 @@
 import { test, expect } from '../helpers/test'
 import {
-  backendFetch, correctLine, getPageDetail, identity, jobPageIds, pageDeletedFlags, pageLines,
+  backendFetch, correctLine, getJob, getPageDetail, identity, jobPageIds, pageDeletedFlags, pageLines,
   seedCompletedJob, uniqueName, waitForJobStatus,
 } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { seedMapJob } from '../helpers/map'
+import { datasetAction } from '../helpers/dataset'
 
 const DEV = identity('dev', 'admin')
 
@@ -161,7 +162,7 @@ test.describe('Scenario: working with a dataset', () => {
       await correctLine(first.id, 'Settled by hand')
 
       await page.goto(`/jobs/${jobId}`)
-      await page.getByRole('button', { name: 'Re-run' }).click()
+      await datasetAction(page, 'rerun-open')
 
       // Line detection: 2 pages x 2 elements x 3 lines from the stub runner, one of them
       // now checked and corrected. Re-offering it is the first answer.
@@ -191,7 +192,7 @@ test.describe('Scenario: working with a dataset', () => {
     await correctLine(first.id, 'Settled by hand')
 
     await page.goto(`/jobs/${jobId}`)
-    await page.getByRole('button', { name: 'Re-run' }).click()
+    await datasetAction(page, 'rerun-open')
     await page.locator('[data-testid="rerun-phase"][data-phase="ocr"]').check()
     await page.getByTestId('rerun-confirm').click()
 
@@ -269,9 +270,22 @@ test.describe('Scenario: reading the page table at a glance', () => {
     const jobId = await seedCompletedJob(uniqueName('Top bar'), 1)
 
     await page.goto(`/jobs/${jobId}`)
-    const transcript = await page.getByRole('link', { name: 'Transcript' }).boundingBox()
-    const llm = await page.getByTestId('llm-read-open').boundingBox()
+    const transcript = await page.getByRole('group', { name: 'Read' }).boundingBox()
+    const run = await page.getByTestId('dataset-run').boundingBox()
     // Transcript was a size smaller than everything beside it.
-    expect(transcript!.height).toBe(llm!.height)
+    expect(transcript!.height).toBe(run!.height)
+  })
+
+  test('the Checked switch signs the whole dataset off, and off again', async ({ page }) => {
+    const jobId = await seedCompletedJob(uniqueName('Signed off'), 1)
+
+    await page.goto(`/jobs/${jobId}`)
+    const checked = page.getByRole('switch', { name: 'Checked' })
+    await expect(checked).toHaveAttribute('aria-checked', 'false')
+    await checked.click()
+    await expect(checked).toHaveAttribute('aria-checked', 'true')
+    await expect.poll(async () => (await getJob(jobId)).checked).toBe(true)
+    await checked.click()
+    await expect.poll(async () => (await getJob(jobId)).checked).toBe(false)
   })
 })

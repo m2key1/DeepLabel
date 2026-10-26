@@ -45,7 +45,7 @@ import { useSetCrumbs } from '../components/NavBar'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
 import { Modal, modalBtn, modalPrimaryBtn } from '../components/Modal'
 import { NoteTag } from '../components/NoteTag'
-import { FlaskIcon } from '../components/icons'
+import { CaretIcon, DownloadIcon, FlaskIcon, KebabIcon, PlayIcon } from '../components/icons'
 import { TEST_PAGE_MEANING, TestDataChip, TestPageSwitch } from '../components/TestPage'
 import { StatusBadge } from '../components/StatusBadge'
 import { Badge } from '../components/ui/Badge'
@@ -75,7 +75,9 @@ function withinTime<T>(promise: Promise<T>, ms: number): Promise<T> {
       (error) => { window.clearTimeout(timer); reject(error) })
   })
 }
-import { Button, buttonClass } from '../components/ui/Button'
+import { BarDivider, Button, ButtonGroup, buttonClass, groupButtonClass } from '../components/ui/Button'
+import { ActionMenu } from '../components/job/ActionMenu'
+import { SwitchKnob } from '../components/ui/SwitchKnob'
 import { AddPagesDialog } from '../components/job/AddPagesDialog'
 import { UploadProgress, type UploadState } from '../components/ui/UploadProgress'
 import { PHASE_CHOICES } from '../components/job/processing'
@@ -91,7 +93,7 @@ import { RerunDialog } from '../components/job/RerunDialog'
 import { CopyImageButton } from '../components/CopyImageButton'
 import {
   REVIEW_THRESHOLDS, classColor, confBadgeClass, confOutlineClass, getReviewConf,
-  setReviewConf,
+  plural, setReviewConf,
 } from '../util'
 import { widePageShell } from '../components/ui/page'
 import { menuTrigger, useDismiss } from '../components/ui/menu'
@@ -931,37 +933,11 @@ export function JobDetailPage() {
         </div>
       )}
       <header className="mb-3 border-b border-line pb-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <h1 className="font-serif text-lg font-semibold">{job.name}</h1>
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-subtle">
-            <input
-              type="checkbox"
-              checked={job.checked}
-              onChange={(e) => {
-                const checked = e.target.checked
-                setJob((p) => (p ? { ...p, checked } : p))
-                setJobChecked(jobId, checked).catch((err: Error) => setError(err.message))
-              }}
-              className="cursor-pointer accent-accent"
-            />
-            checked
-          </label>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          <h1 className="mr-1 font-serif text-lg font-semibold">{job.name}</h1>
           <StatusBadge status={job.status} />
-          <span data-testid="job-review-count" className="text-xs text-ink-subtle">
-            {job.pages_checked}/{(isMap ? job.tiles_total : job.pages_live) ?? 0}{' '}
-            {isMap ? 'tiles reviewed' : 'pages with every line reviewed'}
-          </span>
-          {(job.counters.gt_total ?? 0) > 0 && (
-            <span
-              className="text-xs text-ink-subtle"
-              title="Transcription lines matched to recognized lines"
-            >
-              transcriptions {job.counters.gt_matched ?? 0}/{job.counters.gt_total}
-            </span>
-          )}
-          <span className="text-xs text-ink-subtle" title="Owner">
-            {job.owner}
-          </span>
+          <ReviewProgress done={job.pages_checked ?? 0} total={(isMap ? job.tiles_total : job.pages_live) ?? 0}
+                          unit={isMap ? 'tiles reviewed' : 'pages with every line reviewed'} />
           {!isMap && (
             <TestDataControls
               testPages={chipCounts['test-pages'] ?? 0}
@@ -980,61 +956,56 @@ export function JobDetailPage() {
             setJob((p) => (p ? { ...p, note } : p))
             return note
           }} />
-          <div className="ml-auto flex items-center gap-2">
+          <CheckedSwitch on={job.checked} onChange={(checked) => {
+            setJob((p) => (p ? { ...p, checked } : p))
+            setJobChecked(jobId, checked).catch((err: Error) => setError(err.message))
+          }} />
+          <div className="ml-auto flex items-center gap-1.5">
             {!isMap && (
-              <Link
-                to={`/jobs/${jobId}/transcript`}
-                title="Read the recognized text in order - reviewed lines in full ink"
-                className={buttonClass({ variant: 'outline', size: 'sm' })}
-              >
-                Transcript
-              </Link>
+              <ButtonGroup aria-label="Read">
+                <Link to={`/jobs/${jobId}/transcript`} className={groupButtonClass()}
+                      title="Read the recognized text in order - reviewed lines in full ink">
+                  Transcript
+                </Link>
+                <Link to={`/jobs/${jobId}/corpus`} data-testid="corpus-open" className={groupButtonClass()}
+                      title="Cut a transcribed corpus across the pages and read them against it">
+                  Corpus
+                </Link>
+              </ButtonGroup>
             )}
             {!isMap && (
-              <Link
-                to={`/jobs/${jobId}/corpus`}
-                data-testid="corpus-open"
-                title="Cut a transcribed corpus across the pages and read them against it"
-                className={buttonClass({ variant: 'outline', size: 'sm' })}
-              >
-                Corpus
-              </Link>
+              <div role="group" aria-label="Review"
+                   className="flex shrink-0 items-center overflow-hidden rounded border border-warn/40">
+                <button
+                  onClick={startReview}
+                  disabled={!review?.total}
+                  title="Walk every unchecked line below the confidence threshold"
+                  className="px-2 py-1 text-xs font-medium text-warn hover:bg-warn/10 disabled:cursor-default disabled:text-ink-subtle disabled:hover:bg-transparent"
+                >
+                  {review ? `Review ${review.total} flagged` : 'Review…'}
+                </button>
+                <select
+                  value={maxConf}
+                  onChange={(e) => {
+                    const next = Number(e.target.value)
+                    setMaxConf(next)
+                    setReviewConf(next)
+                  }}
+                  title="Confidence threshold"
+                  className="cursor-pointer self-stretch border-l border-warn/40 bg-transparent pl-1.5 pr-0.5 text-xs text-warn"
+                >
+                  {REVIEW_THRESHOLDS.map((t) => (
+                    <option key={t} value={t}>
+                      &lt;{Math.round(t * 100)}%
+                    </option>
+                  ))}
+                </select>
+              </div>
             )}
-            {!isMap && (
-            <div className="flex items-center overflow-hidden rounded border border-warn/40">
-              <button
-                onClick={startReview}
-                disabled={!review?.total}
-                title="Walk every unchecked line below the confidence threshold"
-                className="px-2.5 py-1 text-sm font-medium text-warn hover:bg-warn/10 disabled:cursor-default disabled:text-ink-subtle disabled:hover:bg-transparent"
-              >
-                {review ? `Review ${review.total} flagged` : 'Review…'}
-              </button>
-              <select
-                value={maxConf}
-                onChange={(e) => {
-                  const next = Number(e.target.value)
-                  setMaxConf(next)
-                  setReviewConf(next)
-                }}
-                title="Confidence threshold"
-                className="cursor-pointer border-l border-warn/40 bg-transparent py-1 pl-1.5 pr-0.5 text-xs text-warn"
-              >
-                {REVIEW_THRESHOLDS.map((t) => (
-                  <option key={t} value={t}>
-                    &lt;{Math.round(t * 100)}%
-                  </option>
-                ))}
-              </select>
-            </div>
-            )}
-            {/* Re-running the dataset is its owner's call, like running a phase on its
-                pages, and a permission per phase on top: the button is there for an owner
-                who may run at least one of them - and the dialog offers only those. A
-                read-only account is refused every write before its capabilities are
-                looked at, so a capability it was given draws nothing. */}
+            <BarDivider />
             {canOwn && uploading && (
               <Button
+                size="xs"
                 data-testid="start-job"
                 onClick={() => startJob(jobId).then(refetch).catch((e: Error) => setError(e.message))}
                 title="This dataset was uploaded in parts and waits for the rest. Start it once every part is in."
@@ -1042,64 +1013,49 @@ export function JobDetailPage() {
                 Start processing
               </Button>
             )}
-            {canEdit && canOwn && !active && !uploading && !isMap
-              && ['pipeline.layout', 'pipeline.lines', 'pipeline.ocr'].some(can) && (
-              <Button onClick={() => setRerunOpen(true)}>Re-run</Button>
-            )}
             {isAdmin && active && (
-              <button
-                onClick={onCancel}
-                className="rounded border border-warn/40 px-2.5 py-1 text-sm text-warn hover:bg-warn/10"
-              >
+              <Button size="xs" onClick={onCancel} className="border-warn/40 text-warn hover:border-warn">
                 Cancel
-              </button>
-            )}
-            {canEdit && can('pipeline.ocr') && !active && !uploading && !isMap && reocrCount > 0 && (
-              <Button
-                onClick={() => reocr(jobId).then(refetch).catch((e: Error) => setError(e.message))}
-                title="Re-read the text of edited or newly drawn lines"
-              >
-                Re-read {reocrCount} line{reocrCount === 1 ? '' : 's'}
               </Button>
             )}
-            {canEdit && !isMap && (
-              <Button onClick={() => { setLlmPages(undefined); setLlmOpen(true) }}
-                      data-testid="llm-read-open"
-                      title="Have language models transcribe the pages, then match their reading to the lines">
-                Transcribe with LLMs
-              </Button>
-            )}
-            {/* Owner or admin, like the agreement settings it applies; shown once readings
-                are on file, since there is nothing to settle before. */}
-            {!isMap && (
-              <Button onClick={() => setClassesOpen(true)} data-testid="layout-classes"
-                      title="The layout classes of this dataset: names, colours, which are containers">
-                Layout classes
-              </Button>
-            )}
-            {canOwn && !isMap && (llmStatus?.done ?? 0) > 0 && (
-              <Button onClick={() => setSettleOpen(true)} data-testid="llm-settle-again"
-                      title="Match the readings already on file again under the dataset's agreement rules - no model is asked">
-                Re-apply LLM agreement
-              </Button>
-            )}
-            {canOwn && !isMap && (llmStatus?.done ?? 0) > 0 && (
-              <Button onClick={() => setRemoveReadingsOpen(true)} data-testid="remove-readings"
-                      title="Delete this dataset's language model readings, from every model or one">
-                Remove LLM readings
-              </Button>
-            )}
-            {canEdit && can('pipeline.lines') && !active && !isMap && !!stale?.elements && (
-              <Button onClick={() => setRedetectOpen(true)} title="Re-detect lines for boxes whose geometry changed">
-                Re-detect lines ({stale.elements})
-              </Button>
-            )}
-            {isAdmin && !active && !!purgeable?.files && (
-              <Button variant="danger" onClick={() => setPurgeOpen(true)}
-                      title="Delete the image files of deleted pages">
-                Purge {purgeable.pages}
-              </Button>
-            )}
+            <ActionMenu
+              testId="dataset-run"
+              title="Run models on the whole dataset"
+              trigger={<><PlayIcon /> Run</>}
+              caret
+              actions={[
+                // Re-running the dataset is its owner's call, and a permission per phase on top:
+                // the entry is there for an owner who may run at least one of them - and the
+                // dialog offers only those.
+                ...(canEdit && can('pipeline.ocr') && !active && !uploading && !isMap && reocrCount > 0 ? [{
+                  label: `Re-read ${plural(reocrCount, 'line')}`,
+                  hint: 'Edited or newly drawn since they were last read',
+                  testId: 'reocr-run',
+                  pending: reocrCount,
+                  onSelect: () => reocr(jobId).then(refetch).catch((e: Error) => setError(e.message)),
+                }] : []),
+                ...(canEdit && can('pipeline.lines') && !active && !isMap && stale?.elements ? [{
+                  label: `Re-detect lines in ${plural(stale.elements, 'box', 'boxes')}`,
+                  hint: 'Boxes whose shape changed since their lines were found',
+                  testId: 'redetect-open',
+                  pending: stale.elements,
+                  onSelect: () => setRedetectOpen(true),
+                }] : []),
+                ...(canEdit && canOwn && !active && !uploading && !isMap
+                  && ['pipeline.layout', 'pipeline.lines', 'pipeline.ocr'].some(can) ? [{
+                  label: 'Re-run phases…',
+                  hint: 'Run layout, lines, OCR or alignment again on every page',
+                  testId: 'rerun-open',
+                  onSelect: () => setRerunOpen(true),
+                }] : []),
+                ...(canEdit && !isMap ? [{
+                  label: 'Transcribe with LLMs…',
+                  hint: 'Language models read the pages, and their reading is matched to the lines',
+                  testId: 'llm-read-open',
+                  onSelect: () => { setLlmPages(undefined); setLlmOpen(true) },
+                }] : []),
+              ]}
+            />
             {isMap ? (
               <>
                 {isAdmin && !active && (
@@ -1173,13 +1129,14 @@ export function JobDetailPage() {
             ) : (
               <div className="relative">
                 <Button
+                  size="xs"
                   {...menuTrigger(exportOpen)}
                   onClick={(e) => {
                     e.stopPropagation()
                     setExportOpen((v) => !v)
                   }}
                 >
-                  Export
+                  <DownloadIcon /> Export <CaretIcon />
                 </Button>
                 {exportOpen && (
                   <div className={`absolute right-0 top-full z-10 mt-1 w-40 overflow-hidden ${popoverChrome}`}>
@@ -1214,8 +1171,50 @@ export function JobDetailPage() {
                 )}
               </div>
             )}
+            <ActionMenu
+              testId="dataset-more"
+              label="More actions"
+              title="Layout classes, language model readings and clean-up"
+              trigger={<KebabIcon />}
+              actions={[
+                ...(!isMap ? [{
+                  label: 'Layout classes…',
+                  hint: 'Their names, colours, and which are containers',
+                  testId: 'layout-classes',
+                  onSelect: () => setClassesOpen(true),
+                }] : []),
+                // Owner or admin, like the agreement settings they apply; offered once readings
+                // are on file, since there is nothing to settle or remove before.
+                ...(canOwn && !isMap && (llmStatus?.done ?? 0) > 0 ? [{
+                  label: 'Re-apply LLM agreement…',
+                  hint: 'Match the readings on file again under the agreement rules - no model is asked',
+                  testId: 'llm-settle-again',
+                  onSelect: () => setSettleOpen(true),
+                }, {
+                  label: 'Remove LLM readings…',
+                  hint: 'From every model, or from one',
+                  testId: 'remove-readings',
+                  onSelect: () => setRemoveReadingsOpen(true),
+                }] : []),
+                ...(isAdmin && !active && purgeable?.files ? [{
+                  label: `Purge ${plural(purgeable.pages, 'deleted page')}`,
+                  hint: 'Delete their image files for good',
+                  testId: 'purge-open',
+                  danger: true,
+                  onSelect: () => setPurgeOpen(true),
+                }] : []),
+              ]}
+            />
           </div>
         </div>
+        <p data-testid="job-meta" className="mt-0.5 text-xs text-ink-subtle">
+          <span title="Owner">{job.owner}</span>
+          {(job.counters.gt_total ?? 0) > 0 && (
+            <span title="Transcription lines matched to recognized lines">
+              {' · '}transcriptions {job.counters.gt_matched ?? 0}/{job.counters.gt_total}
+            </span>
+          )}
+        </p>
         <div className="mt-1.5">
           <PhaseStrip job={job} />
         </div>
@@ -1713,6 +1712,32 @@ function UnreadablePages({ pages }: { pages: UnreadablePage[] }) {
 
 /** How much of the dataset is test data, and for its owner the switch and the dataset-wide
  *  marking. Test pages are never trained on, nor any page with the same scan. */
+/** How much of the dataset is reviewed, as a chip with a bar; the title says in what unit. */
+function ReviewProgress({ done, total, unit }: { done: number; total: number; unit: string }) {
+  return (
+    <span data-testid="job-review-count" title={`${done} of ${total} ${unit}`}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-raised px-2 py-0.5 text-[11px] font-medium text-ink-muted">
+      <span aria-hidden="true" className="h-1 w-10 overflow-hidden rounded-full bg-line-strong">
+        <span className="block h-full bg-accent" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+      </span>
+      {done}/{total} reviewed
+    </span>
+  )
+}
+
+/** The dataset as a whole signed off as checked. */
+function CheckedSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} data-testid="job-checked"
+            title="Mark the whole dataset as checked" onClick={() => onChange(!on)}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+              on ? 'border-ok/40 bg-ok/10 text-ok' : 'border-line-strong text-ink-muted hover:text-ink'}`}>
+      Checked
+      <SwitchKnob on={on} onColor="bg-ok" />
+    </button>
+  )
+}
+
 function TestDataControls({ testPages, pages, newPagesTest, canOwn, onSwitch, onMarkAll }: {
   testPages: number
   pages: number

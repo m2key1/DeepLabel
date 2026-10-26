@@ -4,6 +4,7 @@ import {
   seedLlmConnection, uniqueName,
 } from '../helpers/api'
 import { pickModel } from '../helpers/llm'
+import { datasetAction } from '../helpers/dataset'
 
 const DEV = identity('dev', 'admin')
 
@@ -22,7 +23,7 @@ async function openPromptEditor(page: import('@playwright/test').Page) {
 async function readAndEcho(page: import('@playwright/test').Page, jobId: string,
                            connection: string, options: { refresh?: boolean } = {}): Promise<string[]> {
   await page.goto(`/jobs/${jobId}`)
-  await page.getByTestId('llm-read-open').click()
+  await datasetAction(page, 'llm-read-open')
   await pickModel(page, connection, ECHO).check()
   if (options.refresh) await page.getByTestId('llm-refresh').check()
   await page.getByTestId('llm-start').click()
@@ -88,7 +89,7 @@ test.describe('Scenario: deciding how the models are asked', () => {
       await resetLlmStats()
 
       await page.goto(`/jobs/${jobId}`)
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await openPromptEditor(page)
       // It starts from what would be used anyway, so replacing means editing rather than
       // starting from nothing and losing the rules underneath.
@@ -121,7 +122,7 @@ test.describe('Scenario: deciding how the models are asked', () => {
 
       // The dataset is given its own wording, which does not touch what was read.
       await page.goto(`/jobs/${jobId}`)
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await openPromptEditor(page)
       await page.getByTestId('dataset-prompt').fill('Entirely new instructions.')
       await pickModel(page, connection, ECHO).check()
@@ -134,7 +135,7 @@ test.describe('Scenario: deciding how the models are asked', () => {
       ).toContain('Never modernise')
 
       // Reopening says so, with the price of asking again.
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await pickModel(page, connection, ECHO).check()
       await expect(page.getByTestId('llm-stale-prompt'))
         .toContainText('1 page read with a different prompt')
@@ -166,7 +167,7 @@ test.describe('Scenario: a model that thinks before it answers', () => {
     const jobId = await seedDistinctPagesJob(uniqueName('Thinking'), 1, 60)
 
     await page.goto(`/jobs/${jobId}`)
-    await page.getByTestId('llm-read-open').click()
+    await datasetAction(page, 'llm-read-open')
     await pickModel(page, connection, THINKING).check()
     await page.getByTestId('llm-start').click()
 
@@ -186,7 +187,7 @@ test.describe('Scenario: a model that thinks before it answers', () => {
       const jobId = await seedDistinctPagesJob(uniqueName('Mandatory'), 1, 62)
 
       await page.goto(`/jobs/${jobId}`)
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await pickModel(page, connection, 'stub-mandatory-reasoning').check()
       await page.getByTestId('llm-start').click()
 
@@ -218,7 +219,7 @@ test.describe('Scenario: a model that thinks before it answers', () => {
       }).toContain('chat_template_kwargs')
 
       await page.goto(`/jobs/${jobId}`)
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await pickModel(page, connection, THINKING).check()
       await page.getByTestId('llm-start').click()
 

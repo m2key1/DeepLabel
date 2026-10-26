@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react'
 import { FlaskIcon } from './icons'
+import { SwitchKnob } from './ui/SwitchKnob'
 
 export const TEST_PAGE_MEANING = 'Test data - no training uses it, nor pages with the same scan'
 
@@ -22,9 +23,7 @@ export function TestPageSwitch({ on, compact = false, className = '', ...props }
     >
       <FlaskIcon />
       {!compact && 'Test page'}
-      <span className={`relative h-3 w-5 rounded-full transition-colors ${on ? 'bg-test' : 'bg-line-strong'}`}>
-        <span className={`absolute top-0.5 h-2 w-2 rounded-full bg-surface transition-[left] ${on ? 'left-2.5' : 'left-0.5'}`} />
-      </span>
+      <SwitchKnob on={on} onColor="bg-test" />
       {on && !compact && <span className="font-normal opacity-80">kept out of training</span>}
     </button>
   )

@@ -1,6 +1,7 @@
 import { test, expect } from '../helpers/test'
 import { BACKEND, jobPageIds, pageDeletedFlags, seedCompletedJob, uniqueName } from '../helpers/api'
 import { LANDSCAPE } from '../helpers/viewer'
+import { openDatasetMenu } from '../helpers/dataset'
 
 const ADMIN_HEADERS = { 'X-Frontend-Secret': 'e2e-secret', 'X-Auth-User': 'e2e-seeder', 'X-Auth-Role': 'admin' }
 
@@ -23,9 +24,9 @@ test.describe('Scenario: purging deleted pages', () => {
     await expect.poll(() => pageDeletedFlags(jobId)).toEqual([true, false])
 
     // The scan upload, its two renditions and the 25 deep-zoom tiles of an 800 by 600 scan.
-    const purgeButton = page.getByRole('button', { name: /^Purge \d/ })
-    await expect(purgeButton).toHaveText('Purge 1')
-    await purgeButton.click()
+    const purge = (await openDatasetMenu(page, 'dataset-more')).getByTestId('purge-open')
+    await expect(purge).toHaveAccessibleName('Purge 1 deleted page')
+    await purge.click()
     await expect(page.getByText(/Permanently deletes 28 image file/)).toBeVisible()
     await page.getByRole('button', { name: 'Purge', exact: true }).click()
     await expect(page.getByText(/Freed /)).toBeVisible()
@@ -34,9 +35,12 @@ test.describe('Scenario: purging deleted pages', () => {
     // The image files are really gone, not just reported freed.
     await expect.poll(() => thumbStatus(firstPageId)).not.toBe(200)
 
-    // Nothing left to free, so the button stops offering a purge - the page row
+    // Nothing left to free, so the menu stops offering a purge - the page row
     // survives a purge, so counting rows kept it stuck at "Purge 1" forever.
-    await expect(purgeButton).toHaveCount(0)
+    const more = await openDatasetMenu(page, 'dataset-more')
+    await expect(more.getByTestId('layout-classes')).toBeVisible()
+    await expect(more.getByTestId('purge-open')).toHaveCount(0)
+    await page.keyboard.press('Escape')
 
     // Restoring a purged page must fail - and the Deleted filter is the only place
     // left to try it from.

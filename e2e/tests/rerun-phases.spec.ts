@@ -3,6 +3,7 @@ import { test, expect } from '../helpers/test'
 import {
   UNASSIGNED_LINES, backendFetch, getJob, getPageDetail, jobPageIds, pageLines, seedCompletedJob, uniqueName, waitForJobStatus,
 } from '../helpers/api'
+import { datasetAction } from '../helpers/dataset'
 
 const STUB_LINES = [
   'Sample Header line 1', 'Sample Header line 2', 'Sample Header line 3',
@@ -42,7 +43,7 @@ test.describe('Scenario: starting over once layout is switched off', () => {
 
   async function openRerun(page: Page, jobId: string) {
     await page.goto(`/jobs/${jobId}`)
-    await page.getByRole('button', { name: 'Re-run', exact: true }).click()
+    await datasetAction(page, 'rerun-open')
   }
 
   test('drops the boxes, reads the whole page and leaves layout off', async ({ page }) => {

@@ -64,18 +64,19 @@ export function ButtonGroup({ className = '', ...props }: HTMLAttributes<HTMLDiv
   )
 }
 
+/** How a member of a ButtonGroup looks, for a link that sits in one. */
+export function groupButtonClass({ on, strong = false }: { on?: boolean; strong?: boolean } = {}, extra = '') {
+  const state = on === undefined ? 'text-ink-muted hover:bg-raised hover:text-ink'
+    : on ? (strong ? 'bg-accent text-on-accent' : 'bg-accent-wash text-accent-ink')
+    : 'text-ink-subtle hover:bg-raised hover:text-ink'
+  return `inline-flex items-center gap-1 px-2 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-40 ${state} ${extra}`.trim()
+}
+
 /** A button inside a ButtonGroup. Given `on` it is a toggle, filled while on - in the
  *  accent itself when `strong`, for a mode that changes what every click does. */
 export function GroupButton({ on, strong = false, className = '', type = 'button', ...props }:
   { on?: boolean; strong?: boolean } & ButtonHTMLAttributes<HTMLButtonElement>) {
-  const state = on === undefined ? 'text-ink-muted hover:bg-raised hover:text-ink'
-    : on ? (strong ? 'bg-accent text-on-accent' : 'bg-accent-wash text-accent-ink')
-    : 'text-ink-subtle hover:bg-raised hover:text-ink'
-  return (
-    <button type={type} aria-pressed={on}
-            className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-40 ${state} ${className}`.trim()}
-            {...props} />
-  )
+  return <button type={type} aria-pressed={on} className={groupButtonClass({ on, strong }, className)} {...props} />
 }
 
 /** The thin rule between groups of a toolbar. */

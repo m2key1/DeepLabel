@@ -6,6 +6,7 @@ import {
 } from '../helpers/api'
 import { llmReadStatus, pickModel, waitForLlmReads } from '../helpers/llm'
 import { openViewer } from '../helpers/viewer'
+import { datasetAction } from '../helpers/dataset'
 
 const DEV = identity('dev', 'admin')
 
@@ -31,7 +32,7 @@ test.describe('Scenario: pre-annotating a dataset with language models', () => {
     await resetLlmStats()
 
     await page.goto(`/jobs/${jobId}`)
-    await page.getByTestId('llm-read-open').click()
+    await datasetAction(page, 'llm-read-open')
     await pickModel(page, connection, PERFECT).check()
     await pickModel(page, connection, TYPO).check()
     // Two models over two scans, none of them read before.
@@ -122,7 +123,7 @@ test.describe('Scenario: pre-annotating a dataset with language models', () => {
     const second = await seedDistinctPagesJob(uniqueName('LLM free'), 1)
 
     await page.goto(`/jobs/${second}`)
-    await page.getByTestId('llm-read-open').click()
+    await datasetAction(page, 'llm-read-open')
     await pickModel(page, connection, PERFECT).check()
     await expect(page.getByTestId('llm-cost')).toHaveText('0 calls over 1 page, 1 already read and free.')
     await page.getByTestId('llm-start').click()
@@ -146,7 +147,7 @@ test.describe('Scenario: pre-annotating a dataset with language models', () => {
       await seedLlmConnection(connection, ['stub-error'], DEV)
 
       await page.goto(`/jobs/${jobId}`)
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await pickModel(page, connection, 'stub-error').check()
       await page.getByTestId('llm-start').click()
 
@@ -158,7 +159,7 @@ test.describe('Scenario: pre-annotating a dataset with language models', () => {
       // Asking again retries it - a failed reading was never paid for, so there is
       // nothing to protect. Counting from zero makes the retry's own call the subject.
       await resetLlmStats()
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await pickModel(page, connection, 'stub-error').check()
       await page.getByTestId('llm-start').click()
       // Both halves in one poll: the row is briefly back to pending while the retry runs,

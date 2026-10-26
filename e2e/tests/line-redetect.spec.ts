@@ -3,6 +3,7 @@ import {
   correctLine, getPageDetail, jobPageIds, pageCandidates, redetectLines, seedCompletedJob,
   setElementBbox, setElementClass, uniqueName, waitForJobStatus,
 } from '../helpers/api'
+import { openDatasetMenu } from '../helpers/dataset'
 
 // The stub layout puts a Paragraph element at these coordinates on every page, and its
 // three lines are derived from the box - so resizing the box is how a scenario controls
@@ -85,7 +86,11 @@ test.describe('Scenario: asking for a re-detection from the dataset page', () =>
     await setElementBbox(paragraph.id, BARELY_MOVED)
 
     await page.goto(`/jobs/${jobId}`)
-    await page.getByRole('button', { name: /Re-detect lines \(1\)/ }).click()
+    // The waiting re-detection is counted on the closed Run menu, and listed first in it.
+    await expect(page.getByTestId('dataset-run-pending')).toHaveText('1')
+    const run = await openDatasetMenu(page, 'dataset-run')
+    await expect(run.getByRole('button').first()).toHaveAccessibleName('Re-detect lines in 1 box')
+    await run.getByTestId('redetect-open').click()
     await expect(page.getByTestId('redetect-corrections'))
       .toContainText('2 correction(s) inside those boxes are kept and re-attached')
     await page.getByRole('button', { name: 'Re-detect', exact: true }).click()

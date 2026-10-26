@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process'
 import { expect, type Page } from '@playwright/test'
 import { backendFetch, identity } from './api'
+import { datasetAction } from './dataset'
 
 const DEV = identity('dev', 'admin')
 
@@ -67,7 +68,7 @@ export async function startLlmRead(
   page: Page, jobId: string, connection: string, models: string[], options: LlmReadOptions = {},
 ) {
   await page.goto(`/jobs/${jobId}`)
-  await page.getByTestId('llm-read-open').click()
+  await datasetAction(page, 'llm-read-open')
   for (const model of models) await pickModel(page, connection, model).check()
   if (options.minAgree !== undefined) {
     await page.getByTestId('llm-consensus-min').fill(String(options.minAgree))

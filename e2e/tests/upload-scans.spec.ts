@@ -1,6 +1,7 @@
 import { test, expect } from '../helpers/test'
 import { backendFetch, getJob, uniqueName, waitForJobStatus } from '../helpers/api'
 import { scanPng } from '../helpers/image'
+import { openDatasetMenu } from '../helpers/dataset'
 
 interface PageRow { id: number; filename: string; status: string }
 
@@ -70,7 +71,10 @@ test.describe('Scenario: a volume uploaded in parts by the client', () => {
     await page.goto(`/jobs/${jobId}`)
     await expect(page.getByTestId('status-badge')).toHaveText('uploading')
     // Re-running would start it on part of its pages: only the start is offered.
-    await expect(page.getByRole('button', { name: 'Re-run' })).toHaveCount(0)
+    const run = await openDatasetMenu(page, 'dataset-run')
+    await expect(run.getByTestId('llm-read-open')).toBeVisible()
+    await expect(run.getByTestId('rerun-open')).toHaveCount(0)
+    await page.keyboard.press('Escape')
     expect((await getJob(jobId)).status).toBe('uploading')
 
     await page.getByTestId('start-job').click()
@@ -78,6 +82,6 @@ test.describe('Scenario: a volume uploaded in parts by the client', () => {
     const job = await waitForJobStatus(jobId, 'done')
     expect(job.pages.map((p: PageRow) => p.filename).sort()).toEqual(['scan_1.png', 'scan_2.png'])
     await expect(page.getByTestId('start-job')).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Re-run' })).toBeVisible()
+    await expect((await openDatasetMenu(page, 'dataset-run')).getByTestId('rerun-open')).toBeVisible()
   })
 })

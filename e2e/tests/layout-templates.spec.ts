@@ -6,6 +6,7 @@ import {
 import { scanPng } from '../helpers/image'
 import { enterEditMode, openViewer } from '../helpers/viewer'
 import { pickDataset } from '../helpers/training'
+import { datasetAction } from '../helpers/dataset'
 
 interface LayoutClass { id: number; name: string; role: string; reads: string | null; color: string | null }
 
@@ -94,7 +95,7 @@ test.describe('Scenario: layout classes from templates', () => {
     const { jobId, pageId } = await letterDataset(await letterTemplate(uniqueName('Letters template')))
     await drawBox(pageId, 'Body', [0.1, 0.2, 0.6, 0.4])
     await page.goto(`/jobs/${jobId}`)
-    await page.getByTestId('layout-classes').click()
+    await datasetAction(page, 'layout-classes')
     const body = page.locator('[data-testid="dataset-class"][data-class-name="Body"]')
     await expect(body.getByTestId('class-elements')).toHaveText('1 box')
     await body.getByLabel('Name of Body').fill('Text')
@@ -124,7 +125,7 @@ test.describe('Scenario: layout classes from templates', () => {
     const { jobId, pageId } = await letterDataset(await letterTemplate(uniqueName('Letters template')))
     await drawBox(pageId, 'Salutation', [0.1, 0.1, 0.5, 0.15])
     await page.goto(`/jobs/${jobId}`)
-    await page.getByTestId('layout-classes').click()
+    await datasetAction(page, 'layout-classes')
     await page.getByLabel('Remove Salutation').click()
     await page.getByTestId('remove-class').getByLabel('Merge into').selectOption({ label: 'Make them Body' })
     await page.getByTestId('confirm-remove-class').click()
@@ -141,7 +142,7 @@ test.describe('Scenario: layout classes from templates', () => {
     const jobId = await seedCompletedJob(uniqueName('Volume'), 1)
     const [pageId] = await jobPageIds(jobId)
     await page.goto(`/jobs/${jobId}`)
-    await page.getByTestId('layout-classes').click()
+    await datasetAction(page, 'layout-classes')
     const paragraph = page.locator('[data-testid="dataset-class"][data-class-name="Paragraph"]')
     await expect(paragraph.getByLabel('Name of Paragraph')).toBeDisabled()
     await expect(paragraph.getByLabel('Role of Paragraph')).toBeDisabled()

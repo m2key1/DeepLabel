@@ -32,7 +32,9 @@ test.describe('Scenario: role-based access', () => {
 
     await page.goto(`/jobs/${jobId}`)
     await expect(page.locator('tbody tr')).toHaveCount(1)
-    await expect(page.getByRole('button', { name: 'Re-run' })).toHaveCount(0)
+    // Nothing in the Run menu is a viewer's to start, so there is no menu.
+    await expect(page.getByTestId('dataset-more')).toBeVisible()
+    await expect(page.getByTestId('dataset-run')).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Add pages' })).toHaveCount(0)
 
     // The backend enforces the role itself, independent of the UI.

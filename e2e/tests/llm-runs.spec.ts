@@ -8,6 +8,7 @@ import { scanPng } from '../helpers/image'
 import { gtReads, llmReadStatus, pickModel, startLlmRead, waitForLlmReads } from '../helpers/llm'
 import { seedSession, useSession } from '../helpers/session'
 import { openViewer } from '../helpers/viewer'
+import { datasetAction } from '../helpers/dataset'
 
 const DEV = identity('dev', 'admin')
 
@@ -87,7 +88,7 @@ test.describe('Scenario: who may start a run', () => {
     await useSession(page.context(), seedSession('member', member))
 
     await page.goto(`/jobs/${jobId}`)
-    await page.getByTestId('llm-read-open').click()
+    await datasetAction(page, 'llm-read-open')
     await pickModel(page, connection, PERFECT).check()
     await page.getByTestId('llm-start').click()
 
@@ -124,7 +125,7 @@ test.describe('Scenario: who may start a run', () => {
       await resetLlmStats()
       await useSession(page.context(), seedSession('member', member))
       await page.goto(`/jobs/${jobId}`)
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
 
       const autocheck = page.getByTestId('llm-autocheck')
       const withOcr = page.getByTestId('llm-consensus-with-ocr')
@@ -158,7 +159,7 @@ test.describe('Scenario: who may start a run', () => {
       const own = await createJob(uniqueName('Assignee owns'), 1, undefined, asMember)
       await waitForJobStatus(own, 'done')
       await page.goto(`/jobs/${own}`)
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await expect(autocheck).toBeEnabled()
       await expect(withOcr).toBeEnabled()
       await expect(autocheck).not.toHaveAttribute('title', OWNER_ONLY)
@@ -185,7 +186,7 @@ test.describe('Scenario: what the dialog says about readings under other wording
       .toEqual({ pages: 1, stale: [1, 1] })
 
     await page.goto(`/jobs/${jobId}`)
-    await page.getByTestId('llm-read-open').click()
+    await datasetAction(page, 'llm-read-open')
     await pickModel(page, connection, PERFECT).check()
     await pickModel(page, connection, SECOND).check()
     await expect(page.getByTestId('llm-stale-prompt'))
@@ -430,7 +431,7 @@ test.describe('Scenario: watching a run with a slow model in it', () => {
       await resetLlmStats()
 
       await page.goto(`/jobs/${jobId}`)
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await pickModel(page, connection, SLOW).check()
       await pickModel(page, connection, PERFECT).check()
       await page.getByTestId('llm-start').click()
@@ -468,7 +469,7 @@ test.describe('Scenario: stopping a page being read', () => {
     await resetLlmStats()
 
     await page.goto(`/jobs/${jobId}`)
-    await page.getByTestId('llm-read-open').click()
+    await datasetAction(page, 'llm-read-open')
     await pickModel(page, connection, SLOW).check()
     await page.getByTestId('llm-start').click()
     const sent = Date.now()
@@ -517,7 +518,7 @@ test.describe('Scenario: giving a dataset wording when the picked models disagre
       await resetLlmStats()
 
       await page.goto(`/jobs/${jobId}`)
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await pickModel(page, own, ECHO).check()
       await pickModel(page, usual, ECHO).check()
 

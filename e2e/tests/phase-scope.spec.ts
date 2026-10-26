@@ -6,6 +6,7 @@ import {
 } from '../helpers/api'
 import type { PageLine } from '../helpers/api'
 import { openViewer } from '../helpers/viewer'
+import { datasetAction } from '../helpers/dataset'
 
 const STUB_LINES = [
   'Sample Header line 1', 'Sample Header line 2', 'Sample Header line 3',
@@ -19,7 +20,7 @@ type RerunPhase = 'layout' | 'lines' | 'ocr'
  *  phases ask: re-offer the text on what is found (true) or start the pages clean (false). */
 async function rerunFromDialog(page: Page, jobId: string, phase: RerunPhase, keep?: boolean) {
   await page.goto(`/jobs/${jobId}`)
-  await page.getByRole('button', { name: 'Re-run', exact: true }).click()
+  await datasetAction(page, 'rerun-open')
   await page.locator(`[data-testid="rerun-phase"][data-phase="${phase}"]`).check()
   if (keep !== undefined) {
     await page.locator(`[data-testid="rerun-choice"][data-keep="${keep}"]`).check()

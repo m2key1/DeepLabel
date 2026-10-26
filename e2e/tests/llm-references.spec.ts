@@ -5,6 +5,7 @@ import {
   seedLlmConnection, uniqueName,
 } from '../helpers/api'
 import { pickModel, startLlmRead } from '../helpers/llm'
+import { datasetAction } from '../helpers/dataset'
 
 const DEV = identity('dev', 'admin')
 const PERFECT = 'stub-perfect'
@@ -89,7 +90,7 @@ test.describe('Scenario: showing the models a reference chart', () => {
       await seedLlmConnection(connection, [PERFECT], DEV)
 
       await page.goto(`/jobs/${jobId}`)
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await page.getByTestId('llm-what-they-see').click()
       const references = page.getByTestId('llm-references')
       await expect(references.getByTestId('llm-reference')).toHaveCount(0)
@@ -119,7 +120,7 @@ test.describe('Scenario: showing the models a reference chart', () => {
       await addLlmReference('chart.png', TINY_PNG, 'image/png', jobId, DEV)
 
       await page.reload()
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await pickModel(page, connection, PERFECT).check()
       // Showing a model something new does not silently re-read a whole volume.
       await expect(page.getByTestId('llm-stale-prompt')).toContainText('1 page')
@@ -136,7 +137,7 @@ test.describe('Scenario: showing the models a reference chart', () => {
       await startLlmRead(page, jobId, connection, [PERFECT])
 
       await page.reload()
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       await pickModel(page, connection, PERFECT).check()
       await expect(page.getByTestId('llm-stale-prompt')).toHaveCount(0)
       await expect(page.getByTestId('llm-cost')).toContainText('already read and free')

@@ -5,6 +5,7 @@ import {
 } from '../helpers/api'
 import { pickModel, waitForLlmReads } from '../helpers/llm'
 import { LANDSCAPE, center, clickAt, enterEditMode, openViewer } from '../helpers/viewer'
+import { datasetAction } from '../helpers/dataset'
 
 const DEV = identity('dev', 'admin')
 // 'stub-perfect' reads the six lines as the OCR model did; 'stub-typo' misreads one word of
@@ -144,7 +145,7 @@ test.describe('Scenario: review mode keeps the arrows on the flagged lines', () 
       await seedLlmConnection(connection, [PERFECT, TYPO], DEV)
       // Two pages, so startLlmRead's one-page wait would stop short: each model reads both.
       await page.goto(`/jobs/${jobId}`)
-      await page.getByTestId('llm-read-open').click()
+      await datasetAction(page, 'llm-read-open')
       for (const model of [PERFECT, TYPO]) await pickModel(page, connection, model).check()
       // Three must agree, so nothing settles: a line the models settled without a check is
       // review work itself (review-settled.spec), and this test is about the key, not that.
