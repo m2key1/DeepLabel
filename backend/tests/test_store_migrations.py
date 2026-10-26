@@ -1448,3 +1448,26 @@ class TestTestPages:
         switches = conn.execute('SELECT id, new_pages_test FROM jobs ORDER BY id').fetchall()
         assert [tuple(r) for r in switches] == [('test', 1), ('train', 0)]
         conn.close()
+
+
+class TestNotes:
+    def test_an_older_database_gains_empty_notes(self, tmp_path):
+        db = tmp_path / 'app.db'
+        conn = store.connect(db)
+        conn.execute("INSERT INTO jobs (id, name) VALUES ('j1', 'Volume')")
+        conn.execute("INSERT INTO pages (job_id, idx, filename, source_file) VALUES ('j1', 0, 'a.png', '/a.png')")
+        conn.commit()
+        conn.close()
+        raw = sqlite3.connect(db)
+        for table in ('jobs', 'pages'):
+            for column in ('note', 'note_by', 'note_at'):
+                raw.execute(f'ALTER TABLE {table} DROP COLUMN {column}')
+        raw.commit()
+        raw.close()
+
+        conn = store.connect(db)
+        store.connect(db).close()
+
+        assert tuple(conn.execute('SELECT note, note_by, note_at FROM jobs').fetchone()) == (None, None, None)
+        assert tuple(conn.execute('SELECT note, note_by, note_at FROM pages').fetchone()) == (None, None, None)
+        conn.close()

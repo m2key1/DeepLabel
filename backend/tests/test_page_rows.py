@@ -73,7 +73,7 @@ def test_a_row_carries_what_the_table_shows(client):
     assert body['rows'] == [{
         'id': 1, 'idx': 0, 'filename': 'a.png', 'width': 600, 'height': 800,
         'status': 'done', 'layout_checked': True, 'lines_checked': False, 'deleted': False,
-        'rotation': 0, 'is_test': False,
+        'rotation': 0, 'is_test': False, 'note': None,
         'elements_total': 1, 'elements_checked': 1,
         'lines_total': 2, 'lines_reviewed': 2,
         'min_confidence': 0.8, 'avg_confidence': pytest.approx(0.85),
@@ -103,7 +103,7 @@ def test_each_chip_says_how_many_it_would_show(client):
         'unreviewed-lines': 2,
         'layout-unchecked': 1,
         # Page 3 has no elements at all.
-        'no-layout': 1, 'test-pages': 0,
+        'no-layout': 1, 'test-pages': 0, 'has-note': 0,
         'deleted': 1,
     }
 
@@ -149,7 +149,7 @@ def test_a_duplicate_is_listed_but_counted_by_no_chip(client, conn):
     assert [(r['id'], r['status']) for r in body['rows']][-2:] == [(5, 'done'), (7, 'duplicate')]
     assert body['counts'] == {
         'all': 5, 'lines-reviewed': 1, 'layout-reviewed': 4, 'unreviewed-lines': 2,
-        'layout-unchecked': 1, 'no-layout': 1, 'test-pages': 0, 'deleted': 1}
+        'layout-unchecked': 1, 'no-layout': 1, 'test-pages': 0, 'has-note': 0, 'deleted': 1}
     assert [r['id'] for r in get(client, filter='no-layout', limit=50).json()['rows']] == [3]
     job = client.get('/api/jobs/j1', params={'pages': 'false'}, headers=ALICE).json()
     assert job['pages_live'] == 5

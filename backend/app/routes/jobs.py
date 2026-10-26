@@ -8,7 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import (blobs, caches, config, consensus, conventions, corpus, decode, evaluator, geometry, layout_templates,
                  imports, ingest, jobs, llm, map_classes, model_registry, page_rows, reading_order,
@@ -1060,6 +1060,17 @@ def share_job(job_id: str, body: Share, conn=Depends(get_db), user: dict = Depen
                      [(job_id, n) for n in names])
     conn.commit()
     return {'job_id': job_id, 'shared_with': names}
+
+
+class Note(BaseModel):
+    text: str = Field(max_length=10_000)
+
+
+@router.put('/api/jobs/{job_id}/note')
+def put_job_note(job_id: str, body: Note, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Write the dataset's shared note; an empty text removes it."""
+    require_job_access(conn, job_id, user)
+    return store.set_note(conn, 'jobs', job_id, body.text, user['username'])
 
 
 class TestPages(BaseModel):

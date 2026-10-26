@@ -34,6 +34,7 @@ import {
   READING_ORDER_LABEL,
   setPageLayoutChecked,
   markTestPages,
+  setPageNote,
   setPageLinesChecked,
   setPageReadingOrder,
   tilesUrl,
@@ -43,6 +44,7 @@ import type {
   Bbox, EditSpan, JobDetail, Line, LineCandidate, LlmReadStatus, PageDetail, PageElement,
   PagePhase, RegistryModel, ReviewQueue, RevertResult,
 } from '../api'
+import { NoteTag } from '../components/NoteTag'
 import { useSetCrumbs } from '../components/NavBar'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
 import { PresenceBanner } from '../components/presence/PresenceBanner'
@@ -3786,6 +3788,13 @@ export function PageViewerPage() {
                     </Button>
                   ))}
               </>
+            )}
+            {page && (
+              <NoteTag note={page.note} title={page.filename} canEdit={canEdit} addable onSave={async (text) => {
+                const note = await setPageNote(page.id, text)
+                setPage((p) => (p ? { ...p, note } : p))
+                return note
+              }} />
             )}
             {job && page && (isAdmin || job.owner === user) && (
               <Toggle on={!!page.is_test} onClick={toggleTestPage} data-testid="page-test-toggle"

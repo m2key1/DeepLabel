@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import {
   bulkMove, bulkPreview, bulkRedetect, bulkReocr, bulkRerun, cancelJob, createGroup, deleteGroup,
   deleteJob, downloadMaskSet, getUserNames, isTileTask, listGroups, listJobs, renameGroup,
-  renameJob,
+  renameJob, setJobNote,
 } from '../api'
 import type { BulkAction, BulkOutcome, BulkPreview, Group, Job } from '../api'
 import { useAuth } from '../auth'
@@ -26,6 +26,7 @@ import { PresenceAvatars } from '../components/presence/PresenceAvatars'
 import { StatusBadge } from '../components/StatusBadge'
 import { Button } from '../components/ui/Button'
 import { Check, Input } from '../components/ui/Field'
+import { NoteTag } from '../components/NoteTag'
 import { useDropPlacement } from '../components/ui/dropPlacement'
 import { menuTrigger, useDismiss } from '../components/ui/menu'
 import { Modal } from '../components/Modal'
@@ -708,6 +709,14 @@ export function JobsPage() {
     )
   }
 
+  const noteTag = (job: Job) => (
+    <NoteTag note={job.note} title={job.name} canEdit={canEdit} onSave={async (text) => {
+      const note = await setJobNote(job.id, text)
+      setJobs((rows) => rows && rows.map((j) => (j.id === job.id ? { ...j, note } : j)))
+      return note
+    }} />
+  )
+
   const cellFor = (job: Job, key: string) => {
     const active = job.status === 'queued' || job.status === 'running'
     switch (key) {
@@ -767,6 +776,7 @@ export function JobsPage() {
         <div className="flex min-w-0 items-center gap-2">
           {nameCell(job, prefix)}
           {testLabel(job)}
+          {noteTag(job)}
           {sharedLabel(job)}
           <PresenceAvatars entries={onJob(job.id)} />
           <StatusBadge status={job.status} />
@@ -799,6 +809,7 @@ export function JobsPage() {
           {nameCell(job)}
           <span className="ml-auto flex shrink-0 items-center gap-2">
             {testLabel(job)}
+          {noteTag(job)}
             {sharedLabel(job)}
             <PresenceAvatars entries={onJob(job.id)} />
             <StatusBadge status={job.status} />

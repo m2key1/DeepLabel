@@ -14,6 +14,7 @@ from app import (blobs, caches, candidates, config, dataset_sync, geometry, layo
                  provenance, reading_order, renditions, revert, rotation, serializers, store, training)
 from app.deps import (IMMUTABLE_CACHE, current_user, get_db, get_user, require_job_access,
                       require_page_access, require_role)
+from app.routes.jobs import Note
 
 router = APIRouter(tags=['pages'])
 
@@ -120,6 +121,7 @@ def page_results(job_id: str, page_id: int, conn=Depends(get_db), user: dict = D
             'rotation': page['rotation'] or 0,
             'layout_checked': bool(page['layout_checked']),
             'lines_checked': bool(page['lines_checked']), 'is_test': bool(page['is_test']),
+            'note': store.note_of(dict(page)),
             'elements': elements, 'regions': regions,
             # What the lines of a page with no layout are ordered by: this page's own
             # answer if it has one, and the dataset's, which is what it falls back to.
@@ -266,6 +268,18 @@ class PagePatch(BaseModel):
     # a leaf set in one column in a book set in two. 'auto' or '<leaves>x<columns>';
     # empty follows the dataset again. Setting it re-orders the page.
     reading_order: str | None = None
+
+
+@router.put('/api/pages/{page_id}/note')
+def put_page_note(page_id: int, body: Note, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Write the page's shared note; an empty text removes it."""
+    require_page_access(conn, page_id, user)
+    page = conn.execute('SELECT job_id FROM pages WHERE id = ?', (page_id,)).fetchone()
+    if page is None:
+        raise HTTPException(404)
+    note = store.set_note(conn, 'pages', page_id, body.text, user['username'])
+    page_rows.forget_counts(conn, page['job_id'])
+    return note
 
 
 @router.patch('/api/pages/{page_id}')

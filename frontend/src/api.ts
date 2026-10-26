@@ -26,6 +26,13 @@ export interface Counters {
 
 export type OcrConvention = Record<string, boolean>
 
+/** A shared remark on a dataset or a page, and who last wrote it when. */
+export interface Note {
+  text: string
+  by: string
+  at: string
+}
+
 export interface Job {
   id: string
   name: string
@@ -86,6 +93,7 @@ export interface Job {
   test_pages?: number
   /** Whether pages added from now on arrive as test pages. */
   new_pages_test?: boolean
+  note?: Note | null
   lines_total?: number
   lines_done?: number
   /** When a person last touched it - the pipeline's own passes do not count. Absent on a
@@ -114,6 +122,7 @@ export interface PageSummary {
   deleted: boolean
   /** Test data: never trained on, and what a run's test set is scored on. */
   is_test?: boolean
+  note?: Note | null
   /** Degrees the scan has been turned since it arrived. Renditions are served immutable,
    *  so a turned page's pictures are asked for under this. Absent from the dataset
    *  detail's own page list, which the table falls back to on an older backend only. */
@@ -288,6 +297,7 @@ export interface PageDetail {
   lines_checked: boolean
   /** Test data: never trained on, nor any page with the same scan. */
   is_test: boolean
+  note: Note | null
   /** How far the scan has been turned, 0/90/180/270. */
   rotation: number
   elements: PageElement[]
@@ -1241,6 +1251,15 @@ export function setLineWidth(jobId: string, lineWidth: number): Promise<{ line_w
   return request(`/api/jobs/${jobId}`, json('PATCH', { line_width: lineWidth }))
 }
 
+/** An empty text removes the note. */
+export function setJobNote(jobId: string, text: string): Promise<Note | null> {
+  return request(`/api/jobs/${jobId}/note`, json('PUT', { text }))
+}
+
+export function setPageNote(pageId: number, text: string): Promise<Note | null> {
+  return request(`/api/pages/${pageId}/note`, json('PUT', { text }))
+}
+
 export function setNewPagesTest(jobId: string, newPagesTest: boolean): Promise<{ new_pages_test: boolean }> {
   return request(`/api/jobs/${jobId}`, json('PATCH', { new_pages_test: newPagesTest }))
 }
@@ -1325,7 +1344,7 @@ export interface BulkPreview {
  *  filtered set rather than the first N pages of everything. */
 export type PageFilter =
   'all' | 'reviewed' | 'lines-reviewed' | 'layout-reviewed' | 'unreviewed-lines' | 'layout-unchecked'
-  | 'no-layout' | 'test-pages' | 'deleted'
+  | 'no-layout' | 'test-pages' | 'has-note' | 'deleted'
 
 export type PageSort =
   'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'checked' | 'confidence' | 'llm' | 'test'

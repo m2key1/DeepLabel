@@ -1,7 +1,7 @@
 import sqlite3
 import time
 
-from app import caches, ingest
+from app import caches, ingest, store
 
 # One row per live page with everything the table shows. The counts are correlated
 # subqueries rather than joins: a join would multiply the page row by its lines and need a
@@ -9,6 +9,7 @@ from app import caches, ingest
 _ROWS = """
 SELECT p.id, p.idx, p.filename, p.width, p.height, p.status,
        p.layout_checked, p.lines_checked, p.deleted, p.rotation, p.is_test,
+       p.note, p.note_by, p.note_at,
        (SELECT COUNT(*) FROM elements e
          WHERE e.page_id = p.id AND e.deleted = 0 AND e.kind = 'content'
            AND e.class_name != 'Divider') elements_total,
@@ -57,6 +58,7 @@ FILTERS = {
     'layout-unchecked': f'{_WORK} AND layout_checked = 0',
     'no-layout': f'{_WORK} AND elements_total = 0',
     'test-pages': f'{_WORK} AND is_test = 1',
+    'has-note': 'deleted = 0 AND note IS NOT NULL',
     'deleted': 'deleted = 1',
 }
 
@@ -197,4 +199,5 @@ def _as_page(row: sqlite3.Row) -> dict:
     page = dict(row)
     for flag in ('layout_checked', 'lines_checked', 'deleted', 'is_test'):
         page[flag] = bool(page[flag])
+    page['note'] = store.note_of(page)
     return page

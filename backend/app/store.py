@@ -57,6 +57,10 @@ CREATE TABLE IF NOT EXISTS jobs (
     llm_prompt TEXT NOT NULL DEFAULT '',
     -- Whether pages added to this dataset arrive as test pages.
     new_pages_test INTEGER NOT NULL DEFAULT 0,
+    -- One shared remark on the dataset, and who last wrote it when.
+    note TEXT,
+    note_by TEXT,
+    note_at TEXT,
     -- Wording for the diplomatic reading that turns a corpus span into ground truth. It
     -- is a different question from llm_prompt - it carries the page's reference text -
     -- so it is asked separately. Empty uses the shipped one.
@@ -105,7 +109,10 @@ CREATE TABLE IF NOT EXISTS pages (
     error TEXT,
     -- Test data: never trained on, nor any page with the same scan, and what a run's
     -- test set is scored on.
-    is_test INTEGER NOT NULL DEFAULT 0
+    is_test INTEGER NOT NULL DEFAULT 0,
+    note TEXT,
+    note_by TEXT,
+    note_at TEXT
 );
 -- Full map scans awaiting/after tiling (run_tile map jobs). A map is the source of
 -- tiles, never annotated itself; its tiles are ordinary pages referencing it via
@@ -908,6 +915,10 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE trainings ADD COLUMN lm_build TEXT')
     if 'is_test' not in page_cols:
         _mark_former_test_sets(conn)
+    for table in ('jobs', 'pages'):
+        if 'note' not in {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}:
+            for column in ('note', 'note_by', 'note_at'):
+                conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} TEXT')
     if 'grad_accum_steps' not in training_cols:
         conn.execute('ALTER TABLE trainings ADD COLUMN grad_accum_steps INTEGER')
         conn.execute('ALTER TABLE trainings ADD COLUMN lr_scale REAL')
@@ -1286,8 +1297,25 @@ def job_class_names(conn: sqlite3.Connection, job_id: str) -> dict:
         'SELECT class_id, name FROM job_classes WHERE job_id = ?', (job_id,))}
 
 
+def note_of(row: dict) -> dict | None:
+    """A note as the API shows it, taking its three columns out of `row`."""
+    text, by, at = row.pop('note', None), row.pop('note_by', None), row.pop('note_at', None)
+    return {'text': text, 'by': by, 'at': at} if text else None
+
+
+def set_note(conn: sqlite3.Connection, table: str, row_id, text: str, username: str) -> dict | None:
+    assert table in ('jobs', 'pages')
+    text = text.strip() or None
+    conn.execute(f"UPDATE {table} SET note = ?, note_by = ?, note_at = datetime('now') WHERE id = ?",
+                 (text, username if text else None, row_id))
+    conn.commit()
+    return note_of(dict(conn.execute(f'SELECT note, note_by, note_at FROM {table} WHERE id = ?',
+                                     (row_id,)).fetchone()))
+
+
 def job_row_to_dict(row: sqlite3.Row) -> dict:
     job = dict(row)
+    job['note'] = note_of(job)
     job['counters'] = json.loads(job.get('counters') or '{}')
     job['checked'] = bool(job.get('checked'))
     job['task'] = job.get('task') or 'text'

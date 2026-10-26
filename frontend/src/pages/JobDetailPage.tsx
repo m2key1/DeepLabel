@@ -21,7 +21,9 @@ import {
   renditionUrl,
   setJobChecked,
   setLineWidth,
+  setJobNote,
   setNewPagesTest,
+  setPageNote,
   markTestPages,
   setPageLayoutChecked,
   setPagesDeleted,
@@ -42,6 +44,7 @@ import { usePresence, usePresenceLocation } from '../presence'
 import { useSetCrumbs } from '../components/NavBar'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
 import { Modal, modalBtn, modalPrimaryBtn } from '../components/Modal'
+import { NoteTag } from '../components/NoteTag'
 import { StatusBadge } from '../components/StatusBadge'
 import { Badge } from '../components/ui/Badge'
 import { PhaseStrip } from '../components/job/PhaseStrip'
@@ -144,6 +147,7 @@ const pageFilters = (isMap: boolean, noLayout: boolean): PageFilterDef[] => [
   // nothing.
   ...(isMap || noLayout ? [] : [{ key: 'no-layout' as PageFilter, label: 'No layout' }]),
   ...(isMap ? [] : [{ key: 'test-pages' as PageFilter, label: 'Test pages' }]),
+  ...(isMap ? [] : [{ key: 'has-note' as PageFilter, label: 'Has note' }]),
   { key: 'deleted', label: 'Deleted', editorsOnly: true },
 ]
 
@@ -807,6 +811,11 @@ export function JobDetailPage() {
                 unreadable
               </Badge>
             )}
+            <NoteTag note={page.note} title={page.filename} canEdit={canEdit} onSave={async (text) => {
+              const note = await setPageNote(page.id, text)
+              refetch()
+              return note
+            }} />
             <PresenceAvatars entries={onPage(page.id)} />
           </span>
         )
@@ -970,6 +979,11 @@ export function JobDetailPage() {
               onMarkAll={(test) => markTest(null, test)}
             />
           )}
+          <NoteTag note={job.note} title={job.name} canEdit={canEdit} addable onSave={async (text) => {
+            const note = await setJobNote(jobId, text)
+            setJob((p) => (p ? { ...p, note } : p))
+            return note
+          }} />
           <div className="ml-auto flex items-center gap-2">
             {!isMap && (
               <Link

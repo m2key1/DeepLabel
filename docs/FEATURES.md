@@ -341,6 +341,11 @@ polygons) and *line tracing* (boundary lines, open or closed).
 ## Collaboration
 
 - **Projects and sharing:** share a dataset with people directly or through its project.
+- **Notes:** a dataset and each of its pages can carry one note everyone with access can read,
+  such as how far a volume has been checked. Anyone who can edit adds it with **+ Note** in
+  the dataset's title or the page viewer's toolbar; a **Note** tag then marks it there, on the
+  dataset list and in the page table (filter **Has note**), and opens it with who last edited
+  it and when.
 - **Presence:** the navigation bar shows who is online, and datasets and pages show who is
   in them. Opening a page someone else has open shows a notice. You can hide yourself or
   hide others in Settings.
