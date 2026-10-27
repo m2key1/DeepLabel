@@ -1801,7 +1801,10 @@ function TestDataDialog({ state, testPages, onClose, onSave }: {
   onClose: () => void
   onSave: (next: TestDataState) => void
 }) {
-  const [choice, setChoice] = useState<TestDataState>(state)
+  // Follows the dataset until something is picked: the counts behind `state` can arrive
+  // after the dialog opened.
+  const [picked, setChoice] = useState<TestDataState | null>(null)
+  const choice = picked ?? state
   const choices: [TestDataState, string][] = [
     ['none', 'No test pages'],
     ...(state === 'some' ? [['some', `Keep the ${testPages} test page${testPages === 1 ? '' : 's'} marked now`] as [TestDataState, string]] : []),

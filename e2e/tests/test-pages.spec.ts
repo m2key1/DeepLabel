@@ -79,9 +79,11 @@ test.describe('Scenario: marking test data on a dataset', () => {
     await markTestPages(jobId)
     await page.goto(`/jobs/${jobId}`)
 
+    // Opened before the dataset's counts are in, the dialog still settles on what is marked.
     await page.getByTestId('job-test-pages').click()
     const dialog = page.getByRole('dialog', { name: 'Test data' })
     await expect(dialog.getByRole('radio', { name: 'The whole dataset, including pages added later' })).toBeChecked()
+    await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: whole dataset')
     await expect(dialog.getByTestId('test-data-unmark-warning')).toHaveCount(0)
     await dialog.getByRole('radio', { name: 'No test pages' }).check()
     await expect(dialog.getByTestId('test-data-unmark-warning')).toHaveText(
