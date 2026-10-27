@@ -30,8 +30,12 @@ test.describe('Scenario: creating a dataset', () => {
     expect(created.ocr_decode).toBe('greedy')
 
     await expect(page.getByTestId('status-badge')).toHaveText('done')
-    await expect(page.getByText('Ingest')).toBeVisible()
-    await expect(page.getByText('2/2').first()).toBeVisible()
+    const step = (phase: string) => page.getByTestId('phase-strip').locator(`[data-phase="${phase}"]`)
+    // The two uploads are the same scan, and a duplicate is left out of every count.
+    await expect(step('ingest')).toHaveText('Ingest1/1')
+    for (const phase of ['ingest', 'layout', 'lines', 'ocr']) {
+      await expect(step(phase)).toHaveAttribute('data-state', 'done')
+    }
     await expect(page.locator('tbody tr')).toHaveCount(2)
     await expect(page.locator('tbody img').first()).toBeVisible()
   })

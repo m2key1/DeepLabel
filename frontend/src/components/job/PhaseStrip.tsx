@@ -1,12 +1,6 @@
 import type { JobDetail, JobWithoutPages } from '../../api'
 import { isTileTask } from '../../api'
 
-/** Where the pipeline has got to, on one line.
- *
- *  It used to be four labelled bars across the full width, which spent sixty pixels saying
- *  everything was finished - which it is, for every dataset that is not running. A phase
- *  that is done says so in a word; one that is working keeps its bar, because that is the
- *  only time the proportion matters. */
 /** Everything this reads. The page list is not part of it, so a dataset fetched
  *  without one is still enough to say where the pipeline got to. */
 type Phased = JobDetail | JobWithoutPages
@@ -56,33 +50,56 @@ function tilePhases(job: Phased): Phase[] {
   ]
 }
 
+type StepState = 'done' | 'running' | 'waiting' | 'skipped'
+
+const STEP_LOOK: Record<StepState, string> = {
+  done: 'text-ink-muted',
+  running: 'bg-accent-wash text-accent-ink',
+  waiting: 'text-ink-muted',
+  skipped: 'text-ink-subtle',
+}
+
+function StepMark({ state }: { state: StepState }) {
+  if (state === 'done') {
+    return (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
+           strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-ok">
+        <path d="M5 12.5l4.5 4.5L19 7" />
+      </svg>
+    )
+  }
+  if (state === 'running') return <span aria-hidden="true" className="size-2 animate-pulse rounded-full bg-accent" />
+  return <span aria-hidden="true"
+               className={`size-2 rounded-full border ${state === 'skipped' ? 'border-dashed border-ink-subtle' : 'border-ink-muted'}`} />
+}
+
+/** The pipeline as one joined row of steps: a check once a step is through, a pulsing dot
+ *  and a bar while it works, and a dashed ring for a step this dataset does not run. */
 export function PhaseStrip({ job }: { job: Phased }) {
   const phases = isTileTask(job.task) ? tilePhases(job) : textPhases(job)
   return (
-    <div data-testid="phase-strip"
-         className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-subtle">
+    <div data-testid="phase-strip" role="list" aria-label="Pipeline"
+         className="inline-flex max-w-full flex-wrap divide-x divide-line overflow-hidden rounded-full border border-line text-[11px]">
       {phases.map((p) => {
-        const running = job.phase === p.key && job.status === 'running'
-        const finished = !p.skipped && p.total > 0 && p.done >= p.total
+        const state: StepState = p.skipped ? 'skipped'
+          : job.phase === p.key && job.status === 'running' ? 'running'
+          : p.total > 0 && p.done >= p.total ? 'done' : 'waiting'
         return (
-          <span key={p.key} data-phase={p.key}
-                className={`flex items-center gap-1.5 ${p.skipped ? 'opacity-40' : ''}`}>
-            <span className={running ? 'font-medium text-accent-ink' : ''}>{p.label}</span>
-            {p.skipped ? (
-              <span>not run</span>
+          <span key={p.key} role="listitem" data-phase={p.key} data-state={state}
+                className={`flex items-center gap-1.5 px-2.5 py-0.5 ${STEP_LOOK[state]}`}>
+            <StepMark state={state} />
+            <span className="font-medium">{p.label}</span>
+            {state === 'skipped' ? (
+              <span className="italic">skipped</span>
             ) : (
               <>
-                {/* The bar is only worth the pixels while the proportion is changing. A
-                    finished phase keeps its numbers, which is what says it finished. */}
-                {(running || !finished) && (
-                  <span className="h-1 w-16 overflow-hidden rounded-full bg-raised">
+                {state === 'running' && (
+                  <span className="h-1 w-12 overflow-hidden rounded-full bg-surface">
                     <span className="block h-full bg-accent"
                           style={{ width: `${p.total ? (p.done / p.total) * 100 : 0}%` }} />
                   </span>
                 )}
-                <span className={`font-mono tabular-nums ${finished ? 'text-ok' : ''}`}>
-                  {p.done}/{p.total}
-                </span>
+                <span className="font-mono tabular-nums">{p.done}/{p.total}</span>
               </>
             )}
           </span>

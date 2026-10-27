@@ -50,6 +50,7 @@ import { TEST_PAGE_MEANING, TestDataChip, TestPageSwitch } from '../components/T
 import { StatusBadge } from '../components/StatusBadge'
 import { Badge } from '../components/ui/Badge'
 import { PhaseStrip } from '../components/job/PhaseStrip'
+import { Avatar } from '../components/ui/Avatar'
 import { loadHiddenColumns, saveHiddenColumns } from '../components/job/pageColumns'
 import { appendRows, fetchWindow } from '../components/job/pageWindow'
 
@@ -1207,7 +1208,8 @@ export function JobDetailPage() {
             />
           </div>
         </div>
-        <p data-testid="job-meta" className="mt-0.5 text-xs text-ink-subtle">
+        <p data-testid="job-meta" className="mt-1 flex items-center gap-1.5 text-xs text-ink-muted">
+          <Avatar name={job.owner} size="xs" />
           <span title="Owner">{job.owner}</span>
           {(job.counters.gt_total ?? 0) > 0 && (
             <span title="Transcription lines matched to recognized lines">
