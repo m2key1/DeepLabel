@@ -791,7 +791,7 @@ export function JobsPage() {
   const jobRow = (job: Job, prefix = '') => (
     // An explicit background: the name cell pins itself over the scrolled columns and
     // inherits this, and transparent they would show through it.
-    <tr key={job.id} data-testid="job-card" {...dragSource(job.id, renaming !== job.id)}
+    <tr key={job.id} data-testid="job-card" data-status={job.status} {...dragSource(job.id, renaming !== job.id)}
         className={`h-9 border-b border-line/60 border-l-4 ${surface(job)} hover:bg-ground ${
           STATUS_ACCENT[STATUS_TONE[job.status]]}`}>
       <td className="w-8 pl-2">{selectBox(job)}</td>
@@ -804,7 +804,7 @@ export function JobsPage() {
           {noteTag(job)}
           {sharedLabel(job)}
           <PresenceAvatars entries={onJob(job.id)} />
-          <StatusBadge status={job.status} />
+          {job.status !== 'done' && <StatusBadge status={job.status} />}
         </div>
       </td>
       {/* overflow-hidden as the header has: the table is fixed-layout, so a cell whose
@@ -826,7 +826,7 @@ export function JobsPage() {
   const jobCard = (job: Job) => {
     const active = job.status === 'queued' || job.status === 'running'
     return (
-      <div key={job.id} data-testid="job-card" {...dragSource(job.id, renaming !== job.id)}
+      <div key={job.id} data-testid="job-card" data-status={job.status} {...dragSource(job.id, renaming !== job.id)}
            className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-line border-l-4 ${
              surface(job)} px-3 py-2 ${STATUS_ACCENT[STATUS_TONE[job.status]]}`}>
         <div className="flex min-w-40 flex-1 items-center gap-2">
@@ -838,7 +838,7 @@ export function JobsPage() {
             {noteTag(job)}
             {sharedLabel(job)}
             <PresenceAvatars entries={onJob(job.id)} />
-            <StatusBadge status={job.status} />
+            {job.status !== 'done' && <StatusBadge status={job.status} />}
           </span>
         </div>
         <div className="order-last flex w-full items-center gap-2">

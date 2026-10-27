@@ -170,13 +170,15 @@ test.describe('Scenario: managing datasets from the list', () => {
     await expect(page.getByTestId('convention-read')).toHaveText('Last read with long s, abbreviations.')
   })
 
-  test('a finished dataset shows its status and offers downloads', async ({ page }) => {
+  test('a finished dataset carries no status chip and offers downloads', async ({ page }) => {
     const name = uniqueName('Finished')
     const jobId = await seedCompletedJob(name)
 
     await page.goto('/')
     const card = page.getByTestId('job-card').filter({ hasText: name })
-    await expect(card.getByTestId('status-badge')).toHaveText('done')
+    // Done is the ordinary state, so it is left unsaid; running and cancelled keep their chip below.
+    await expect(card).toHaveAttribute('data-status', 'done')
+    await expect(card.getByTestId('status-badge')).toHaveCount(0)
 
     // Timestamps render in European 24h format, converted from the backend's UTC. They
     // live in the Info panel now, with the rest of a dataset's provenance.
