@@ -405,7 +405,7 @@ test.describe('Scenario: a re-read that fails', () => {
       .toHaveText('0 done · 0 pending · 0 running · 2 failed, over 2 placed pages.')
     const failures = page.getByTestId('gt-failure')
     await expect(failures).toHaveCount(2)
-    const reason = 'the endpoint answered 500: {"error": {"message": "the model is overloaded"}}'
+    const reason = 'the provider had a temporary failure (500) - try again later: {"error": {"message": "the model is overloaded"}}'
     await expect(failures.nth(0)).toHaveText(`page ${first} · ${connection} ${PERFECT}: ${reason}`)
     await expect(failures.nth(1)).toHaveText(`page ${second} · ${connection} ${PERFECT}: ${reason}`)
 

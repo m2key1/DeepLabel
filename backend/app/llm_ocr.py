@@ -179,6 +179,32 @@ def enqueue(conn, job_id: str, model_ids: list[int], user: dict, refresh: bool =
             'models': [{'id': m['id'], 'label': m['label']} for m in models]}
 
 
+def _split_error(error: str | None) -> dict:
+    """The sentence a failure is recorded in, apart from what the provider answered after
+    it, which is for whoever has to look closer. "ValueError: ..." names a type and stays whole."""
+    sentence, _, said = (error or '').partition(': ')
+    if not said or ' ' not in sentence:
+        return {'summary': error or '', 'detail': ''}
+    return {'summary': sentence, 'detail': said}
+
+
+def retry_failed(conn, job_id: str, user: dict) -> dict:
+    """Ask again for the readings of this dataset that failed, and only those: pages no
+    model was asked about stay unasked."""
+    pages = {page['content_hash']: page['id'] for page in _readable_pages(conn, job_id, None)}
+    models = selected_models(conn, job_id)
+    if not pages or not models:
+        return {'queued': 0}
+    failed: dict[int, list[int]] = {}
+    for row in conn.execute(
+            "SELECT llm_model_id, content_hash FROM llm_reads WHERE status = 'error' "
+            f"AND content_hash IN ({','.join('?' * len(pages))}) "
+            f"AND llm_model_id IN ({','.join('?' * len(models))})", (*pages, *models)):
+        failed.setdefault(row['llm_model_id'], []).append(pages[row['content_hash']])
+    queued = sum(enqueue(conn, job_id, [model], user, page_ids=ids)['queued'] for model, ids in failed.items())
+    return {'queued': queued}
+
+
 def status(conn, job_id: str, page_ids: list[int] | None = None) -> dict:
     """Progress of every reading this dataset is waiting on, and what it has. Given page
     ids narrow it to those pages, which is what somebody looking at one page needs: a run
@@ -203,11 +229,11 @@ def status(conn, job_id: str, page_ids: list[int] | None = None) -> dict:
         per_model.append({'id': model_id, 'label': label, **row_counts})
     # Scoped to the dataset's own models, like the counts above: another dataset's failed
     # reading of the same scan is not this dataset's problem to report.
-    errors = [dict(row) for row in conn.execute(
-        "SELECT label, error, COUNT(*) c FROM llm_reads WHERE status = 'error' "
+    errors = [{**dict(row), **_split_error(row['error'])} for row in conn.execute(
+        "SELECT llm_model_id id, label, error, COUNT(*) c FROM llm_reads WHERE status = 'error' "
         f"AND content_hash IN ({','.join('?' * len(hashes))}) "
         f"AND llm_model_id IN ({','.join('?' * len(model_ids))}) "
-        'GROUP BY label, error LIMIT 5',
+        'GROUP BY llm_model_id, label, error LIMIT 5',
         (*hashes, *model_ids))] if hashes and model_ids else []
     return {'pages': len(pages), 'models': per_model, 'errors': errors,
             # Whether the dataset is still waiting on anything, next to the counts that

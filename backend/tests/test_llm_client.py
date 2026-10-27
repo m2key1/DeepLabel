@@ -386,7 +386,15 @@ class TestWhenTheEndpointMisbehaves:
             'x', request=httpx.Request('GET', 'http://llm/v1/models'),
             response=httpx.Response(503, text=''))
 
-        assert llm_client._describe(error) == 'the endpoint answered 503'
+        assert llm_client._describe(error) == 'the provider had a temporary failure (503) - try again later'
+
+    def test_a_server_error_says_it_is_the_provider_s_and_keeps_what_it_said(self):
+        error = httpx.HTTPStatusError(
+            'x', request=httpx.Request('POST', 'http://llm/v1/chat/completions'),
+            response=httpx.Response(502, text='{"detail":"upstream_error"}'))
+
+        assert llm_client._describe(error) == \
+            'the provider had a temporary failure (502) - try again later: {"detail":"upstream_error"}'
 
     def test_anything_else_is_named_by_its_type(self):
         assert llm_client._describe(ValueError('nonsense')) == 'ValueError: nonsense'

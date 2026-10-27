@@ -266,6 +266,8 @@ reader.
   dialog shows the number of calls before anything is sent. A scan already read by the
   same model and prompt is not sent again.
 - Readings are matched to the detected lines and offered on each line.
+- The dataset page shows each model's progress. A failed reading shows as a red count on its
+  model; click it for the reason and **Retry failed**, which asks again for the failed pages only.
 - **Agreement:** when enough readers agree on a line, its text is filled in, and
   optionally checked. Hover the agreement badge to compare every reader's text. The OCR
   model does not vote by default. Agreement never overwrites a person's correction or

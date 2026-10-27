@@ -54,6 +54,8 @@ def _describe(exc: Exception, model: str | None = None) -> str:
             return 'the endpoint has no such path - check the base URL ends at /v1'
         if status == 429:
             return 'the endpoint is rate limiting this key (429)'
+        if status >= 500:
+            return f'the provider had a temporary failure ({status}) - try again later{said}'
         return f'the endpoint answered {status}{said}'
     return f'{type(exc).__name__}: {exc}'
 

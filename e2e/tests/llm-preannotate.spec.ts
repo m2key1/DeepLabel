@@ -151,17 +151,21 @@ test.describe('Scenario: pre-annotating a dataset with language models', () => {
       await pickModel(page, connection, 'stub-error').check()
       await page.getByTestId('llm-start').click()
 
-      await expect(page.locator(
-        `[data-testid="llm-progress-error"][data-label="${connection} stub-error"]`))
-        .toContainText('the model is overloaded', { timeout: 20_000 })
+      // The failure folds into a chip on its model's row, and opens in words, with what the
+      // provider answered underneath.
+      const failed = page.locator(`[data-testid="llm-progress-failed"][data-label="${connection} stub-error"]`)
+      await expect(failed).toHaveText('✕ 1 failed', { timeout: 20_000 })
       await expect.poll(async () => (await llmReadStatus(jobId)).error).toBe(1)
+      const error = page.locator(`[data-testid="llm-progress-error"][data-label="${connection} stub-error"]`)
+      await expect(error).toHaveCount(0)
+      await failed.click()
+      await expect(error).toContainText('The provider had a temporary failure (500) - try again later.')
+      await expect(error).toContainText('the model is overloaded')
 
-      // Asking again retries it - a failed reading was never paid for, so there is
-      // nothing to protect. Counting from zero makes the retry's own call the subject.
+      // Retry asks again - a failed reading was never paid for, so there is nothing to
+      // protect. Counting from zero makes the retry's own call the subject.
       await resetLlmStats()
-      await datasetAction(page, 'llm-read-open')
-      await pickModel(page, connection, 'stub-error').check()
-      await page.getByTestId('llm-start').click()
+      await page.getByTestId('llm-retry').click()
       // Both halves in one poll: the row is briefly back to pending while the retry runs,
       // so asking about either alone can catch it mid-flight.
       await expect.poll(async () => ({

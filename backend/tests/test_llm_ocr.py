@@ -194,7 +194,36 @@ class TestReadingAPage:
         read = conn.execute('SELECT status, error FROM llm_reads').fetchone()
         assert (read['status'], read['error']) == ('error', 'the endpoint rejected the API key (401)')
         assert llm_ocr.status(conn, 'j1')['errors'] == [
-            {'label': 'First reader', 'error': 'the endpoint rejected the API key (401)', 'c': 1}]
+            {'id': 1, 'label': 'First reader', 'error': 'the endpoint rejected the API key (401)',
+             'summary': 'the endpoint rejected the API key (401)', 'detail': '', 'c': 1}]
+
+    def test_what_the_provider_said_is_kept_apart_from_the_sentence(self, conn, monkeypatch):
+        def transcribe(*args, **kwargs):
+            raise llm_client.LlmError('the provider had a temporary failure (502) - try again later: '
+                                      '{"detail":"upstream_error"}')
+        monkeypatch.setattr(llm_client, 'transcribe', transcribe)
+        llm_ocr.enqueue(conn, 'j1', [1], ALICE)
+        llm_ocr.drain_once(conn)
+
+        [error] = llm_ocr.status(conn, 'j1')['errors']
+        assert (error['summary'], error['detail']) == (
+            'the provider had a temporary failure (502) - try again later', '{"detail":"upstream_error"}')
+
+    def test_retrying_asks_again_for_the_failed_pages_only(self, conn, monkeypatch):
+        conn.execute(
+            'INSERT INTO pages (id, job_id, idx, filename, source_file, content_hash, status) '
+            "SELECT 3, 'j1', 1, 'p2.png', source_file, 'never-read', 'done' FROM pages WHERE id = 1")
+        conn.commit()
+        def transcribe(*args, **kwargs):
+            raise llm_client.LlmError('the endpoint answered 503')
+        monkeypatch.setattr(llm_client, 'transcribe', transcribe)
+        llm_ocr.enqueue(conn, 'j1', [1], ALICE, page_ids=[1])
+        llm_ocr.drain_once(conn)
+
+        assert llm_ocr.retry_failed(conn, 'j1', ALICE) == {'queued': 1}
+
+        assert [tuple(r) for r in conn.execute('SELECT content_hash, status FROM llm_reads')] == [(SCAN, 'pending')]
+        assert llm_ocr.retry_failed(conn, 'j1', ALICE) == {'queued': 0}
 
     def test_a_key_that_cannot_be_decrypted_fails_before_any_call(self, conn, monkeypatch):
         conn.execute('UPDATE llm_connections SET api_key = ? WHERE id = 1', (llm.encrypt_key('sk-x'),))

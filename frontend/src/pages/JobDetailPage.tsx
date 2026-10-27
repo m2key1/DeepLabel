@@ -14,7 +14,7 @@ import {
   cancelLlmRead,
   getJobMapClasses,
   getPage,
-  getNewerModels, getReviewQueue,
+  getNewerModels, getReviewQueue, retryLlmReads,
   isTileTask,
   jobEventsUrl,
   purgePreview,
@@ -86,6 +86,7 @@ import { PurgeDialog } from '../components/job/PurgeDialog'
 import { RedetectDialog } from '../components/job/RedetectDialog'
 import { LlmReadDialog } from '../components/job/LlmReadDialog'
 import { NewerModelsDialog } from '../components/job/NewerModelsDialog'
+import { LlmProgress } from '../components/job/LlmProgress'
 import { LayoutClassesDialog } from '../components/job/LayoutClassesDialog'
 import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
 import { SettleAgainDialog } from '../components/job/SettleAgainDialog'
@@ -1310,51 +1311,12 @@ export function JobDetailPage() {
                           onError={setError} />
       )}
       {llmStatus && (llmStatus.active || llmStatus.error > 0) && !llmDismissed && (
-        <div data-testid="llm-progress"
-             className="mb-4 flex flex-wrap items-center gap-3 rounded border border-line p-3 text-sm">
-          <span className="font-medium">Language models</span>
-          {/* A run over two pages of fifty reports 2/2, which reads as the whole dataset
-              having been transcribed. The denominator says otherwise. */}
-          <span data-testid="llm-progress-scope" className="text-xs text-ink-muted">
-            of {llmStatus.pages} page{llmStatus.pages === 1 ? '' : 's'} in this dataset
-          </span>
-          {llmStatus.models.map((model) => (
-            <span key={model.id} data-testid="llm-progress-model" data-label={model.label}
-                  className="text-ink-muted">
-              {model.label} {model.done}/{model.done + model.pending + model.running + model.error}
-              {/* Finished is all the count says, so without this a page being read right
-                  now looks exactly like one nothing is happening to. */}
-              {model.running > 0 && (
-                <span className="text-accent-ink">
-                  {' '}· {model.running} being read
-                </span>
-              )}
-              {model.error > 0 && (
-                <span className="text-danger"> · {model.error} failed</span>
-              )}
-            </span>
-          ))}
-          {llmStatus.errors.map((failure) => (
-            <span key={`${failure.label}-${failure.error}`} data-testid="llm-progress-error"
-                  data-label={failure.label}
-                  className="text-xs text-danger">{failure.error}</span>
-          ))}
-          {llmStatus.active && (
-            <Button size="xs" data-testid="llm-cancel"
-                    onClick={() => cancelLlmRead(jobId).then(pollLlm).catch((e: Error) => setError(e.message))}>
-              Cancel what is not sent
-            </Button>
-          )}
-          <button
-            onClick={() => setLlmDismissed(true)}
-            data-testid="llm-progress-dismiss"
-            title="Hide this until the next run"
-            aria-label="Dismiss"
-            className="ml-auto rounded px-1 text-ink-subtle hover:text-ink"
-          >
-            ×
-          </button>
-        </div>
+        <LlmProgress
+          status={llmStatus}
+          onCancel={() => cancelLlmRead(jobId).then(pollLlm).catch((e: Error) => setError(e.message))}
+          onRetry={() => retryLlmReads(jobId).then(pollLlm).catch((e: Error) => setError(e.message))}
+          onDismiss={() => setLlmDismissed(true)}
+        />
       )}
       {selected.size > 0 && !active && (
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-accent bg-accent-wash px-3 py-2 text-sm">

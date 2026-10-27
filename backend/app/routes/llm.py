@@ -462,6 +462,16 @@ def cancel_reads(job_id: str, body: CancelRequest | None = None, conn=Depends(ge
     return {'cancelled': llm_ocr.cancel(conn, job_id, page_ids, in_flight=bool(body and body.in_flight))}
 
 
+@router.post('/api/jobs/{job_id}/llm/retry')
+def retry_reads(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user),
+                _on=Depends(require_enabled)):
+    """Ask again for this dataset's failed readings only, billed to whoever asks."""
+    require_job_access(conn, job_id, user)
+    if store.get_job(conn, job_id) is None:
+        raise HTTPException(404)
+    return llm_ocr.retry_failed(conn, job_id, user)
+
+
 @router.get('/api/jobs/{job_id}/llm/readings')
 def readings_on_file(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
     """The models with readings of this dataset's scans, and how many other datasets would

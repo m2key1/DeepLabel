@@ -2817,7 +2817,13 @@ export interface LlmReadStatus {
   done: number
   error: number
   models: { id: number; label: string; pending: number; running: number; done: number; error: number }[]
-  errors: { label: string; error: string; c: number }[]
+  /** The failures, grouped: `summary` is the sentence, `detail` what the provider answered. */
+  errors: { id: number; label: string; error: string; summary: string; detail: string; c: number }[]
+}
+
+/** Ask again for the dataset's failed readings, and only those. */
+export function retryLlmReads(jobId: string): Promise<{ queued: number }> {
+  return request(`/api/jobs/${jobId}/llm/retry`, { method: 'POST' })
 }
 
 /** What a run would cost. Pages already read - here or in any dataset holding the same

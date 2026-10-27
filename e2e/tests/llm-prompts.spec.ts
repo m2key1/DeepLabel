@@ -195,7 +195,7 @@ test.describe('Scenario: a model that thinks before it answers', () => {
       await expect.poll(async () =>
         (await pageCandidates(pageId)).filter((c) => c.source === 'llm' && !c.dismissed).length,
       { timeout: 30_000 }).toBe(6)
-      await expect(page.getByTestId('llm-progress-error')).toHaveCount(0)
+      await expect(page.getByTestId('llm-progress-failed')).toHaveCount(0)
     })
 
   test('a model whose endpoint refuses the switch still says what went wrong',
@@ -224,8 +224,8 @@ test.describe('Scenario: a model that thinks before it answers', () => {
       await page.getByTestId('llm-start').click()
 
       // The failure names the switch rather than reporting an empty transcription.
-      await expect(page.getByTestId('llm-progress-error'))
-        .toContainText('answered with its reasoning', { timeout: 30_000 })
+      await page.getByTestId('llm-progress-failed').click({ timeout: 30_000 })
+      await expect(page.getByTestId('llm-progress-error')).toContainText('answered with its reasoning')
       await expect(page.getByTestId('llm-progress-error')).toContainText('enable_thinking')
     })
 })

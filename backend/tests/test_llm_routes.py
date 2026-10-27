@@ -381,6 +381,16 @@ class TestDrivingAReading:
         response = client.delete('/api/candidates/5', headers=ALICE)
         assert (response.status_code, response.json()['detail']) == (409, "only a language model's reading can be removed")
 
+    def test_failed_readings_are_asked_for_again(self, client, conn):
+        conn.execute("UPDATE jobs SET llm_model_ids = '[1]' WHERE id = 'j1'")
+        conn.execute("INSERT INTO llm_reads (content_hash, llm_model_id, label, status, error, job_id) "
+                     "VALUES ('hash-of-p1', 1, 'Careful reader', 'error', 'the endpoint answered 503', 'j1')")
+        conn.commit()
+
+        assert client.post('/api/jobs/j1/llm/retry', headers=ALICE).json() == {'queued': 1}
+        assert conn.execute('SELECT status FROM llm_reads').fetchone()[0] == 'pending'
+        assert client.post('/api/jobs/j1/llm/retry', headers=BOB).status_code == 404
+
     def test_a_stranger_is_not_told_the_dataset_exists(self, client):
         assert client.get('/api/jobs/j1/llm/readings', headers=BOB).status_code == 404
         assert client.delete('/api/jobs/j1/llm/readings', headers=BOB).status_code == 404
