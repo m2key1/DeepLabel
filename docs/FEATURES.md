@@ -34,6 +34,8 @@ The start page lists every dataset you can open, as a table or as cards.
 
 - Search, sort, filter to your own datasets or to those that need review, and pick which
   columns to show.
+- Mark a dataset **Complete** on its page once nothing more needs doing; the list shows it
+  and filters by **In progress** or **Complete**.
 - Datasets are grouped into projects. Drag a dataset onto a project in the list or the
   side rail to file it there, or onto Ungrouped to take it out.
 - Tick several datasets, or use a project's menu, to act on all of them at once: re-run,

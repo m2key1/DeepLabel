@@ -276,16 +276,34 @@ test.describe('Scenario: reading the page table at a glance', () => {
     expect(transcript!.height).toBe(run!.height)
   })
 
-  test('the Checked switch signs the whole dataset off, and off again', async ({ page }) => {
-    const jobId = await seedCompletedJob(uniqueName('Signed off'), 1)
+  test('Complete marks a dataset finished, and the dataset list shows and filters by it', async ({ page }) => {
+    const name = uniqueName('Finished volume')
+    const jobId = await seedCompletedJob(name, 1)
+    const other = uniqueName('Open volume')
+    await seedCompletedJob(other, 1)
 
     await page.goto(`/jobs/${jobId}`)
-    const checked = page.getByRole('switch', { name: 'Checked' })
-    await expect(checked).toHaveAttribute('aria-checked', 'false')
-    await checked.click()
-    await expect(checked).toHaveAttribute('aria-checked', 'true')
+    const complete = page.getByRole('switch', { name: 'Complete' })
+    await expect(complete).toHaveAttribute('aria-checked', 'false')
+    await complete.click()
+    await expect(complete).toHaveAttribute('aria-checked', 'true')
     await expect.poll(async () => (await getJob(jobId)).checked).toBe(true)
-    await checked.click()
+
+    await page.goto('/?q=volume')
+    const row = (title: string) => page.getByTestId('job-card').filter({ hasText: title })
+    await expect(row(name).getByTestId('complete-label')).toHaveText('Complete')
+    await expect(row(other)).toBeVisible()
+    await expect(row(other).getByTestId('complete-label')).toHaveCount(0)
+
+    await page.getByTestId('filter-complete-1').click()
+    await expect(row(name)).toBeVisible()
+    await expect(row(other)).toHaveCount(0)
+    await page.getByTestId('filter-complete-0').click()
+    await expect(row(other)).toBeVisible()
+    await expect(row(name)).toHaveCount(0)
+
+    await page.goto(`/jobs/${jobId}`)
+    await complete.click()
     await expect.poll(async () => (await getJob(jobId)).checked).toBe(false)
   })
 })

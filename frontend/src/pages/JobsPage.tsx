@@ -28,6 +28,7 @@ import { Button } from '../components/ui/Button'
 import { Check, Input } from '../components/ui/Field'
 import { NoteTag } from '../components/NoteTag'
 import { TestDataChip } from '../components/TestPage'
+import { CheckIcon } from '../components/icons'
 import { useDropPlacement } from '../components/ui/dropPlacement'
 import { menuTrigger, useDismiss } from '../components/ui/menu'
 import { Modal } from '../components/Modal'
@@ -254,6 +255,7 @@ export function JobsPage() {
   const onlyMine = params.get('mine') === '1'
   const needsReview = params.get('review') === '1'
   const onlyTest = params.get('test') === '1'
+  const completeness = params.get('complete')
   const scope = params.get('group')
   const setScope = (value: string | null) => param('group', value, '')
   const sort = (SORTS.some((o) => o.key === params.get('sort'))
@@ -269,7 +271,7 @@ export function JobsPage() {
     window.clearTimeout(queryWrite.current)
     setParams((prev) => {
       const next = new URLSearchParams(prev)
-      for (const key of ['q', 'mine', 'review', 'test', 'group', 'as']) next.delete(key)
+      for (const key of ['q', 'mine', 'review', 'test', 'complete', 'group', 'as']) next.delete(key)
       return next
     }, { replace: true })
   }
@@ -398,6 +400,7 @@ export function JobsPage() {
     if (onlyMine) rows = rows.filter((j) => j.owner === viewer)
     if (needsReview) rows = rows.filter((j) => (j.lines_done ?? 0) < (j.lines_total ?? 0))
     if (onlyTest) rows = rows.filter((j) => (j.test_pages ?? 0) > 0)
+    if (completeness !== null) rows = rows.filter((j) => j.checked === (completeness === '1'))
     const terms = fold(query).split(/\s+/).filter(Boolean)
     if (terms.length) {
       const named = (j: Job) => fold(`${j.name} ${groups.find((g) => g.id === j.group_id)?.name ?? ''}`)
@@ -412,7 +415,7 @@ export function JobsPage() {
         (b.lines_total ? (b.lines_done ?? 0) / b.lines_total : 1),
     }
     return [...rows].sort(by[sort])
-  }, [reached, groups, scope, onlyMine, needsReview, onlyTest, query, sort, viewer])
+  }, [reached, groups, scope, onlyMine, needsReview, onlyTest, completeness, query, sort, viewer])
 
   /** The list's sections, whatever it is divided by. A project section carries the group
    *  itself, because renaming, sharing and running belong to the group and not to the
@@ -431,7 +434,8 @@ export function JobsPage() {
       const key = job.group_id ?? null
       byGroup.set(key, [...(byGroup.get(key) ?? []), job])
     }
-    const filtering = query.trim() !== '' || onlyMine || needsReview || onlyTest || scope !== null
+    const filtering = query.trim() !== '' || onlyMine || needsReview || onlyTest || completeness !== null
+      || scope !== null
     const out: { key: SectionKey; title: string; rows: Job[]; group?: Group }[] = reached.groups
       .map((group) => ({ key: group.id as SectionKey, title: group.name,
                          rows: byGroup.get(group.id) ?? [], group }))
@@ -447,7 +451,8 @@ export function JobsPage() {
       out.push({ key: 'unlisted', title: 'Groups not loaded', rows: unlisted })
     }
     return out
-  }, [visible, reached, groupBy, viewerIsAdmin, viewer, query, onlyMine, needsReview, onlyTest, scope, groupsFailed])
+  }, [visible, reached, groupBy, viewerIsAdmin, viewer, query, onlyMine, needsReview, onlyTest, completeness, scope,
+    groupsFailed])
 
   const reviewCount = useMemo(
     () => reached.jobs.filter((j) => (j.lines_done ?? 0) < (j.lines_total ?? 0)).length,
@@ -709,6 +714,14 @@ export function JobsPage() {
     )
   }
 
+  const completeLabel = (job: Job) => job.checked && (
+    <span data-testid="complete-label" title="Marked complete: nothing more to do"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[11px] font-medium text-ok">
+      <CheckIcon />
+      Complete
+    </span>
+  )
+
   const noteTag = (job: Job) => (
     <NoteTag note={job.note} title={job.name} canEdit={canEdit} compact onSave={async (text) => {
       const note = await setJobNote(job.id, text)
@@ -775,6 +788,7 @@ export function JobsPage() {
           overflows ? 'sticky left-0 z-10 bg-inherit' : ''}`}>
         <div className="flex min-w-0 items-center gap-2">
           {nameCell(job, prefix)}
+          {completeLabel(job)}
           {testLabel(job)}
           {noteTag(job)}
           {sharedLabel(job)}
@@ -808,8 +822,9 @@ export function JobsPage() {
           {selectBox(job)}
           {nameCell(job)}
           <span className="ml-auto flex shrink-0 items-center gap-2">
+            {completeLabel(job)}
             {testLabel(job)}
-          {noteTag(job)}
+            {noteTag(job)}
             {sharedLabel(job)}
             <PresenceAvatars entries={onJob(job.id)} />
             <StatusBadge status={job.status} />
@@ -1018,6 +1033,13 @@ export function JobsPage() {
               onClick={() => param('test', onlyTest ? '0' : '1', '0')}>
         Test data
       </button>
+      {([['0', 'In progress'], ['1', 'Complete']] as const).map(([value, label]) => (
+        <button key={value} className={chip(completeness === value)} aria-pressed={completeness === value}
+                data-testid={`filter-complete-${value}`}
+                onClick={() => param('complete', completeness === value ? '' : value, '')}>
+          {label}
+        </button>
+      ))}
       {isAdmin && (
         <div className="relative">
           <button className={chip(asUser !== '')} data-testid="as-user-menu"

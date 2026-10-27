@@ -955,7 +955,7 @@ export function JobDetailPage() {
             setJob((p) => (p ? { ...p, note } : p))
             return note
           }} />
-          <CheckedSwitch on={job.checked} onChange={(checked) => {
+          <CompleteSwitch on={job.checked} onChange={(checked) => {
             setJob((p) => (p ? { ...p, checked } : p))
             setJobChecked(jobId, checked).catch((err: Error) => setError(err.message))
           }} />
@@ -1727,14 +1727,14 @@ function ReviewProgress({ done, total, unit }: { done: number; total: number; un
   )
 }
 
-/** The dataset as a whole signed off as checked. */
-function CheckedSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+/** The dataset marked as needing no more work, which the dataset list shows and filters by. */
+function CompleteSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
   return (
-    <button type="button" role="switch" aria-checked={on} data-testid="job-checked"
-            title="Mark the whole dataset as checked" onClick={() => onChange(!on)}
+    <button type="button" role="switch" aria-checked={on} data-testid="job-complete"
+            title="Mark the dataset complete: nothing more to do on it" onClick={() => onChange(!on)}
             className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
               on ? 'border-ok/40 bg-ok/10 text-ok' : 'border-line-strong text-ink-muted hover:text-ink'}`}>
-      Checked
+      Complete
       <SwitchKnob on={on} onColor="bg-ok" />
     </button>
   )
