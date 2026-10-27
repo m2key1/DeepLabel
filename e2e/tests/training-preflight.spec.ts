@@ -1,6 +1,6 @@
 import { test, expect } from '../helpers/test'
 import {
-  backendFetch, correctLine, getPageDetail, jobPageIds, listTrainings, markLinesChecked, seedDistinctPagesJob,
+  TEST_SCAN_WIDTH, backendFetch, correctLine, getPageDetail, jobPageIds, listTrainings, markLinesChecked, seedDistinctPagesJob,
   uniqueName,
 } from '../helpers/api'
 import { JSON_HEADERS } from '../helpers/map'
@@ -35,17 +35,20 @@ test.describe('Scenario: the training pre-flight', () => {
   // blocks ... The pre-flight the review showed is stored with the run and shown again on
   // the run's page".
   test('Next opens a review, Back keeps the settings, and the run keeps that review', async ({ page }) => {
-    // Two distinct scans to train on, and a test set whose one page is a copy of the first
-    // of them - the same content hash on both sides of the split.
+    // Two distinct scans to train on, and a test set of a third. A test page that copied
+    // a training scan would take that scan out of training rather than share it.
     const trainName = uniqueName('Preflight train')
     const testName = uniqueName('Preflight test')
     const trainId = await seedDistinctPagesJob(trainName, 2)
-    const testId = await seedDistinctPagesJob(testName, 1)
+    const testId = await seedDistinctPagesJob(testName, 1, 115, TEST_SCAN_WIDTH)
     // A Cyrillic a where the stub wrote "Sample", and a sharp s only the test set holds.
     await correctLine(await firstLineId(trainId), `S${CYRILLIC_A}mple Header line 1`)
     await correctLine(await firstLineId(testId), `Sample Header line 1 ${SHARP_S}`)
     await markLinesChecked(trainId, 12)
     await markLinesChecked(testId, 6)
+    await backendFetch(`/api/jobs/${testId}/test-pages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ test: true }),
+    })
 
     const started: number[] = []
     page.on('response', async (res) => {
@@ -58,7 +61,7 @@ test.describe('Scenario: the training pre-flight', () => {
     await page.goto('/models/train?task=ocr')
     await page.getByLabel('Model name').fill(runName)
     await pickDataset(page, trainName)
-    await page.getByLabel('Test dataset').selectOption({ label: `${testName} (6)` })
+    await page.getByLabel('Test set').selectOption({ label: `${testName} - 1 test page` })
     await page.getByTestId('advanced-toggle').click()
     await page.getByLabel('Epochs', { exact: true }).fill('2')
 
@@ -90,10 +93,9 @@ test.describe('Scenario: the training pre-flight', () => {
     await expect(total.locator('[data-split="train"]')).toHaveText('12 / 2 p')
     await expect(total.locator('[data-split="val"]')).toHaveText('0 / 0 p')
     await expect(total.locator('[data-split="test"]')).toHaveText('6 / 1 p')
-    await expect(report.locator('[data-testid="preflight-finding"][data-code="duplicates"]'))
-      .toHaveText(/1 scan sits in more than one split/)
     await expect(report.locator('[data-testid="preflight-finding"][data-code="empty_split"]'))
       .toHaveText(/The valid split is empty/)
+    await expect(report.locator('[data-testid="preflight-finding"][data-code="duplicates"]')).toHaveCount(0)
     const lookalike = report.locator('[data-testid="preflight-char"][data-char="U+0430"]')
     await expect(lookalike).toHaveAttribute('data-flags', 'rare lookalike')
     await expect(lookalike).toContainText('looks like Latin a (U+0061)')
@@ -126,16 +128,16 @@ test.describe('Scenario: the training pre-flight', () => {
     expect(stored.status).toBe('done')
     expect(stored.result.split.totals).toEqual({
       train: { pages: 2, items: 12 }, val: { pages: 0, items: 0 }, test: { pages: 1, items: 6 } })
-    expect(stored.result.split.duplicate_count).toBe(1)
+    expect(stored.result.split.duplicate_count).toBe(0)
     const storedSharpS = stored.result.text.characters.find((c) => c.codepoints[0] === 'U+00DF')!
     expect([storedSharpS.train, storedSharpS.test, storedSharpS.flags]).toEqual([0, 1, ['split_only']])
     expect(stored.result.findings.filter((f) => f.level === 'warn').map((f) => f.code).sort())
-      .toEqual(['duplicates', 'empty_split', 'lookalike', 'split_only'])
+      .toEqual(['empty_split', 'lookalike', 'split_only'])
 
     await page.goto(`/models/runs/${run.id}?tab=data`)
     const onRun = page.getByTestId('preflight-report')
     await expect(onRun.getByTestId('preflight-split-total').locator('[data-split="train"]')).toHaveText('12 / 2 p')
-    await expect(onRun.locator('[data-testid="preflight-finding"][data-code="duplicates"]')).toBeVisible()
+    await expect(onRun.locator('[data-testid="preflight-finding"][data-code="split_only"]')).toBeVisible()
     await expect(onRun.locator('[data-testid="preflight-char"][data-char="U+0430"]'))
       .toHaveAttribute('data-flags', 'rare lookalike')
 
