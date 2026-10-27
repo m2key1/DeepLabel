@@ -32,6 +32,28 @@ describe('model families', () => {
     expect(families[1].name).toBe('m1')
   })
 
+  it('puts a new version in the family of the model it succeeds, on one line with it', () => {
+    // V1 -> V2 -> V3 by "new version of", none trained from the other; V2 also has a fine-tune.
+    const models = [model(1, { name: 'DeepOCR V1', family_name: 'DeepOCR' }), model(2, { supersedes: 1 }),
+                    model(3, { supersedes: 2, is_default: true }), model(4, { trained_from: 2 })]
+    const families = buildFamilies(models, [], [])
+
+    expect(families).toHaveLength(1)
+    expect(families[0].name).toBe('DeepOCR')
+    expect(lanes(families[0])).toEqual({ m4: 1, m3: 0, m2: 0, m1: 0 })
+    expect(families[0].versions.map((v) => [v.key, v.parentKey, v.succeeds])).toEqual([
+      ['m4', 'm2', false], ['m3', 'm2', true], ['m2', 'm1', true], ['m1', null, false]])
+    expect(lineage(families[0].versions, 'm3').map((v) => v.key)).toEqual(['m3', 'm2', 'm1'])
+  })
+
+  it('keeps the versions on the main line when a fine-tune came later', () => {
+    const models = [model(1), model(2, { supersedes: 1, is_default: true }), model(3, { supersedes: 2 }),
+                    model(4, { trained_from: 2 })]
+    const [family] = buildFamilies(models, [], [])
+
+    expect(lanes(family)).toEqual({ m4: 1, m3: 0, m2: 0, m1: 0 })
+  })
+
   it('takes the name a family was given over its root model name', () => {
     const [family] = buildFamilies([model(1, { family_name: 'DeepOCR' }), model(2, { trained_from: 1 })], [], [])
     expect(family.name).toBe('DeepOCR')

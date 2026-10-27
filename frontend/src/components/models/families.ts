@@ -19,6 +19,8 @@ export interface Version {
   model: RegistryModel | null
   run: Training | null
   parentKey: string | null
+  /** The parent is the model this one is the new version of, not one it was trained from. */
+  succeeds: boolean
   /** The weights' short hash, or the run number for a run with no model yet. */
   ref: string
   name: string
@@ -80,7 +82,9 @@ export function better(a: Score | null, b: Score | null): boolean {
 
 const shortHash = (model: RegistryModel) => model.files.find((f) => f.role === 'weights')?.sha256.slice(0, 7)
 
-const byNewest = (a: { createdAt: string }, b: { createdAt: string }) => b.createdAt.localeCompare(a.createdAt)
+// Registered in the same second, the later id is the newer.
+const byNewest = (a: { createdAt: string; key: string }, b: { createdAt: string; key: string }) =>
+  b.createdAt.localeCompare(a.createdAt) || Number(b.key.slice(1)) - Number(a.key.slice(1))
 
 /** Lanes as in git log --graph: the lead's line - its ancestors, then its newest child on
  *  down - runs straight; every other child starts a branch along its own newest children,
@@ -92,7 +96,9 @@ function assignLanes(versions: Version[], lead: Version): void {
   }
   const byKey = new Map(versions.map((v) => [v.key, v]))
   const row = new Map(versions.map((v, i) => [v.key, i]))
-  const newestChild = (v: Version) => (children.get(v.key) ?? []).slice().sort(byNewest)[0]
+  // A new version carries a line on before any fine-tune does.
+  const newestChild = (v: Version) => (children.get(v.key) ?? []).slice()
+    .sort((a, b) => Number(b.succeeds) - Number(a.succeeds) || byNewest(a, b))[0]
   const chainFrom = (start: Version) => {
     const chain = [start]
     for (let next = newestChild(start); next; next = newestChild(next)) chain.push(next)
@@ -154,23 +160,29 @@ export function buildFamilies(models: RegistryModel[], trainings: Training[], ev
                               hideArchived = false): Family[] {
   const runByModel = new Map(trainings.filter((t) => t.model_id !== null).map((t) => [t.model_id!, t]))
   const byId = new Map(models.map((m) => [m.id, m]))
+  // Trained from a model, it descends from that one; otherwise it continues the line of the
+  // model it is the new version of.
+  const parentOf = (model: RegistryModel): number | null =>
+    [model.trained_from, model.supersedes].find((id) => id !== null && byId.has(id)) ?? null
   const rootOf = (model: RegistryModel): RegistryModel => {
     const seen = new Set<number>()
     let current = model
-    while (current.trained_from !== null && byId.has(current.trained_from) && !seen.has(current.id)) {
+    for (let up = parentOf(current); up !== null && !seen.has(current.id); up = parentOf(current)) {
       seen.add(current.id)
-      current = byId.get(current.trained_from)!
+      current = byId.get(up)!
     }
     return current
   }
 
   const modelVersion = (model: RegistryModel): Version => {
     const run = runByModel.get(model.id) ?? null
+    const parent = parentOf(model)
     return {
       key: `m${model.id}`,
       model,
       run,
-      parentKey: model.trained_from !== null && byId.has(model.trained_from) ? `m${model.trained_from}` : null,
+      parentKey: parent !== null ? `m${parent}` : null,
+      succeeds: parent !== null && parent !== model.trained_from,
       ref: shortHash(model) ?? `#${model.id}`,
       name: model.name,
       createdAt: model.created_at,
@@ -188,6 +200,7 @@ export function buildFamilies(models: RegistryModel[], trainings: Training[], ev
     model: null,
     run,
     parentKey: `m${run.base_model_id}`,
+    succeeds: false,
     ref: `run ${run.id}`,
     name: run.name,
     createdAt: run.created_at,

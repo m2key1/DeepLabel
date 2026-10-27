@@ -26,6 +26,10 @@ function Tags({ version }: { version: Version }) {
   return (
     <span className="flex shrink-0 gap-1">
       {version.isDefault && <span data-testid="version-tag" className={`${tag} bg-accent-wash text-accent-ink`}>★ DEFAULT</span>}
+      {version.succeeds && (
+        <span data-testid="version-tag" title="A new version of the model it comes after, not trained from it"
+              className={`${tag} border border-accent/40 text-accent-ink`}>NEW VERSION</span>
+      )}
       {version.state === 'running' && (
         <span data-testid="version-tag" className={`${tag} border border-dashed border-accent text-accent-ink`}>RUNNING</span>
       )}
@@ -129,7 +133,9 @@ export function FamilyGraph({ family }: { family: Family }) {
               <Tags version={v} />
             </span>
             <span className="hidden w-36 shrink-0 truncate text-ink-subtle md:block">
-              {v.parentKey ? `from ${nameOf.get(v.parentKey) ?? 'another family'}` : 'root'}
+              {v.parentKey
+                ? `${v.succeeds ? 'after' : 'from'} ${nameOf.get(v.parentKey) ?? 'another family'}`
+                : 'root'}
             </span>
             <span data-testid="version-score" title={v.score ? scoreTitle[v.score.kind] : undefined}
                   className="w-28 shrink-0 text-right tabular-nums text-ink-muted">

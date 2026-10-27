@@ -289,7 +289,8 @@ backends up as described in [MODEL-BACKENDS.md](MODEL-BACKENDS.md).
 - Every task has a default model. Archived models leave the pickers but stay on record and
   can be unarchived.
 - Mark a model as the **new version of** another under **Edit**, even when it was not
-  trained from it. Its page then shows "New version of ..." and "Replaced by ...".
+  trained from it. Its page then shows "New version of ..." and "Replaced by ...", and its
+  family graph draws the versions as one line, each fine-tune branching off its own version.
 - You manage the models your own trainings produced; people with the model-management
   permission manage all of them.
 

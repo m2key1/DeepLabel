@@ -42,6 +42,20 @@ test.describe('Scenario: a model gets a new version', () => {
       await expect(page.getByTestId('model-versions')).toHaveText(`New version of ${older}`)
       await expect.poll(async () => offered(jobId)).toEqual(['ocr'])
 
+      // The two are one family now, drawn on one line, the new one tagged as such.
+      await page.goto('/models?tab=ocr')
+      const family = page.getByTestId('model-family').and(page.locator(`[data-root="${olderId}"]`))
+      await expect(page.getByTestId('model-family').and(page.locator(`[data-root="${newerId}"]`))).toHaveCount(0)
+      if (await family.getByTestId('family-toggle').getAttribute('aria-expanded') === 'false') {
+        await family.getByTestId('family-toggle').click()
+      }
+      const versionRow = (id: number) => family.locator(`[data-testid="version-row"][data-version="m${id}"]`)
+      await expect(versionRow(newerId).getByTestId('version-tag')).toHaveText('NEW VERSION')
+      await expect(versionRow(olderId)).toBeVisible()
+      await expect(versionRow(olderId).getByTestId('version-tag')).toHaveCount(0)
+      await expect(family.locator(`[data-testid="graph-dot"][data-version="m${newerId}"]`)).toHaveAttribute('data-lane', '0')
+      await expect(family.locator(`[data-testid="graph-dot"][data-version="m${olderId}"]`)).toHaveAttribute('data-lane', '0')
+
       await page.goto(`/jobs/${jobId}`)
       const dialog = page.getByRole('dialog', { name: `Newer models for ${name}` })
       const ocr = dialog.locator('[data-testid="newer-model"][data-task="ocr"]')
