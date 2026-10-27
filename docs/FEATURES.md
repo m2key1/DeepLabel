@@ -196,8 +196,9 @@ Press `e` to edit the page.
   both.
 - Build your own character keyboard under Settings, from a grid of characters grouped by
   script or from presets, or let it fill itself with the characters the dataset uses. The
-  bar sits above the status bar; drag its top handle to move it anywhere, double-click the
-  handle to put it back, and drag its corner to resize it. Position and size are remembered.
+  bar sits above the status bar; drag its top handle to move it anywhere, put it back with
+  **Dock** or by dragging it to the bottom edge, and drag its corner to resize it. Position
+  and size are remembered.
 - The page header shows the live CER and WER of the OCR model against the lines people
   have checked.
 

@@ -187,6 +187,9 @@ const READINGS_FRAC = { least: 0.1, most: 0.8 }
 const clampOcrFrac = (f: number) => Math.min(OCR_FRAC.most, Math.max(OCR_FRAC.least, f))
 const clampReadingsFrac = (f: number) => Math.min(READINGS_FRAC.most, Math.max(READINGS_FRAC.least, f))
 
+// How close to the bottom edge a dragged keyboard's lower edge must come to dock again.
+const KEYBOARD_SNAP_PX = 48
+
 export function PageViewerPage() {
   const { user, isAdmin, canEdit, can } = useAuth()
   const canReread = canEdit && can('pipeline.ocr')
@@ -296,6 +299,7 @@ export function PageViewerPage() {
   const [readingsFrac, setReadingsFracState] = useState(getReadingsFrac)
   const [kbSize, setKbSize] = useState(getKeyboardSize)
   const [kbPlace, setKbPlace] = useState(getKeyboardPlace)
+  const [kbSnap, setKbSnap] = useState(false)
   const [loupeH, setLoupeH] = useState(getLoupeHeight)
   const lastFrac = useRef(0.5)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -1215,7 +1219,8 @@ export function PageViewerPage() {
   }
 
   // Drag the keyboard by its handle. It is placed by its centre, so resizing it afterwards
-  // still grows it from both sides; a double-click puts it back above the footer.
+  // still grows it from both sides. Let go near the bottom edge, it docks above the footer
+  // again - as the Dock button and a double-click on the handle do.
   const beginKeyboardMove = (e: React.PointerEvent) => {
     e.preventDefault()
     const board = kbRef.current?.getBoundingClientRect()
@@ -1226,12 +1231,18 @@ export function PageViewerPage() {
       cx: board.left + board.width / 2 - area.left, cy: board.top + board.height / 2 - area.top,
     }
     const fraction = (v: number, of: number) => Math.min(1, Math.max(0, v / of))
+    let snap = false
     kbMoveDrag.begin(e, {
-      onMove: (ev) => setKbPlace({
-        x: fraction(from.cx + ev.clientX - from.x, area.width),
-        y: fraction(from.cy + ev.clientY - from.y, area.height),
-      }),
-      onEnd: () => undefined,
+      onMove: (ev) => {
+        const cy = from.cy + ev.clientY - from.y
+        snap = area.height - (cy + board.height / 2) < KEYBOARD_SNAP_PX
+        setKbSnap(snap)
+        setKbPlace({ x: fraction(from.cx + ev.clientX - from.x, area.width), y: fraction(cy, area.height) })
+      },
+      onEnd: () => {
+        setKbSnap(false)
+        if (snap) setKbPlace(null)
+      },
     })
   }
 
@@ -3876,6 +3887,12 @@ export function PageViewerPage() {
           onHeight={setLoupeH}
         />
       )}
+      {kbVisible && kbSnap && (
+        <div data-testid="keyboard-dock-target" style={{ width: kbBox.width, height: kbBox.height }}
+             className="pointer-events-none absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center justify-center rounded border-2 border-dashed border-accent bg-accent-wash/60 text-xs font-medium text-accent-ink">
+          Dock here
+        </div>
+      )}
       {kbVisible && (
         <div
           ref={kbRef}
@@ -3915,6 +3932,13 @@ export function PageViewerPage() {
               title="Drag to move · double-click to put it back above the footer"
               className="absolute -top-1.5 left-1/2 h-3 w-12 -translate-x-1/2 cursor-move rounded-full border border-line-strong bg-white"
             />
+          )}
+          {canEdit && kbPlace && (
+            <button type="button" data-testid="keyboard-dock" onClick={() => setKbPlace(null)}
+                    title="Put the keyboard back above the footer"
+                    className="absolute -top-2.5 left-[calc(50%+2.25rem)] rounded-full border border-line-strong bg-surface px-1.5 text-[10px] font-medium leading-4 text-ink-muted hover:border-accent hover:text-accent-ink">
+              Dock
+            </button>
           )}
           {palette.map((c, i) => (
             <button

@@ -150,18 +150,31 @@ test.describe('Scenario: customizing hotkeys', () => {
     await page.getByTestId('line-text').first().click()
     await expect.poll(async () => Math.round((await board.boundingBox())!.y)).toBe(Math.round(from.y - 200))
 
-    // Dragged far past the bottom it stops at the canvas edge, never over the footer.
-    const moved = (await handle.boundingBox())!
-    await page.mouse.move(moved.x + moved.width / 2, moved.y + moved.height / 2)
-    await page.mouse.down()
-    await page.mouse.move(moved.x + moved.width / 2, moved.y + 2000, { steps: 10 })
-    await page.mouse.up()
-    await expect.poll(async () => Math.round((await board.boundingBox())!.y)).toBeGreaterThan(Math.round(from.y - 200))
-    expect(await docked()).toBe(true)
-
-    await handle.dblclick()
+    // Floating, it offers its way back: Dock puts it above the footer again.
+    const dock = page.getByTestId('keyboard-dock')
+    await dock.click()
     await expect.poll(async () => Math.round((await board.boundingBox())!.y)).toBe(Math.round(from.y))
     expect(Math.round((await board.boundingBox())!.x)).toBe(Math.round(from.x))
+    expect(await docked()).toBe(true)
+    await expect(dock).toHaveCount(0)
+
+    // Dragged back down to the bottom edge, it shows where it will land and docks there.
+    const lift = (await handle.boundingBox())!
+    await page.mouse.move(lift.x + lift.width / 2, lift.y + lift.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(lift.x + lift.width / 2 + 30, lift.y - 150, { steps: 10 })
+    await page.mouse.up()
+    await expect(dock).toBeVisible()
+    const up = (await handle.boundingBox())!
+    await page.mouse.move(up.x + up.width / 2, up.y + up.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(up.x + up.width / 2, up.y + 2000, { steps: 10 })
+    await expect(page.getByTestId('keyboard-dock-target')).toBeVisible()
+    await page.mouse.up()
+    await expect(page.getByTestId('keyboard-dock-target')).toHaveCount(0)
+    await expect.poll(async () => Math.round((await board.boundingBox())!.y)).toBe(Math.round(from.y))
+    expect(Math.round((await board.boundingBox())!.x)).toBe(Math.round(from.x))
+    await expect(dock).toHaveCount(0)
   })
 
   test('a character typed into Settings joins the palette and reaches the line editor', async ({ page }) => {
@@ -206,7 +219,7 @@ test.describe('Scenario: customizing hotkeys', () => {
     // left the keyboard with no way back from the page that wants it.
     await openViewer(page, jobId, pageId)
     const keys = page.getByRole('button', { name: /^Keys/ })
-    await expect(keys).toHaveText('Keys none')
+    await expect(keys).toHaveAccessibleName('Keys none')
     await expect(page.getByTitle('Insert ä', { exact: true })).toHaveCount(0)
 
     // And it leads to the one place that can fill it.
@@ -218,7 +231,7 @@ test.describe('Scenario: customizing hotkeys', () => {
     // Paired: with keys again the same control goes back to cycling the keyboard, and
     // the bar it cycles is there to be shown.
     await openViewer(page, jobId, pageId)
-    await expect(page.getByRole('button', { name: /^Keys/ })).toHaveText('Keys auto')
+    await expect(page.getByRole('button', { name: /^Keys/ })).toHaveAccessibleName('Keys auto')
     await page.getByTestId('line-text').first().click()
     await expect(page.getByTitle('Insert ä', { exact: true })).toBeVisible()
   })
