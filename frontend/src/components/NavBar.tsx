@@ -6,7 +6,7 @@ import { useAuth } from '../auth'
 import { useCommand } from '../commands'
 import { profilePath } from '../people'
 import { PresencePill } from './presence/PresencePill'
-import { cycleTheme } from './ThemeToggle'
+import { ThemeToggle, cycleTheme } from './ThemeToggle'
 import { Avatar } from './ui/Avatar'
 import { buttonClass } from './ui/Button'
 
@@ -72,8 +72,7 @@ function QueuePill({ queue }: { queue: QueueState | null }) {
   )
 }
 
-/** Your own avatar, which opens your profile - where your settings, the theme and
- *  logging out are. */
+/** Your own avatar, which opens your profile - where your settings and logging out are. */
 function ProfileLink() {
   const { user } = useAuth()
   return (
@@ -156,6 +155,7 @@ export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
               New job
             </Link>
           )}
+          <ThemeToggle />
           <ProfileLink />
         </div>
       </div>

@@ -18,8 +18,8 @@ function applyTheme(mode: ThemeMode) {
   document.documentElement.classList.toggle('dark', dark)
 }
 
-// One mode for the whole app, so every switch that shows it - the profile's, the tile
-// editor's - and the shortcut that cycles it agree.
+// One mode for the whole app, so every switch that shows it - the profile's, the top
+// bar's - and the shortcut that cycles it agree.
 let current: ThemeMode = 'system'
 const listeners = new Set<() => void>()
 
@@ -57,7 +57,8 @@ export function useTheme(): ThemeMode {
 export function ThemeToggle() {
   const mode = useTheme()
   return (
-    <Button variant="ghost" size="icon" onClick={cycleTheme} title={`Theme: ${LABELS[mode]}`} aria-label="Theme">
+    <Button variant="ghost" size="icon" onClick={cycleTheme} data-testid="theme-toggle" data-mode={mode}
+            title={`Theme: ${LABELS[mode]} - click for ${LABELS[NEXT[mode]]}`} aria-label="Theme">
       <ThemeIcon mode={mode} />
     </Button>
   )

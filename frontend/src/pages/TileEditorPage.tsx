@@ -20,7 +20,6 @@ import { spanOf, useEditHistory } from '../editor/useEditHistory'
 import { useGuardedSave } from '../editor/guardedSave'
 import { usePageLiveFeed } from '../editor/usePageLiveFeed'
 import { comboLabel, eventCombo, useSettings } from '../settings'
-import { ThemeToggle } from '../components/ThemeToggle'
 import { PresenceBanner } from '../components/presence/PresenceBanner'
 import { usePresence, usePresenceLocation } from '../presence'
 import { AddClassDialog, RemoveClassDialog } from '../components/tile/ClassDialogs'
@@ -2032,7 +2031,6 @@ export function TileEditorPage() {
                    onChange={toggleReviewed} disabled={readOnly} />
             Reviewed
           </label>
-          <ThemeToggle />
         </>),
       }}
       rail={<>

@@ -212,6 +212,30 @@ test.describe('Scenario: a person\'s profile', () => {
     await expect(page).toHaveURL(/\/people\/dev\?section=tokens$/)
   })
 
+  test('the top bar button cycles the theme on every page, and the profile switch follows it',
+    async ({ page }) => {
+      await page.goto('/')
+      await page.evaluate(() => localStorage.removeItem('deeplabel.theme'))
+      await page.reload()
+      const toggle = page.getByRole('banner').getByTestId('theme-toggle')
+      await expect(toggle).toHaveAttribute('data-mode', 'system')
+      await toggle.click()
+      await expect(toggle).toHaveAttribute('data-mode', 'light')
+      await expect(page.locator('html')).not.toHaveClass(/\bdark\b/)
+      await toggle.click()
+      await expect(toggle).toHaveAttribute('data-mode', 'dark')
+      await expect(page.locator('html')).toHaveClass(/\bdark\b/)
+      expect(await page.evaluate(() => localStorage.getItem('deeplabel.theme'))).toBe('dark')
+
+      await page.getByTestId('user-menu').click()
+      await expect(page.getByTestId('theme-choice').getByRole('button', { name: 'Dark' }))
+        .toHaveAttribute('aria-pressed', 'true')
+      await toggle.click()
+      await expect(page.getByTestId('theme-choice').getByRole('button', { name: 'Auto' }))
+        .toHaveAttribute('aria-pressed', 'true')
+      await page.evaluate(() => localStorage.removeItem('deeplabel.theme'))
+    })
+
   test('the theme switch lives on your profile and its choice is kept', async ({ page }) => {
     await page.goto('/people/dev')
     const theme = page.getByTestId('theme-choice')
