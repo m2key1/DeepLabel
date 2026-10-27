@@ -31,7 +31,7 @@ test.describe('Scenario: the page table agrees with the dataset however its rows
     const reads = await spoilRowReads(page, jobId, 1, (route) => route.abort('internetdisconnected'))
     await page.reload()
 
-    await expect(page.getByTestId('status-badge')).toHaveText('done')
+    await expect(page.getByTestId('phase-strip')).toHaveAttribute('data-status', 'done')
     await expect(page.locator('[data-page-row]')).toHaveCount(3)
     await expect(page.getByTestId('page-filter-all')).toHaveText('All · 3')
     expect(reads()).toBe(2)

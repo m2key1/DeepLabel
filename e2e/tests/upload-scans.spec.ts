@@ -78,7 +78,9 @@ test.describe('Scenario: a volume uploaded in parts by the client', () => {
     expect((await getJob(jobId)).status).toBe('uploading')
 
     await page.getByTestId('start-job').click()
-    await expect(page.getByTestId('status-badge')).toHaveText('done', { timeout: 30_000 })
+    await expect(page.getByTestId('phase-strip')).toHaveAttribute('data-status', 'done', { timeout: 30_000 })
+    // Done is said by the steps' checks; the status chip only stands in for what they cannot say.
+    await expect(page.getByTestId('status-badge')).toHaveCount(0)
     const job = await waitForJobStatus(jobId, 'done')
     expect(job.pages.map((p: PageRow) => p.filename).sort()).toEqual(['scan_1.png', 'scan_2.png'])
     await expect(page.getByTestId('start-job')).toHaveCount(0)

@@ -45,9 +45,8 @@ import { useSetCrumbs } from '../components/NavBar'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
 import { Modal, modalBtn, modalPrimaryBtn } from '../components/Modal'
 import { NoteTag } from '../components/NoteTag'
-import { CaretIcon, DownloadIcon, FlaskIcon, KebabIcon, PlayIcon } from '../components/icons'
+import { CaretIcon, CheckIcon, DownloadIcon, FlaskIcon, KebabIcon, PlayIcon } from '../components/icons'
 import { TEST_PAGE_MEANING, TestDataChip, TestPageSwitch } from '../components/TestPage'
-import { StatusBadge } from '../components/StatusBadge'
 import { Badge } from '../components/ui/Badge'
 import { PhaseStrip } from '../components/job/PhaseStrip'
 import { Avatar } from '../components/ui/Avatar'
@@ -936,9 +935,8 @@ export function JobDetailPage() {
       <header className="mb-3 border-b border-line pb-2">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
           <h1 className="mr-1 font-serif text-lg font-semibold">{job.name}</h1>
-          <StatusBadge status={job.status} />
           <ReviewProgress done={job.pages_checked ?? 0} total={(isMap ? job.tiles_total : job.pages_live) ?? 0}
-                          unit={isMap ? 'tiles reviewed' : 'pages with every line reviewed'} />
+                          unit={isMap ? 'tiles reviewed' : 'pages with every line checked'} />
           {!isMap && (
             <TestDataControls
               testPages={chipCounts['test-pages'] ?? 0}
@@ -1714,15 +1712,17 @@ function UnreadablePages({ pages }: { pages: UnreadablePage[] }) {
 
 /** How much of the dataset is test data, and for its owner the switch and the dataset-wide
  *  marking. Test pages are never trained on, nor any page with the same scan. */
-/** How much of the dataset is reviewed, as a chip with a bar; the title says in what unit. */
+/** How much of the dataset a person has checked, as a chip with a bar; the title says in
+ *  what unit. */
 function ReviewProgress({ done, total, unit }: { done: number; total: number; unit: string }) {
   return (
     <span data-testid="job-review-count" title={`${done} of ${total} ${unit}`}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-raised px-2 py-0.5 text-[11px] font-medium text-ink-muted">
-      <span aria-hidden="true" className="h-1 w-10 overflow-hidden rounded-full bg-line-strong">
-        <span className="block h-full bg-accent" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-ok/30 px-2 py-0.5 text-[11px] font-medium text-ok">
+      {total > 0 && done >= total && <CheckIcon />}
+      {unit.startsWith('tiles') ? `Reviewed ${done}/${total} tiles` : `Checked ${done}/${total} pages`}
+      <span aria-hidden="true" className="h-1 w-10 overflow-hidden rounded-full bg-ok/15">
+        <span className="block h-full bg-ok" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
       </span>
-      {done}/{total} reviewed
     </span>
   )
 }

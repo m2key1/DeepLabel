@@ -29,7 +29,7 @@ test.describe('Scenario: creating a dataset', () => {
     expect(created.model_ocr_id).toBe(builtinOcr.id)
     expect(created.ocr_decode).toBe('greedy')
 
-    await expect(page.getByTestId('status-badge')).toHaveText('done')
+    await expect(page.getByTestId('phase-strip')).toHaveAttribute('data-status', 'done')
     const step = (phase: string) => page.getByTestId('phase-strip').locator(`[data-phase="${phase}"]`)
     // The two uploads are the same scan, and a duplicate is left out of every count.
     await expect(step('ingest')).toHaveText('Ingest1/1')

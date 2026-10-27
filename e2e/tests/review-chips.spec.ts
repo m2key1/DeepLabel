@@ -25,8 +25,8 @@ test.describe('Scenario: lines and layout are reviewed apart', () => {
       await expect(page.getByTestId('page-filter-lines-reviewed')).toHaveText('Lines reviewed · 1')
       await expect(page.getByTestId('page-filter-layout-reviewed')).toHaveText('Layout reviewed · 1')
       await expect(page.getByTestId('page-filter-all')).toHaveText('All · 2')
-      await expect(page.getByTestId('job-review-count')).toHaveText('1/2 reviewed')
-      await expect(page.getByTestId('job-review-count')).toHaveAttribute('title', '1 of 2 pages with every line reviewed')
+      await expect(page.getByTestId('job-review-count')).toHaveText('Checked 1/2 pages')
+      await expect(page.getByTestId('job-review-count')).toHaveAttribute('title', '1 of 2 pages with every line checked')
       await expect(page.getByRole('button', { name: /Fully reviewed/ })).toHaveCount(0)
       await expect(page.getByRole('button', { name: /Lines reviewed/ })).toHaveCount(1)
 

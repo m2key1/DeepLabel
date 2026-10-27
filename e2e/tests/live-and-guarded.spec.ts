@@ -66,17 +66,17 @@ test.describe('Scenario: a dataset page left open', () => {
     // [slow] gives it a reader that takes fifteen seconds over each run, long enough to be seen.
     const jobId = await seedCompletedJob(uniqueName('[slow] Watched'), 1)
     await page.goto(`/jobs/${jobId}`)
-    const badge = page.getByTestId('status-badge')
-    await expect(badge).toHaveText('done')
+    const pipeline = page.getByTestId('phase-strip')
+    await expect(pipeline).toHaveAttribute('data-status', 'done')
 
     await backendFetch(`/api/jobs/${jobId}/rerun`, {
       method: 'POST', headers: json, body: JSON.stringify({ from_phase: 'ocr' }),
     })
     await expect.poll(async () => (await getJob(jobId)).status).not.toBe('done')
-    await expect(badge).not.toHaveText('done', { timeout: 12_000 })
+    await expect(pipeline).not.toHaveAttribute('data-status', 'done', { timeout: 12_000 })
 
     await waitForJobStatus(jobId, 'done', 60_000)
-    await expect(badge).toHaveText('done')
+    await expect(pipeline).toHaveAttribute('data-status', 'done')
   })
 })
 

@@ -1,5 +1,7 @@
 import type { JobDetail, JobWithoutPages } from '../../api'
 import { isTileTask } from '../../api'
+import { CheckIcon } from '../icons'
+import { StatusBadge } from '../StatusBadge'
 
 /** Everything this reads. The page list is not part of it, so a dataset fetched
  *  without one is still enough to say where the pipeline got to. */
@@ -50,39 +52,40 @@ function tilePhases(job: Phased): Phase[] {
   ]
 }
 
-type StepState = 'done' | 'running' | 'waiting' | 'skipped'
+type StepState = 'done' | 'running' | 'failed' | 'waiting' | 'skipped'
 
 const STEP_LOOK: Record<StepState, string> = {
   done: 'text-ink-muted',
   running: 'bg-accent-wash text-accent-ink',
+  failed: 'bg-danger/10 text-danger',
   waiting: 'text-ink-muted',
   skipped: 'text-ink-subtle',
 }
 
 function StepMark({ state }: { state: StepState }) {
-  if (state === 'done') {
-    return (
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
-           strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-ok">
-        <path d="M5 12.5l4.5 4.5L19 7" />
-      </svg>
-    )
-  }
+  if (state === 'done') return <span className="text-ok"><CheckIcon /></span>
+  if (state === 'failed') return <span aria-hidden="true" className="font-semibold leading-none">✕</span>
   if (state === 'running') return <span aria-hidden="true" className="size-2 animate-pulse rounded-full bg-accent" />
   return <span aria-hidden="true"
                className={`size-2 rounded-full border ${state === 'skipped' ? 'border-dashed border-ink-subtle' : 'border-ink-muted'}`} />
 }
 
 /** The pipeline as one joined row of steps: a check once a step is through, a pulsing dot
- *  and a bar while it works, and a dashed ring for a step this dataset does not run. */
+ *  and a bar while it works, and a dashed ring for a step this dataset does not run. The
+ *  dataset's status leads the row only when the steps cannot say it - queued, uploading,
+ *  failed or cancelled. */
 export function PhaseStrip({ job }: { job: Phased }) {
   const phases = isTileTask(job.task) ? tilePhases(job) : textPhases(job)
   return (
-    <div data-testid="phase-strip" role="list" aria-label="Pipeline"
-         className="inline-flex max-w-full flex-wrap divide-x divide-line overflow-hidden rounded-full border border-line text-[11px]">
+    <div data-testid="phase-strip" data-status={job.status} role="list" aria-label="Pipeline"
+         className="inline-flex max-w-full flex-wrap items-center divide-x divide-line overflow-hidden rounded-full border border-line text-[11px]">
+      {job.status !== 'done' && job.status !== 'running' && (
+        <span role="listitem" className="flex items-center px-1.5"><StatusBadge status={job.status} /></span>
+      )}
       {phases.map((p) => {
         const state: StepState = p.skipped ? 'skipped'
           : job.phase === p.key && job.status === 'running' ? 'running'
+          : job.phase === p.key && job.status === 'error' ? 'failed'
           : p.total > 0 && p.done >= p.total ? 'done' : 'waiting'
         return (
           <span key={p.key} role="listitem" data-phase={p.key} data-state={state}
