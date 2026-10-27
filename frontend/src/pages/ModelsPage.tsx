@@ -346,6 +346,7 @@ export function ModelsPage() {
           : (
             <Table
               caption="Training runs"
+              fixed
               rows={shownRuns}
               rowKey={(t) => t.id}
               rowProps={() => ({ 'data-testid': 'training-row' })}
@@ -353,6 +354,7 @@ export function ModelsPage() {
                 {
                   key: 'pick',
                   label: '',
+                  width: '2rem',
                   cell: (t) => (
                     <input
                       type="checkbox"
@@ -376,7 +378,6 @@ export function ModelsPage() {
                 {
                   key: 'name',
                   label: 'Run',
-                  width: '50%',
                   cell: (t) => (
                     <span className="block min-w-0">
                       <Link to={`/models/runs/${t.id}`} data-testid="training-open"
@@ -393,6 +394,7 @@ export function ModelsPage() {
                 {
                   key: 'status',
                   label: 'Status',
+                  width: '13rem',
                   cell: (t) => (
                     <span className="flex flex-wrap items-center gap-1.5">
                       <Badge tone={STATUS_TONE[t.status] ?? 'neutral'} className="whitespace-nowrap">
@@ -424,7 +426,7 @@ export function ModelsPage() {
                 {
                   key: 'result',
                   label: 'Result',
-                  width: '24%',
+                  width: '28%',
                   cell: (t) => (
                     <span className="flex min-w-0 items-center gap-2 text-xs text-ink-muted">
                       {t.error ? (
@@ -446,6 +448,7 @@ export function ModelsPage() {
                   key: 'actions',
                   label: '',
                   align: 'right',
+                  width: '3.5rem',
                   cell: (t) => (
                     <ActionMenu
                       testId="run-actions"

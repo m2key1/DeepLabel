@@ -19,16 +19,19 @@ export interface Column<T> {
   cell: (row: T) => ReactNode
 }
 
-export function Table<T>({ columns, rows, rowKey, rowProps, caption }: {
+export function Table<T>({ columns, rows, rowKey, rowProps, caption, fixed = false }: {
   columns: Column<T>[]
   rows: T[]
   rowKey: (row: T) => string | number
   /** Per-row attributes - a testid, a status accent on the left border, a click. */
   rowProps?: (row: T) => React.HTMLAttributes<HTMLTableRowElement> & { 'data-testid'?: string }
   caption?: string
+  /** Columns keep their widths whatever a cell holds - a long error is cut, not let widen
+   *  the table past its page. Columns without a width share what is left. */
+  fixed?: boolean
 }) {
   return (
-    <table className="w-full border-collapse text-sm">
+    <table className={`w-full border-collapse text-sm ${fixed ? 'table-fixed' : ''}`.trim()}>
       {caption && <caption className="sr-only">{caption}</caption>}
       <thead>
         <tr className={tableHeadRow}>

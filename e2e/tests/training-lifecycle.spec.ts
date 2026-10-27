@@ -194,6 +194,13 @@ test.describe('Scenario: a cluster submit while the cluster is out of reach', ()
       const row = page.getByTestId('training-row').filter({ hasText: h200Name })
       await expect(row).toContainText('error')
       await expect(row).toContainText('check the host and the network, then retry')
+      // The long error is cut at its column with the whole of it on hover, rather than
+      // widening the table past the page.
+      const table = page.getByRole('table', { name: 'Training runs' })
+      expect(await table.evaluate((t) => t.scrollWidth <= t.parentElement!.clientWidth)).toBe(true)
+      const error = row.locator('[data-col="result"] span[title]').first()
+      await expect(error).toHaveAttribute('title', /check the host and the network, then retry$/)
+      expect(await error.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(true)
       await row.getByTestId('run-actions').click()
       await expect(row.getByTestId('retry-training')).toBeVisible()
       await page.keyboard.press('Escape')
