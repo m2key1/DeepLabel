@@ -2980,6 +2980,16 @@ export function removeLlmReadings(jobId: string, modelId?: number): Promise<{ re
                  { method: 'DELETE' })
 }
 
+export function getPageLlmReadings(pageId: number): Promise<{ models: LlmReadingsOnFile[] }> {
+  return request(`/api/pages/${pageId}/llm/readings`)
+}
+
+/** Deletes one page's readings for good, by the same rules as a dataset's. */
+export function removePageLlmReadings(pageId: number, modelId?: number): Promise<{ readings: number }> {
+  return request(`/api/pages/${pageId}/llm/readings${modelId === undefined ? '' : `?model_id=${modelId}`}`,
+                 { method: 'DELETE' })
+}
+
 export function getPageCandidates(pageId: number): Promise<{ candidates: LineCandidate[] }> {
   return request(`/api/pages/${pageId}/candidates`)
 }

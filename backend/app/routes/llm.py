@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app import config, consensus, llm, llm_client, llm_ocr, store
-from app.deps import current_user, get_db, require_job_access, require_job_owner
+from app.deps import current_user, get_db, require_job_access, require_job_owner, require_page_access
 from app.routes.selection import selected_pages
 
 router = APIRouter(tags=['llm'])
@@ -477,6 +477,31 @@ def remove_readings(job_id: str, model_id: int | None = None, conn=Depends(get_d
     wherever they landed. Asking again pays again; a checked line keeps its reading."""
     require_job_owner(conn, job_id, user)
     return llm_ocr.remove(conn, job_id, model_id)
+
+
+@router.get('/api/pages/{page_id}/llm/readings')
+def page_readings_on_file(page_id: int, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """The models with readings of this page's scan, as the dataset's are counted."""
+    require_page_access(conn, page_id, user)
+    page = _live_page(conn, page_id)
+    return {'models': llm_ocr.removable(conn, page['job_id'], page_id)}
+
+
+@router.delete('/api/pages/{page_id}/llm/readings')
+def remove_page_readings(page_id: int, model_id: int | None = None, conn=Depends(get_db),
+                         user: dict = Depends(current_user)):
+    """Delete this page's readings - every model's, or `model_id`'s - by the dataset's rules.
+    Anyone who may edit the page may, as they may remove one line's reading."""
+    require_page_access(conn, page_id, user)
+    page = _live_page(conn, page_id)
+    return llm_ocr.remove(conn, page['job_id'], model_id, page_id)
+
+
+def _live_page(conn, page_id: int):
+    page = conn.execute('SELECT job_id FROM pages WHERE id = ? AND deleted = 0', (page_id,)).fetchone()
+    if page is None:
+        raise HTTPException(404)
+    return page
 
 
 @router.get('/api/jobs/{job_id}/llm/settle')

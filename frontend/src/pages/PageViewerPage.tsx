@@ -64,6 +64,7 @@ import { LineReadings } from '../components/viewer/LineReadings'
 import { UnmatchedReadings } from '../components/viewer/UnmatchedReadings'
 import { isMachineAuthor, readerName } from '../components/viewer/readers'
 import type { Reading } from '../components/viewer/LineReadings'
+import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
 import { RunMenu } from '../components/viewer/RunMenu'
 import { LlmReadDialog } from '../components/job/LlmReadDialog'
 import { CopyImageButton } from '../components/CopyImageButton'
@@ -305,6 +306,7 @@ export function PageViewerPage() {
   const contentRef = useRef<HTMLDivElement>(null)
   const [runningJob, setRunningJob] = useState(false)
   const [readOpen, setReadOpen] = useState(false)
+  const [removeOpen, setRemoveOpen] = useState(false)
   // Progress of a language-model run while one is in flight, so triggering a read from
   // here shows something happening rather than nothing at all.
   const [reading, setReading] = useState<LlmReadStatus | null>(null)
@@ -3783,6 +3785,7 @@ export function PageViewerPage() {
                   busy={runningJob}
                   onRun={runPhase}
                   onReadPage={() => setReadOpen(true)}
+                  onRemoveReadings={() => setRemoveOpen(true)}
                   onError={setError}
                 />
                 <ButtonGroup aria-label="Turn the scan">
@@ -3849,6 +3852,11 @@ export function PageViewerPage() {
         <div className="mx-3 mt-3 shrink-0">
           <LineConflict conflict={conflict} busy={resolving} onKeepTheirs={keepTheirs} onUseMine={overwriteWithMine} />
         </div>
+      )}
+      {removeOpen && page && (
+        <RemoveReadingsDialog jobId={jobId} page={{ id: page.id, name: page.filename }}
+                              onClose={() => setRemoveOpen(false)} onRemoved={() => void reloadPage()}
+                              onError={setError} />
       )}
       {readOpen && page && job && (
         /* The dataset's own dialog, scoped to this page: it already does model choice, the

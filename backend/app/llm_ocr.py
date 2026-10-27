@@ -262,16 +262,18 @@ class CannotRemove(ValueError):
 ON_A_CHECKED_LINE = 'COALESCE(line_id IN (SELECT l.id FROM lines l WHERE l.checked = 1 AND l.deleted = 0), 0)'
 
 
-def _scans(conn, job_id: str) -> list[str]:
+def _scans(conn, job_id: str, page_id: int | None = None) -> list[str]:
+    """The scans of a dataset's pages, or of the one page named."""
+    one_page = '' if page_id is None else ' AND id = ?'
     return [row['content_hash'] for row in conn.execute(
-        'SELECT DISTINCT content_hash FROM pages WHERE job_id = ? AND deleted = 0 AND content_hash IS NOT NULL',
-        (job_id,))]
+        'SELECT DISTINCT content_hash FROM pages WHERE job_id = ? AND deleted = 0 AND content_hash IS NOT NULL'
+        f'{one_page}', (job_id, *(() if page_id is None else (page_id,))))]
 
 
-def removable(conn, job_id: str) -> list[dict]:
-    """The models with readings of this dataset's scans: how many, and how many other
-    datasets holding those scans would lose them along with this one."""
-    hashes = _scans(conn, job_id)
+def removable(conn, job_id: str, page_id: int | None = None) -> list[dict]:
+    """The models with readings of this dataset's scans - or of one page's: how many, and
+    how many other datasets holding those scans would lose them along with this one."""
+    hashes = _scans(conn, job_id, page_id)
     if not hashes:
         return []
     marks = ','.join('?' * len(hashes))
@@ -284,13 +286,13 @@ def removable(conn, job_id: str) -> list[dict]:
         (*hashes, job_id, *hashes))]
 
 
-def remove(conn, job_id: str, model_id: int | None = None) -> dict:
-    """Delete the readings of this dataset's scans - every model's, or one's - wherever
+def remove(conn, job_id: str, model_id: int | None = None, page_id: int | None = None) -> dict:
+    """Delete the readings of this dataset's scans, or one page's - every model's, or one's - wherever
     they landed: the stored answers, so asking again calls the provider again, and the
     candidates on every page holding those scans. A reading still out is dropped with
     them and its answer discarded when it lands. Each page is then settled again, so a
     fill-in the agreement no longer carries goes back to the OCR text."""
-    hashes = _scans(conn, job_id)
+    hashes = _scans(conn, job_id, page_id)
     if not hashes:
         return {'readings': 0}
     marks = ','.join('?' * len(hashes))

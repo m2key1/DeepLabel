@@ -60,10 +60,12 @@ export interface LlmReadOptions {
   autocheck?: boolean
   /** Count the local OCR model as one of the readers. */
   withOcr?: boolean
+  /** How many pages the dataset has, which each model reads once. */
+  pages?: number
 }
 
-/** Opens a one-page dataset's read dialog, picks `models` on `connection`, starts the run
- *  and waits for one reading per model - which is what one page costs. */
+/** Opens a dataset's read dialog, picks `models` on `connection`, starts the run and waits
+ *  for one reading per model and page - one page unless said otherwise. */
 export async function startLlmRead(
   page: Page, jobId: string, connection: string, models: string[], options: LlmReadOptions = {},
 ) {
@@ -76,5 +78,5 @@ export async function startLlmRead(
   if (options.autocheck) await page.getByTestId('llm-autocheck').check()
   if (options.withOcr) await page.getByTestId('llm-consensus-with-ocr').check()
   await page.getByTestId('llm-start').click()
-  await waitForLlmReads(jobId, models.length)
+  await waitForLlmReads(jobId, models.length * (options.pages ?? 1))
 }

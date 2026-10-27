@@ -451,3 +451,38 @@ test.describe('Scenario: removing language model readings', () => {
       expect((await llmStats()).total).toBe(2)
     })
 })
+
+test.describe("Scenario: removing one page's readings", () => {
+  test("from the viewer's Run menu, one model's, counted first - the dataset's other page keeps its own",
+    async ({ page }) => {
+      test.setTimeout(120_000)
+      const jobId = await seedDistinctPagesJob(uniqueName('Page readings removed'), 2, 260)
+      const connection = uniqueName('Page pair')
+      await seedLlmConnection(connection, [PERFECT, SECOND], DEV)
+      await startLlmRead(page, jobId, connection, [PERFECT, SECOND], { pages: 2 })
+      const [first, second] = await jobPageIds(jobId)
+      const onPage = async (pageId: number) => ((await backendFetch(`/api/pages/${pageId}/llm/readings`)).models as
+        { label: string; readings: number }[]).map((m) => [m.label, m.readings])
+      const both = [[`${connection} ${PERFECT}`, 1], [`${connection} ${SECOND}`, 1]]
+      expect(await onPage(first)).toEqual(both)
+      expect(await onPage(second)).toEqual(both)
+
+      await openViewer(page, jobId, first)
+      await page.getByTestId('run-menu').click()
+      const remove = page.getByTestId('run-llm-remove')
+      await expect(remove).toContainText('2 readings by 2 models on this page')
+      await remove.click()
+      const dialog = page.getByRole('dialog', { name: 'Remove LLM readings - scan_1.png' })
+      await expect(dialog.getByTestId('remove-readings-option')).toHaveCount(3)
+      await dialog.locator('[data-testid="remove-readings-option"]').filter({ hasText: SECOND }).getByRole('radio').check()
+      await expect(dialog.getByTestId('remove-readings-warning')).toContainText('1 reading is deleted for good')
+      await dialog.getByTestId('remove-readings-confirm').click()
+      await expect(dialog.getByTestId('remove-readings-result')).toHaveText('Removed 1 reading.')
+
+      expect(await onPage(first)).toEqual([[`${connection} ${PERFECT}`, 1]])
+      expect(await onPage(second)).toEqual(both)
+      await dialog.getByRole('button', { name: 'Close' }).click()
+      await page.getByTestId('run-menu').click()
+      await expect(remove).toContainText('1 reading by 1 model on this page')
+    })
+})

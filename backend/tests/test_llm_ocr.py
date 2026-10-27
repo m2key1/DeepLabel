@@ -1097,6 +1097,28 @@ class TestRemoving:
             {'id': 2, 'label': 'Second reader', 'readings': 1, 'other_datasets': 0},
         ]
 
+    def test_one_page_s_readings_go_and_the_dataset_s_other_pages_keep_theirs(self, read, monkeypatch):
+        read.execute(
+            'INSERT INTO pages (id, job_id, idx, filename, source_file, content_hash, status) '
+            "SELECT 3, 'j1', 1, 'p2.png', source_file, 'other-scan', 'done' FROM pages WHERE id = 1")
+        read.commit()
+        fake_provider(monkeypatch, ['Another page'], [])
+        llm_ocr.enqueue(read, 'j1', [1, 2], ALICE)
+        llm_ocr.drain_once(read)
+        assert llm_ocr.removable(read, 'j1', page_id=1) == [
+            {'id': 1, 'label': 'First reader', 'readings': 1, 'other_datasets': 1},
+            {'id': 2, 'label': 'Second reader', 'readings': 1, 'other_datasets': 0},
+        ]
+
+        assert llm_ocr.remove(read, 'j1', model_id=2, page_id=1) == {'readings': 1}
+
+        assert sorted((r['content_hash'], r['llm_model_id']) for r in read.execute(
+            'SELECT content_hash, llm_model_id FROM llm_reads')) == sorted([
+            ('other-scan', 1), ('other-scan', 2), (SCAN, 1)])
+        # The page keeps the other model's reading and the one behind its checked line.
+        assert [c for c in self._candidates(read) if c[0] == 1] == [(1, 1, 1), (1, 1, 2), (1, 2, 2)]
+        assert self._lines(read) == {1: (None, False), 2: ('Second line', True)}
+
     def test_one_lines_reading_can_be_removed_but_not_one_a_checked_line_rests_on(self, read):
         on_first = read.execute("SELECT id FROM candidates WHERE source = 'llm' AND line_id = 1 "
                                 'AND llm_model_id = 1').fetchone()['id']

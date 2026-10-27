@@ -272,7 +272,7 @@ reader.
   check.
 - **Re-apply LLM agreement** (in the dataset page's **⋯** menu) applies changed agreement
   settings to lines already read; **Remove LLM readings** deletes a model's readings from a
-  dataset.
+  dataset. **Remove readings** in the page viewer's **Run** menu does the same for one page.
 - A deployment can switch the feature off entirely.
 
 ## Models

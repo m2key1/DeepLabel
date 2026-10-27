@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
-  PHASE_CAPABILITY, getLlmReadPreview, getPageRunCosts, type LlmReadPreview, type PagePhase,
-  type PageRunCosts,
+  PHASE_CAPABILITY, getLlmReadPreview, getPageLlmReadings, getPageRunCosts, type LlmReadPreview,
+  type LlmReadingsOnFile, type PagePhase, type PageRunCosts,
 } from '../../api'
 import { useAuth } from '../../auth'
 import { CaretIcon, PlayIcon } from '../icons'
@@ -62,18 +62,21 @@ interface RunMenuProps {
    *  choosing them is what the dialog behind it is for. */
   llmModelIds: number[]
   onReadPage: () => void
+  /** Offered once the page has readings to remove. */
+  onRemoveReadings: () => void
   busy: boolean
   onRun: (phase: PagePhase) => void
   onError: (message: string) => void
 }
 
 export function RunMenu({
-  pageId, jobId, llmModelIds, busy, onRun, onReadPage, onError,
+  pageId, jobId, llmModelIds, busy, onRun, onReadPage, onRemoveReadings, onError,
 }: RunMenuProps) {
   const { can } = useAuth()
   const [open, setOpen] = useState(false)
   const [costs, setCosts] = useState<PageRunCosts | null>(null)
   const [reading, setReading] = useState<LlmReadPreview | null>(null)
+  const [onFile, setOnFile] = useState<LlmReadingsOnFile[]>([])
   const models = llmModelIds.join(',')
 
   useEffect(() => {
@@ -98,7 +101,18 @@ export function RunMenu({
     return () => { live = false }
   }, [open, jobId, pageId, models, onError])
 
+  useEffect(() => {
+    if (!open) return
+    let live = true
+    setOnFile([])
+    getPageLlmReadings(pageId)
+      .then((next) => { if (live) setOnFile(next.models) })
+      .catch(() => undefined)
+    return () => { live = false }
+  }, [open, pageId])
+
   useDismiss(open, () => setOpen(false))
+  const readings = onFile.reduce((sum, m) => sum + m.readings, 0)
 
   const corrections = costs?.lines.corrections ?? 0
 
@@ -154,6 +168,21 @@ export function RunMenu({
               {describeRead(llmModelIds, reading)}
             </span>
           </button>
+          {readings > 0 && (
+            <button
+              data-testid="run-llm-remove"
+              onClick={() => {
+                setOpen(false)
+                onRemoveReadings()
+              }}
+              className={`${menuItem} text-danger`}
+            >
+              <span className="font-medium">Remove readings…</span>
+              <span className="block text-[11px] text-ink-muted">
+                {plural(readings, 'reading')} by {plural(onFile.length, 'model')} on this page
+              </span>
+            </button>
+          )}
           {corrections > 0 && (
             <p className="border-t border-line px-2.5 py-1 text-[11px] text-ink-muted">
               {plural(corrections, 'correction')} kept and re-attached afterwards.

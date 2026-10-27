@@ -355,6 +355,26 @@ class TestDrivingAReading:
         assert client.delete('/api/jobs/j1/llm/readings?model_id=1', headers=ALICE).json() == {'readings': 1}
         assert client.get('/api/jobs/j1/llm/readings', headers=ALICE).json()['models'] == []
 
+    def test_anyone_who_may_edit_removes_a_page_s_readings_counted_first(self, client, conn):
+        conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'carol')")
+        conn.execute("INSERT INTO llm_reads (content_hash, llm_model_id, label, status, raw_text, job_id) "
+                     "VALUES ('hash-of-p1', 1, 'Careful reader', 'done', '[\"Anno\"]', 'j1')")
+        conn.commit()
+        carol = {**ALICE, 'X-Auth-User': 'carol'}
+
+        listed = client.get('/api/pages/1/llm/readings', headers=carol).json()['models']
+        assert listed == [{'id': 1, 'label': 'Careful reader', 'readings': 1, 'other_datasets': 0}]
+        assert client.delete('/api/pages/1/llm/readings?model_id=1', headers=carol).json() == {'readings': 1}
+        assert client.get('/api/pages/1/llm/readings', headers=carol).json()['models'] == []
+
+    def test_a_page_s_readings_are_not_removed_by_a_viewer_or_a_stranger(self, client, conn):
+        conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'vera')")
+        conn.commit()
+        viewer = {**ALICE, 'X-Auth-User': 'vera', 'X-Auth-Role': 'viewer'}
+        assert client.delete('/api/pages/1/llm/readings', headers=viewer).status_code == 403
+        assert client.delete('/api/pages/1/llm/readings', headers=BOB).status_code == 404
+        assert client.get('/api/pages/1/llm/readings', headers=BOB).status_code == 404
+
     def test_only_a_language_models_reading_can_be_removed_from_a_line(self, client, conn):
         conn.execute("INSERT INTO candidates (id, page_id, source, text) VALUES (5, 1, 'ocr', 'Anno')")
         conn.commit()
