@@ -295,12 +295,16 @@ test.describe('Scenario: reading the page table at a glance', () => {
     await expect(row(other)).toBeVisible()
     await expect(row(other).getByTestId('complete-label')).toHaveCount(0)
 
+    await page.getByTestId('filter-menu').click()
     await page.getByTestId('filter-complete-1').click()
+    await expect(page.getByTestId('filter-complete-1')).toBeChecked()
     await expect(row(name)).toBeVisible()
     await expect(row(other)).toHaveCount(0)
     await page.getByTestId('filter-complete-0').click()
+    await expect(page.getByTestId('filter-complete-0')).toBeChecked()
     await expect(row(other)).toBeVisible()
     await expect(row(name)).toHaveCount(0)
+    await expect(page.locator('[data-testid="filter-chip"][data-filter="complete"]')).toContainText('In progress')
 
     await page.goto(`/jobs/${jobId}`)
     await complete.click()

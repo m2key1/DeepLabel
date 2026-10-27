@@ -97,7 +97,7 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
   makes pages added later test data too. Uploads have an **Add as test pages** checkbox,
   preset from it.
 - Test pages stay fully editable. The dataset list shows "test set" or "40 of 300 test pages"
-  and filters by **Test data**.
+  and filters by **Has test data**.
 
 ## Layout classes and templates
 

@@ -142,10 +142,21 @@ test.describe('Scenario: the dataset list', () => {
     await expect(row(none)).toBeVisible()
     await expect(row(none).getByTestId('test-pages-label')).toHaveCount(0)
 
-    await page.getByRole('button', { name: 'Test data' }).click()
+    await page.getByTestId('filter-menu').click()
+    await page.getByTestId('filter-test').click()
+    await expect(page.getByTestId('filter-test')).toBeChecked()
     await expect(row(whole)).toBeVisible()
     await expect(row(part)).toBeVisible()
     await expect(row(none)).toHaveCount(0)
+    // The filter shows as a chip beside the search, and its cross takes it off again.
+    await page.keyboard.press('Escape')
+    const chip = page.locator('[data-testid="filter-chip"][data-filter="test"]')
+    await expect(chip).toContainText('Has test data')
+    await expect(page.getByTestId('filter-menu')).toContainText('1')
+    await chip.getByRole('button', { name: 'Remove filter: Has test data' }).click()
+    await expect(row(none)).toBeVisible()
+    await expect(page.getByTestId('filter-chip')).toHaveCount(0)
+    await expect(page).not.toHaveURL(/[?&]test=1/)
   })
 })
 

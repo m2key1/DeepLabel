@@ -25,11 +25,11 @@ import { groupSize } from '../components/job/groups'
 import { sharedPrefix } from '../components/job/sharedPrefix'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
 import { StatusBadge } from '../components/StatusBadge'
-import { Button } from '../components/ui/Button'
+import { Button, GroupButton } from '../components/ui/Button'
 import { Check, Input } from '../components/ui/Field'
 import { NoteTag } from '../components/NoteTag'
 import { TestDataChip } from '../components/TestPage'
-import { CheckIcon } from '../components/icons'
+import { CaretIcon, CheckIcon, FilterIcon } from '../components/icons'
 import { useDropPlacement } from '../components/ui/dropPlacement'
 import { menuTrigger, useDismiss } from '../components/ui/menu'
 import { Modal } from '../components/Modal'
@@ -293,7 +293,7 @@ export function JobsPage() {
     }
   }
   const [people, setPeople] = useState<string[]>([])
-  const [toolbarMenu, setToolbarMenu] = useState<'columns' | 'sort' | 'groupby' | 'asuser' | null>(null)
+  const [toolbarMenu, setToolbarMenu] = useState<'columns' | 'sort' | 'groupby' | 'filter' | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [pending, setPending] = useState<
     { action: BulkAction; phase?: string; ids: string[]; label: string
@@ -1016,10 +1016,26 @@ export function JobsPage() {
     )
   }
 
-  const chip = (on: boolean) =>
-    `inline-flex h-7 items-center rounded border px-2.5 text-xs ${
-      on ? 'border-accent bg-accent-wash font-medium text-accent-ink'
-         : 'border-line text-ink-muted hover:text-ink'}`
+  // What narrows the list, each with the way to drop it again: shown as chips beside the
+  // Filter button, so a filtered list never looks like the whole one.
+  const activeFilters = [
+    onlyMine && { key: 'mine', label: 'Only mine', clear: () => param('mine', '0', '0') },
+    needsReview && { key: 'review', label: 'Needs review', clear: () => param('review', '0', '0') },
+    onlyTest && { key: 'test', label: 'Has test data', clear: () => param('test', '0', '0') },
+    completeness !== null && {
+      key: 'complete', label: completeness === '1' ? 'Complete' : 'In progress',
+      clear: () => param('complete', '', ''),
+    },
+    asUser !== '' && { key: 'as', label: `Visible to ${asUser}`, clear: () => setAsUser('') },
+  ].filter((f): f is { key: string; label: string; clear: () => void } => !!f)
+
+  const openToolbarMenu = (name: NonNullable<typeof toolbarMenu>) => (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setToolbarMenu(toolbarMenu === name ? null : name)
+  }
+  const filterRow = 'flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs text-ink hover:bg-raised'
+  const filterHeading = 'px-2 pb-0.5 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-ink-subtle'
+  const joined = 'flex shrink-0 divide-x divide-line-strong rounded border border-line-strong'
 
   const toolbar = (
     <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2">
@@ -1032,135 +1048,140 @@ export function JobsPage() {
         aria-label="Search datasets"
         className="h-7 min-w-0 flex-1 rounded border border-line bg-ground px-2 text-xs focus:border-accent focus:outline-none sm:max-w-72"
       />
-      <button className={chip(onlyMine)} aria-pressed={onlyMine}
-              onClick={() => param('mine', onlyMine ? '0' : '1', '0')}>
-        Only mine
-      </button>
-      <button className={chip(needsReview)} aria-pressed={needsReview}
-              onClick={() => param('review', needsReview ? '0' : '1', '0')}>
-        Needs review
-      </button>
-      <button className={chip(onlyTest)} aria-pressed={onlyTest}
-              onClick={() => param('test', onlyTest ? '0' : '1', '0')}>
-        Test data
-      </button>
-      {([['0', 'In progress'], ['1', 'Complete']] as const).map(([value, label]) => (
-        <button key={value} className={chip(completeness === value)} aria-pressed={completeness === value}
-                data-testid={`filter-complete-${value}`}
-                onClick={() => param('complete', completeness === value ? '' : value, '')}>
-          {label}
-        </button>
-      ))}
-      {isAdmin && (
-        <div className="relative">
-          <button className={chip(asUser !== '')} data-testid="as-user-menu"
-                  {...menuTrigger(toolbarMenu === 'asuser')}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setToolbarMenu(toolbarMenu === 'asuser' ? null : 'asuser')
-                  }}>
-            {asUser === '' ? 'Visible to anyone' : `Visible to ${asUser}`}
-          </button>
-          {toolbarMenu === 'asuser' && (
-            <div className={`absolute left-0 top-full z-20 mt-1 max-h-64 w-52 overflow-auto ${popoverChrome} py-1`}>
-              <button className={menuItem}
-                      onClick={() => { setAsUser(''); setToolbarMenu(null) }}>
-                Visible to anyone
-              </button>
-              <div className="my-1 border-t border-line" />
-              {people.map((name) => (
-                <button key={name} className={menuItem} data-person={name}
-                        onClick={() => { setAsUser(name); setToolbarMenu(null) }}>
-                  {name}
-                </button>
+      <div className="relative">
+        <Button size="xs" data-testid="filter-menu" {...menuTrigger(toolbarMenu === 'filter')}
+                onClick={openToolbarMenu('filter')}
+                className={activeFilters.length ? 'border-accent text-accent-ink' : ''}>
+          <FilterIcon /> Filter
+          {activeFilters.length > 0 && (
+            <span className="rounded-full bg-accent px-1.5 text-[10px] font-semibold leading-4 text-on-accent">
+              {activeFilters.length}
+            </span>
+          )}
+          <CaretIcon />
+        </Button>
+        {toolbarMenu === 'filter' && (
+          <div data-testid="filter-items" onClick={(e) => e.stopPropagation()}
+               className={`absolute left-0 top-full z-20 mt-1 w-60 ${popoverChrome} p-1`}>
+            <div className={filterHeading}>Who</div>
+            <label className={filterRow}>
+              <Check data-testid="filter-mine" checked={onlyMine}
+                     onChange={() => param('mine', onlyMine ? '0' : '1', '0')} />
+              Only mine
+            </label>
+            {isAdmin && (
+              <label className={`${filterRow} cursor-default hover:bg-transparent`}>
+                <span className="shrink-0">Visible to</span>
+                <select data-testid="filter-as-user" value={asUser} onChange={(e) => setAsUser(e.target.value)}
+                        className="min-w-0 flex-1 rounded border border-line bg-ground px-1 py-0.5 text-xs">
+                  <option value="">anyone</option>
+                  {people.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </label>
+            )}
+            <div className={filterHeading}>State</div>
+            <div role="radiogroup" aria-label="State" className="flex gap-1 px-2 py-1">
+              {([['', 'Any'], ['0', 'In progress'], ['1', 'Complete']] as const).map(([value, label]) => (
+                <label key={label} className="flex cursor-pointer items-center gap-1 text-xs text-ink">
+                  <input type="radio" name="filter-complete" data-testid={`filter-complete-${value || 'any'}`}
+                         checked={(completeness ?? '') === value} className="accent-accent"
+                         onChange={() => param('complete', value, '')} />
+                  {label}
+                </label>
               ))}
             </div>
-          )}
-        </div>
-      )}
-      <div className="relative">
-        <button className={chip(false)} data-testid="groupby-menu"
-                {...menuTrigger(toolbarMenu === 'groupby')}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setToolbarMenu(toolbarMenu === 'groupby' ? null : 'groupby')
-                }}>
-          {GROUP_BYS.find((o) => o.key === groupBy)?.label}
-        </button>
-        {toolbarMenu === 'groupby' && (
-          <div className={`absolute left-0 top-full z-20 mt-1 w-44 overflow-hidden ${popoverChrome} py-1`}>
-            {GROUP_BYS.map((g) => (
-              <button key={g.key} className={menuItem} data-groupby={g.key}
-                      onClick={() => { setGroupBy(g.key); setToolbarMenu(null) }}>
-                {g.label}
-              </button>
-            ))}
+            <label className={filterRow}>
+              <Check data-testid="filter-review" checked={needsReview}
+                     onChange={() => param('review', needsReview ? '0' : '1', '0')} />
+              Needs review
+            </label>
+            <div className={filterHeading}>Data</div>
+            <label className={filterRow}>
+              <Check data-testid="filter-test" checked={onlyTest}
+                     onChange={() => param('test', onlyTest ? '0' : '1', '0')} />
+              Has test data
+            </label>
           </div>
         )}
       </div>
-      <div className="relative">
-        <button className={chip(false)} data-testid="sort-menu"
-                {...menuTrigger(toolbarMenu === 'sort')}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setToolbarMenu(toolbarMenu === 'sort' ? null : 'sort')
-                }}>
-          Sort: {SORTS.find((o) => o.key === sort)?.label}
-        </button>
-        {toolbarMenu === 'sort' && (
-          <div className={`absolute left-0 top-full z-20 mt-1 w-44 overflow-hidden ${popoverChrome} py-1`}>
-            {SORTS.map((s) => (
-              <button key={s.key} className={menuItem}
-                      onClick={() => { setSort(s.key); setToolbarMenu(null) }}>
-                {s.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {activeFilters.map((f) => (
+        <span key={f.key} data-testid="filter-chip" data-filter={f.key}
+              className="inline-flex h-6 items-center gap-1 rounded-full bg-accent-wash pl-2.5 pr-1 text-xs font-medium text-accent-ink">
+          {f.label}
+          <button type="button" aria-label={`Remove filter: ${f.label}`} onClick={f.clear}
+                  className="flex size-4 items-center justify-center rounded-full hover:bg-accent hover:text-on-accent">
+            ×
+          </button>
+        </span>
+      ))}
       <span className="ml-auto flex items-center gap-2">
         <span className="text-[11px] text-ink-subtle" data-testid="result-count">
           {visible.length} of {jobs?.length ?? 0}
         </span>
-        <div className="relative">
-          <button className={chip(false)} data-testid="columns-menu"
-                  {...menuTrigger(toolbarMenu === 'columns')}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setToolbarMenu(toolbarMenu === 'columns' ? null : 'columns')
-                  }}>
-            Columns
-          </button>
-          {toolbarMenu === 'columns' && (
-            <div className={`absolute right-0 top-full z-20 mt-1 w-52 ${popoverChrome} p-1`}
-                 onClick={(e) => e.stopPropagation()}>
-              {COLUMNS.map((c) => (
-                <label key={c.key}
-                       className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs text-ink-muted hover:bg-accent-wash hover:text-ink">
-                  <input type="checkbox" id={`col-${c.key}`} checked={columns.includes(c.key)}
-                         onChange={() => toggleColumn(c.key)} className="accent-accent" />
-                  {c.label}
-                </label>
-              ))}
-              <button className={`${menuItem} text-accent-ink`}
-                      onClick={() => { setColumns(DEFAULT_COLUMNS); saveColumns(DEFAULT_COLUMNS) }}>
-                Reset to defaults
-              </button>
-            </div>
-          )}
-        </div>
-        <span className="inline-flex overflow-hidden rounded border border-line">
-          <button aria-pressed={view === 'table'} aria-label="Table view" title="Table"
-                  onClick={() => setView('table')}
-                  className={`px-2 py-1 text-xs ${view === 'table' ? 'bg-accent-wash text-accent-ink' : 'text-ink-subtle'}`}>
+        <div role="group" aria-label="View" className={joined}>
+          <div className="relative">
+            <GroupButton data-testid="groupby-menu" {...menuTrigger(toolbarMenu === 'groupby')}
+                         onClick={openToolbarMenu('groupby')} className="rounded-l">
+              {GROUP_BYS.find((o) => o.key === groupBy)?.label} <CaretIcon />
+            </GroupButton>
+            {toolbarMenu === 'groupby' && (
+              <div className={`absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden ${popoverChrome} py-1`}>
+                {GROUP_BYS.map((g) => (
+                  <button key={g.key} className={menuItem} data-groupby={g.key}
+                          onClick={() => { setGroupBy(g.key); setToolbarMenu(null) }}>
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="relative">
+            <GroupButton data-testid="sort-menu" {...menuTrigger(toolbarMenu === 'sort')}
+                         onClick={openToolbarMenu('sort')}>
+              Sort: {SORTS.find((o) => o.key === sort)?.label} <CaretIcon />
+            </GroupButton>
+            {toolbarMenu === 'sort' && (
+              <div className={`absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden ${popoverChrome} py-1`}>
+                {SORTS.map((o) => (
+                  <button key={o.key} className={menuItem}
+                          onClick={() => { setSort(o.key); setToolbarMenu(null) }}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="relative">
+            <GroupButton data-testid="columns-menu" {...menuTrigger(toolbarMenu === 'columns')}
+                         onClick={openToolbarMenu('columns')}>
+              Columns <CaretIcon />
+            </GroupButton>
+            {toolbarMenu === 'columns' && (
+              <div className={`absolute right-0 top-full z-20 mt-1 w-52 ${popoverChrome} p-1`}
+                   onClick={(e) => e.stopPropagation()}>
+                {COLUMNS.map((c) => (
+                  <label key={c.key}
+                         className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs text-ink-muted hover:bg-accent-wash hover:text-ink">
+                    <input type="checkbox" id={`col-${c.key}`} checked={columns.includes(c.key)}
+                           onChange={() => toggleColumn(c.key)} className="accent-accent" />
+                    {c.label}
+                  </label>
+                ))}
+                <button className={`${menuItem} text-accent-ink`}
+                        onClick={() => { setColumns(DEFAULT_COLUMNS); saveColumns(DEFAULT_COLUMNS) }}>
+                  Reset to defaults
+                </button>
+              </div>
+            )}
+          </div>
+          <GroupButton on={view === 'table'} aria-label="Table view" title="Table" onClick={() => setView('table')}>
             Rows
-          </button>
-          <button aria-pressed={view === 'cards'} aria-label="Card view" title="Cards"
-                  onClick={() => setView('cards')}
-                  className={`px-2 py-1 text-xs ${view === 'cards' ? 'bg-accent-wash text-accent-ink' : 'text-ink-subtle'}`}>
+          </GroupButton>
+          <GroupButton on={view === 'cards'} aria-label="Card view" title="Cards" onClick={() => setView('cards')}
+                       className="rounded-r">
             Cards
-          </button>
-        </span>
+          </GroupButton>
+        </div>
         {canEdit && (creatingGroup ? (
           <input
             autoFocus
@@ -1176,7 +1197,7 @@ export function JobsPage() {
           />
         ) : (
           <Button size="xs" onClick={() => { setGroupDraft(''); setCreatingGroup(true) }}>
-            New group
+            <span aria-hidden="true">+</span> New group
           </Button>
         ))}
       </span>
