@@ -313,7 +313,7 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   mixed Unicode forms. It warns but never blocks.
 - The run page has tabs for Overview, Curves, Data, Evaluations and Settings. Curves are
   drawn per metric, with smoothing, log scale, zoom and a shared crosshair.
-- **Rerun** opens a finished run's settings in a new form.
+- **Rerun**, in a run's **⋯** menu, opens a finished run's settings in a new form.
 - **Augmentations** (under Models) builds augmentation pipelines from the trainer's
   catalogue, with groups and a live preview on real line crops. Pipelines are private; an
   admin can make one a task's default.

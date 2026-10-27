@@ -222,13 +222,15 @@ test.describe('Scenario: the model registry', () => {
     // Deleting the run is blocked while its model is active, allowed once archived.
     page.on('dialog', (dialog) => dialog.accept())
     await page.goto('/models?tab=runs')
-    await run.getByRole('button', { name: 'Delete' }).click()
+    await run.getByTestId('run-actions').click()
+    await run.getByTestId('delete-training').click()
     await expect(page.getByText(/archive the model first/)).toBeVisible()
     await page.goto(`/models/${registered.id}`)
     await page.getByTestId('archive-model').click()
     await expect(header.getByText('ARCHIVED')).toBeVisible()
     await page.goto('/models?tab=runs')
-    await run.getByRole('button', { name: 'Delete' }).click()
+    await run.getByTestId('run-actions').click()
+    await run.getByTestId('delete-training').click()
     await expect(run).toHaveCount(0)
     await expect
       .poll(async () => (await listTrainings()).some((t) => t.name === modelName))
@@ -266,6 +268,7 @@ test.describe('Scenario: the model registry', () => {
     const source = page.getByTestId('training-row').filter({ hasText: sourceName })
     // Every run is everyone's to see, under the name of whoever started it.
     await expect(source).toContainText('e2e-seeder')
+    await source.getByTestId('run-actions').click()
     await source.getByTestId('rerun-training').click()
 
     // Every field the run was submitted with, back in the control that sets it - and the
@@ -517,8 +520,9 @@ test.describe('Scenario: the model registry', () => {
       // The model each run registered is named beside it, and the model says which run
       // it came from - the same pair of facts read from either end.
       const runRow = rows.filter({ hasText: names[0] })
-      await expect(runRow.getByTestId('run-model')).toContainText(names[0])
       const registered = (await listRegistryModels()).find((m) => m.name === names[0])!
+      await expect(runRow.getByTestId('run-model')).toHaveAttribute('href', `/models/${registered.id}`)
+      await expect(runRow.getByTestId('run-model')).toHaveAttribute('title', names[0])
       await page.goto(`/models/${registered.id}`)
       await expect(page.getByTestId('model-from-run')).toHaveText(names[0])
     })

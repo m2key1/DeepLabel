@@ -98,7 +98,8 @@ test.describe('Scenario: stopping a run that is on the GPU', () => {
 
       await page.goto('/models?tab=runs')
       const row = page.getByTestId('training-row').filter({ hasText: name })
-      const cancel = row.getByRole('button', { name: 'Cancel', exact: true })
+      await row.getByTestId('run-actions').click()
+      const cancel = row.getByTestId('cancel-training')
       await expect(cancel).toBeVisible()
       await cancel.click()
 
@@ -125,10 +126,14 @@ test.describe('Scenario: stopping a run that is on the GPU', () => {
       // Finished now, so Cancel is gone from its row; the run that finished on its own
       // carries the buttons a finished row has, so an empty row could not pass this.
       await expect(row).toContainText('cancelled')
+      await row.getByTestId('run-actions').click()
+      await expect(row.getByTestId('rerun-training')).toBeVisible()
       await expect(cancel).toHaveCount(0)
+      await page.keyboard.press('Escape')
       const finished = page.getByTestId('training-row').filter({ hasText: finishedName })
+      await finished.getByTestId('run-actions').click()
       await expect(finished.getByTestId('rerun-training')).toBeVisible()
-      await expect(finished.getByRole('button', { name: 'Delete', exact: true })).toBeVisible()
+      await expect(finished.getByTestId('delete-training')).toBeVisible()
     })
 })
 
@@ -189,7 +194,9 @@ test.describe('Scenario: a cluster submit while the cluster is out of reach', ()
       const row = page.getByTestId('training-row').filter({ hasText: h200Name })
       await expect(row).toContainText('error')
       await expect(row).toContainText('check the host and the network, then retry')
+      await row.getByTestId('run-actions').click()
       await expect(row.getByTestId('retry-training')).toBeVisible()
+      await page.keyboard.press('Escape')
 
       // A member granted the cluster is told the state too - a refused submit has to explain
       // itself - but opening the session takes the admin's second factor, so no Reconnect.
@@ -214,6 +221,9 @@ test.describe('Scenario: a cluster submit while the cluster is out of reach', ()
       // The failed run is everyone's to see and the owner's to retry.
       const memberRow = memberPage.getByTestId('training-row').filter({ hasText: h200Name })
       await expect(memberRow).toContainText('error')
+      // Theirs to rerun as a new run, not to retry.
+      await memberRow.getByTestId('run-actions').click()
+      await expect(memberRow.getByTestId('rerun-training')).toBeVisible()
       await expect(memberRow.getByTestId('retry-training')).toHaveCount(0)
       await context.close()
     })
@@ -321,10 +331,7 @@ test.describe('Scenario: what a viewer sees on the Models page', () => {
     // the stage tab, and the model's own page.
     const surfaces = (p: Page) => [
       { url: '/models?tab=runs', shown: p.getByTestId('training-row').filter({ hasText: runName }), actions: {
-        'Cancel button': p.getByRole('button', { name: 'Cancel', exact: true }),
-        'Rerun link': p.getByTestId('rerun-training'),
-        'Retry button': p.getByTestId('retry-training'),
-        'Delete button': p.getByRole('button', { name: 'Delete', exact: true }),
+        'Actions menu': p.getByTestId('run-actions'),
       } },
       { url: '/models?tab=ocr', shown: p.getByTestId('model-family').first(), actions: {
         'Train model link': p.getByTestId('train-model'),

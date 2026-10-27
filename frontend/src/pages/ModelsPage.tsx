@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { cancelTraining, deleteTraining, listEvaluations, listModels, listTrainings, retryTraining } from '../api'
 import type { Evaluation, ModelTask, RegistryModel, Training, TrainingTargets } from '../api'
 import { useAuth } from '../auth'
@@ -9,13 +9,15 @@ import { FamilyGraph, formatScore } from '../components/models/FamilyGraph'
 import { buildFamilies } from '../components/models/families'
 import type { Family } from '../components/models/families'
 import { RunCompare } from '../components/models/RunCompare'
+import { ActionMenu } from '../components/job/ActionMenu'
+import { KebabIcon } from '../components/icons'
 import { Button, buttonClass } from '../components/ui/Button'
 import { Segmented } from '../components/ui/Segmented'
 import { Tabs, panelId, tabId } from '../components/ui/Tabs'
 import { formatDate } from '../util'
 import { EmptyState } from '../components/ui/EmptyState'
 import { PageHeader } from '../components/ui/PageHeader'
-import { Badge } from '../components/ui/Badge'
+import { Badge, type Tone } from '../components/ui/Badge'
 import { Section } from '../components/ui/Section'
 import { Table } from '../components/ui/Table'
 import { pageShell } from '../components/ui/page'
@@ -46,13 +48,13 @@ function rememberedTab(): Tab {
   return 'ocr'
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  queued: 'text-warn',
-  preparing: 'text-accent-ink',
-  running: 'text-accent-ink',
-  done: 'text-ok',
-  error: 'text-danger',
-  cancelled: 'text-ink-muted',
+const STATUS_TONE: Record<string, Tone> = {
+  queued: 'warn',
+  preparing: 'accent',
+  running: 'accent',
+  done: 'ok',
+  error: 'danger',
+  cancelled: 'neutral',
 }
 
 function rootLabel(family: Family): string {
@@ -173,6 +175,7 @@ export function ModelsPage() {
   // Everyone sees every run; acting on one is the owner's or an admin's, which the
   // backend enforces - so the buttons that would 403 are not offered.
   const mine = (t: Training) => canEdit && (isAdmin || t.owner === user)
+  const navigate = useNavigate()
   const shownRuns = trainings.filter(
     (t) => (runTask === 'all' || t.task === runTask) && RUN_FILTERS[runStatus](t))
   const modelById = new Map((models ?? []).map((m) => [m.id, m]))
@@ -373,31 +376,39 @@ export function ModelsPage() {
                 {
                   key: 'name',
                   label: 'Run',
+                  width: '50%',
                   cell: (t) => (
-                    <Link to={`/models/runs/${t.id}`} data-testid="training-open"
-                          className="font-medium hover:text-accent-ink">
-                      {t.name}
-                    </Link>
+                    <span className="block min-w-0">
+                      <Link to={`/models/runs/${t.id}`} data-testid="training-open"
+                            className="block truncate font-medium hover:text-accent-ink" title={t.name}>
+                        {t.name}
+                      </Link>
+                      <span data-testid="run-meta" className="block truncate text-xs text-ink-subtle">
+                        {[t.task, t.target === 'slurm' ? 'cluster' : 'local', t.owner === user ? 'you' : t.owner,
+                          formatDate(t.created_at)].join(' · ')}
+                      </span>
+                    </span>
                   ),
                 },
-                { key: 'task', label: 'Stage',
-                  cell: (t) => (
-                    <span className="whitespace-nowrap text-xs text-ink-subtle">
-                      {t.task}
-                      {t.model_id !== null && modelById.has(t.model_id) && (
-                        <span data-testid="run-model" className="block text-ink-subtle">
-                          → {modelById.get(t.model_id)!.name}
-                        </span>
-                      )}
-                    </span>
-                  ) },
                 {
                   key: 'status',
                   label: 'Status',
                   cell: (t) => (
-                    <span className="flex items-center gap-1.5">
-                      <span className={`text-xs font-medium ${STATUS_COLOR[t.status] ?? ''}`}>{t.status}</span>
-                      {t.phase && (
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <Badge tone={STATUS_TONE[t.status] ?? 'neutral'} className="whitespace-nowrap">
+                        {t.status}
+                        {t.status === 'preparing' && t.snapshot_progress && (
+                          <span data-testid="snapshot-progress" className="font-normal">
+                            {' · '}snapshot {t.snapshot_progress.done.toLocaleString()} / {t.snapshot_progress.total.toLocaleString()}
+                          </span>
+                        )}
+                        {!isFinished(t.status) && t.progress_last?.epoch !== undefined && (
+                          <span className="font-normal">
+                            {' · '}epoch {t.progress_last.epoch}{t.epochs ? `/${t.epochs}` : ''}
+                          </span>
+                        )}
+                      </Badge>
+                      {t.phase && !isFinished(t.status) && (
                         <span
                           className={`truncate text-xs ${stuckPending(t.phase) ? 'font-medium text-warn' : 'text-ink-subtle'}`}
                           title={stuckPending(t.phase)
@@ -411,72 +422,59 @@ export function ModelsPage() {
                   ),
                 },
                 {
-                  key: 'progress',
-                  label: 'Progress',
-                  width: '22%',
+                  key: 'result',
+                  label: 'Result',
+                  width: '24%',
                   cell: (t) => (
-                    <span className="text-xs text-ink-muted">
-                      {t.status === 'preparing' && t.snapshot_progress ? (
-                        <span data-testid="snapshot-progress">
-                          snapshot {t.snapshot_progress.done.toLocaleString()} /{' '}
-                          {t.snapshot_progress.total.toLocaleString()}
-                        </span>
-                      ) : t.progress_last ? (
-                        <>
-                          {t.progress_last.epoch !== undefined && `epoch ${t.progress_last.epoch}`}
-                          {typeof t.progress_last.cer === 'number' && ` · cer ${t.progress_last.cer.toFixed(4)}`}
-                        </>
-                      ) : t.error ? (
-                        <span className="text-danger" title={t.error}>{t.error}</span>
-                      ) : '-'}
+                    <span className="flex min-w-0 items-center gap-2 text-xs text-ink-muted">
+                      {t.error ? (
+                        <span className="truncate text-danger" title={t.error}>{t.error}</span>
+                      ) : typeof t.progress_last?.cer === 'number' ? (
+                        <span className="font-mono tabular-nums">cer {t.progress_last.cer.toFixed(4)}</span>
+                      ) : t.model_id === null && '-'}
+                      {t.model_id !== null && modelById.has(t.model_id) && (
+                        <Link to={`/models/${t.model_id}`} data-testid="run-model"
+                              title={modelById.get(t.model_id)!.name}
+                              className="shrink-0 text-accent-ink hover:underline">
+                          → {modelById.get(t.model_id)!.name === t.name ? 'model' : modelById.get(t.model_id)!.name}
+                        </Link>
+                      )}
                     </span>
                   ),
                 },
-                { key: 'target', label: 'Ran on',
-                  cell: (t) => <span className="whitespace-nowrap text-xs text-ink-subtle">{t.target === 'slurm' ? 'cluster' : 'local'}</span> },
-                { key: 'owner', label: 'Owner',
-                  cell: (t) => <span className="whitespace-nowrap text-xs text-ink-subtle">{t.owner === user ? 'you' : t.owner}</span> },
-                { key: 'started', label: 'Started', align: 'right',
-                  cell: (t) => <span className="whitespace-nowrap text-xs font-mono tabular-nums text-ink-subtle">{formatDate(t.created_at)}</span> },
                 {
                   key: 'actions',
                   label: '',
                   align: 'right',
                   cell: (t) => (
-                    <span className="flex items-center justify-end gap-1 whitespace-nowrap">
-                      {isFinished(t.status) && canEdit && trainableTasks.includes(t.task) && (
-                        <Link
-                          to={`/models/train?task=${t.task}&from=${t.id}`}
-                          data-testid="rerun-training"
-                          title="Open the training form on this run's settings"
-                          className={buttonClass({ variant: 'ghost', size: 'xs' })}
-                        >
-                          Rerun…
-                        </Link>
-                      )}
-                      {!isFinished(t.status) && mine(t) && (
-                        <Button variant="ghost" size="xs"
-                                onClick={() => cancelTraining(t.id).then(refresh).catch((e: Error) => setError(e.message))}>
-                          Cancel
-                        </Button>
-                      )}
-                      {t.status === 'error' && mine(t) && (
-                        <Button variant="ghost" size="xs" data-testid="retry-training"
-                                title="Submit it again on the snapshot it already cut"
-                                onClick={() => retryTraining(t.id).then(refresh).catch((e: Error) => setError(e.message))}>
-                          Retry
-                        </Button>
-                      )}
-                      {isFinished(t.status) && mine(t) && (
-                        <Button variant="ghost" size="xs" className="text-danger hover:text-danger"
-                                onClick={() => {
-                                  if (!window.confirm(`Delete training "${t.name}" and free its snapshot and checkpoint?`)) return
-                                  deleteTraining(t.id).then(refresh).catch((e: Error) => setError(e.message))
-                                }}>
-                          Delete
-                        </Button>
-                      )}
-                    </span>
+                    <ActionMenu
+                      testId="run-actions"
+                      label={`Actions for ${t.name}`}
+                      title="Rerun, retry, cancel or delete"
+                      trigger={<KebabIcon />}
+                      actions={[
+                        ...(isFinished(t.status) && canEdit && trainableTasks.includes(t.task) ? [{
+                          label: 'Rerun…', hint: "Open the training form on this run's settings",
+                          testId: 'rerun-training', onSelect: () => navigate(`/models/train?task=${t.task}&from=${t.id}`),
+                        }] : []),
+                        ...(t.status === 'error' && mine(t) ? [{
+                          label: 'Retry', hint: 'Submit it again on the snapshot it already cut',
+                          testId: 'retry-training',
+                          onSelect: () => retryTraining(t.id).then(refresh).catch((e: Error) => setError(e.message)),
+                        }] : []),
+                        ...(!isFinished(t.status) && mine(t) ? [{
+                          label: 'Cancel', testId: 'cancel-training',
+                          onSelect: () => cancelTraining(t.id).then(refresh).catch((e: Error) => setError(e.message)),
+                        }] : []),
+                        ...(isFinished(t.status) && mine(t) ? [{
+                          label: 'Delete', hint: 'Frees its snapshot and checkpoint', testId: 'delete-training', danger: true,
+                          onSelect: () => {
+                            if (!window.confirm(`Delete training "${t.name}" and free its snapshot and checkpoint?`)) return
+                            deleteTraining(t.id).then(refresh).catch((e: Error) => setError(e.message))
+                          },
+                        }] : []),
+                      ]}
+                    />
                   ),
                 },
               ]}
