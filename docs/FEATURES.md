@@ -123,6 +123,12 @@ the next run; nothing already recognised is thrown away.
   page structure used for reading order.
 - **Re-run** a phase over the dataset (from the **Run** menu on its page), a selection of
   pages, or a single page. The dialog says what will be replaced before it runs.
+- When a step of a dataset was run with a model that has since been replaced (by a new
+  default, a new version, or a model changed under Processing), its owner is asked on
+  opening it. Each step is listed with the old and new model and what running it again
+  would do. Re-reading is ticked by default and leaves checked lines alone; layout and
+  lines start unticked. **Switch and run** moves the dataset to the ticked models and runs
+  them; **Not now** asks again only when an even newer model appears.
 - Re-reading never touches lines a person has checked, unless you explicitly ask it to.
 - When lines are re-detected, the text of the old lines is kept and matched onto the new
   ones. A correction lands back on its line where the shape barely changed, and is offered
@@ -282,6 +288,8 @@ backends up as described in [MODEL-BACKENDS.md](MODEL-BACKENDS.md).
   **Archive**.
 - Every task has a default model. Archived models leave the pickers but stay on record and
   can be unarchived.
+- Mark a model as the **new version of** another under **Edit**, even when it was not
+  trained from it. Its page then shows "New version of ..." and "Replaced by ...".
 - You manage the models your own trainings produced; people with the model-management
   permission manage all of them.
 

@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import config, registry, schemas, weights
+from app import config, newer_models, registry, schemas, weights
 from app.deps import get_db, has_capability, require_role
 
 router = APIRouter(tags=['models'])
@@ -36,13 +36,16 @@ class ModelPatch(BaseModel):
     backend: str | None = None
     # A layout model's template, whose reading order its datasets follow.
     layout_template_id: int | None = None
+    # The model this one is the new version of; null says it replaces none.
+    supersedes: int | None = None
 
 
 # The default model silently changes what every new dataset uses, so choosing it is part
-# of managing the registry, as is naming a family everyone's fine-tunes sit in. The LM
+# of managing the registry, as is naming a family everyone's fine-tunes sit in or saying
+# which model a new release replaces, which offers it to every dataset on the old one. The LM
 # paths point into the backend filesystem and which model backend serves a model decides
 # where its weights go, so both stay with admins whatever else they grant.
-REGISTRY_FIELDS = {'is_default', 'family_name', 'layout_template_id'}
+REGISTRY_FIELDS = {'is_default', 'family_name', 'layout_template_id', 'supersedes'}
 ADMIN_ONLY_FIELDS = {'lm_path', 'lm_dict_path', 'backend'}
 
 
@@ -95,6 +98,15 @@ def patch_model(model_id: int, body: ModelPatch, conn=Depends(get_db),
                 'SELECT 1 FROM layout_templates WHERE id = ?', (body.layout_template_id,)).fetchone():
             raise HTTPException(400, f'no layout template {body.layout_template_id}')
         conn.execute('UPDATE models SET layout_template_id = ? WHERE id = ?', (body.layout_template_id, model_id))
+    if 'supersedes' in fields:
+        older = registry.get_model(conn, body.supersedes) if body.supersedes is not None else None
+        if body.supersedes is not None:
+            if older is None or older['task'] != row['task'] or older['id'] == model_id:
+                raise HTTPException(400, f'a model is the new version of another {row["task"]} model')
+            if newer_models.chain_loops(conn, model_id, older['id']):
+                raise HTTPException(400, f'{older["name"]} is already a newer version of {row["name"]}: '
+                                         'the versions would loop')
+        conn.execute('UPDATE models SET supersedes = ? WHERE id = ?', (body.supersedes, model_id))
     if 'notes' in fields:
         conn.execute('UPDATE models SET notes = ? WHERE id = ?',
                      ((body.notes or '').strip() or None, model_id))

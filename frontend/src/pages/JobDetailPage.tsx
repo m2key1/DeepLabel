@@ -14,7 +14,7 @@ import {
   cancelLlmRead,
   getJobMapClasses,
   getPage,
-  getReviewQueue,
+  getNewerModels, getReviewQueue,
   isTileTask,
   jobEventsUrl,
   purgePreview,
@@ -34,7 +34,7 @@ import {
   ApiError,
 } from '../api'
 import type {
-  ExportFormat, JobEvent, JobWithoutPages, LlmReadStatus, MapClass, PageDetail,
+  ExportFormat, JobEvent, NewerModelOffer, JobWithoutPages, LlmReadStatus, MapClass, PageDetail,
   PageFilter as PageFilterKey, PagePhase, PageRows, PageSort, PageSummary, PurgeManifest, Region,
   ReviewQueue, StaleLines, UnreadablePage,
 } from '../api'
@@ -85,6 +85,7 @@ import { MaskExportDialog } from '../components/job/MaskExportDialog'
 import { PurgeDialog } from '../components/job/PurgeDialog'
 import { RedetectDialog } from '../components/job/RedetectDialog'
 import { LlmReadDialog } from '../components/job/LlmReadDialog'
+import { NewerModelsDialog } from '../components/job/NewerModelsDialog'
 import { LayoutClassesDialog } from '../components/job/LayoutClassesDialog'
 import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
 import { SettleAgainDialog } from '../components/job/SettleAgainDialog'
@@ -222,6 +223,7 @@ export function JobDetailPage() {
   const [downloadingFullMaps, setDownloadingFullMaps] = useState(false)
   const [repredictOpen, setRepredictOpen] = useState(false)
   const [llmOpen, setLlmOpen] = useState(false)
+  const [newerModels, setNewerModels] = useState<NewerModelOffer[]>([])
   const [settleOpen, setSettleOpen] = useState(false)
   const [removeReadingsOpen, setRemoveReadingsOpen] = useState(false)
   const [classesOpen, setClassesOpen] = useState(false)
@@ -350,6 +352,13 @@ export function JobDetailPage() {
   // Both tile tasks share the job page, tile grid, review flags and mask export; only
   // the geometry inside a tile differs, which lives in the editor.
   const isMap = !!job && isTileTask(job.task)
+  // Asked once a visit, when the dataset is at rest: a newer model for a step it ran.
+  const askedNewer = useRef(false)
+  useEffect(() => {
+    if (!canOwn || isMap || active || uploading || askedNewer.current) return
+    askedNewer.current = true
+    getNewerModels(jobId).then((r) => setNewerModels(r.offers)).catch(() => undefined)
+  }, [jobId, canOwn, isMap, active, uploading])
   const lineJob = job?.task === 'map_lines'
   // Nothing detected the boxes, so the lines are what gets reviewed and counted.
   const noLayout = !!job && !isMap && !job.run_layout
@@ -1248,6 +1257,10 @@ export function JobDetailPage() {
           onDone={refetch}
           onError={setError}
         />
+      )}
+      {newerModels.length > 0 && job && (
+        <NewerModelsDialog jobId={jobId} name={job.name} offers={newerModels}
+                           onClose={() => setNewerModels([])} onStarted={refetch} onError={setError} />
       )}
       {llmOpen && (
         <LlmReadDialog

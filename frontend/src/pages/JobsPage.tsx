@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   bulkMove, bulkPreview, bulkRedetect, bulkReocr, bulkRerun, cancelJob, createGroup, deleteGroup,
-  deleteJob, downloadMaskSet, getUserNames, isTileTask, listGroups, listJobs, renameGroup,
+  deleteJob, downloadMaskSet, getNewerModels, getUserNames, isTileTask, listGroups, listJobs, renameGroup,
   renameJob, setJobNote,
 } from '../api'
-import type { BulkAction, BulkOutcome, BulkPreview, Group, Job } from '../api'
+import type { BulkAction, BulkOutcome, BulkPreview, Group, Job, NewerModelOffer } from '../api'
 import { useAuth } from '../auth'
 import { useSettings } from '../settings'
 import { JobActions, menuItem } from '../components/job/JobActions'
@@ -18,6 +18,7 @@ import { COLUMNS, DEFAULT_COLUMNS, NAME_MIN, columnWidths, columnsForWidth, load
 import { ShareDialog } from '../components/job/ShareDialog'
 import { ModelPickerDialog } from '../components/job/ModelPickerDialog'
 import { ProcessingDialog } from '../components/job/ProcessingDialog'
+import { NewerModelsDialog } from '../components/job/NewerModelsDialog'
 import { GroupSettingsDialog } from '../components/job/GroupSettingsDialog'
 import { MoveToGroupDialog } from '../components/job/MoveToGroupDialog'
 import { groupSize } from '../components/job/groups'
@@ -220,6 +221,7 @@ export function JobsPage() {
   const [moveJob, setMoveJob] = useState<Job | null>(null)
   const [modelsJob, setModelsJob] = useState<Job | null>(null)
   const [processingJob, setProcessingJob] = useState<Job | null>(null)
+  const [newerFor, setNewerFor] = useState<{ job: Job; offers: NewerModelOffer[] } | null>(null)
   const [shareTarget, setShareTarget] = useState<
     { kind: 'dataset'; job: Job } | { kind: 'group'; group: Group } | null>(null)
   const [settingsGroup, setSettingsGroup] = useState<Group | null>(null)
@@ -324,6 +326,15 @@ export function JobsPage() {
         setError(`Could not load the groups: ${e.message}`)
       })
   }, [])
+
+  // A model changed by hand is offered the same way a new default is: the steps it ran
+  // with the old one can be run again now.
+  const offerNewer = (job: Job) => {
+    refresh()
+    getNewerModels(job.id)
+      .then((r) => { if (r.offers.length) setNewerFor({ job, offers: r.offers }) })
+      .catch(() => undefined)
+  }
 
   usePolling(refresh, 5000)
 
@@ -1346,15 +1357,19 @@ export function JobsPage() {
         <ModelPickerDialog
           job={modelsJob}
           onClose={() => setModelsJob(null)}
-          onSaved={refresh}
+          onSaved={() => offerNewer(modelsJob)}
           onError={setError}
         />
+      )}
+      {newerFor && (
+        <NewerModelsDialog jobId={newerFor.job.id} name={newerFor.job.name} offers={newerFor.offers}
+                           onClose={() => setNewerFor(null)} onStarted={refresh} onError={setError} />
       )}
       {processingJob && (
         <ProcessingDialog
           job={processingJob}
           onClose={() => setProcessingJob(null)}
-          onSaved={refresh}
+          onSaved={() => offerNewer(processingJob)}
           onError={setError}
         />
       )}

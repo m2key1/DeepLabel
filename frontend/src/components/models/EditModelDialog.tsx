@@ -12,9 +12,11 @@ interface EditModelDialogProps {
   onError: (message: string) => void
   /** Set on a family's root for someone who manages models: the family is named here. */
   familyName?: string
+  /** The other models, for someone who manages models to say which one this replaces. */
+  models?: RegistryModel[]
 }
 
-export function EditModelDialog({ model, onClose, onSaved, onError, familyName }: EditModelDialogProps) {
+export function EditModelDialog({ model, onClose, onSaved, onError, familyName, models }: EditModelDialogProps) {
   const { isAdmin, can } = useAuth()
   const choosesTemplate = model.task === 'layout' && can('models.manage')
   const [templates, setTemplates] = useState<LayoutTemplate[]>([])
@@ -27,6 +29,9 @@ export function EditModelDialog({ model, onClose, onSaved, onError, familyName }
   const [family, setFamily] = useState(familyName ?? '')
   const [lmPath, setLmPath] = useState(model.lm_path ?? '')
   const [lmDictPath, setLmDictPath] = useState(model.lm_dict_path ?? '')
+  const [supersedes, setSupersedes] = useState(model.supersedes)
+  const olderChoices = (models ?? []).filter((m) => m.task === model.task && m.id !== model.id
+    && (!m.archived || m.id === model.supersedes))
   const [busy, setBusy] = useState(false)
 
 
@@ -39,6 +44,7 @@ export function EditModelDialog({ model, onClose, onSaved, onError, familyName }
         ...(familyName !== undefined && family.trim() !== familyName ? { family_name: family.trim() } : {}),
         ...(model.task === 'ocr' && isAdmin ? { lm_path: lmPath.trim(), lm_dict_path: lmDictPath.trim() } : {}),
         ...(choosesTemplate && templateId !== model.layout_template_id ? { layout_template_id: templateId } : {}),
+        ...(models && supersedes !== model.supersedes ? { supersedes } : {}),
       })
       onClose()
       onSaved()
@@ -83,6 +89,23 @@ export function EditModelDialog({ model, onClose, onSaved, onError, familyName }
                  placeholder={model.name} className="mb-1 w-full" />
           <p className="mb-4 text-xs text-ink-muted">
             Everything fine-tuned from this model is listed under it. Empty calls the family after the model.
+          </p>
+        </>
+      )}
+      {models && (
+        <>
+          <label className="mb-1 block text-sm font-medium text-ink" htmlFor="model-supersedes">
+            New version of
+          </label>
+          <Select size="md" id="model-supersedes" data-testid="model-supersedes" value={supersedes ?? ''}
+                  onChange={(e) => setSupersedes(e.target.value ? Number(e.target.value) : null)}
+                  className="mb-1 w-full">
+            <option value="">No model - this is not a new version</option>
+            {olderChoices.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </Select>
+          <p className="mb-4 text-xs text-ink-muted">
+            The owners of datasets read with that model are offered this one when they open them.
+            It need not be trained from it.
           </p>
         </>
       )}

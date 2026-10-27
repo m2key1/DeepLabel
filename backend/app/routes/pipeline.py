@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import candidates, characters, config, ingest, layout_classes, registry, store
+from app import candidates, characters, config, ingest, layout_classes, newer_models, registry, store
 from app.deps import (check_capability, current_user, get_db, get_user, require_capability,
                       require_job_access, require_page_access, require_role)
 
@@ -429,6 +429,71 @@ def rerun_one(conn, job_id: str, from_phase: str, force: bool, user: str,
     # stale totals (e.g. 76/75) until the re-run happens to overwrite each one.
     store.recount_pages(conn, job_id)
     return {'ok': True, 'from_phase': body.from_phase, 'discarded': discarded}
+
+
+def _owned_job(conn, job_id: str, user: dict) -> dict:
+    job = store.get_job(conn, job_id)
+    if job is None:
+        raise HTTPException(404)
+    require_rerun_owner(job, user)
+    return job
+
+
+@router.get('/api/jobs/{job_id}/newer-models')
+def newer_models_offer(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """The steps a newer model could be run for, old and new model, and what running each
+    would cost. Asked of the owner and admins only, since only they may run them."""
+    require_job_access(conn, job_id, user)
+    job = store.get_job(conn, job_id)
+    if job is None:
+        raise HTTPException(404)
+    if job['owner'] != user['username'] and user['role'] != 'admin':
+        return {'offers': []}
+    return {'offers': newer_models.offers(conn, job)}
+
+
+@router.post('/api/jobs/{job_id}/newer-models/dismiss')
+def newer_models_dismiss(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Not now: these models are not offered again, an even newer one is."""
+    require_job_access(conn, job_id, user)
+    newer_models.decline(conn, _owned_job(conn, job_id, user))
+    conn.commit()
+    return {'ok': True}
+
+
+class NewerModelsRun(BaseModel):
+    tasks: list[str]
+
+
+@router.post('/api/jobs/{job_id}/newer-models')
+def newer_models_run(job_id: str, body: NewerModelsRun, conn=Depends(get_db),
+                     user: dict = Depends(current_user)):
+    """Switch the ticked steps to their offered models and run them: from layout or lines
+    the pages are detected again (which reads them too), OCR alone re-reads the unchecked
+    lines. The steps left unticked count as declined."""
+    require_job_access(conn, job_id, user)
+    job = _owned_job(conn, job_id, user)
+    offered = {o['task']: o for o in newer_models.offers(conn, job)}
+    tasks = set(body.tasks)
+    if not tasks or not tasks <= set(offered):
+        raise HTTPException(400, f'only these steps have a newer model: {", ".join(sorted(offered)) or "none"}')
+    first = next(task for task in registry.TASKS if task in tasks)
+    force = first == 'layout' and offered['layout']['layout_checked'] > 0
+    for task in tasks:
+        check_capability(user, PHASE_CAPABILITY[task])
+    if force:
+        check_capability(user, 'pipeline.discard')
+    for task in tasks:
+        newer_models.switch_to(conn, job, offered[task])
+    for task in set(offered) - tasks:
+        conn.execute('INSERT OR REPLACE INTO declined_models (job_id, task, model_id) VALUES (?, ?, ?)',
+                     (job_id, task, offered[task]['to']['id']))
+    if first == 'ocr':
+        result = reocr_one(conn, job_id, 'unchecked', user)
+    else:
+        result = rerun_one(conn, job_id, first, force, user['username'])
+    conn.commit()
+    return result
 
 
 def _line_tally(conn, page_id: int, holders: str):

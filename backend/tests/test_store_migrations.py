@@ -168,6 +168,7 @@ class TestMigrations:
     ORIGINAL_COLUMNS = {
         'augmentation_pipelines': ['created_at', 'id', 'is_default', 'name', 'owner', 'spec', 'task', 'updated_at'],
         'candidates': ['author', 'checked', 'created_at', 'dismissed', 'id', 'line_id', 'llm_model_id', 'order_idx', 'page_id', 'polygon', 'similarity', 'source', 'text'],
+        'declined_models': ['job_id', 'model_id', 'task'],
         'elements': ['bbox', 'checked', 'class_name', 'conf', 'deleted', 'id', 'kind', 'lines_bbox', 'order_idx', 'page_id', 'raw_class_name'],
         'eval_lines': ['confidence', 'cer', 'decode', 'distance', 'evaluation_id', 'ground_truth', 'job_id', 'length', 'line_id', 'ops', 'page_id', 'prediction'],
         'evaluations': ['cer', 'created_at', 'decode', 'error', 'id', 'line_count', 'model_id', 'owner', 'pid', 'source', 'status', 'training_id', 'wer'],
@@ -1470,4 +1471,25 @@ class TestNotes:
 
         assert tuple(conn.execute('SELECT note, note_by, note_at FROM jobs').fetchone()) == (None, None, None)
         assert tuple(conn.execute('SELECT note, note_by, note_at FROM pages').fetchone()) == (None, None, None)
+        conn.close()
+
+
+class TestModelVersions:
+    def test_an_older_database_gains_version_links_and_declined_offers(self, tmp_path):
+        db = tmp_path / 'app.db'
+        conn = store.connect(db)
+        conn.execute("INSERT INTO models (task, name, checkpoint) VALUES ('ocr', 'v1', 'v1')")
+        conn.commit()
+        conn.close()
+        raw = sqlite3.connect(db)
+        raw.execute('ALTER TABLE models DROP COLUMN supersedes')
+        raw.execute('DROP TABLE declined_models')
+        raw.commit()
+        raw.close()
+
+        conn = store.connect(db)
+        store.connect(db).close()
+
+        assert conn.execute('SELECT supersedes FROM models').fetchone()[0] is None
+        assert conn.execute('SELECT COUNT(*) FROM declined_models').fetchone()[0] == 0
         conn.close()

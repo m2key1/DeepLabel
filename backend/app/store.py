@@ -293,7 +293,18 @@ CREATE TABLE IF NOT EXISTS models (
     -- The layout template a layout model was trained on, whose reading order the datasets
     -- it reads follow. Null: their order is worked out from the page.
     layout_template_id INTEGER REFERENCES layout_templates(id),
+    -- The model this one is the new version of, set by hand: a release trained afresh is
+    -- not trained from the one it replaces. Datasets on the older one are offered it.
+    supersedes INTEGER REFERENCES models(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- A newer model a dataset's owner said "not now" to, per step: asked again only once a
+-- model other than this one is on offer.
+CREATE TABLE IF NOT EXISTS declined_models (
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    task TEXT NOT NULL,
+    model_id INTEGER NOT NULL REFERENCES models(id),
+    PRIMARY KEY (job_id, task)
 );
 -- The files of a model as the weight store holds them, by content (WEIGHTS_DIR/<sha[:2]>/<sha>).
 CREATE TABLE IF NOT EXISTS model_files (
@@ -960,7 +971,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE models ADD COLUMN max_width INTEGER')
     for column, kind in (('backend', 'TEXT'), ('model_type', 'TEXT'), ('classes', 'TEXT'),
                          ('input_size', 'INTEGER'), ('ref', 'TEXT'), ('conventions', 'TEXT'),
-                         ('family_name', 'TEXT')):
+                         ('family_name', 'TEXT'), ('supersedes', 'INTEGER REFERENCES models(id)')):
         if column not in model_cols:
             conn.execute(f'ALTER TABLE models ADD COLUMN {column} {kind}')
     # 'rescored' named a mode the engine did not run: with an LM configured it did beam

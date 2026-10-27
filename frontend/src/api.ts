@@ -521,6 +521,8 @@ export interface RegistryModel {
   family_name: string | null
   /** A layout model's template, whose reading order the datasets it reads follow. */
   layout_template_id: number | null
+  /** The model this one is the new version of; datasets on that one are offered this one. */
+  supersedes: number | null
   /** The model backend it is read on, or null while no configured backend serves it. */
   runs_on?: string | null
   owner: string | null
@@ -1187,6 +1189,33 @@ export function reocr(jobId: string, scope: 'pending' | 'unchecked' = 'pending')
   return request(`/api/jobs/${jobId}/reocr`, json('POST', { scope }))
 }
 
+/** A step of a dataset that a newer model could be run for, and what running it costs. */
+export interface NewerModelOffer {
+  task: ModelTask
+  from: { id: number | null; name: string }
+  to: { id: number; name: string }
+  /** OCR: the lines a re-read covers, and the checked ones it leaves alone. */
+  unchecked?: number
+  checked?: number
+  /** Layout and lines: what detecting again replaces. */
+  lines?: number
+  corrected?: number
+  boxes?: number
+  layout_checked?: number
+}
+
+export function getNewerModels(jobId: string): Promise<{ offers: NewerModelOffer[] }> {
+  return request(`/api/jobs/${jobId}/newer-models`)
+}
+
+export function runNewerModels(jobId: string, tasks: ModelTask[]): Promise<unknown> {
+  return request(`/api/jobs/${jobId}/newer-models`, json('POST', { tasks }))
+}
+
+export function declineNewerModels(jobId: string): Promise<unknown> {
+  return request(`/api/jobs/${jobId}/newer-models/dismiss`, json('POST', {}))
+}
+
 export function redetectPreview(jobId: string): Promise<StaleLines> {
   return request(`/api/jobs/${jobId}/redetect`)
 }
@@ -1489,7 +1518,7 @@ export function patchModel(
   modelId: number,
   body: {
     name?: string; notes?: string; is_default?: boolean; archived?: boolean; lm_path?: string; lm_dict_path?: string
-    family_name?: string; layout_template_id?: number | null
+    family_name?: string; layout_template_id?: number | null; supersedes?: number | null
   },
 ): Promise<RegistryModel> {
   return request(`/api/models/${modelId}`, json('PATCH', body))

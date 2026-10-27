@@ -5,7 +5,7 @@ import { buildFamilies, lineage } from './families'
 const model = (id: number, over: Partial<RegistryModel> = {}): RegistryModel => ({
   id, task: 'ocr', name: `m${id}`, source: 'trained', checkpoint: `/m${id}.ckpt`, trained_from: null,
   metrics: null, notes: null, is_default: false, archived: false, lm_path: null, lm_dict_path: null,
-  target_height: null, max_width: null, conventions: null, owner: null, files: [], family_name: null, layout_template_id: null, runs_on: null,
+  target_height: null, max_width: null, conventions: null, owner: null, files: [], family_name: null, layout_template_id: null, supersedes: null, runs_on: null,
   created_at: `2026-10-${String(id).padStart(2, '0')} 10:00:00`, ...over,
 })
 

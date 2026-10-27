@@ -174,6 +174,8 @@ export function ModelPage() {
   const own = model.owner === user
   const evals = evaluations.filter((ev) => ev.model_id === model.id)
   const base = model.trained_from !== null ? models.find((m) => m.id === model.trained_from) : undefined
+  const older = model.supersedes !== null ? models.find((m) => m.id === model.supersedes) : undefined
+  const newer = models.find((m) => m.supersedes === model.id && !m.archived)
   const baseOnSameTest = run && evaluations.find((ev) => ev.model_id === base?.id && ev.training_id === run.id
     && ev.source.jobs !== undefined && ev.status === 'done' && ev.decode === 'beam' && ev.cer !== null)
   const valid = evals.find((ev) => run && ev.source.snapshot === run.id && ev.status === 'done' && ev.decode === 'beam')
@@ -256,6 +258,14 @@ export function ModelPage() {
             <dt className="text-ink-muted">Reading order</dt>
             <dd data-testid="model-reading-order"><ReadingOrder template={templates.find((t) => t.id === model.layout_template_id)} /></dd>
           </>}
+          {(older || newer) && <>
+            <dt className="text-ink-muted">Version</dt>
+            <dd data-testid="model-versions">
+              {older && <>New version of <Link to={`/models/${older.id}`} className="text-accent-ink hover:underline">{older.name}</Link></>}
+              {older && newer && ' · '}
+              {newer && <>Replaced by <Link to={`/models/${newer.id}`} className="text-accent-ink hover:underline">{newer.name}</Link></>}
+            </dd>
+          </>}
           <dt className="text-ink-muted">Runs on</dt>
           <dd data-testid="model-runs-on">{model.runs_on ? `model backend "${model.runs_on}"` : 'no configured model backend'}</dd>
           <dt className="text-ink-muted">Notes</dt>
@@ -299,7 +309,8 @@ export function ModelPage() {
 
       {evaluating && <EvaluateDialog model={model} onClose={() => setEvaluating(false)} onStarted={refresh} />}
       {editing && <EditModelDialog model={model} onClose={() => setEditing(false)} onSaved={refresh} onError={setError}
-                                   familyName={managesModels && family.root.id === model.id ? model.family_name ?? '' : undefined} />}
+                                   familyName={managesModels && family.root.id === model.id ? model.family_name ?? '' : undefined}
+                                   models={managesModels ? models : undefined} />}
     </div>
   )
 }
