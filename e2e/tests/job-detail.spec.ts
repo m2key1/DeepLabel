@@ -274,8 +274,9 @@ test.describe('Scenario: reading the page table at a glance', () => {
     const worst = cell.getByTitle('Worst line on the page')
     const average = cell.getByTitle("Average over the page's lines")
     await expect(average).toHaveText('ø 85%')
-    // The average used to break after its ø into a box twice the height of the other.
-    expect((await average.boundingBox())!.height).toBe((await worst.boundingBox())!.height)
+    // The average used to break after its ø into a box twice the height of the other; one
+    // line tall, it differs from it only by its border.
+    expect((await average.boundingBox())!.height).toBeLessThan((await worst.boundingBox())!.height * 1.3)
   })
 
   test('the top bar buttons are all the same height', async ({ page }) => {
