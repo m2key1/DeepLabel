@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+from datetime import datetime, timezone
 import shutil
 from pathlib import Path
 from uuid import uuid4
@@ -11,7 +12,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from app import (blobs, caches, config, consensus, conventions, corpus, decode, evaluator, geometry, layout_templates,
-                 imports, ingest, jobs, llm, map_classes, model_registry, page_rows, reading_order,
+                 imports, ingest, jobs, llm, map_classes, model_registry, page_rows, queue_eta, reading_order,
                  registry, schemas, store, trainer)
 from app.deps import (can_access_job, can_reach_group, check_capability, current_user, get_db, get_user,
                       require_job_access, require_job_owner, require_role)
@@ -1230,5 +1231,14 @@ def queue(conn=Depends(get_db), user: dict = Depends(current_user)):
         pending_reocr = {'lines': sum(r['lines'] for r in flagged), 'datasets': datasets,
                          'next_pass_in': jobs.next_reocr_pass_in()}
 
+    # How long each will take, so the page can lay the lanes out over time.
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for entry in [*running, *queued, *cluster]:
+        if entry['kind'] == 'dataset':
+            entry['eta'] = queue_eta.dataset(conn, entry['id'], now)
+        elif entry['kind'] == 'training':
+            entry['eta'] = queue_eta.training(conn, entry['id'], entry['training']['progress_last'], now)
+        else:
+            entry['eta'] = queue_eta.evaluation(conn, entry['id'], now)
     return {'gpu': {'running': running[0] if running else None, 'queued': queued},
             'cluster': cluster, 'pending_reocr': pending_reocr}

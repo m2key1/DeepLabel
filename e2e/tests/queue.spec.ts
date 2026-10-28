@@ -156,6 +156,44 @@ test.describe('Scenario: what the shared GPU is doing', () => {
   })
 })
 
+test.describe('Scenario: when work will run', () => {
+  test.use({ timezoneId: 'Europe/Vienna' })
+
+  test('the GPU is drawn over time: the running item, then each waiting one as long as it should take',
+    async ({ page }) => {
+      await page.clock.setFixedTime(new Date('2026-01-01T10:00:00Z'))
+      await serveQueue(page, {
+        ...EMPTY,
+        gpu: {
+          running: dataset('j-running', 'Census', 'running',
+                           { started_at: '2026-01-01 09:58:00', eta: { seconds: 120, basis: 'progress' } }),
+          queued: [dataset('j-theirs', 'Letters', 'queued', { owner: 'joerg', eta: { seconds: 600, basis: 'history' } }),
+                   dataset('j-mine', 'Protokolle', 'queued', { eta: { seconds: null, basis: 'unknown' } })],
+        },
+        cluster: [{ ...training(12, 'OCR sweep', 'running'), eta: { seconds: 5400, basis: 'progress' } }],
+      })
+
+      await page.goto('/queue')
+
+      const bars = page.getByTestId('queue-timeline').getByTestId('queue-bar')
+      await expect(bars).toHaveCount(4)
+      // Your own work is outlined; a bar with no estimate is marked as a guess.
+      await expect(bars.and(page.locator('[data-mine]'))).toHaveCount(3)
+      await expect(bars.and(page.locator('[data-unknown]'))).toHaveCount(1)
+      await expect(bars.and(page.locator('[data-unknown]'))).toContainText('Protokolle')
+      // The list says when each starts: Letters after Census's two minutes, Protokolle ten after that.
+      const starts = (name: string) => rows(page).filter({ hasText: name }).getByTestId('queue-row-starts')
+      await expect(starts('Census')).toHaveText('now')
+      await expect(starts('Letters')).toHaveText('~11:02')
+      await expect(starts('Protokolle')).toHaveText('~11:12')
+      await expect(rows(page).filter({ hasText: 'Protokolle' })).toHaveAttribute('data-mine', 'true')
+      await expect(starts('OCR sweep')).toHaveText('now')
+
+      await bars.filter({ hasText: 'Letters' }).click()
+      await expect(page).toHaveURL(/\/jobs\/j-theirs$/)
+    })
+})
+
 test.describe('Scenario: lines waiting to be read again', () => {
   test('they are counted on the queue with a countdown to the sweep', async ({ page }) => {
     // Real state, not served: a flagged line stays flagged until the batcher's sweep,

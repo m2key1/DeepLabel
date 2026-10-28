@@ -13,6 +13,8 @@ import { Section } from '../components/ui/Section'
 import { Table } from '../components/ui/Table'
 import type { Column } from '../components/ui/Table'
 import { pageShell } from '../components/ui/page'
+import { QueueTimeline } from '../components/queue/QueueTimeline'
+import { clock, placeCluster, placeLocal } from '../components/queue/timeline'
 
 const KIND_LABEL: Record<QueueEntry['kind'], string> = {
   dataset: 'dataset',
@@ -100,6 +102,9 @@ interface Waiting {
   now: number
   /** Set when the viewer may stop this row: its owner, or an admin. */
   onCancel?: () => void
+  /** When it is expected to start, as a clock time; 'now' while it runs. */
+  starts: string
+  mine: boolean
 }
 
 /** How long a row has run, or waited: from when it left the queue, else from when it
@@ -128,6 +133,16 @@ const QUEUE_COLUMNS: Column<Waiting>[] = [
     ),
   },
   {
+    key: 'starts',
+    label: 'Starts',
+    cell: ({ starts, mine }) => (
+      <span data-testid="queue-row-starts"
+            className={`whitespace-nowrap font-mono text-xs tabular-nums ${mine ? 'font-semibold text-accent-ink' : 'text-ink-muted'}`}>
+        {starts}
+      </span>
+    ),
+  },
+  {
     key: 'kind',
     label: 'Kind',
     cell: ({ entry }) => <Badge tone="neutral">{KIND_LABEL[entry.kind]}</Badge>,
@@ -135,11 +150,12 @@ const QUEUE_COLUMNS: Column<Waiting>[] = [
   {
     key: 'name',
     label: 'Name',
-    cell: ({ entry }) => {
+    cell: ({ entry, mine }) => {
       const to = pageOf(entry)
+      const tone = mine ? 'text-accent-ink' : ''
       return to
-        ? <Link to={to} data-testid="queue-row-link" className="truncate font-medium hover:text-accent-ink">{entry.name}</Link>
-        : <span className="truncate font-medium">{entry.name}</span>
+        ? <Link to={to} data-testid="queue-row-link" className={`truncate font-medium hover:text-accent-ink ${tone}`}>{entry.name}</Link>
+        : <span className={`truncate font-medium ${tone}`}>{entry.name}</span>
     },
   },
   {
@@ -178,7 +194,7 @@ function QueueTable({ rows, caption }: { rows: Waiting[]; caption: string }) {
       columns={QUEUE_COLUMNS}
       rows={rows}
       rowKey={({ entry }) => `${entry.kind}-${entry.id}`}
-      rowProps={({ entry }) => ({ 'data-testid': 'queue-row', 'data-kind': entry.kind })}
+      rowProps={({ entry, mine }) => ({ 'data-testid': 'queue-row', 'data-kind': entry.kind, 'data-mine': mine || undefined })}
     />
   )
 }
@@ -245,23 +261,37 @@ export function QueuePage() {
     ? () => { CANCEL[entry.kind](entry.id).then(refresh).catch((e: Error) => setError(e.message)) }
     : undefined
   const { running, queued } = queue.gpu
-  const local: Waiting[] = [
-    ...(running ? [{ entry: running, position: '►', waiting: false, now, onCancel: cancelOf(running) }] : []),
-    ...queued.map((entry, i) => ({ entry, position: String(i + 1), waiting: true, now, onCancel: cancelOf(entry) })),
-  ]
+  const localBars = placeLocal(running, queued)
+  const clusterBars = placeCluster(queue.cluster)
+  const startOf = (i: number) => {
+    const bar = localBars[i]
+    if (bar.start === 0 && bar.entry.status !== 'queued') return 'now'
+    return localBars.slice(0, i + 1).some((b) => b.unknown && b !== bar) ? `after ~${clock(bar.start, now)}` : `~${clock(bar.start, now)}`
+  }
+  const local: Waiting[] = localBars.map((bar, i) => ({
+    entry: bar.entry, position: i === 0 && running ? '►' : String(running ? i : i + 1), waiting: bar.entry !== running,
+    now, onCancel: cancelOf(bar.entry), starts: startOf(i), mine: bar.entry.owner === user,
+  }))
   const cluster: Waiting[] = queue.cluster.map((entry) => ({
     entry,
     position: entry.status === 'queued' ? '◌' : '►',
     waiting: entry.status === 'queued',
     now,
     onCancel: cancelOf(entry),
+    starts: entry.status === 'queued' ? 'when the cluster has room' : 'now',
+    mine: entry.owner === user,
   }))
+  const lanes = [
+    ...(localBars.length ? [{ name: 'Local GPU', bars: localBars }] : []),
+    ...(clusterBars.length ? [{ name: 'Cluster', bars: clusterBars }] : []),
+  ]
   return (
     <div className={pageShell}>
       <PageHeader title="Queue">
         What the shared GPU is working on, in the order it will get to it.
       </PageHeader>
       {failure}
+      {lanes.length > 0 && <QueueTimeline lanes={lanes} now={now} user={user} pageOf={pageOf} />}
       <Section title="Local GPU">
         {local.length === 0
           ? (

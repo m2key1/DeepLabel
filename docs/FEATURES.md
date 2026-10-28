@@ -137,8 +137,10 @@ the next run; nothing already recognised is thrown away.
 - Turn a scan that arrived the wrong way up from the page viewer's **Run** menu. Boxes and
   lines turn with it, and turning back restores the original file.
 - The **Queue** page shows everything running or waiting - datasets, trainings,
-  evaluations - in the order they will run, with live progress. Their owner, or an admin,
-  can cancel them there.
+  evaluations - on a timeline per GPU and on the cluster, each item as long as it is
+  expected to take, with the time it should start. Estimates come from the item's own
+  progress, else from how long the same kind of work took recently. Their owner, or an
+  admin, can cancel them there.
 
 ## Reading order
 

@@ -123,7 +123,7 @@ def test_a_dataset_entry_carries_only_what_draws_its_progress(client):
     assert theirs == {'kind': 'dataset', 'id': 'j-a', 'name': 'another dataset', 'owner': 'alice',
                       'status': 'running', 'phase': 'ocr', 'created_at': '2026-01-01 10:04:00',
                       'queued_at': '2026-01-01 10:04:00', 'started_at': None, 'accessible': False,
-                      'job': progress}
+                      'job': progress, 'eta': {'seconds': None, 'basis': 'unknown'}}
     mine = fetch(api, ADMIN)['gpu']['running']
     assert (mine['name'], mine['accessible'], mine['job']) == ('Secret set', True, progress)
 
@@ -191,3 +191,22 @@ def test_each_entry_says_when_it_started_and_waiting_work_has_not(client):
     assert state['gpu']['running']['started_at'] == '2026-01-01 10:05:00'
     assert state['cluster'][0]['started_at'] == '2026-01-01 09:01:00'
     assert [e['started_at'] for e in state['gpu']['queued']] == [None]
+
+
+def test_every_entry_carries_an_estimate(client):
+    api, conn = client
+    conn.execute("INSERT INTO jobs (id, name, owner, status, started_at, finished_at) "
+                 "VALUES ('j-old', 'Old set', 'alice', 'done', '2026-01-01 10:00:00', '2026-01-01 10:01:00')")
+    conn.execute("INSERT INTO pages (job_id, idx, filename, source_file, status) VALUES ('j-old', 0, 'p', 'p', 'done')")
+    conn.execute("INSERT INTO jobs (id, name, owner, status) VALUES ('j-wait', 'Waiting set', 'alice', 'queued')")
+    for i in range(3):
+        conn.execute("INSERT INTO pages (job_id, idx, filename, source_file, status) VALUES ('j-wait', ?, 'p', 'p', 'pending')", (i,))
+    conn.execute("INSERT INTO trainings (task, name, owner, target, status, epochs) "
+                 "VALUES ('ocr', 'run-9', 'alice', 'local', 'queued', 5)")
+    conn.commit()
+
+    state = fetch(api)
+
+    assert [(e['name'], e['eta']) for e in state['gpu']['queued']] == [
+        ('Waiting set', {'seconds': 180, 'basis': 'history'}),
+        ('run-9', {'seconds': None, 'basis': 'unknown'})]

@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     started_at TEXT,
     -- When it last joined the queue, null while it never left it: the jobs_queued_at trigger.
     queued_at TEXT,
+    -- When its last run ended, done or not: the jobs_finished_at trigger. With started_at it
+    -- says how long a run took, which the queue's estimates go by.
+    finished_at TEXT,
     source_path TEXT,
     counters TEXT NOT NULL DEFAULT '{}',
     line_mode TEXT NOT NULL DEFAULT 'per_crop',
@@ -393,6 +396,7 @@ CREATE TABLE IF NOT EXISTS trainings (
     line_shape TEXT,
     started_at TEXT,
     queued_at TEXT,
+    finished_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 -- A review of the material a training would be cut from, computed in the background
@@ -507,6 +511,7 @@ CREATE TABLE IF NOT EXISTS evaluations (
     fingerprint TEXT,
     started_at TEXT,
     queued_at TEXT,
+    finished_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 -- One scored line of an evaluation, as the evaluator recorded it. Copies of the text
@@ -951,6 +956,11 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute(f"CREATE TRIGGER IF NOT EXISTS {table}_queued_at AFTER UPDATE OF status ON {table} "
                      "WHEN NEW.status = 'queued' AND OLD.status NOT IN ('queued', 'preparing', 'running') "
                      f"BEGIN UPDATE {table} SET queued_at = datetime('now') WHERE rowid = NEW.rowid; END")
+        if 'finished_at' not in {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}:
+            conn.execute(f'ALTER TABLE {table} ADD COLUMN finished_at TEXT')
+        conn.execute(f"CREATE TRIGGER IF NOT EXISTS {table}_finished_at AFTER UPDATE OF status ON {table} "
+                     "WHEN NEW.status IN ('done', 'error', 'cancelled') AND OLD.status IN ('queued', 'preparing', 'running') "
+                     f"BEGIN UPDATE {table} SET finished_at = datetime('now') WHERE rowid = NEW.rowid; END")
     # 'rescored' named a mode the engine did not run: with an LM configured it did beam
     # search instead, so every job and evaluation recorded the wrong name. Relabel to what
     # actually ran - once, guarded by user_version, or a later deliberate 'rescored' would

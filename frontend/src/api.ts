@@ -432,6 +432,9 @@ export interface QueueEntry {
   started_at: string | null
   /** Datasets only: false when the viewer cannot open it (its name is redacted too). */
   accessible?: boolean
+  /** How long it will still take: from its own pace while it runs, else from how long the
+   *  same kind of work took recently; `seconds` is null when there is nothing to go by. */
+  eta?: { seconds: number | null; basis: 'progress' | 'history' | 'unknown' }
   /** Datasets only: just what draws the progress bar, so nothing more leaks to whoever
    *  cannot open the dataset. */
   job?: Pick<Job, 'status' | 'counters' | 'run_layout' | 'run_lines' | 'run_ocr' | 'run_predict' | 'run_tile'>
