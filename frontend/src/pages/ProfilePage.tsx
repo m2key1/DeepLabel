@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, Navigate, useLocation, useParams, useSearchParams } from 'react-router-dom'
 
-import { ApiError, getMeta, getPerson, getPersonProfile, logout } from '../api'
-import type { AppMeta, Person, PersonProfile, PersonStats } from '../api'
+import { ApiError, getPerson, getPersonProfile, logout } from '../api'
+import type { Person, PersonProfile, PersonStats } from '../api'
 import { useAuth } from '../auth'
 import { profilePath } from '../people'
 import { useSettings } from '../settings'
@@ -150,24 +150,9 @@ function OwnTabs({ profile }: { profile: PersonProfile | null }) {
           active={active}
           onSelect={(id) => setParams(id === OVERVIEW ? {} : { section: id }, { replace: true })}
         />
-        <AppVersion />
       </div>
       <div className="min-w-0 flex-1">{tabs.find((t) => t.id === active)?.node}</div>
     </div>
-  )
-}
-
-/** The release this deployment runs, so a bug report can say which. */
-function AppVersion() {
-  const [meta, setMeta] = useState<AppMeta | null>(null)
-  useEffect(() => {
-    getMeta().then(setMeta).catch(() => {})
-  }, [])
-  if (!meta) return null
-  return (
-    <p data-testid="app-version" className="mt-4 px-2 font-mono text-xs text-ink-subtle">
-      DeepLabel {meta.version}{meta.commit && ` · ${meta.commit}`}
-    </p>
   )
 }
 

@@ -411,7 +411,8 @@ Sign-in is handled by Authentik.
   presence, which overlays a page opens with, keyboard shortcuts, character keyboard, API
   tokens and language models.
 - Settings are stored with your account and follow you to every device.
-- The profile footer shows the DeepLabel version the deployment runs.
+- Every page except the two editors ends with a footer naming the running version and
+  commit, with links to the documentation, the source and a new issue.
 
 ## Keyboard shortcuts
 

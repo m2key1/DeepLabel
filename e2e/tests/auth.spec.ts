@@ -6,7 +6,7 @@ test.describe('Scenario: signing in and out', () => {
 
   test('visiting the app logs in via the dev bypass and lands on the jobs page', async ({ page }) => {
     await page.goto('/')
-    await expect(page.getByRole('link', { name: 'DeepLabel' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'DeepLabel', exact: true })).toBeVisible()
     await page.getByTestId('user-menu').click()
     await expect(page.getByTestId('profile-name')).toHaveText('dev')
     await expect(page.getByRole('link', { name: 'New job' })).toBeVisible()
@@ -26,6 +26,6 @@ test.describe('Scenario: signing in and out', () => {
         return sid && sid !== before?.value ? sid : null
       })
       .not.toBeNull()
-    await expect(page.getByRole('link', { name: 'DeepLabel' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'DeepLabel', exact: true })).toBeVisible()
   })
 })

@@ -189,17 +189,6 @@ test.describe('Scenario: a person\'s profile', () => {
     await expect(page.getByTestId('profile')).toBeVisible()
   })
 
-  test('your own profile names the release this deployment runs, a colleague\'s does not', async ({ page }) => {
-    expect(await backendFetch('/api/meta')).toEqual({ version: '0.1.0', commit: null })
-    await page.goto('/people/dev')
-    await expect(page.getByTestId('app-version')).toHaveText('DeepLabel 0.1.0')
-    const colleague = `cleo-${Date.now()}`
-    seedSession('member', colleague)
-    await page.goto(`/people/${colleague}`)
-    await expect(page.getByTestId('profile')).toHaveAttribute('data-username', colleague)
-    await expect(page.getByTestId('app-version')).toHaveCount(0)
-  })
-
   test('the old Settings addresses open the matching tab of your profile', async ({ page }) => {
     await page.goto('/settings?section=keys')
     await expect(page).toHaveURL(/\/people\/dev\?section=keys$/)

@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { Link, Outlet, useNavigate } from 'react-router-dom'
+import { Link, Outlet, useMatch, useNavigate } from 'react-router-dom'
 import { getQueue } from '../api'
 import type { QueueState } from '../api'
 import { useAuth } from '../auth'
 import { useCommand } from '../commands'
 import { profilePath } from '../people'
+import { AppFooter } from './AppFooter'
 import { PresencePill } from './presence/PresencePill'
 import { ThemeToggle, cycleTheme } from './ThemeToggle'
 import { Avatar } from './ui/Avatar'
@@ -34,6 +35,7 @@ export function useCrumb(label: string) {
 
 export function Shell() {
   const [crumbs, setCrumbs] = useState<Crumb[]>([])
+  const inEditor = !!useMatch('/jobs/:id/pages/:pageId') || !!useMatch('/jobs/:id/tiles/:pageId')
   // The shell owns the viewport and the page scrolls inside it, rather than the document
   // scrolling around a nav bar of its own height. A full-height page (the editors) can then
   // ask for h-full and get exactly the space left under the nav — as the document, it would
@@ -45,7 +47,12 @@ export function Shell() {
           <NavBar crumbs={crumbs} />
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
-          <Outlet />
+          {inEditor ? <Outlet /> : (
+            <div className="flex min-h-full flex-col">
+              <div className="flex-1"><Outlet /></div>
+              <AppFooter />
+            </div>
+          )}
         </div>
       </div>
     </CrumbContext.Provider>
