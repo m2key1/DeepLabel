@@ -863,7 +863,7 @@ export function JobDetailPage() {
       }
       case 'confidence':
         return page.min_confidence !== null ? (
-          <span className="inline-flex items-center gap-1">
+          <span className="inline-flex items-center gap-1 whitespace-nowrap">
             <span title="Worst line on the page"
                   className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${confBadgeClass(page.min_confidence)}`}>
               {Math.round(page.min_confidence * 100)}%

@@ -266,6 +266,18 @@ test.describe('Scenario: reading the page table at a glance', () => {
       expect(await shape(average)).toEqual(worstShape)
     })
 
+  test('the confidence badges stay on one line in a narrow window', async ({ page }) => {
+    const jobId = await seedCompletedJob(uniqueName('Narrow'), 1)
+    await page.setViewportSize({ width: 760, height: 600 })
+    await page.goto(`/jobs/${jobId}`)
+    const cell = page.locator('tbody tr').first().locator('[data-col="confidence"]')
+    const worst = cell.getByTitle('Worst line on the page')
+    const average = cell.getByTitle("Average over the page's lines")
+    await expect(average).toHaveText('ø 85%')
+    // The average used to break after its ø into a box twice the height of the other.
+    expect((await average.boundingBox())!.height).toBe((await worst.boundingBox())!.height)
+  })
+
   test('the top bar buttons are all the same height', async ({ page }) => {
     const jobId = await seedCompletedJob(uniqueName('Top bar'), 1)
 
