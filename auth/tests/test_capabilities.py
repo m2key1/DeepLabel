@@ -83,6 +83,12 @@ class TestOverrides:
         assert alice['permissions'] == {'pipeline.lines': False}
         assert sorted(alice['capabilities']) == ['pipeline.layout', 'pipeline.ocr', 'train.local']
 
+    def test_the_accounts_come_with_what_each_role_allows(self, client):
+        roles = client.get('/api/users', cookies=_session('root')).json()['roles']
+        assert roles['member'] == ['pipeline.layout', 'pipeline.lines', 'pipeline.ocr', 'train.local']
+        assert roles['viewer'] == []
+        assert len(roles['admin']) == len(client.get('/api/users', cookies=_session('root')).json()['capabilities'])
+
     def test_an_override_is_lifted_by_setting_it_back_to_the_role(self, client):
         user_id = _user_id('alice')
         client.patch(f'/api/users/{user_id}', json={'permissions': {'pipeline.lines': False}},

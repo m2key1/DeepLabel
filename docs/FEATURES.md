@@ -384,9 +384,11 @@ Sign-in is handled by Authentik.
   re-running phases, discarding checked work, deleting datasets, managing models and
   training. Admins can grant or remove single permissions per person on the **Admin** page.
   Buttons you cannot use are not shown.
-- The Admin page lists every account with its role, training access, last activity and
-  whether the person is online. Each row opens what they can reach, what they edited, their
-  sessions and a history of changes to the account.
+- The Admin page shows everyone in one table, grouped by role, with a dot per permission.
+  Each role's own line shows what its people get, and an amber dot marks an exception made
+  for one person; click a dot to make or lift one. Click a name for their role, cluster
+  account, sessions, what they can reach and edited, and the history of changes to the
+  account. API tokens have their own tab.
 - Admins can invite people by email: the app creates the account and a one-time link to
   set a password, which the admin sends. See [AUTHENTIK.md](../AUTHENTIK.md).
 - Admins can see and revoke every API token.

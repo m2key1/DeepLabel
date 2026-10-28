@@ -48,8 +48,14 @@ export function UserDetail({ user, self, onChanged, onError }: UserDetailProps) 
   useEffect(() => {
     getContributorAccess(user.username).then(setAccess).catch((e: Error) => onError(e.message))
     getContributorActivity(user.username).then(setActivity).catch((e: Error) => onError(e.message))
+  }, [user.username, onError])
+
+  // The account can change while this is open - its role, rights or status are set right
+  // above it - and the history has to show that change too.
+  const changed = `${user.role}|${user.active}|${user.slurm_account}|${JSON.stringify(user.permissions)}`
+  useEffect(() => {
     loadAudit()
-  }, [user.username, loadAudit, onError])
+  }, [loadAudit, changed])
 
   const signOutEverywhere = async () => {
     setBusy(true)
@@ -120,7 +126,7 @@ export function UserDetail({ user, self, onChanged, onError }: UserDetailProps) 
                 self ? (
                   <Link to="/settings?section=tokens" className={manageLink}>manage</Link>
                 ) : (
-                  <a href={`#${ADMIN_TOKENS_ID}`} className={manageLink}>manage</a>
+                  <Link to={`?tab=tokens#${ADMIN_TOKENS_ID}`} className={manageLink}>manage</Link>
                 )
               )}
             </dd>

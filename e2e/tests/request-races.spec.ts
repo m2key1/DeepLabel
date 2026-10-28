@@ -6,6 +6,7 @@ import {
 import { seedSession, userRecord } from '../helpers/session'
 import { cancelledRun } from '../helpers/training'
 import { openViewer } from '../helpers/viewer'
+import { accountControls } from '../helpers/admin'
 
 // Longer than the five-second poll every list page runs, so a quiet window this long
 // means the poll really stopped rather than that it had not come round yet.
@@ -71,7 +72,7 @@ test.describe('Scenario: an answer that arrives late does not overwrite a newer 
     seedSession('viewer', username)
     await page.clock.install()
     await page.goto('/admin')
-    const role = page.getByTestId('user-row').filter({ hasText: username }).locator('select')
+    const role = (await accountControls(page, username)).getByTestId('role-select')
     await expect(role).toHaveValue('viewer')
 
     // The page's own re-read, sent while the person is still viewer and answered late.

@@ -218,7 +218,7 @@ test.describe('Scenario: a cluster submit while the cluster is out of reach', ()
       await page.goto('/admin')
       // Controlled checkbox: it flips once the PATCH answers, so click and wait on the grant
       // arriving at the backend through nginx and /validate.
-      await page.getByTestId('user-row').filter({ hasText: username }).getByTestId('train-cluster').click()
+      await page.getByTestId('user-row').filter({ hasText: username }).locator('[data-testid="permission-cell"][data-cap="train.cluster"]').click()
       await expect.poll(memberView).toMatchObject({ targets: { slurm: true }, cluster: { reachable: false } })
 
       await memberPage.goto('/models?tab=runs')

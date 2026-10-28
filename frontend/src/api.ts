@@ -2534,7 +2534,10 @@ export function logout(): Promise<{ ok: boolean }> {
   return request('/api/logout', { method: 'POST' })
 }
 
-export function getUsers(): Promise<{ users: AppUser[]; capabilities: string[]; invitations: boolean }> {
+/** `roles` is what each role allows, which a person starts from before their exceptions. */
+export function getUsers(): Promise<{
+  users: AppUser[]; capabilities: string[]; roles: Record<string, string[]>; invitations: boolean
+}> {
   return request('/api/users')
 }
 

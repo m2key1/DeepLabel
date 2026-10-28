@@ -5,6 +5,7 @@ import {
 } from '../helpers/api'
 import { seedSession, seedStaleUser } from '../helpers/session'
 import { FRONTEND } from '../helpers/frontend'
+import { accountControls, adminTokens } from '../helpers/admin'
 
 
 async function editOneLineAs(jobId: string, username: string) {
@@ -45,7 +46,7 @@ test.describe('Scenario: what each person may ask for', () => {
       const heading = (cap: string) => page.locator(`[data-testid="permission-heading"][data-cap="${cap}"]`)
       await expect(heading('train.local')).toHaveText('Train locally')
       await expect(heading('train.cluster')).toHaveText('Train cluster')
-      const row = page.getByTestId('permission-row').filter({ has: page.getByText(username) })
+      const row = page.getByTestId('user-row').filter({ has: page.getByText(username) })
       const cell = row.locator('[data-testid="permission-cell"][data-cap="pipeline.ocr"]')
       // The member role allows it, and nothing has been said about this person.
       await expect(cell).toBeChecked()
@@ -74,7 +75,7 @@ test.describe('Scenario: what each person may ask for', () => {
 
   test('an admin cannot take a capability off themselves', async ({ page }) => {
     await page.goto('/admin')
-    const mine = page.getByTestId('permission-row').filter({ hasText: '(you)' })
+    const mine = page.getByTestId('user-row').filter({ hasText: '(you)' })
     await expect(mine.locator('[data-testid="permission-cell"]').first()).toBeDisabled()
     // Every box on an admin's row is ticked and none of them can be moved.
     const boxes = mine.locator('[data-testid="permission-cell"]')
@@ -89,15 +90,18 @@ test.describe('Scenario: managing users', () => {
     seedSession('viewer', username)
 
     await page.goto('/admin')
-    const row = page.getByTestId('user-row').filter({ hasText: username })
-    await expect(row.locator('select')).toHaveValue('viewer')
-    await row.locator('select').selectOption('member')
-    await expect(row.locator('select')).toHaveValue('member')
+    // People sit under their role; the role is changed in their details.
+    await expect(page.getByTestId('user-row').filter({ hasText: username })).toHaveAttribute('data-viewer', 'true')
+    const role = (await accountControls(page, username)).getByTestId('role-select')
+    await expect(role).toHaveValue('viewer')
+    await role.selectOption('member')
+    await expect(role).toHaveValue('member')
 
     await page.reload()
-    await expect(page.getByTestId('user-row').filter({ hasText: username }).locator('select')).toHaveValue('member')
+    await expect((await accountControls(page, username)).getByTestId('role-select')).toHaveValue('member')
+    await expect(page.getByTestId('user-row').filter({ hasText: username })).not.toHaveAttribute('data-viewer', 'true')
 
-    await expect(page.getByTestId('user-row').filter({ hasText: '(you)' }).locator('select')).toBeDisabled()
+    await expect((await accountControls(page, 'dev')).getByTestId('role-select')).toBeDisabled()
   })
 
   test('being here just now is what the dot means, your own row included', async ({ page }) => {
@@ -157,12 +161,12 @@ test.describe('Scenario: managing users', () => {
 
     await page.goto('/admin')
     const row = page.getByTestId('user-row').filter({ hasText: username })
-    await row.locator('select').selectOption('member')
-    await expect(row.locator('select')).toHaveValue('member')
+    const role = (await accountControls(page, username)).getByTestId('role-select')
+    await role.selectOption('member')
+    await expect(role).toHaveValue('member')
     // Controlled checkbox: it flips once the PATCH answers, so wait rather than check().
-    await row.getByTestId('train-cluster').click()
-    await expect(row.getByTestId('train-cluster')).toBeChecked()
-    await row.getByRole('button', { name: `Show details for ${username}` }).click()
+    await row.locator('[data-testid="permission-cell"][data-cap="train.cluster"]').click()
+    await expect(row.locator('[data-testid="permission-cell"][data-cap="train.cluster"]')).toBeChecked()
 
     const audit = page.getByTestId('user-detail').getByTestId('user-audit')
     await expect(audit.getByRole('listitem')).toHaveCount(2)
@@ -203,7 +207,7 @@ test.describe('Scenario: what an admin may and may not see', () => {
 
     // Revoking a leaked token is still possible - from Admin, where it belongs.
     await page.goto('/admin')
-    const all = page.getByTestId('admin-tokens').getByTestId('admin-token-row')
+    const all = (await adminTokens(page)).getByTestId('admin-token-row')
     await expect(all.filter({ hasText: theirToken })).toContainText(username)
     await expect(all.filter({ hasText: ownName })).toHaveCount(1)
 
@@ -227,18 +231,18 @@ test.describe('Scenario: what an admin may and may not see', () => {
     await page.goto('/admin')
     const row = page.getByTestId('user-row').filter({ hasText: username })
     // Controlled checkboxes: they flip once the PATCH answers, so click and wait.
-    await row.getByTestId('train-local').click()
+    await row.locator('[data-testid="permission-cell"][data-cap="train.local"]').click()
     await expect.poll(targets).toEqual({ local: false, slurm: false })
 
-    await row.getByTestId('train-cluster').click()
+    await row.locator('[data-testid="permission-cell"][data-cap="train.cluster"]').click()
     await expect.poll(targets).toEqual({ local: false, slurm: true })
-    await expect(row.getByTestId('train-local')).not.toBeChecked()
-    await expect(row.getByTestId('train-cluster')).toBeChecked()
+    await expect(row.locator('[data-testid="permission-cell"][data-cap="train.local"]')).not.toBeChecked()
+    await expect(row.locator('[data-testid="permission-cell"][data-cap="train.cluster"]')).toBeChecked()
 
     await page.reload()
     const reloaded = page.getByTestId('user-row').filter({ hasText: username })
-    await expect(reloaded.getByTestId('train-local')).not.toBeChecked()
-    await expect(reloaded.getByTestId('train-cluster')).toBeChecked()
+    await expect(reloaded.locator('[data-testid="permission-cell"][data-cap="train.local"]')).not.toBeChecked()
+    await expect(reloaded.locator('[data-testid="permission-cell"][data-cap="train.cluster"]')).toBeChecked()
   })
 
   test('the SLURM account an admin sets is charged to that person\'s runs', async ({ page }) => {
@@ -253,8 +257,9 @@ test.describe('Scenario: what an admin may and may not see', () => {
 
     await page.goto('/admin')
     const row = page.getByTestId('user-row').filter({ hasText: username })
-    await row.getByTestId('slurm-account').fill(account)
-    await row.getByTestId('slurm-account').press('Enter')
+    const field = (await accountControls(page, username)).getByTestId('slurm-account')
+    await field.fill(account)
+    await field.press('Enter')
     // Backend-state oracle for the edit itself, before checking where the value travels.
     await expect.poll(async () => {
       const res = await fetch(`${FRONTEND}/api/users`, { headers: { cookie: `sid=${adminSession}` } })
@@ -273,7 +278,6 @@ test.describe('Scenario: what an admin may and may not see', () => {
     expect(created.status).toBe(200)
     expect((await created.json()).slurm_account).toBe(account)
 
-    await row.getByRole('button', { name: `Show details for ${username}` }).click()
     await expect(page.getByTestId('user-detail').getByTestId('user-audit'))
       .toContainText(`SLURM account: the cluster default → ${account}`)
   })

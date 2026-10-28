@@ -196,6 +196,9 @@ def get_users(_admin=Depends(require_admin_session)):
         # capabilities this build has rather than a copy of the list that can drift.
         return {'users': [_user_payload(u) for u in store.list_users(conn)],
                 'capabilities': list(store.CAPABILITIES),
+                # What each role allows, which the admin page shows as the line a person's
+                # exceptions break.
+                'roles': {role: sorted(caps) for role, caps in store.ROLE_CAPS.items()},
                 'invitations': authentik.invitations_enabled()}
     finally:
         conn.close()

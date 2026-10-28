@@ -7,6 +7,7 @@ import {
 import { asSession, expireToken, seedSession, useSession, userRecord, type UserRecord } from '../helpers/session'
 import { FRONTEND } from '../helpers/frontend'
 import { pngSize, scanPng } from '../helpers/image'
+import { accountControls, adminTokens } from '../helpers/admin'
 
 /** Through nginx as a script would: the token alone, no cookie to fall back on. */
 const asBearer = (token: string, path: string) =>
@@ -36,10 +37,12 @@ test.describe('Scenario: disabling an account', () => {
 
       await page.goto('/admin')
       const row = page.getByTestId('user-row').filter({ hasText: username })
-      await expect(row).toContainText('Active')
-      await row.getByRole('button', { name: 'Disable', exact: true }).click()
+      const account = await accountControls(page, username)
+      await expect(account).toContainText('Active')
+      await expect(row).not.toContainText('Disabled')
+      await account.getByRole('button', { name: 'Disable', exact: true }).click()
       await expect(row).toContainText('Disabled')
-      await expect(row.getByRole('button', { name: 'Enable', exact: true })).toBeVisible()
+      await expect(account.getByRole('button', { name: 'Enable', exact: true })).toBeVisible()
 
       // Auth-service oracle: the account is off and holds no live session or token.
       await expect.poll(async () => credentialsOf(await userRecord(page, username)))
@@ -47,7 +50,6 @@ test.describe('Scenario: disabling an account', () => {
       expect((await asSession(session, '/api/me')).status).toBe(401)
       expect((await asBearer(bearer, '/api/jobs')).status).toBe(401)
 
-      await row.getByRole('button', { name: `Show details for ${username}` }).click()
       const detail = page.getByTestId('user-detail')
       await expect(detail.getByTestId('session-count')).toHaveText('0')
       const entries = detail.getByTestId('user-audit').getByRole('listitem')
@@ -55,9 +57,10 @@ test.describe('Scenario: disabling an account', () => {
       await expect(entries.first()).toContainText('status: active → disabled')
       await expect(entries.first()).toContainText('by dev')
 
-      await row.getByRole('button', { name: 'Enable', exact: true }).click()
-      await expect(row).toContainText('Active')
-      await expect(row.getByRole('button', { name: 'Disable', exact: true })).toBeVisible()
+      await account.getByRole('button', { name: 'Enable', exact: true }).click()
+      await expect(account).toContainText('Active')
+      await expect(row).not.toContainText('Disabled')
+      await expect(account.getByRole('button', { name: 'Disable', exact: true })).toBeVisible()
       await expect.poll(async () => credentialsOf(await userRecord(page, username)))
         .toEqual({ active: 1, sessions: 0, tokens: 0 })
       // Enabled is not signed in: the old cookie and the old token stay dead.
@@ -189,9 +192,9 @@ test.describe('Scenario: how long a token lives, and when it was last used', () 
       expect((await tokenNamed(page, monthName)).last_used_at).toBe(firstUse)
 
       await page.goto('/admin')
-      await expect(page.getByTestId('admin-tokens').getByRole('columnheader'))
-        .toHaveText(headingsOf(ADMIN_COLUMNS))
-      const all = page.getByTestId('admin-tokens').getByTestId('admin-token-row')
+      const tokens = await adminTokens(page)
+      await expect(tokens.getByRole('columnheader')).toHaveText(headingsOf(ADMIN_COLUMNS))
+      const all = tokens.getByTestId('admin-token-row')
       const monthAdminRow = all.filter({ hasText: monthName })
       const foreverAdminRow = all.filter({ hasText: foreverName })
       await expect(cell(monthAdminRow, ADMIN_COLUMNS, 'Last used')).toHaveText(asAdminStamp(firstUse))
@@ -233,7 +236,7 @@ test.describe('Scenario: a token that has expired', () => {
       await expect(detail.getByTestId('token-count')).toHaveText('1')
       await expect(detail.getByTestId('expired-token-count')).toHaveText('+ 1 expired')
 
-      const theirs = page.getByTestId('admin-tokens').getByTestId('admin-token-row').filter({ hasText: username })
+      const theirs = (await adminTokens(page)).getByTestId('admin-token-row').filter({ hasText: username })
       await expect(theirs).toHaveCount(2)
       const staleRow = theirs.filter({ hasText: 'stale' })
       const liveRow = theirs.filter({ hasText: 'live' })

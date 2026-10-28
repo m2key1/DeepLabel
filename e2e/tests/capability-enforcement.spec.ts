@@ -6,6 +6,7 @@ import {
 } from '../helpers/api'
 import { asSession, seedSession, useSession, userRecord } from '../helpers/session'
 import { datasetAction, openDatasetMenu } from '../helpers/dataset'
+import { accountControls } from '../helpers/admin'
 
 async function signInAs(context: BrowserContext, role: 'member' | 'admin', username: string) {
   const session = seedSession(role, username)
@@ -43,7 +44,7 @@ test.describe('Scenario: a capability the admin page offers is one the backend e
 
       // Granted from the permission matrix, the same request goes through.
       await page.goto('/admin')
-      const matrixRow = page.getByTestId('permission-row').filter({ has: page.getByText(username) })
+      const matrixRow = page.getByTestId('user-row').filter({ has: page.getByText(username) })
       const cell = matrixRow.locator('[data-testid="permission-cell"][data-cap="dataset.delete"]')
       await expect(cell).not.toBeChecked()
       await cell.click()
@@ -69,7 +70,7 @@ test.describe('Scenario: a capability the admin page offers is one the backend e
       await expect.poll(targets).toEqual({ local: true, slurm: false })
 
       await page.goto('/admin')
-      const matrixRow = page.getByTestId('permission-row').filter({ has: page.getByText(username) })
+      const matrixRow = page.getByTestId('user-row').filter({ has: page.getByText(username) })
       const cell = matrixRow.locator('[data-testid="permission-cell"][data-cap="train.local"]')
       await expect(cell).toBeChecked()
       await cell.click()
@@ -83,7 +84,7 @@ test.describe('Scenario: a capability the admin page offers is one the backend e
       // The Training column on the same person's row says the same as the matrix.
       await page.reload()
       const userRow = page.getByTestId('user-row').filter({ hasText: username })
-      await expect(userRow.getByTestId('train-local')).not.toBeChecked()
+      await expect(userRow.locator('[data-testid="permission-cell"][data-cap="train.local"]')).not.toBeChecked()
     })
 
   test('a phase run on one page is refused to someone the phase was taken from',
@@ -95,7 +96,7 @@ test.describe('Scenario: a capability the admin page offers is one the backend e
       const [pageId] = await jobPageIds(jobId)
 
       await page.goto('/admin')
-      const matrixRow = page.getByTestId('permission-row').filter({ has: page.getByText(username) })
+      const matrixRow = page.getByTestId('user-row').filter({ has: page.getByText(username) })
       await matrixRow.locator('[data-testid="permission-cell"][data-cap="pipeline.layout"]').click()
       await expect.poll(async () => (await userRecord(page, username)).permissions)
         .toEqual({ 'pipeline.layout': false })
@@ -128,7 +129,7 @@ test.describe('Scenario: a capability the admin page offers is one the backend e
       await expect.poll(async () => (await userRecord(page, username)).capabilities).toEqual([])
 
       await page.goto('/admin')
-      const matrixRow = page.getByTestId('permission-row').filter({ has: page.getByText(username) })
+      const matrixRow = page.getByTestId('user-row').filter({ has: page.getByText(username) })
       const cell = matrixRow.locator('[data-testid="permission-cell"][data-cap="dataset.delete"]')
       await expect(matrixRow).toHaveAttribute('data-viewer', 'true')
       await expect(matrixRow.getByTestId('promote-first')).toHaveText('promote to member to grant anything')
@@ -148,7 +149,7 @@ test.describe('Scenario: a capability the admin page offers is one the backend e
       expect((await userRecord(page, username)).capabilities).toEqual([])
 
       // Promoted, the same row takes the grant, and the history reads it as a sentence.
-      await page.getByTestId('user-row').filter({ hasText: username }).locator('select').selectOption('member')
+      await (await accountControls(page, username)).getByTestId('role-select').selectOption('member')
       await expect.poll(async () => (await userRecord(page, username)).role).toBe('member')
       await expect(matrixRow).not.toHaveAttribute('data-viewer')
       await expect(matrixRow.getByTestId('promote-first')).toHaveCount(0)
@@ -157,7 +158,6 @@ test.describe('Scenario: a capability the admin page offers is one the backend e
       await expect(cell).toBeChecked()
       await expect.poll(async () => (await userRecord(page, username)).permissions)
         .toEqual({ 'dataset.delete': true })
-      await page.getByRole('button', { name: `Show details for ${username}` }).click()
       const audit = page.getByTestId('user-detail').getByTestId('user-audit').getByRole('listitem')
       await expect(audit).toHaveCount(2)
       await expect(audit.nth(0)).toHaveText(new RegExp(`^granted "Delete" to ${username}by dev`))

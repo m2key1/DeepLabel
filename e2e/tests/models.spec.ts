@@ -828,14 +828,14 @@ test.describe('Scenario: the model registry', () => {
       await expect(row).toHaveCount(1)
       // click, not check: the box is controlled and only flips once the PATCH resolves,
       // so check() would see it snap back and fail before the grant ever landed.
-      await row.getByTestId('train-cluster').click()
+      await row.locator('[data-testid="permission-cell"][data-cap="train.cluster"]').click()
       // Backend-state oracle: what the member's own session is offered, resolved through
       // nginx and /validate rather than read back off the page that just set it.
       await expect.poll(async () => {
         const response = await memberPage.request.get('/api/trainings')
         return (await response.json()).targets.slurm
       }).toBe(true)
-      await expect(row.getByTestId('train-cluster')).toBeChecked()
+      await expect(row.locator('[data-testid="permission-cell"][data-cap="train.cluster"]')).toBeChecked()
 
       // The grant travels as a proxy header, so only a real request through nginx proves it.
       const clusterRadio = await openTrainDialog(memberPage)
