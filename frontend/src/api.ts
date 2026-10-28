@@ -1,6 +1,6 @@
 export type JobStatus = 'uploading' | 'queued' | 'running' | 'done' | 'error' | 'cancelled'
 export type Phase = 'ingest' | 'layout' | 'lines' | 'ocr' | 'predict' | 'tile'
-export type ExportFormat = 'json' | 'md' | 'txt' | 'zip'
+export type ExportFormat = 'json' | 'md' | 'txt' | 'zip' | 'page' | 'alto' | 'hocr' | 'tei'
 export type Task = 'text' | 'map_segmentation' | 'map_lines'
 
 // Both map tasks annotate tiles: same ingest/tiling/classes/export machinery, same
@@ -911,7 +911,12 @@ function uploadForm<T>(url: string, form: FormData, onProgress: (loaded: number,
     }
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText))
-      else reject(new Error(errorMessage(xhr.status, xhr.responseText, `POST ${url} failed`)))
+      else {
+        let detail: unknown = null
+        try { detail = JSON.parse(xhr.responseText).detail } catch { /* not JSON */ }
+        // The same error as every other call, so a caller can tell one refusal from another.
+        reject(new ApiError(errorMessage(xhr.status, xhr.responseText, `POST ${url} failed`), xhr.status, detail))
+      }
     }
     xhr.onerror = () => reject(new Error(`POST ${url} failed: network error`))
     xhr.send(form)

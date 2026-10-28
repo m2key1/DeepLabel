@@ -122,7 +122,7 @@ test.describe('Scenario: working the dialogs and menus from the keyboard', () =>
     await expect(exportMenu).toHaveAttribute('aria-haspopup', 'menu')
     await exportMenu.click()
     await expect(exportMenu).toHaveAttribute('aria-expanded', 'true')
-    const zip = page.getByRole('link', { name: 'zip', exact: true })
+    const zip = page.getByRole('link', { name: 'DeepLabel zip', exact: true })
     await expect(zip).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(zip).toHaveCount(0)

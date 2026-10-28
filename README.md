@@ -33,6 +33,32 @@ docker compose -f compose.e2e.yml down -v         # stop, delete data
 
 `DEEPLABEL_BACKENDS_ROOT` in `.env` points elsewhere if the backends clone is not next to this one.
 
+## Formats
+
+Import (New dataset: drop files, or one zip):
+
+| What | Formats |
+|---|---|
+| Scans | JPG, PNG, TIFF, BMP, WebP, PDF (one page per PDF page), or a zip of these |
+| Page transcriptions | `.txt` named like its scan, or a PDF's own text layer; matched to the recognised lines |
+| Whole-document text | any other `.txt`, cut across the pages it spans |
+| Transcribed datasets | zip of PAGE XML, ALTO, hOCR or TEI with the scans (Transkribus, eScriptorium, OCR-D, Tesseract, Kraken), or a DeepLabel zip. Taken over as they are, no recognition runs |
+
+Export (dataset > Export, all pages or reviewed lines only):
+
+| Format | Archive layout | Read by |
+|---|---|---|
+| PAGE XML 2019 | `page/<scan>.xml` + `images/` | Transkribus, eScriptorium, OCR-D |
+| ALTO v4 | `alto/<scan>.xml` + `images/` | libraries, eScriptorium |
+| hOCR | `hocr/<scan>.hocr` + `images/` | Tesseract and hOCR tools |
+| TEI P5 | `tei.xml` (facsimile zones, linked from `pb`/`lb`) + `images/` | editions, TEI Publisher |
+| DeepLabel zip | `job.json`, a JSON and Markdown file per page, `images/` | DeepLabel (lossless) |
+| JSON, Markdown, text | one file | |
+
+Every export keeps regions with their class, line outlines (boxes in hOCR), the text, and
+which lines were checked; ALTO has no place for the last. The class and the checks are read
+back from files DeepLabel wrote. Map datasets export class-index PNG masks with geometry JSON.
+
 ## Real models and production
 
 Build the model backends (DeepOCR v3 and Kraken are ready to use), then run the backend on

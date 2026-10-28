@@ -1,7 +1,9 @@
 import io
 import json
 import zipfile
+from pathlib import Path
 
+from app import formats
 from app.caches import counted_page
 
 
@@ -83,12 +85,53 @@ def to_text(data: dict) -> str:
     return '\n\n'.join(parts)
 
 
-def to_zip(data: dict) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr('job.json', json.dumps(data, ensure_ascii=False, indent=2))
+def write_archive(conn, data: dict, files: dict[str, str], out) -> None:
+    """A zip of these text files and every page's scan under images/, written to `out` (a
+    path or a file object) so a volume's worth of scans never has to fit in memory. The
+    scans are stored as they are - they are compressed already."""
+    with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for name, text in files.items():
+            zf.writestr(name, text)
+        written = set()
         for page in data['pages']:
-            stem = f"page_{page['idx'] + 1:04d}"
-            zf.writestr(f'pages/{stem}.json', json.dumps(page, ensure_ascii=False, indent=2))
-            zf.writestr(f'pages/{stem}.md', page_markdown(page))
-    return buf.getvalue()
+            name = f"images/{page['filename']}"
+            if name in written:
+                continue
+            row = conn.execute('SELECT source_file FROM pages WHERE id = ?', (page['id'],)).fetchone()
+            if row and row['source_file'] and Path(row['source_file']).is_file():
+                zf.write(row['source_file'], name, compress_type=zipfile.ZIP_STORED)
+                written.add(name)
+
+
+def page_stem(page: dict) -> str:
+    return f"page_{page['idx'] + 1:04d}"
+
+
+def deeplabel_files(data: dict) -> dict[str, str]:
+    """DeepLabel's own archive: the whole dataset as job.json, which an import elsewhere
+    reads back with every class, correction and check, and each page as JSON and Markdown."""
+    files = {'job.json': json.dumps(data, ensure_ascii=False, indent=2)}
+    for page in data['pages']:
+        files[f'pages/{page_stem(page)}.json'] = json.dumps(page, ensure_ascii=False, indent=2)
+        files[f'pages/{page_stem(page)}.md'] = page_markdown(page)
+    return files
+
+
+def _file_stems(data: dict) -> dict[int, str]:
+    """Each page's file named after its scan, as Transkribus and eScriptorium name theirs;
+    two scans of one name fall back to the page number."""
+    stems = [Path(page['filename']).stem for page in data['pages']]
+    return {page['id']: stem if stems.count(stem) == 1 else page_stem(page)
+            for page, stem in zip(data['pages'], stems)}
+
+
+def standard_files(data: dict, fmt: str) -> dict[str, str]:
+    """The dataset in a standard format: PAGE XML, ALTO or hOCR as a file per page, TEI as
+    one document. The scans go beside them in the archive."""
+    if fmt == 'tei':
+        return {'tei.xml': formats.tei(data)}
+    stems = _file_stems(data)
+    title = data['job'].get('name', '')
+    render = {'page': (formats.page_xml, 'xml'), 'alto': (formats.alto, 'xml'),
+              'hocr': (lambda page: formats.hocr(page, title), 'hocr')}[fmt]
+    return {f'{fmt}/{stems[page["id"]]}.{render[1]}': render[0](page) for page in data['pages']}

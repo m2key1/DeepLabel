@@ -2,6 +2,7 @@ import codecs
 import os
 import re
 import shutil
+import zipfile
 import unicodedata
 from pathlib import Path, PurePosixPath
 
@@ -200,12 +201,43 @@ def in_reading_order(documents: list[tuple]) -> list:
     return [entry for _name, _position, entries in ordered for entry in entries]
 
 
+def _expand_zip(job_id: str, archive_path: Path, prefix: str, extensions) -> list[tuple]:
+    """The scans and PDF pages inside a zip of scans, in name order, saved next to it.
+    Anything else in it - a stray document, the system's own files - is passed over."""
+    uploads = archive_path.parent
+    entries = []
+    with zipfile.ZipFile(archive_path) as archive:
+        require_zip_within_limit(archive)
+        members = sorted((m for m in archive.namelist()
+                          if not m.endswith('/') and not is_system_entry(m)
+                          and Path(m).suffix.lower() in extensions),
+                         key=lambda m: natural_key(Path(m).name))
+        for j, member in enumerate(members):
+            filename = Path(member).name
+            require_short_name(filename)
+            dest = uploads / f'{prefix}_{j:04d}_{filename}'
+            with archive.open(member) as src, open(dest, 'wb') as out:
+                shutil.copyfileobj(src, out, length=1 << 20)
+            if is_pdf(filename):
+                try:
+                    entries.extend(expand_pdf(job_id, dest, filename, f'{prefix}_{j:04d}'))
+                except pdf.PdfError as e:
+                    raise IngestError(f'{filename}: {e}')
+            else:
+                require_pixels_within_limit(dest, filename)
+                entries.append((filename, str(dest)))
+    archive_path.unlink(missing_ok=True)
+    return entries
+
+
 def save_uploads(job_id: str, files, offset: int, extensions=None) -> tuple[list, list]:
     extensions = extensions or config.INGEST_EXTENSIONS
+    # A zip of scans is unpacked like a PDF is: one document whose pages it holds.
+    accepted = extensions | {'.zip'} if extensions == config.INGEST_EXTENSIONS else extensions
     chosen, skipped = [], []
     for i, file in enumerate(files):
         filename = Path(file.filename or f'file_{offset + i}').name
-        if Path(filename).suffix.lower() not in extensions:
+        if Path(filename).suffix.lower() not in accepted:
             skipped.append(filename)
             continue
         require_short_name(filename)
@@ -225,6 +257,11 @@ def save_uploads(job_id: str, files, offset: int, extensions=None) -> tuple[list
                     documents.append((filename, i, expand_pdf(job_id, dest, filename, prefix)))
                 except pdf.PdfError as e:
                     raise IngestError(f'{filename}: {e}')
+            elif Path(filename).suffix.lower() == '.zip':
+                try:
+                    documents.append((filename, i, _expand_zip(job_id, dest, prefix, extensions)))
+                except zipfile.BadZipFile:
+                    raise IngestError(f'{filename}: not a readable zip archive')
             else:
                 documents.append((filename, i, [(filename, str(dest))]))
                 require_pixels_within_limit(dest, filename)

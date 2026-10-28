@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app import store
+from app import imports, store
 from app.deps import get_db
 from app.main import app
 
@@ -105,6 +105,15 @@ class TestFormats:
             assert z.namelist(), 'the archive has something in it'
             assert z.testzip() is None
 
+    def test_the_zip_carries_its_scans_and_imports_back(self, client, scan):
+        response = download(client, 'zip')
+
+        archive = zipfile.ZipFile(io.BytesIO(response.content))
+        assert archive.read('images/p1.png') == scan.read_bytes()
+        pages = imports.read_export_zip(io.BytesIO(response.content))
+        assert [(p['image'], p['image_member'], p['width'], p['height']) for p in pages] == \
+            [('p1.png', 'images/p1.png', 120, 60)]
+
     def test_a_format_nobody_offers_is_refused_with_the_list(self, client):
         response = download(client, 'pdf')
 
@@ -182,7 +191,7 @@ class TestReviewedOnly:
         response = download(client, 'zip', checked_only=True)
 
         names = zipfile.ZipFile(io.BytesIO(response.content)).namelist()
-        assert sorted(names) == ['job.json', 'pages/page_0001.json', 'pages/page_0001.md']
+        assert sorted(names) == ['images/p1.png', 'job.json', 'pages/page_0001.json', 'pages/page_0001.md']
 
     def test_the_whole_export_still_keeps_every_page(self, client, unreviewed_page):
         pages = download(client, 'json').json()['pages']
@@ -244,3 +253,47 @@ class TestCoco:
     def test_previewing_a_dataset_that_does_not_exist_is_a_404(self, client):
         assert client.get('/api/jobs/nope/coco', headers=ADMIN).status_code == 404
         assert client.post('/api/jobs/nope/coco', headers=ADMIN).status_code == 404
+
+
+class TestRoundTrip:
+    """What any of the archive formats exports, the import reads back into a new dataset -
+    the scans, the regions and lines, their text and which lines were checked."""
+
+    @pytest.mark.parametrize('fmt', ['zip', 'page', 'alto', 'hocr', 'tei'])
+    def test_an_export_imports_back_as_the_same_dataset(self, client, conn, tmp_path, monkeypatch, fmt):
+        monkeypatch.setattr('app.config.JOBS_DIR', tmp_path / 'jobs')
+        conn.execute("UPDATE elements SET class_name = 'Kopfzeile' WHERE id = 1")
+        conn.commit()
+        exported = download(client, fmt)
+        assert exported.status_code == 200, exported.text
+
+        imported = client.post('/api/jobs/import', data={'name': f'Back from {fmt}', 'reviewed': 'false'},
+                               files={'file': (f'volume.{fmt}.zip', exported.content, 'application/zip')},
+                               headers=ALICE)
+
+        assert imported.status_code == 200, imported.text
+        job_id = imported.json()['job_id']
+        rows = conn.execute(
+            'SELECT e.class_name, l.text, l.corrected_text, l.checked FROM lines l '
+            'JOIN elements e ON l.element_id = e.id JOIN pages p ON e.page_id = p.id '
+            'WHERE p.job_id = ? ORDER BY e.order_idx, l.order_idx', (job_id,)).fetchall()
+        texts = [r['corrected_text'] or r['text'] for r in rows]
+        assert texts == ['Reviewed line', 'Unreviewed line']
+        assert {r['class_name'] for r in rows} == {'Kopfzeile'}
+        # ALTO has no place to say a line was checked; the others carry it.
+        expected = [False, False] if fmt == 'alto' else [True, False]
+        assert [bool(r['checked']) for r in rows] == expected
+        page = conn.execute('SELECT filename, width, height FROM pages WHERE job_id = ?', (job_id,)).fetchone()
+        assert tuple(page) == ('p1.png', 120, 60)
+
+    def test_a_zip_of_scans_alone_is_told_to_go_up_as_pages(self, client, tmp_path, monkeypatch, scan):
+        monkeypatch.setattr('app.config.JOBS_DIR', tmp_path / 'jobs')
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, 'w') as zf:
+            zf.write(scan, 'scans/p1.png')
+
+        response = client.post('/api/jobs/import', data={'name': 'Scans'},
+                               files={'file': ('scans.zip', archive.getvalue(), 'application/zip')}, headers=ALICE)
+
+        assert response.status_code == 422
+        assert 'upload it as pages' in response.json()['detail']

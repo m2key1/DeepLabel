@@ -1,14 +1,13 @@
-import { exportUrl, isTileTask } from '../../api'
-import type { ExportFormat, Job } from '../../api'
+import { isTileTask } from '../../api'
+import type { Job } from '../../api'
 import { useAuth } from '../../auth'
 import { DownloadIcon, InfoIcon, KebabIcon } from '../icons'
 import { Button } from '../ui/Button'
 import { useDropPlacement } from '../ui/dropPlacement'
 import { menuTrigger } from '../ui/menu'
 import { JobInfo } from './JobInfo'
+import { ExportMenu } from './ExportMenu'
 import { popoverChrome } from '../ui/Card'
-
-const DOWNLOAD_FORMATS: ExportFormat[] = ['zip', 'json', 'md', 'txt']
 
 export const menuItem =
   'block w-full px-2.5 py-1.5 text-left text-xs text-ink-muted hover:bg-accent-wash hover:text-accent-ink'
@@ -121,35 +120,7 @@ export function JobActions(p: JobActionsProps) {
                                            'One mask per source map, reviewed tiles stitched back into place')}
               </>
             ) : (
-              <>
-                {DOWNLOAD_FORMATS.map((f) => (
-                  <a
-                    key={f}
-                    href={exportUrl(job.id, f)}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => p.onToggleDownload()}
-                    className={menuItem}
-                  >
-                    {f}
-                  </a>
-                ))}
-                <div className="border-t border-line px-2.5 py-1 text-[10px] uppercase tracking-wide text-ink-subtle">
-                  reviewed only
-                </div>
-                {DOWNLOAD_FORMATS.map((f) => (
-                  <a
-                    key={`${f}-reviewed`}
-                    href={exportUrl(job.id, f, true)}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => p.onToggleDownload()}
-                    className={menuItem}
-                  >
-                    {f} · reviewed
-                  </a>
-                ))}
-              </>
+              <ExportMenu jobId={job.id} onPicked={() => p.onToggleDownload()} />
             )}
           </div>
         )}

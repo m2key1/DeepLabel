@@ -6,7 +6,8 @@ from pathlib import Path
 
 from deeplabel.client import DeepLabel, DeepLabelError
 
-EXPORT_SUFFIX = {'json': 'json', 'md': 'md', 'txt': 'txt', 'zip': 'zip'}
+EXPORT_SUFFIX = {'json': 'json', 'md': 'md', 'txt': 'txt', 'zip': 'zip',
+                 'page': 'page.zip', 'alto': 'alto.zip', 'hocr': 'hocr.zip', 'tei': 'tei.zip'}
 
 
 def _client(args) -> DeepLabel:

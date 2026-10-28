@@ -52,8 +52,9 @@ The start page lists every dataset you can open, as a table or as cards.
 
 Choose **New job**, pick the task, name the dataset and add files.
 
-- Upload images, PDFs or zips, or (admins) point at a folder on the server. The form lists
-  every file and lets you remove any before sending.
+- Upload images, PDFs, a zip of scans, or a transcribed dataset as a zip, or (admins)
+  point at a folder on the server. The form lists every file and lets you remove any
+  before sending.
 - Choose which phases run: layout detection, line detection and OCR. Layout is off by
   default; lines are then detected on the whole page. With layout on, lines can be detected
   inside each layout box instead.
@@ -217,8 +218,9 @@ Press `e` to edit the page.
 - Search fuzzily, exactly, case-sensitively or by regular expression. `n` and `p` step
   through the hits, and a strip along the edge shows which pages hold them.
 - `f` opens a distraction-free reading view.
-- Export a dataset as JSON, Markdown, plain text or a zip with images, either complete or
-  only what was reviewed. Lines inside tables and other containers are included.
+- Export a dataset as PAGE XML, ALTO, hOCR or TEI with its scans, as JSON, Markdown, plain
+  text or DeepLabel's own zip, either complete or only what was reviewed. Lines inside
+  tables and other containers are included.
 - A DeepLabel zip export can be uploaded to another instance and arrives with its classes,
   text, corrections and review state intact.
 
@@ -233,7 +235,8 @@ Bring the ground truth you already have.
   or UTF-16.
 - **PDF text layer:** tick "take the transcription from the text layer" for born-digital
   PDFs. This text fills in corrections but is never checked automatically.
-- **Transkribus or eScriptorium:** upload a PAGE XML or ALTO export zipped with its images.
+- **Transkribus, eScriptorium and other tools:** upload a PAGE XML, ALTO, hOCR or TEI
+  export zipped with its images.
   Pages, regions, line polygons and text are imported as they are, with no recognition run.
 - Change the alignment settings under Processing and re-run **Alignment** to match again.
   Lines a person checked or corrected are kept; the aligned text is offered as a reading.

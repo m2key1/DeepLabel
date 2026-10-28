@@ -146,3 +146,26 @@ class TestLongNames:
         res = upload(api, [name], name='at the limit')
         assert res.status_code == 200, res.text
         assert page_order(conn, res.json()['job_id']) == [(name, None)]
+
+
+class TestAZipOfScans:
+    @staticmethod
+    def zipped(names: list[str]) -> bytes:
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w') as zf:
+            for name in names:
+                zf.writestr(name, png_bytes() if not name.endswith('.pdf') else text_pdf([['a'], ['b']]))
+            zf.writestr('__MACOSX/._scan_1.png', b'junk')
+            zf.writestr('notes.docx', b'not a scan')
+        return buf.getvalue()
+
+    def test_its_scans_and_pdf_pages_become_pages_in_name_order(self, client):
+        api, conn = client
+        archive = self.zipped(['volume/scan_10.png', 'volume/scan_2.png', 'volume/letter.pdf'])
+        res = api.post('/api/jobs', data={'name': 'zipped'}, headers=ADMIN,
+                       files=[('files', ('volume.zip', archive, 'application/zip'))])
+
+        assert res.status_code == 200, res.text
+        assert [f for f, _ in page_order(conn, res.json()['job_id'])] == [
+            'letter_p0001.png', 'letter_p0002.png', 'scan_2.png', 'scan_10.png']

@@ -45,7 +45,7 @@ test.describe('Scenario: importing an existing dataset', () => {
     })
 
     // The form recognizes the archive and drops the recognition choices.
-    await expect(page.getByTestId('import-notice')).toContainText('Existing dataset detected')
+    await expect(page.getByTestId('import-notice')).toContainText('Zip archive')
     await expect(page.getByTestId('ocr-decode-greedy')).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Import dataset' })).toBeEnabled()
     await page.getByRole('button', { name: 'Import dataset' }).click()
@@ -75,16 +75,16 @@ test.describe('Scenario: importing an existing dataset', () => {
     expect(job.run_ocr).toBe(false)
   })
 
-  test('a zip that is not a dataset export explains itself', async ({ page }) => {
+  test('a zip that is neither an export nor scans explains itself', async ({ page }) => {
     await page.goto('/new')
     await page.getByLabel('Job name').fill(uniqueName('Bad import'))
     await page.locator('input[type="file"]').setInputFiles({
-      name: 'holiday-photos.zip',
+      name: 'paperwork.zip',
       mimeType: 'application/zip',
-      buffer: makeZip({ 'beach.png': scanPng() }),
+      buffer: makeZip({ 'minutes.xml': Buffer.from('<minutes>nothing to see</minutes>') }),
     })
     await page.getByRole('button', { name: 'Import dataset' }).click()
-    await expect(page.getByText(/no PAGE or ALTO XML with matching images/)).toBeVisible()
+    await expect(page.getByText(/no PAGE XML, ALTO, hOCR or TEI with matching images/)).toBeVisible()
     await expect(page).toHaveURL(/\/new$/)
   })
 })

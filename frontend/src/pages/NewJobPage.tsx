@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
   PHASE_CAPABILITY, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromPath,
-  getEnabledTasks, getLayoutTemplates, getMapModels, importJob, isTileTask, listModels, uploadJob,
+  ApiError, getEnabledTasks, getLayoutTemplates, getMapModels, importJob, isTileTask, listModels, uploadJob,
 } from '../api'
 import type {
   LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrDecode, Phases, RegistryModel, Task,
@@ -204,16 +204,11 @@ export function NewJobPage() {
     setBusy(true)
     try {
       let job_id: string
-      if (archive) {
-        setProgress({ loaded: 0, total: archive.size })
-        const res = await importJob(name.trim(), archive, importReviewed,
-                                    (loaded, total) => setProgress({ loaded, total }))
-        job_id = res.job_id
-      } else if (mode === 'upload') {
-        setProgress({ loaded: 0, total: files.reduce((s, f) => s + f.size, 0) })
-        const res = await uploadJob(
+      const upload = async (sent: File[]) => {
+        setProgress({ loaded: 0, total: sent.reduce((s, f) => s + f.size, 0) })
+        return uploadJob(
           name.trim(),
-          files,
+          sent,
           effectiveLineMode,
           effectivePhases,
           task,
@@ -231,7 +226,20 @@ export function NewJobPage() {
           isMap ? null : templateId,
           !isMap && asTest,
         )
-        job_id = res.job_id
+      }
+      if (archive) {
+        setProgress({ loaded: 0, total: archive.size })
+        try {
+          job_id = (await importJob(name.trim(), archive, importReviewed,
+                                    (loaded, total) => setProgress({ loaded, total }))).job_id
+        } catch (err) {
+          // A zip of scans with nothing describing them is a set of pages: it goes up as
+          // an upload and is read like any other.
+          if (!(err instanceof ApiError && err.status === 422)) throw err
+          job_id = (await upload([archive])).job_id
+        }
+      } else if (mode === 'upload') {
+        job_id = (await upload(files)).job_id
       } else {
         const res = await createJobFromPath(
           name.trim(), serverPath.trim(), effectiveLineMode, effectivePhases, task,
@@ -355,7 +363,8 @@ export function NewJobPage() {
               {!isMap && (
                 <p className="mt-1 text-xs">
                   Also accepted: page transcriptions as .txt named like their image, any other .txt as a
-                  corpus document, or a complete dataset exported from Transkribus or eScriptorium as a .zip
+                  corpus document, a .zip of scans, or a transcribed dataset as a .zip - PAGE XML, ALTO,
+                  hOCR or TEI with their scans (Transkribus, eScriptorium, Tesseract), or a DeepLabel export
                 </p>
               )}
               <input
@@ -403,9 +412,9 @@ export function NewJobPage() {
                 className="mt-2 rounded border border-accent bg-accent-wash p-2 text-sm text-accent-ink"
               >
                 <p>
-                  <span className="font-medium">Existing dataset detected.</span> Pages, text
-                  regions, line boxes and transcriptions are taken over as they are - no recognition
-                  runs, so it is ready to review immediately.
+                  <span className="font-medium">Zip archive.</span> A transcribed export - PAGE XML,
+                  ALTO, hOCR, TEI or DeepLabel - is taken over as it is: no recognition runs, so it is
+                  ready to review at once. A zip of scans alone is read like any other upload.
                 </p>
                 {otherFiles.length > 0 && (
                   <p data-testid="import-ignored" className="mt-1 text-warn">

@@ -51,7 +51,7 @@ test.describe('Scenario: importing an export whose lines sit in tables and neste
     await page.locator('input[type="file"]').setInputFiles({
       name: 'export.zip', mimeType: 'application/zip', buffer: zip,
     })
-    await expect(page.getByTestId('import-notice')).toContainText('Existing dataset detected')
+    await expect(page.getByTestId('import-notice')).toContainText('Zip archive')
     await page.getByRole('button', { name: 'Import dataset' }).click()
 
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)

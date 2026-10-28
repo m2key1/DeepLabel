@@ -1,8 +1,11 @@
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
+from starlette.background import BackgroundTask
 
 from app import coco, config, export, schemas, store
 from app.deps import attachment, current_user, get_db, require_job_access, require_role
@@ -10,15 +13,18 @@ from app.deps import attachment, current_user, get_db, require_job_access, requi
 router = APIRouter(tags=['exports'])
 
 EXPORT_FORMATS = {'json': ('application/json', 'json'), 'md': ('text/markdown', 'md'),
-                  'txt': ('text/plain', 'txt'), 'zip': ('application/zip', 'zip')}
+                  'txt': ('text/plain', 'txt'), 'zip': ('application/zip', 'zip'),
+                  # The standard formats, each in a zip with the scans it describes.
+                  'page': ('application/zip', 'page.zip'), 'alto': ('application/zip', 'alto.zip'),
+                  'hocr': ('application/zip', 'hocr.zip'), 'tei': ('application/zip', 'tei.zip')}
 
 
 @router.get('/api/jobs/{job_id}/export', responses={200: {'content': {
     'application/json': {}, 'text/markdown': {}, 'text/plain': {}, 'application/zip': {}}}})
 def export_job(job_id: str, format: str = 'json', checked_only: bool = False,
                conn=Depends(get_db), user: dict = Depends(current_user)):
-    """Download the dataset as json, md, txt or zip; checked_only keeps the reviewed lines
-    and the pages that hold one."""
+    """Download the dataset as json, md, txt or DeepLabel's zip, or as PAGE XML, ALTO, hOCR
+    or TEI with its scans; checked_only keeps the reviewed lines and the pages that hold one."""
     require_job_access(conn, job_id, user)
     if format not in EXPORT_FORMATS:
         raise HTTPException(400, f'format must be one of {sorted(EXPORT_FORMATS)}')
@@ -36,7 +42,12 @@ def export_job(job_id: str, format: str = 'json', checked_only: bool = False,
     elif format == 'txt':
         body = export.to_text(data)
     else:
-        body = export.to_zip(data)
+        # Written to disk and streamed from there: the scans of a volume run to gigabytes.
+        files = export.deeplabel_files(data) if format == 'zip' else export.standard_files(data, format)
+        with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as out:
+            export.write_archive(conn, data, files, out)
+        return FileResponse(out.name, media_type=media_type, headers=attachment(name),
+                            background=BackgroundTask(os.unlink, out.name))
     return Response(content=body, media_type=media_type, headers=attachment(name))
 
 

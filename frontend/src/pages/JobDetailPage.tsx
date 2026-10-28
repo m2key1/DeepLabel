@@ -7,7 +7,6 @@ import {
   reocr,
   reocrPreview,
   downloadMaskSet,
-  exportUrl,
   getJob,
   isUncounted,
   getLlmReadStatus,
@@ -34,7 +33,7 @@ import {
   ApiError,
 } from '../api'
 import type {
-  ExportFormat, JobEvent, NewerModelOffer, JobWithoutPages, LlmReadStatus, MapClass, PageDetail,
+  JobEvent, NewerModelOffer, JobWithoutPages, LlmReadStatus, MapClass, PageDetail,
   PageFilter as PageFilterKey, PagePhase, PageRows, PageSort, PageSummary, PurgeManifest, Region,
   ReviewQueue, StaleLines, UnreadablePage,
 } from '../api'
@@ -87,6 +86,7 @@ import { RedetectDialog } from '../components/job/RedetectDialog'
 import { LlmReadDialog } from '../components/job/LlmReadDialog'
 import { NewerModelsDialog } from '../components/job/NewerModelsDialog'
 import { LlmProgress } from '../components/job/LlmProgress'
+import { ExportMenu } from '../components/job/ExportMenu'
 import { LayoutClassesDialog } from '../components/job/LayoutClassesDialog'
 import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
 import { SettleAgainDialog } from '../components/job/SettleAgainDialog'
@@ -104,7 +104,6 @@ import { Check } from '../components/ui/Field'
 import { usePolling } from '../hooks/usePolling'
 import { cardChrome, popoverChrome } from '../components/ui/Card'
 
-const EXPORT_FORMATS: ExportFormat[] = ['json', 'md', 'txt', 'zip']
 
 const PHASE_LABELS: Record<PagePhase, string> = {
   layout: 'Layout detection',
@@ -1148,34 +1147,8 @@ export function JobDetailPage() {
                   <DownloadIcon /> Export <CaretIcon />
                 </Button>
                 {exportOpen && (
-                  <div className={`absolute right-0 top-full z-10 mt-1 w-40 overflow-hidden ${popoverChrome}`}>
-                    {EXPORT_FORMATS.map((f) => (
-                      <a
-                        key={f}
-                        href={exportUrl(jobId, f)}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={() => setExportOpen(false)}
-                        className="block px-2.5 py-1.5 text-sm text-ink hover:bg-accent-wash hover:text-accent-ink"
-                      >
-                        {f}
-                      </a>
-                    ))}
-                    <div className="border-t border-line px-2.5 py-1 text-[10px] uppercase tracking-wide text-ink-subtle">
-                      reviewed only
-                    </div>
-                    {EXPORT_FORMATS.map((f) => (
-                      <a
-                        key={`${f}-reviewed`}
-                        href={exportUrl(jobId, f, true)}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={() => setExportOpen(false)}
-                        className="block px-2.5 py-1.5 text-sm text-ink hover:bg-accent-wash hover:text-accent-ink"
-                      >
-                        {f} · reviewed
-                      </a>
-                    ))}
+                  <div className={`absolute right-0 top-full z-10 mt-1 overflow-hidden ${popoverChrome}`}>
+                    <ExportMenu jobId={jobId} onPicked={() => setExportOpen(false)} />
                   </div>
                 )}
               </div>

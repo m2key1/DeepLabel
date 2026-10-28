@@ -102,6 +102,12 @@ def _region_type(region) -> str:
     return rtype
 
 
+def _custom(el, tag: str, key: str) -> str | None:
+    """One value of PAGE's @custom, which reads `tag {key:value; ...}`."""
+    match = re.search(rf'{tag}\s*{{[^}}]*\b{key}\s*:\s*([^;}}]+)', el.get('custom') or '')
+    return match.group(1).strip() if match else None
+
+
 def _page_line(line, width: int, height: int) -> dict | None:
     line_points, text = None, ''
     for part in line:
@@ -121,9 +127,18 @@ def _page_line(line, width: int, height: int) -> dict | None:
     return {'polygon': polygon, 'text': text.strip()}
 
 
+def _written_by_deeplabel(root) -> bool:
+    return any(_local(el.tag) in ('Creator', 'softwareName') and (el.text or '').strip() == 'DeepLabel'
+               for el in root.iter())
+
+
 def parse_page_xml(data: bytes) -> dict:
-    page = _page_element(ElementTree.fromstring(data))
+    root = ElementTree.fromstring(data)
+    page = _page_element(root)
     width, height = _page_size(page, 'imageWidth', 'imageHeight')
+    # Our own export says the dataset's class and which lines were checked; anyone else's is
+    # read by PAGE's types alone, and its lines take the import's review setting.
+    ours = _written_by_deeplabel(root)
     regions = []
     for region in page.iter():
         if _local(region.tag) not in LINE_CONTAINERS:
@@ -134,6 +149,8 @@ def parse_page_xml(data: bytes) -> dict:
                 region_points = _points(child.get('points') or '')
             if _local(child.tag) == 'TextLine':
                 line = _page_line(child, width, height)
+                if line and ours:
+                    line['checked'] = _custom(child, 'deeplabel', 'checked') == 'true'
                 if line:
                     lines.append(line)
         if not lines:
@@ -141,8 +158,9 @@ def parse_page_xml(data: bytes) -> dict:
         rtype = _region_type(region)
         bbox = (_bbox(region_points, width, height) if region_points
                 else _region_bbox_from_lines(lines))
-        regions.append({'class_name': REGION_CLASSES.get(rtype.lower(), 'Paragraph'),
-                        'raw_type': rtype or 'paragraph', 'bbox': bbox, 'lines': lines})
+        own_class = _custom(region, 'structure', 'type') if ours else None
+        regions.append({'class_name': own_class or REGION_CLASSES.get(rtype.lower(), 'Paragraph'),
+                        'raw_type': own_class or rtype or 'paragraph', 'bbox': bbox, 'lines': lines})
     return {'image': page.get('imageFilename') or '', 'width': width, 'height': height,
             'regions': regions}
 
@@ -155,22 +173,162 @@ def parse_alto(data: bytes) -> dict:
     for el in root.iter():
         if _local(el.tag) == 'fileName' and el.text:
             image = el.text.strip()
+    # A block's class, where our own export named it in a layout tag.
+    labels = ({el.get('ID'): el.get('LABEL') for el in root.iter() if _local(el.tag) == 'LayoutTag'}
+              if _written_by_deeplabel(root) else {})
     regions = []
     for block in (el for el in page.iter() if _local(el.tag) == 'TextBlock'):
         lines = []
         for line in (el for el in block if _local(el.tag) == 'TextLine'):
             words = _alto_words(line)
             x, y, w, h = _alto_box(line)
-            bbox = _bbox([(x, y), (x + w, y + h)], width, height)
-            lines.append({'polygon': _quad(bbox), 'text': ' '.join(w for w in words if w).strip()})
+            outline = next((el.get('POINTS') for el in line.iter() if _local(el.tag) == 'Polygon'), None)
+            points = _points(outline) if outline else []
+            polygon = (_polygon(points, width, height) if len(points) >= 3
+                       else _quad(_bbox([(x, y), (x + w, y + h)], width, height)))
+            lines.append({'polygon': polygon, 'text': ' '.join(w for w in words if w).strip()})
         if not lines:
             continue
         x, y, w, h = _alto_box(block)
         bbox = (_bbox([(x, y), (x + w, y + h)], width, height) if w and h
                 else _region_bbox_from_lines(lines))
-        regions.append({'class_name': 'Paragraph', 'raw_type': 'TextBlock',
+        label = next((labels[ref] for ref in (block.get('TAGREFS') or '').split() if ref in labels), None)
+        regions.append({'class_name': label or 'Paragraph', 'raw_type': label or 'TextBlock',
                         'bbox': bbox, 'lines': lines})
     return {'image': image, 'width': width, 'height': height, 'regions': regions}
+
+
+def _hocr_props(el) -> dict[str, str]:
+    """hOCR's title, `bbox 0 0 10 10; image a.png; x_class Header`, as a dict."""
+    props = {}
+    for part in (el.get('title') or '').split(';'):
+        key, _, value = part.strip().partition(' ')
+        if key:
+            props[key] = value.strip().strip('"')
+    return props
+
+
+def _hocr_classes(el) -> set[str]:
+    return set((el.get('class') or '').split())
+
+
+def _hocr_bbox(props: dict, what: str) -> tuple[float, float, float, float]:
+    values = (props.get('bbox') or '').split()
+    if len(values) != 4:
+        raise UnreadableXml(f'{what} has no bbox')
+    x0, y0, x1, y1 = (_number(v, 'bbox') for v in values)
+    return x0, y0, x1, y1
+
+
+def parse_hocr(data: bytes) -> dict:
+    """An hOCR page (Tesseract, OCRopus, Kraken and our own export): its areas as regions and
+    their lines with the text of their words. hOCR keeps boxes, so lines arrive upright."""
+    root = ElementTree.fromstring(data)
+    page = next((el for el in root.iter() if 'ocr_page' in _hocr_classes(el)), None)
+    if page is None:
+        raise UnreadableXml('it has no ocr_page')
+    props = _hocr_props(page)
+    _, _, width, height = _hocr_bbox(props, 'the ocr_page')
+    width, height = int(width), int(height)
+    if width <= 0 or height <= 0:
+        raise UnreadableXml('the ocr_page has no size')
+    ours = any(el.get('content') == 'DeepLabel' for el in root.iter() if _local(el.tag) == 'meta')
+    # Areas hold paragraphs; a page written without areas has only paragraphs. Each line is
+    # taken once, by the first area that holds it.
+    areas = [el for el in page.iter() if 'ocr_carea' in _hocr_classes(el)] \
+        or [el for el in page.iter() if 'ocr_par' in _hocr_classes(el)]
+    seen, regions = set(), []
+    for area in areas:
+        lines = []
+        for line in (el for el in area.iter() if _hocr_classes(el) & {'ocr_line', 'ocr_textfloat', 'ocr_header', 'ocr_caption'}):
+            if id(line) in seen:
+                continue
+            seen.add(id(line))
+            line_props = _hocr_props(line)
+            x0, y0, x1, y1 = _hocr_bbox(line_props, 'an ocr_line')
+            words = [''.join(w.itertext()).strip() for w in line.iter() if 'ocrx_word' in _hocr_classes(w)]
+            text = ' '.join(w for w in words if w) or ' '.join(''.join(line.itertext()).split())
+            entry = {'polygon': _quad(_bbox([(x0, y0), (x1, y1)], width, height)), 'text': text}
+            if ours:
+                entry['checked'] = line_props.get('x_checked') == '1'
+            lines.append(entry)
+        if not lines:
+            continue
+        area_props = _hocr_props(area)
+        x0, y0, x1, y1 = _hocr_bbox(area_props, 'an ocr_carea')
+        label = area_props.get('x_class') if ours else None
+        regions.append({'class_name': label or 'Paragraph', 'raw_type': label or 'ocr_carea',
+                        'bbox': _bbox([(x0, y0), (x1, y1)], width, height), 'lines': lines})
+    return {'image': props.get('image') or '', 'width': width, 'height': height, 'regions': regions}
+
+
+XML_ID = '{http://www.w3.org/XML/1998/namespace}id'
+
+
+def _px_size(value: str | None, what: str) -> int:
+    return int(_number((value or '').removesuffix('px'), what))
+
+
+def parse_tei(data: bytes) -> list[dict]:
+    """A TEI document with a facsimile (Transkribus, eScriptorium and our own export): a page
+    per surface, a region per zone with lines inside, and each line's text from the <lb>
+    that points at its zone. Lines no <lb> points at are kept, with no text."""
+    root = ElementTree.fromstring(data)
+    texts: dict[str, str] = {}
+    for body in (el for el in root.iter() if _local(el.tag) == 'body'):
+        current, buffer = None, []
+
+        def close():
+            if current is not None:
+                texts[current] = ''.join(buffer).strip()
+
+        for el in body.iter():
+            if _local(el.tag) == 'lb':
+                close()
+                current, buffer = (el.get('facs') or '').lstrip('#') or None, []
+                if el.tail:
+                    buffer.append(el.tail)
+            elif current is not None and _local(el.tag) in ('pb', 'ab', 'p'):
+                # A page or region boundary ends the line before it.
+                close()
+                current, buffer = None, []
+            elif current is not None:
+                buffer.append((el.text or '') + (el.tail or ''))
+        close()
+    ours = 'Exported from DeepLabel' in ''.join(t for el in root.iter() if _local(el.tag) == 'publicationStmt'
+                                               for t in el.itertext())
+    pages = []
+    for surface in (el for el in root.iter() if _local(el.tag) == 'surface'):
+        graphic = next((el for el in surface if _local(el.tag) == 'graphic'), None)
+        width = _px_size(surface.get('lrx') or (graphic.get('width') if graphic is not None else None), 'lrx')
+        height = _px_size(surface.get('lry') or (graphic.get('height') if graphic is not None else None), 'lry')
+        if width <= 0 or height <= 0:
+            raise UnreadableXml('a surface has no size')
+        regions = []
+        for zone in (el for el in surface if _local(el.tag) == 'zone'):
+            lines = []
+            for line_zone in (el for el in zone if _local(el.tag) == 'zone'):
+                points = _points(line_zone.get('points') or '')
+                if not points:
+                    continue
+                polygon = (_polygon(points, width, height) if len(points) >= 3
+                           else _quad(_bbox(points, width, height)))
+                entry = {'polygon': polygon, 'text': texts.get(line_zone.get(XML_ID), '')}
+                if ours:
+                    entry['checked'] = line_zone.get('subtype') == 'checked'
+                lines.append(entry)
+            if not lines:
+                continue
+            points = _points(zone.get('points') or '')
+            label = zone.get('type') if ours else None
+            regions.append({'class_name': label or 'Paragraph', 'raw_type': zone.get('type') or 'zone',
+                            'bbox': _bbox(points, width, height) if points else _region_bbox_from_lines(lines),
+                            'lines': lines})
+        url = graphic.get('url') if graphic is not None else ''
+        pages.append({'image': PurePosixPath(url or '').name, 'width': width, 'height': height, 'regions': regions})
+    if not pages:
+        raise UnreadableXml('it has no facsimile surface')
+    return pages
 
 
 def _alto_box(el) -> tuple[float, float, float, float]:
@@ -254,18 +412,32 @@ def _nearest(candidates: list[str], xml_name: str) -> str | None:
     return max(sorted(candidates), key=shared_folders, default=None)
 
 
-def _parse_export_xml(xml_name: str, content: bytes) -> dict | None:
-    head = content[:2000].decode('utf-8', errors='replace')
+ANNOTATION_SUFFIXES = {'.xml', '.hocr', '.html', '.xhtml'}
+
+
+class ScansOnly(ImportError_):
+    """A zip with scans and nothing that describes them: a set of pages to upload, not an
+    export to import."""
+
+
+def _parse_export_xml(xml_name: str, content: bytes) -> list[dict]:
+    """The pages one file describes: one for PAGE, ALTO and hOCR, as many as it has
+    surfaces for TEI, none for a file in none of these formats."""
+    head = content[:4000].decode('utf-8', errors='replace')
     try:
         if 'PcGts' in head:
-            return {**parse_page_xml(content), 'format': 'page-xml'}
+            return [{**parse_page_xml(content), 'format': 'page-xml'}]
         if '<alto' in head or 'alto' in head[:200].lower():
-            return {**parse_alto(content), 'format': 'alto'}
+            return [{**parse_alto(content), 'format': 'alto'}]
+        if 'ocr_page' in content.decode('utf-8', errors='replace'):
+            return [{**parse_hocr(content), 'format': 'hocr'}]
+        if '<TEI' in head:
+            return [{**page, 'format': 'tei'} for page in parse_tei(content)]
     except ElementTree.ParseError as e:
         raise ImportError_(f'{xml_name}: not well-formed XML ({e})')
     except UnreadableXml as e:
         raise ImportError_(f'{xml_name}: {e}')
-    return None
+    return []
 
 
 def _page_names(members: list[str]) -> list[str]:
@@ -324,7 +496,7 @@ def read_export_zip(fileobj) -> list[dict]:
     if manifests:
         return _deeplabel_pages(archive, members, manifests[0])
     xml_names = [n for n in members
-                 if n.lower().endswith('.xml') and not n.endswith('mets.xml')
+                 if PurePosixPath(n).suffix.lower() in ANNOTATION_SUFFIXES and not n.endswith('mets.xml')
                  and not Path(n).name.startswith(('metadata', 'METS'))]
     by_name, by_stem = {}, {}
     for member in members:
@@ -334,19 +506,19 @@ def read_export_zip(fileobj) -> list[dict]:
             by_stem.setdefault(path.stem, []).append(member)
     pages = []
     for xml_name in sorted(xml_names):
-        parsed = _parse_export_xml(xml_name, archive.read(xml_name))
-        if parsed is None:
-            continue
-        image_member = _nearest(by_name.get(PurePosixPath(parsed['image']).name)
-                                or by_stem.get(PurePosixPath(xml_name).stem, []), xml_name)
-        # A blank leaf has an image and no regions; it is still a page of the export.
-        if image_member is None:
-            continue
-        parsed['image_member'] = image_member
-        pages.append(parsed)
+        for parsed in _parse_export_xml(xml_name, archive.read(xml_name)):
+            image_member = _nearest(by_name.get(PurePosixPath(parsed['image']).name)
+                                    or by_stem.get(PurePosixPath(xml_name).stem, []), xml_name)
+            # A blank leaf has an image and no regions; it is still a page of the export.
+            if image_member is None:
+                continue
+            parsed['image_member'] = image_member
+            pages.append(parsed)
+    if not pages and by_name and not xml_names:
+        raise ScansOnly('this zip holds scans and nothing describing them - upload it as pages instead')
     if not pages:
-        raise ImportError_('no PAGE or ALTO XML with matching images found in the zip - '
-                           'export with images included (Transkribus/eScriptorium offer this)')
+        raise ImportError_('no PAGE XML, ALTO, hOCR or TEI with matching images found in the zip - '
+                           'export with images included (Transkribus and eScriptorium offer this)')
     for parsed, name in zip(pages, _page_names([p['image_member'] for p in pages])):
         parsed['image_name'] = name
     return pages

@@ -236,6 +236,9 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True),
     name = ingest.require_unique_name(conn, name)
     try:
         pages = imports.read_export_zip(file.file)
+    except imports.ScansOnly as e:
+        # Its own status, so the page can send the same zip on as an upload of scans.
+        raise HTTPException(422, e.detail)
     except imports.ImportError_ as e:
         raise HTTPException(400, e.detail)
     except ingest.IngestError as e:
@@ -252,12 +255,12 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True),
         conn.execute('INSERT INTO jobs (id, name, owner, line_mode, run_layout, run_lines, run_ocr) '
                      "VALUES (?,?,?,'per_page',0,0,0)", (job_id, name, user))
         layout_templates.copy_into(conn, job_id)
-        # A DeepLabel export may bring classes this instance's template lacks; they join the
+        # An import may bring classes this instance's template lacks; they join the
         # dataset. Matched without case, as class names are (a Schematismus dataset stores
         # PageNumber as Pagenumber); the unassigned lines' holder is not a class.
         known = {c['name'].lower() for c in layout_templates.job_classes(conn, job_id)}
-        brought = {r['class_name']: r['kind'] for p in pages if p.get('format') == 'deeplabel'
-                   for r in p['regions'] if r['kind'] != 'orphan'}
+        brought = {r['class_name']: r.get('kind') or 'content' for p in pages
+                   for r in p['regions'] if r.get('kind') != 'orphan'}
         for name in sorted(n for n in brought if n.lower() not in known):
             layout_templates.add_class(conn, job_id, name, 'container' if brought[name] == 'container' else 'content',
                                        'down' if brought[name] == 'container' else None)

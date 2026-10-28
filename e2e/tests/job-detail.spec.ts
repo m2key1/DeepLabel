@@ -311,3 +311,23 @@ test.describe('Scenario: reading the page table at a glance', () => {
     await expect.poll(async () => (await getJob(jobId)).checked).toBe(false)
   })
 })
+
+test.describe('Scenario: choosing what to download', () => {
+  test('the export menu offers the standard formats first, and reviewed-only applies to all of them',
+    async ({ page }) => {
+      const jobId = await seedCompletedJob(uniqueName('Downloads'), 1)
+      await page.goto(`/jobs/${jobId}`)
+      await page.getByRole('button', { name: 'Export', exact: true }).click()
+      const menu = page.getByTestId('export-menu')
+      await expect(menu.getByTestId('export-format')).toHaveCount(8)
+      expect(await menu.getByTestId('export-format').evaluateAll((links) => links.map((l) => l.getAttribute('data-format'))))
+        .toEqual(['page', 'alto', 'hocr', 'tei', 'zip', 'json', 'md', 'txt'])
+      const pageXml = menu.locator('[data-testid="export-format"][data-format="page"]')
+      await expect(pageXml).toHaveAttribute('href', `/api/jobs/${jobId}/export?format=page`)
+
+      await menu.getByTestId('export-reviewed').check()
+      await expect(pageXml).toHaveAttribute('href', `/api/jobs/${jobId}/export?format=page&checked_only=true`)
+      await expect(menu.locator('[data-testid="export-format"][data-format="tei"]'))
+        .toHaveAttribute('href', `/api/jobs/${jobId}/export?format=tei&checked_only=true`)
+    })
+})

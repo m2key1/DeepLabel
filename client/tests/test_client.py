@@ -203,6 +203,16 @@ def test_export_returns_raw_bytes_and_passes_the_filters(client):
     assert 'checked_only=true' in RECORDED[-1]['path']
 
 
+def test_the_cli_saves_a_standard_format_under_its_own_name(server, tmp_path, monkeypatch):
+    from deeplabel import cli
+    monkeypatch.setenv('DEEPLABEL_URL', server)
+    monkeypatch.setenv('DEEPLABEL_TOKEN', 'dlp_test')
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(['export', 'j1', '--format', 'tei']) == 0
+    assert 'format=tei' in RECORDED[-1]['path']
+    assert (tmp_path / 'j1.tei.zip').read_bytes() == b'EXPORTED'
+
+
 def test_an_http_error_surfaces_the_servers_own_message(client):
     with pytest.raises(DeepLabelError) as caught:
         client.job('denied')

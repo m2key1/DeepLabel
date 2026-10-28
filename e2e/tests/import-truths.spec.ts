@@ -89,7 +89,7 @@ async function importThroughForm(page: Page, name: string, zip: Buffer) {
   await page.locator('input[type="file"]').setInputFiles({
     name: 'export.zip', mimeType: 'application/zip', buffer: zip,
   })
-  await expect(page.getByTestId('import-notice')).toContainText('Existing dataset detected')
+  await expect(page.getByTestId('import-notice')).toContainText('Zip archive')
   // The form's default: the transcriptions are final, so every imported line is reviewed.
   await expect(page.getByTestId('import-reviewed')).toBeChecked()
   const [response] = await Promise.all([
@@ -244,7 +244,56 @@ test.describe('Scenario: downloading only what was reviewed', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('content-disposition')).toBe(`attachment; filename="${name}-reviewed.zip"`)
     // One sidecar pair for the reviewed page, numbered by its place in the dataset.
+    // One sidecar pair for the reviewed page, numbered by its place in the dataset, and
+    // its scan, so the archive imports elsewhere.
     expect(zipEntries(Buffer.from(await res.arrayBuffer())))
-      .toEqual(['job.json', 'pages/page_0002.json', 'pages/page_0002.md'])
+      .toEqual(['job.json', 'pages/page_0002.json', 'pages/page_0002.md', 'images/scan_2.png'])
+  })
+})
+
+test.describe('Scenario: out in a standard format and back in', () => {
+  test('a dataset leaves as PAGE XML with its scans and comes back through the form, checks and all',
+    async ({ page }) => {
+      const jobId = await seedCompletedJob(uniqueName('Round trip'), 2)
+      const [first] = await jobPageIds(jobId)
+      const [line] = await pageLines(jobId, first)
+      await correctLine(line.id, 'Pfarre Heiligenstadt')
+      const res = await fetch(`${BACKEND}/api/jobs/${jobId}/export?format=page`, { headers: HEADERS })
+      expect(res.status).toBe(200)
+      const archive = Buffer.from(await res.arrayBuffer())
+      expect(zipEntries(archive)).toEqual(
+        ['page/scan_1.xml', 'page/scan_2.xml', 'images/scan_1.png', 'images/scan_2.png'])
+
+      const { jobId: back, reply } = await importThroughForm(page, uniqueName('Back again'), archive)
+
+      expect(reply).toMatchObject({ format: 'page-xml', pages: 2, lines: 12 })
+      const [firstBack] = await jobPageIds(back)
+      const lines = await pageLines(back, firstBack)
+      // The one checked line came back checked, the rest as unchecked readings - the file
+      // says which, not the form's review default.
+      expect(lines.filter((l) => l.checked).map((l) => l.text)).toEqual(['Pfarre Heiligenstadt'])
+      expect(lines.filter((l) => !l.checked)).toHaveLength(5)
+    })
+
+  test('a zip of scans alone goes up as pages and is read like any upload', async ({ page }) => {
+    const name = uniqueName('Zipped scans')
+    const zip = makeZip({ 'volume/scan_2.png': scanPng(600, 800, 71), 'volume/scan_1.png': scanPng(600, 800, 72) })
+    await page.goto('/new')
+    await page.getByLabel('Job name').fill(name)
+    await page.locator('input[type="file"]').setInputFiles({ name: 'scans.zip', mimeType: 'application/zip', buffer: zip })
+    await expect(page.getByTestId('import-notice')).toContainText('A zip of scans alone is read like any other upload')
+    const [refused, uploaded] = await Promise.all([
+      page.waitForResponse((r) => r.url().endsWith('/api/jobs/import')),
+      page.waitForResponse((r) => r.url().endsWith('/api/jobs') && r.request().method() === 'POST'),
+      page.getByRole('button', { name: 'Import dataset' }).click(),
+    ])
+    expect(refused.status()).toBe(422)
+    expect(uploaded.status()).toBe(200)
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
+    const jobId = page.url().split('/').pop()!
+    await waitForJobStatus(jobId, 'done')
+    expect(await pageFilenames(jobId)).toEqual(['scan_1.png', 'scan_2.png'])
+    // Read by the pipeline: the stub's six lines on each page.
+    expect(await pageLines(jobId, (await jobPageIds(jobId))[0])).toHaveLength(6)
   })
 })

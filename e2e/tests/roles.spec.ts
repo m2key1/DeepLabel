@@ -27,7 +27,7 @@ test.describe('Scenario: role-based access', () => {
 
     // A viewer can open and download, but gets no management menu at all.
     await card.getByRole('button', { name: 'Download' }).click()
-    await expect(card.getByRole('link', { name: 'zip', exact: true })).toBeVisible()
+    await expect(card.getByRole('link', { name: 'DeepLabel zip', exact: true })).toBeVisible()
     await expect(card.getByTestId('job-menu')).toHaveCount(0)
 
     await page.goto(`/jobs/${jobId}`)
