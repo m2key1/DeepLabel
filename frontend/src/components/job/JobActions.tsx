@@ -105,7 +105,7 @@ export function JobActions(p: JobActionsProps) {
           <div
             ref={download.ref}
             className={`${download.className} right-0 z-10 overflow-hidden ${popoverChrome} ${
-              tiles ? 'w-44' : 'w-36'
+              tiles ? 'w-44' : 'w-max'
             }`}
           >
             {/* A map job has no text to export - json/md/txt would all come back empty,

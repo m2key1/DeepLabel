@@ -15,7 +15,7 @@ const GROUPS: { title: string; formats: { format: ExportFormat; label: string; h
   {
     title: 'DeepLabel',
     formats: [
-      { format: 'zip', label: 'DeepLabel zip', hint: 'everything, with scans - imports into DeepLabel' },
+      { format: 'zip', label: 'DeepLabel zip', hint: 'everything with scans, imports back' },
       { format: 'json', label: 'JSON', hint: 'everything, as data' },
       { format: 'md', label: 'Markdown', hint: 'text by page and region' },
       { format: 'txt', label: 'Plain text', hint: 'text in reading order' },
@@ -41,7 +41,7 @@ export function ExportMenu({ jobId, onPicked }: { jobId: string; onPicked: () =>
             <a key={format} data-testid="export-format" data-format={format} aria-label={label}
                href={exportUrl(jobId, format, reviewed)} target="_blank" rel="noreferrer" onClick={onPicked}
                className="flex items-baseline justify-between gap-3 px-2.5 py-1.5 text-xs text-ink hover:bg-accent-wash hover:text-accent-ink">
-              <span className="font-medium">{label}</span>
+              <span className="whitespace-nowrap font-medium">{label}</span>
               <span className="truncate text-[11px] text-ink-subtle">{hint}</span>
             </a>
           ))}

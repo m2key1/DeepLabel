@@ -197,8 +197,8 @@ test.describe('Scenario: managing datasets from the list', () => {
     const download = card.getByRole('button', { name: 'Download' })
     await expect(download).toBeEnabled()
     await download.click()
-    for (const format of ['zip', 'json', 'md', 'txt']) {
-      const link = card.getByRole('link', { name: format, exact: true })
+    for (const format of ['page', 'alto', 'hocr', 'tei', 'zip', 'json', 'md', 'txt']) {
+      const link = card.locator(`[data-testid="export-format"][data-format="${format}"]`)
       await expect(link).toBeVisible()
       // The export must really produce content, not just render a link.
       const res = await page.request.get((await link.getAttribute('href'))!)
@@ -206,8 +206,8 @@ test.describe('Scenario: managing datasets from the list', () => {
       const body = await res.body()
       // Not just "non-empty": an export that answered "{}" would pass that. The stub
       // reads every page the same way, so the transcription has to be in there.
-      if (format === 'zip') expect(body.subarray(0, 2).toString()).toBe('PK')
-      else expect(body.toString()).toContain('Sample Header line 1')
+      if (['json', 'md', 'txt'].includes(format)) expect(body.toString()).toContain('Sample Header line 1')
+      else expect(body.subarray(0, 2).toString()).toBe('PK')
     }
   })
 
@@ -436,5 +436,24 @@ test.describe('Scenario: arriving at the dataset list', () => {
     // The real cards replace it rather than appearing beside it.
     await expect(page.getByTestId('job-card').filter({ hasText: name })).toBeVisible()
     await expect(page.getByTestId('jobs-skeleton')).toHaveCount(0)
+  })
+})
+
+test.describe('Scenario: downloading from the list', () => {
+  test('the download menu shows every format and what it is for, nothing cut off', async ({ page }) => {
+    const name = uniqueName('Menu width')
+    await seedCompletedJob(name, 1)
+    await page.goto(`/?q=${encodeURIComponent(name)}`)
+    await page.getByTestId('job-card').filter({ hasText: name }).getByTitle('Download this dataset').click()
+    const menu = page.getByTestId('export-menu')
+    await expect(menu.getByTestId('export-format')).toHaveCount(8)
+    const popover = (await menu.locator('..').boundingBox())!
+    // Every format's line, hint included, ends inside the popover rather than under its edge.
+    for (const link of await menu.getByTestId('export-format').all()) {
+      const hint = (await link.locator('span').last().boundingBox())!
+      expect(hint.x + hint.width).toBeLessThanOrEqual(popover.x + popover.width)
+      expect(await link.locator('span').last().evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true)
+    }
+    await expect(menu.locator('[data-format="page"]')).toContainText('Transkribus, eScriptorium, OCR-D')
   })
 })
