@@ -1,81 +1,80 @@
-# End-to-end tests
+# DeepLabel
 
-Scenario-based Playwright tests that drive the real stack: the nginx frontend, the
-auth service (dev bypass), and the real backend with its queue, database and SSE
-streams. Only the models are replaced, by a stub model backend and a stub language model.
+Transcription tool for scanned historical documents. Runs layout detection, line
+segmentation and OCR over page scans, lets people check and correct the result, and trains
+new models on the checked lines. Also annotates map tiles for segmentation.
 
-## Running
+![Page viewer with layout boxes and lines over a scan](docs/images/overview.png)
+
+## Architecture
+
+| Service | Stack | Compose file |
+|---|---|---|
+| frontend | React + TypeScript (Vite), served by nginx, which also proxies the API | `compose.frontend.yml` |
+| auth | FastAPI, Authentik (OIDC) login, sessions, roles | `compose.frontend.yml`, `compose.authentik.yml` |
+| backend | FastAPI, SQLite, job queue for pipeline runs and trainings | `compose.backend.yml` |
+| model backends | one HTTP server per model type, from [deeplabel-backends](https://github.com/m2key1/deeplabel-backends) | `compose.models.yml` |
+
+Services talk only over HTTP and can run on separate hosts. The backend has no PyTorch;
+models run in the model backends, which follow the contract in
+[docs/MODEL-BACKENDS.md](docs/MODEL-BACKENDS.md).
+
+## Try it without a GPU
+
+Stub models return fixed boxes, lines and text; login is bypassed.
 
 ```bash
-cd e2e
-npm install
-npx playwright install chromium
-
-npm run e2e          # headless
-npm run e2e:headed   # watch a real browser execute each scenario
-npm run e2e:ui       # Playwright UI mode: pick tests, watch live, time-travel steps
+git clone https://github.com/m2key1/DeepLabel.git
+git clone https://github.com/m2key1/deeplabel-backends.git
+cd DeepLabel
+docker compose -f compose.e2e.yml up -d --build   # http://localhost:8090
+docker compose -f compose.e2e.yml down -v         # stop, delete data
 ```
 
-Every run starts the stack fresh (`compose.e2e.yml`, ports 8090/8001, isolated
-volumes) and tears it down afterwards. Set `E2E_KEEP_STACK=1` to keep it running
-for faster iteration; `npm run stack:down` removes it.
+`DEEPLABEL_BACKENDS_ROOT` in `.env` points elsewhere if the backends clone is not next to this one.
 
-Running a second stack beside it (two people, or two agents, on one machine) means
-remapping its ports, and three variables carry that: `E2E_FRONTEND_URL`,
-`E2E_BACKEND_PORT` and `E2E_LLM_PORT`. Set all three - a spec that signs in with a
-session cookie has to go through the frontend, so a stale `E2E_FRONTEND_URL` makes
-those specs fail against whatever is on 8090 instead of the stack under test.
+## Real models and production
 
-## How the pipeline runs without a GPU
+Build the model backends (DeepOCR v3 and Kraken are ready to use), then run the backend on
+a GPU host and the frontend and auth anywhere. Steps: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Login setup: [AUTHENTIK.md](AUTHENTIK.md).
 
-Every model runs on the stub model backend from the `deeplabel-backends` repository
-(`stub/`), built from the clone beside this one (`DEEPLABEL_BACKENDS_ROOT` in `.env` says
-where else). It speaks the real contract, so DeepLabel's own pipeline runs: ingest,
-renditions, reading order, crops and alignment are the real ones, and only the readings are
-stand-ins. The stub finds a Header and a Paragraph box, three lines in each, and reads every
-line as `Sample <class> line <n>` with fixed confidences. A page without layout gets the
-lines of both boxes, classed Unassigned.
+Configuration lives in `.env` files copied from `.env.backend.example` and
+`.env.frontend.example`; every variable is explained there.
 
-Layout, lines and OCR each have a stub container of their own, because a backend trains one
-snapshot kind (`STUB_TRAIN_SNAPSHOT`); each waits 0.3 s per request, so a job's phases can
-be watched. A scenario that needs a slower or worse reader imports one with
-`importStubModel`: weights reading `stub-slow` take 15 s over every request, `stub-misread`
-reads OCR with a fixed cycle of four errors. A dataset named `[slow]` gets the slow reader
-from `createJob`, which lets scenarios catch it mid-run (cancel, progress), and a training
-run named `[slow]` waits before it starts.
+## API
 
-Ingest files a scan another page of the dataset already has as a duplicate, so the helpers
-give every seeded page a scan of its own (`scanPng`'s `variant`).
+Everything the UI does is available with an API token (Profile > API tokens):
 
-Map jobs are seeded annotation-only (`helpers/map.ts`): with neither tiling nor
-prediction enabled, the backend ingests the uploaded tiles in its own worker thread
-with pure Pillow, so the tile editor and mask export need no stub runner and no GPU.
-Tiling and prediction themselves have no stub yet and are not exercised here; their
-geometry, export and migration logic is covered by pytest in `backend/tests/`.
+```bash
+curl -H "Authorization: Bearer $DEEPLABEL_TOKEN" https://<host>/api/jobs
+```
 
-## How LLM pre-annotation runs without a provider
+OpenAPI schema at `/docs`. Python client and `deeplabel` CLI in `client/`
+(`pip install -e client`), examples in [docs/API.md](docs/API.md).
 
-`e2e/stub/llm/server.py` is a deterministic OpenAI-compatible endpoint, published on
-port 8002 and reached by the backend as `http://llm:8000/v1`. It runs under the backend
-image - the stub is pure stdlib - the same shadowing trick the GPU runner uses. What it
-answers is decided by the model id alone, so a scenario picks the behaviour it needs by
-naming a model: `stub-perfect` and `stub-second` return the stub runner's own six lines
-verbatim, `stub-typo` gets one word wrong, `stub-extra` adds a line the segmentation
-never found, `stub-plain` answers in bare lines instead of JSON, and `stub-error` fails.
-`stub-echo` answers with the prompt it was given, which is the only honest oracle for
-which wording won, and `stub-thinking` answers with its working and no transcription until
-the request carries `chat_template_kwargs.enable_thinking = false`, standing in for a
-reasoning model. `stub-slow` reads correctly but takes 15 seconds over it, which is the
-only way to look at a run while it is still happening - every other model answers before
-the assertion is made. `Bearer bad-key` is rejected with a 401.
+## Tests
 
-It also counts the completions it served (`GET /_stats`, `POST /_reset`), which is how a
-scenario proves that re-matching stored reads cost no API call.
+```bash
+cd backend  && uv run --group dev pytest
+cd auth     && uv run --group dev pytest
+cd client   && uv run --group dev pytest
+cd frontend && npm install && npx tsc -b && npx vitest run
+cd e2e      && npm install && npx playwright install chromium && npm run e2e
+```
 
-## Conventions
+The e2e suite starts and stops the stub stack itself; see [e2e/README.md](e2e/README.md).
 
-- One user journey per spec file; each test seeds its own uniquely named dataset
-  through the backend API (`helpers/api.ts`) and never depends on another test.
-- Tests authenticate via a session created once in `global-setup.ts`; only
-  `auth.spec.ts` starts logged out, because the login bounce is what it tests.
-- Fixture scans are generated in-process (`helpers/image.ts`), no binary files in git.
+## Docs
+
+- [docs/FEATURES.md](docs/FEATURES.md) - what the app does, by area
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) - development, model backends, production
+- [docs/MODEL-BACKENDS.md](docs/MODEL-BACKENDS.md) - the model backend contract
+- [docs/API.md](docs/API.md) - tokens, client, CLI
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+
+Bugs and requests: [GitHub issues](https://github.com/m2key1/DeepLabel/issues).
+
+## License
+
+Apache 2.0, see [LICENSE](LICENSE).
