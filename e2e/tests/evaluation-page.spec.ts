@@ -64,7 +64,15 @@ test.describe('Scenario: an evaluation has a page of its own', () => {
     await page.goto('/models')
     await page.getByTestId('evaluations-list').click()
     await expect(page).toHaveURL(/\/models\/evaluations$/)
-    await page.getByTestId('evaluation-row').filter({ hasText: name }).getByTestId('evaluation-open').click()
+    // The dataset is a ruler, the model a dot on it; the dot opens a card with its scores.
+    const ruler = page.getByTestId('evaluation-ruler').filter({ hasText: name })
+    await expect(ruler.getByTestId('evaluation-dot')).toHaveCount(1)
+    await ruler.getByTestId('evaluation-dot').click()
+    const card = ruler.getByTestId('evaluation-card')
+    await expect(card).toContainText(`on ${name}`)
+    await expect(card.locator('tbody tr')).toHaveCount(1)
+    await expect(card.locator('tbody tr').first()).toContainText('4.82%')
+    await card.getByTestId('evaluation-open').click()
     await expect(page).toHaveURL(new RegExp(`/evaluations/${evalId}(\\?|$)`))
 
     // 4 edits over 83 characters; 5 word errors over 16 words, order-free or not.

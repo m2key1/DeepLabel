@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { listEvaluations, listModels } from '../api'
 import type { Evaluation } from '../api'
 import { useSetCrumbs } from '../components/NavBar'
 import { percent } from '../components/evaluation/format'
+import { EvaluationRulers } from '../components/evaluation/EvaluationRulers'
+import { Segmented } from '../components/ui/Segmented'
 import { Badge } from '../components/ui/Badge'
 import { buttonClass } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -23,6 +25,8 @@ export function EvaluationsPage() {
   const [evaluations, setEvaluations] = useState<Evaluation[] | null>(null)
   const [modelNames, setModelNames] = useState<Map<number, string>>(new Map())
   const [error, setError] = useState<string | null>(null)
+  const [params, setParams] = useSearchParams()
+  const view = params.get('view') === 'table' ? 'table' : 'rulers'
 
   useEffect(() => {
     listEvaluations().then((r) => setEvaluations(r.evaluations)).catch((e: Error) => setError(e.message))
@@ -32,14 +36,20 @@ export function EvaluationsPage() {
   return (
     <div className={pageShell}>
       <PageHeader title="Evaluations" actions={<Link to="/models" className={buttonClass()}>Models</Link>}>
-        Every model scored on a training's split or on datasets' checked lines. Each opens a page with its
-        lines, confusions, characters and calibration. Evaluate a model from its card on the models page.
+        Every model scored on a training's split or on datasets' checked lines, one ruler per thing
+        scored on. Click a dot for its scores; each evaluation opens a page with its lines,
+        confusions, characters and calibration.
       </PageHeader>
+      <Segmented className="mb-3 w-fit" value={view}
+                 onChange={(next) => setParams(next === 'table' ? { view: 'table' } : {}, { replace: true })}
+                 options={[{ value: 'rulers', label: 'Rulers' }, { value: 'table', label: 'Table' }]} />
       {error && <p className="mb-2 text-sm text-danger">{error}</p>}
       {evaluations !== null && evaluations.length === 0 ? (
         <EmptyState action={<Link to="/models" className={buttonClass()}>Models</Link>}>
           No model has been evaluated yet.
         </EmptyState>
+      ) : view === 'rulers' ? (
+        <EvaluationRulers evaluations={evaluations ?? []} modelNames={modelNames} />
       ) : (
         <div className="overflow-x-auto">
           <Table

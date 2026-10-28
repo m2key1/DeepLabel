@@ -642,7 +642,7 @@ export interface Evaluation {
   id: number
   model_id: number
   training_id: number | null
-  source: { snapshot?: number; jobs?: string[] }
+  source: { snapshot?: number; jobs?: string[]; test_pages?: boolean }
   /** What was scored, named and redacted server-side; absent on a create response. */
   source_label?: string
   /** Per-dataset scores when the material spans several datasets; names resolved server-side. */

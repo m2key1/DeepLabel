@@ -327,6 +327,11 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
 
 ## Evaluation
 
+- **Evaluations** (under Models) draws one ruler per dataset or validation split, with each
+  model as a dot at its CER, the best in green. Test pages come first and are marked as
+  such; a run's validation split comes last and is marked too, since it chose the
+  checkpoint and reads optimistic. Click a dot for its scores in every decode and a link to
+  each evaluation. **Table** lists them all instead.
 - Evaluate any OCR model on any dataset's checked lines with **Evaluate...** on its page; a
   dataset with test pages is scored on those, unless **All pages** is chosen. Training runs
   are evaluated automatically on their validation split and test pages.
