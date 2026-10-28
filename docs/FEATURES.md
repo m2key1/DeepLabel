@@ -400,19 +400,21 @@ Sign-in is handled by Authentik.
 
 ## Profile and settings
 
-- Everyone has a profile at `/people/<username>` with their picture, role, groups, work
-  statistics (lines corrected and checked, pages signed off, trainings, models, best CER),
-  a year of activity and recent datasets.
+- Everyone has a profile at `/people/<username>` with their picture, role, groups, a short
+  written summary of their work, work statistics (lines corrected and checked, pages signed
+  off, trainings, models, best CER), a year of activity and recent datasets.
 - Click your avatar on your profile to upload and crop a picture.
-- Your settings are tabs on your own profile: presence, which overlays a page opens with,
-  keyboard shortcuts, character keyboard, API tokens and language models.
+- Your settings are tabs on your own profile, grouped as Editing, Together and Connections:
+  presence, which overlays a page opens with, keyboard shortcuts, character keyboard, API
+  tokens and language models.
 - Settings are stored with your account and follow you to every device.
 - The profile footer shows the DeepLabel version the deployment runs.
 
 ## Keyboard shortcuts
 
-Every shortcut can be changed under Settings. Some commands (navigation, theme) start
-unbound.
+Every shortcut can be changed under Settings, where a keyboard shows which keys each part
+of the app uses, with or without Shift. Click a key to give it a command, or use the list
+below it. Some commands (navigation, theme) start unbound.
 
 | Where | Key | Action |
 |---|---|---|

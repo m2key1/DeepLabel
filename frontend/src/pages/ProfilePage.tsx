@@ -8,6 +8,7 @@ import { useAuth } from '../auth'
 import { profilePath } from '../people'
 import { useSettings } from '../settings'
 import { formatRelative, parseStamp } from '../util'
+import { profileSummary } from '../components/users/profileSummary'
 import { useCrumb } from '../components/NavBar'
 import { ThemeChoice } from '../components/ThemeToggle'
 import { useSettingsPanels } from '../components/settings/SettingsPanels'
@@ -127,6 +128,12 @@ function OwnControls() {
   )
 }
 
+// The settings read in groups by what they are about, under the profile itself.
+const SECTION_GROUP: Record<string, string> = {
+  [OVERVIEW]: 'You', opening: 'Editing', keys: 'Editing', characters: 'Editing',
+  together: 'Together', llm: 'Connections', tokens: 'Connections',
+}
+
 function OwnTabs({ profile }: { profile: PersonProfile | null }) {
   const { user } = useAuth()
   const [params, setParams] = useSearchParams()
@@ -139,7 +146,7 @@ function OwnTabs({ profile }: { profile: PersonProfile | null }) {
       <div className="sticky top-0 self-start">
         <SectionNav
           label={`${user} - profile and settings`}
-          items={tabs.map(({ id, label }) => ({ id, label }))}
+          items={tabs.map(({ id, label }) => ({ id, label, group: SECTION_GROUP[id] }))}
           active={active}
           onSelect={(id) => setParams(id === OVERVIEW ? {} : { section: id }, { replace: true })}
         />
@@ -173,8 +180,12 @@ function Stat({ id, label, value, title }: { id: string; label: ReactNode; value
 function Overview({ profile }: { profile: PersonProfile | null }) {
   if (!profile) return <p className="text-sm text-ink-subtle">Loading…</p>
   const { stats } = profile
+  const summary = profileSummary(profile)
   return (
     <div data-testid="profile-overview">
+      <p data-testid="profile-summary" className="mb-6 max-w-[62ch] text-[15px] leading-relaxed text-ink">
+        {summary ? summary.join(' ') : 'Nothing yet - work done here shows up as soon as there is some.'}
+      </p>
       <Section title="Annotation">
         <StatRow>
           <Stat id="lines_corrected" label="Lines corrected" value={count(stats.lines_corrected)}

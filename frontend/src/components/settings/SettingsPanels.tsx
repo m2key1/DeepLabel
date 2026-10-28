@@ -6,6 +6,7 @@ import {
 import type { VocabGroup } from '../../settings'
 import { paletteKey, withKeys, withoutKeys } from '../../palette'
 import { ApiTokens } from '../ApiTokens'
+import { KeyboardMap } from './KeyboardMap'
 import { LlmConnections } from '../llm/LlmConnections'
 import { Toggle } from '../ui/Button'
 import { CheckField, Input } from '../ui/Field'
@@ -141,6 +142,7 @@ export function useSettingsPanels(): SettingsPanel[] {
           already taken moves it, unless the two can never be on screen together. A command only
           answers on a page that offers it.
         </p>
+        <KeyboardMap scopes={HOTKEY_SCOPES} hotkeys={hotkeys} onBind={rebind} />
         <div className="space-y-4">
           {HOTKEY_SCOPES.map((scope) => (
             <div key={scope} data-testid="hotkey-group" data-group={SCOPE_LABEL[scope]}>

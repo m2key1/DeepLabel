@@ -5,6 +5,8 @@ export interface NavItem {
   label: ReactNode
   /** A count or a warning dot, shown right-aligned. */
   badge?: ReactNode
+  /** A heading over this item and the ones after it that share it. */
+  group?: string
 }
 
 /** The rail beside a page that has more sections than fit in one read. Vertical rather
@@ -22,11 +24,17 @@ export function SectionNav({ items, active, onSelect, label, className = '' }: {
   return (
     <nav aria-label={label} data-testid="section-nav"
          className={`w-48 shrink-0 space-y-0.5 ${className}`.trim()}>
-      {items.map((item) => {
+      {items.map((item, i) => {
         const on = item.id === active
+        const heading = item.group && item.group !== items[i - 1]?.group
         return (
+          <div key={item.id}>
+          {heading && (
+            <div className={`px-2 pb-1 text-[10px] font-medium uppercase tracking-widest text-ink-subtle ${i ? 'pt-3' : ''}`}>
+              {item.group}
+            </div>
+          )}
           <button
-            key={item.id}
             type="button"
             data-testid="section-nav-item"
             data-section={item.id}
@@ -39,6 +47,7 @@ export function SectionNav({ items, active, onSelect, label, className = '' }: {
             <span className="min-w-0 flex-1 truncate">{item.label}</span>
             {item.badge && <span className="shrink-0 text-xs text-ink-subtle">{item.badge}</span>}
           </button>
+          </div>
         )
       })}
     </nav>

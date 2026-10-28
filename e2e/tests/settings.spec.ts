@@ -422,6 +422,29 @@ test.describe('Scenario: putting keys on the buttons', () => {
     await expect(page.getByRole('link', { name: 'Models' })).toBeVisible()
   }
 
+  test('the keyboard map shows what each key does and puts a command on a free key', async ({ page }) => {
+    await page.goto('/settings?section=keys')
+    const map = page.getByTestId('keyboard-map')
+    await map.getByRole('button', { name: 'Both editors' }).click()
+    // V selects in both editors by default; B is free there.
+    await expect(map.locator('[data-testid="keyboard-key"][data-key="v"]')).toHaveAttribute('data-command', 'toolSelect')
+    const free = map.locator('[data-testid="keyboard-key"][data-key="b"]')
+    await expect(free).not.toHaveAttribute('data-command')
+
+    await free.click()
+    await map.locator('[data-testid="keyboard-key-command"][data-command="toolHand"]').click()
+    await expect.poll(bindings(page)).toMatchObject({ toolHand: 'b' })
+    await expect(free).toHaveAttribute('data-command', 'toolHand')
+    await expect(row(page, 'toolHand').getByTestId('hotkey-bind')).toHaveText('B')
+
+    // With Shift held the same keyboard shows the other layer: Shift+E erases.
+    await map.getByTestId('keyboard-map-shift').click()
+    await expect(map.locator('[data-testid="keyboard-key"][data-key="shift+e"]')).toHaveAttribute('data-command', 'toolErase')
+
+    await row(page, 'toolHand').getByTestId('hotkey-clear').click()
+    await expect.poll(async () => (await bindings(page)()).toolHand ?? '').toBe('')
+  })
+
   test('a key bound to a button runs it, and only where the button is', async ({ page }) => {
     await page.goto('/settings?section=keys')
     await bind(page, 'goModels', 'F2')
