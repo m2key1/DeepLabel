@@ -283,3 +283,43 @@ export function FilterIcon() {
     </svg>
   )
 }
+
+export function RereadIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 4v6h6M20 20v-6h-6" />
+      <path d="M5 13a7 7 0 0 0 12 4M19 11a7 7 0 0 0-12-4" />
+    </svg>
+  )
+}
+
+/** A chain broken across the middle: a reading let go of, not thrown away. */
+export function UnlinkIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" aria-hidden="true">
+      <path d="M9 7H7a5 5 0 0 0 0 10h2M15 7h2a5 5 0 0 1 0 10h-2M9.5 12h5" />
+      <path d="M4 20 20 4" />
+    </svg>
+  )
+}
+
+export function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
+    </svg>
+  )
+}
+
+export function RevertIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+      <path d="M3 3v5h5" />
+    </svg>
+  )
+}

@@ -110,5 +110,14 @@ test.describe('Scenario: lines the models settled without a check', () => {
       await expect(page.getByTestId('settled-badge')).toHaveCount(5)
       await expect(rows.filter({ hasText: 'Sample Header line 1' }).getByTestId('settled-badge')).toHaveCount(0)
       await expect(rows.filter({ hasText: 'Sample Header line 2' }).getByTestId('settled-badge')).toBeVisible()
+
+      // The badge is also the way back: it hands the line the OCR model's text again.
+      const settled = unchecked[0]
+      await rows.filter({ hasText: 'Sample Header line 2' }).getByTestId('settled-badge').click()
+      await expect.poll(async () => {
+        const line = (await pageLines(jobId, pageId)).find((l) => l.id === settled.id)!
+        return { corrected_text: line.corrected_text, checked: line.checked }
+      }).toEqual({ corrected_text: null, checked: false })
+      await expect(page.getByTestId('settled-badge')).toHaveCount(4)
     })
 })

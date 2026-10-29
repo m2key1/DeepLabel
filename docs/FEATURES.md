@@ -185,7 +185,7 @@ Press `e` to edit the page.
 - **Erase** (Shift+E): sweep away line corners with a brush. Lines you or others have
   checked are skipped unless you hold Shift.
 - Hold Space or Alt for the hand tool.
-- Delete a line straight from the text list, without entering edit mode.
+- Delete a line straight from the text list with its trash can, without entering edit mode.
 - Ctrl+Z undoes and Ctrl+Shift+Z redoes any edit, including merges and splits, in or out of
   edit mode.
 
@@ -198,9 +198,13 @@ Press `e` to edit the page.
 - Every reading held for a line - the OCR model's, a language model's, an aligned
   transcription, an earlier correction - is listed under it. Click one to make it the
   line's text. The reading it replaces stays in the list, so nothing is lost.
+- The readings a line already uses are listed too, marked "in use". Any reading can be
+  released back to the page's unmatched readings from there, and a language model's
+  reading deleted with its trash can.
 - Readings that matched no line are listed on the page; drag one onto the line it belongs
   to.
-- The revert button puts a line back to its OCR text and unchecks it.
+- The "edited" or "settled" chip on a line is also its revert button: it puts the line back
+  to its OCR text and unchecks it.
 - Mark a page's layout as complete separately from its lines; the page table filters on
   both.
 - Build your own character keyboard under Settings, from a grid of characters grouped by

@@ -37,7 +37,7 @@ test.describe('Scenario: reviewing OCR text', () => {
       await corrected.getByRole('checkbox').check()
       await expect.poll(stateOf).toEqual({ corrected_text: 'Grüße from e2eä', checked: true })
 
-      await page.getByTitle('Revert to OCR text').click()
+      await corrected.getByTestId('edited-badge').click()
       await expect(page.getByText('edited', { exact: true })).not.toBeVisible()
       // README: "Reverting hands the line back for review: the check goes with the
       // correction, and approving the OCR text as it stands is a second, explicit click."

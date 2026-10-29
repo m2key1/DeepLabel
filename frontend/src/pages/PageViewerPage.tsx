@@ -55,7 +55,7 @@ import type { Crumb } from '../components/NavBar'
 import { BarDivider, Button, ButtonGroup, GroupButton, Toggle } from '../components/ui/Button'
 import { Select } from '../components/ui/Field'
 import { Segmented } from '../components/ui/Segmented'
-import { KeyboardIcon, PanelIcon, PenIcon, PolygonIcon, RotateIcon, TurnedBoxIcon } from '../components/icons'
+import { KeyboardIcon, PanelIcon, PenIcon, PolygonIcon, RereadIcon, RevertIcon, RotateIcon, TrashIcon, TurnedBoxIcon } from '../components/icons'
 import { boxChrome } from '../components/chrome'
 import { Splitter } from '../components/ui/Splitter'
 import { LineLoupe } from '../components/viewer/LineLoupe'
@@ -2070,10 +2070,6 @@ export function PageViewerPage() {
   /** Step down or up the readings held for the active line, and say whether the step
    *  stayed among them. Out of the last one is out of the line: the arrows walk what is on
    *  screen, and a line's readings are on screen exactly while it is the active one. */
-  // The reading a line is wearing: taken, so no longer offered, and only undone from here.
-  const takenReading = (line: Line): LineCandidate | undefined =>
-    (candidatesByLine.get(line.id) ?? [])
-      .find((c) => sameText(c.text, line.corrected_text ?? line.text ?? ''))
 
   // The arrow keys and Enter walk what is drawn, not the pool behind it.
   const offeredLineReadings = (lineId: number): LineCandidate[] => {
@@ -3025,6 +3021,7 @@ export function PageViewerPage() {
   // Narrow, nothing gives way: the row stacks instead, the reading on a line of its own and
   // the rail right-aligned under it, so the columns still line up down the panel.
   const ACTION_SLOT = `${SLOT} w-5`
+  const RAIL_BUTTON = 'rounded text-ink-subtle group-data-[hot]:text-ink-muted'
 
   // Settled by the models agreeing, checked by nobody: review work, and badged as such.
   // Once a person checks it, it is theirs and reads as any other correction.
@@ -3089,72 +3086,26 @@ export function PageViewerPage() {
       )}
       {/* Narrow, the row stacks: this ends the reading's line, and the rail wraps under it. */}
       <span aria-hidden="true" className="hidden h-0 basis-full @max-md:block" />
-      <span data-testid="edited-slot" className={`${SLOT} w-11 @max-md:ml-auto`}>
-        {isSettled(line) ? (
-          // Agreement without a check is not a review: the line is flagged like any other
-          // unchecked one, and says why it is there.
-          <>
-            <span data-testid="settled-badge"
-                  title="Settled by the models agreeing - not checked by anyone yet"
-                  className="rounded bg-series-7/15 px-1 text-[10px] font-medium text-series-7">
-              settled
-            </span>
-          </>
-        ) : line.corrected_text !== null && editingId !== line.id && (
-          <>
-            <span className="rounded bg-accent-wash px-1 text-[10px] font-medium text-accent-ink">
-              edited
-            </span>
-          </>
-        )}
-      </span>
-      <span className={ACTION_SLOT}>
-        {line.corrected_text !== null && editingId !== line.id && (
+      <span data-testid="edited-slot" className={`${SLOT} w-14 @max-md:ml-auto`}>
+        {(isSettled(line) || line.corrected_text !== null) && editingId !== line.id && (
+          // The chip that says the line was changed is also how the change is undone.
           <button
-            onClick={() => revert(line)}
-            title="Revert to OCR text"
-            className="rounded px-0.5 text-sm leading-none text-ink-muted hover:text-danger"
+            type="button"
+            data-testid={isSettled(line) ? 'settled-badge' : 'edited-badge'}
+            disabled={!canEdit}
+            onClick={(e) => { e.stopPropagation(); void revert(line) }}
+            title={isSettled(line)
+              ? 'Settled by the models agreeing - not checked by anyone yet. Click to revert to the OCR text'
+              : 'Revert to OCR text'}
+            className={`inline-flex items-center gap-0.5 rounded border px-1 text-[10px] font-medium disabled:cursor-default ${
+              isSettled(line)
+                ? 'border-series-7/30 bg-series-7/15 text-series-7 enabled:hover:border-series-7'
+                : 'border-accent/25 bg-accent-wash text-accent-ink enabled:hover:border-accent'}`}
           >
-            ↺
+            {isSettled(line) ? 'settled' : 'edited'}
+            {canEdit && <RevertIcon />}
           </button>
         )}
-      </span>
-      <span className={ACTION_SLOT}>
-      {canReread && !line.needs_ocr && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            reocrOneLine(line)
-          }}
-          title="Re-run OCR on this line"
-          className="rounded px-0.5 text-ink-subtle hover:text-accent-ink"
-        >
-          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M4 4v6h6M20 20v-6h-6"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M5 13a7 7 0 0 0 12 4M19 11a7 7 0 0 0-12-4"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-      )}
-      {line.needs_ocr && (
-        <span title="Re-reading…" className="text-accent">
-          <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
-            <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-          </svg>
-        </span>
-      )}
       </span>
       <span className={`${SLOT} w-7`}>
       {line.llm_agree_count >= 2 && (
@@ -3186,6 +3137,22 @@ export function PageViewerPage() {
       >
         {line.confidence !== null ? `${Math.round(line.confidence * 100)}%` : '–'}
       </span>
+      <span aria-hidden="true" className="mx-0.5 h-3.5 w-px shrink-0 bg-line" />
+      <span className={ACTION_SLOT}>
+        {line.needs_ocr ? (
+          <span title="Re-reading…" className="text-accent">
+            <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
+              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+          </span>
+        ) : canReread && (
+          <button type="button" onClick={(e) => { e.stopPropagation(); void reocrOneLine(line) }}
+                  title="Re-run OCR on this line" aria-label="Re-run OCR on this line" className={`${RAIL_BUTTON} hover:text-accent-ink`}>
+            <RereadIcon />
+          </button>
+        )}
+      </span>
     </>
   )
 
@@ -3208,7 +3175,6 @@ export function PageViewerPage() {
   const lineRow = (line: Line) => {
     const hot = hoveredLine === line.id || activeLine === line.id
     const over = dropLine === line.id
-    const taken = takenReading(line)
     return (
       <div
         key={line.id}
@@ -3260,46 +3226,21 @@ export function PageViewerPage() {
       >
         {lineContent(line, hot)}
         <span className={ACTION_SLOT}>
-        {canEdit && taken && (
-          <button
-            type="button"
-            data-testid="release-line-reading"
-            onClick={(e) => { e.stopPropagation(); void attachReading(taken, null) }}
-            title="Take this reading off the line and put it back in the list"
-            aria-label="Release this reading"
-            className="rounded px-0.5 text-ink-subtle hover:text-danger"
-          >
-            {/* A chain broken across the middle: the reading is let go of, not thrown
-                away. The cross beside it is what throws the line away. */}
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="M9 7H7a5 5 0 0 0 0 10h2M15 7h2a5 5 0 0 1 0 10h-2M9.5 12h5"
-                stroke="currentColor" strokeWidth="2" strokeLinecap="round"
-              />
-              <path d="M4 20 20 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </button>
-        )}
-        </span>
-        <span className={ACTION_SLOT}>
-        {canEdit && (
-          <button
-            data-testid="delete-line"
-            onClick={(e) => {
-              e.stopPropagation()
-              // A stray detection is deleted on the spot; a line somebody has corrected or
-              // checked is work, so it asks first even though Ctrl+Z would bring it back.
-              const own = line.checked || line.corrected_text !== null
-              if (own && !window.confirm('Delete this line? It carries a correction or a check.')) return
-              commitLineDelete(line.id)
-            }}
-            title="Delete this line and its box"
-            aria-label="Delete line"
-            className="rounded px-0.5 text-sm leading-none text-ink-subtle hover:text-danger"
-          >
-            ×
-          </button>
-        )}
+          {canEdit && (
+            <button type="button" data-testid="delete-line"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      // A stray detection is deleted on the spot; a line somebody has corrected or
+                      // checked is work, so it asks first even though Ctrl+Z would bring it back.
+                      const own = line.checked || line.corrected_text !== null
+                      if (own && !window.confirm('Delete this line? It carries a correction or a check.')) return
+                      commitLineDelete(line.id)
+                    }}
+                    title="Delete this line and its box" aria-label="Delete line"
+                    className={`${RAIL_BUTTON} hover:text-danger`}>
+              <TrashIcon />
+            </button>
+          )}
         </span>
         <PresenceAvatars entries={onTarget('line', line.id)} />
       </div>

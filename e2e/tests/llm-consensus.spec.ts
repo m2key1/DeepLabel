@@ -296,13 +296,16 @@ test.describe('Scenario: withdrawing the agreement that settled a line', () => {
 
       await openViewer(page, jobId, pageId)
 
-      // The settled line wears the reading the models agreed on, so it is released from
-      // its row. One voice short of the two the dataset asks for, the settlement has
-      // nothing left to rest on: the line reads what the OCR model said, under nobody.
+      // The settled line wears the reading the models agreed on: opened, it lists both
+      // readers' copies as in use, and one is released from there. One voice short of the
+      // two the dataset asks for, the settlement has nothing left to rest on: the line
+      // reads what the OCR model said, under nobody.
       const settledRow = page.getByTestId('line-row').filter({ hasText: 'Sample Header line 1' })
       await expect(settledRow.getByTestId('agree-badge')).toHaveText('2×')
-      await settledRow.hover()
-      await settledRow.getByTestId('release-line-reading').click()
+      await settledRow.click()
+      const inUse = page.getByTestId('line-candidate-in-use')
+      await expect(inUse).toHaveCount(2)
+      await inUse.first().getByTestId('release-candidate').click()
       await expect.poll(() => lineState(jobId, pageId, settled.id)).toEqual({
         corrected_text: null, corrected_by: null, llm_agree_count: 1, checked: false,
       })

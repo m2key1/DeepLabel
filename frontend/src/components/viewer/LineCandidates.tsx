@@ -1,5 +1,6 @@
 import type { LineCandidate } from '../../api'
 import { displayed, sameText } from '../../lib/text'
+import { TrashIcon, UnlinkIcon } from '../icons'
 import { commonest, diffWords } from './diff'
 import { readerName } from './readers'
 
@@ -66,12 +67,30 @@ export function LineCandidates({
   candidates, current, canEdit, activeId, onAccept, onRelease, onRemove, machine,
 }: LineCandidatesProps) {
   const offered = offeredReadings(candidates, current, machine)
-  if (offered.length === 0) return null
+  // The readings the line already says are listed too, so the one it wears can be let go
+  // of here rather than from the row; they are not offered, as choosing them changes nothing.
+  const inUse = candidates.filter((c) => sameText(c.text, current))
+  if (offered.length === 0 && inUse.length === 0) return null
   // What the line already says is the reference where there is one. Before anything is
   // settled there is none, so the readers are held against the reading most of them gave.
   const baseline = current || commonest(offered.map((c) => c.text))
   return (
     <div data-testid="line-candidates" className="ml-6 mt-0.5 space-y-0.5">
+      {inUse.map((candidate) => (
+        <div key={candidate.id} data-testid="line-candidate-in-use" data-source={candidate.source}
+             data-author={candidate.author} className="group flex items-start gap-1.5 rounded">
+          <span className="flex min-w-0 flex-1 items-start gap-1.5 px-0.5">
+            <span className="min-w-0 flex-1 whitespace-pre-wrap wrap-anywhere font-ocr text-xs text-ink-subtle">
+              {displayed(candidate.text)}
+            </span>
+            <span className="shrink-0 rounded bg-raised px-1 text-[10px] font-medium text-ink-muted">in use</span>
+            <span title={candidate.author} className={`${READER_CHIP} ${SOURCE_STYLE[candidate.source]}`}>
+              {readerName(candidate.source, candidate.author)}
+            </span>
+          </span>
+          <ReadingActions candidate={candidate} canEdit={canEdit} onRelease={onRelease} onRemove={onRemove} />
+        </div>
+      ))}
       {offered.map((candidate) => {
         const takeable = canEdit
         return (
@@ -106,8 +125,7 @@ export function LineCandidates({
               </span>
               {takeable && (
                 // The hint for what a click on the row does, not the target itself.
-                <span aria-hidden
-                      className="shrink-0 text-[10px] text-accent-ink opacity-0 group-hover:opacity-100">
+                <span aria-hidden className="shrink-0 rounded px-1 text-[10px] font-medium text-accent-ink">
                   Use
                 </span>
               )}
@@ -117,33 +135,47 @@ export function LineCandidates({
                 {readerName(candidate.source, candidate.author)}
               </span>
             </button>
-            {onRelease && canEdit && candidate.id !== MACHINE_ID && (
-              <button
-                type="button"
-                data-testid="release-candidate"
-                onClick={(e) => { e.stopPropagation(); onRelease(candidate) }}
-                title="Take this reading off the line and put it back in the list"
-                aria-label="Release this reading"
-                className="shrink-0 rounded px-0.5 text-[10px] text-ink-subtle hover:text-danger"
-              >
-                ×
-              </button>
-            )}
-            {onRemove && canEdit && candidate.source === 'llm' && (
-              <button
-                type="button"
-                data-testid="remove-candidate"
-                onClick={(e) => { e.stopPropagation(); onRemove(candidate) }}
-                title="Delete this language model reading for good"
-                aria-label="Delete this reading"
-                className="shrink-0 rounded px-0.5 text-[10px] text-ink-subtle opacity-0 group-hover:opacity-100 hover:text-danger focus-visible:opacity-100"
-              >
-                Delete
-              </button>
-            )}
+            <ReadingActions candidate={candidate} canEdit={canEdit} onRelease={onRelease} onRemove={onRemove} />
           </div>
         )
       })}
     </div>
+  )
+}
+
+function ReadingActions({ candidate, canEdit, onRelease, onRemove }: {
+  candidate: LineCandidate
+  canEdit: boolean
+  onRelease?: (candidate: LineCandidate) => void
+  onRemove?: (candidate: LineCandidate) => void
+}) {
+  if (!canEdit) return null
+  return (
+    <>
+      {onRelease && candidate.id !== MACHINE_ID && (
+        <button
+          type="button"
+          data-testid="release-candidate"
+          onClick={(e) => { e.stopPropagation(); onRelease(candidate) }}
+          title="Take this reading off the line and put it back in the list"
+          aria-label="Release this reading"
+          className="shrink-0 rounded px-0.5 text-ink-subtle hover:text-accent-ink"
+        >
+          <UnlinkIcon />
+        </button>
+      )}
+      {onRemove && candidate.source === 'llm' && (
+        <button
+          type="button"
+          data-testid="remove-candidate"
+          onClick={(e) => { e.stopPropagation(); onRemove(candidate) }}
+          title="Delete this language model reading for good"
+          aria-label="Delete this reading"
+          className="shrink-0 rounded px-0.5 text-ink-subtle hover:text-danger"
+        >
+          <TrashIcon />
+        </button>
+      )}
+    </>
   )
 }

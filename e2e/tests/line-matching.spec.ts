@@ -109,17 +109,17 @@ test.describe('Scenario: a reading that matched no line', () => {
     await page.getByTestId('line-row').filter({ hasText: TARGET }).click()
     await expect.poll(async () => (await stray(pageId)).line_id).toBe(target.id)
 
-    // The line reads as the dropped reading now, so that is what names its row - and the
-    // reading being the line is why it is released from there rather than from the list.
+    // The line reads as the dropped reading now, so that is what names its row. Opened, it
+    // lists that reading as in use - not offered, since choosing it would change nothing -
+    // and lets it go from there.
     const row = page.getByTestId('line-row').filter({ hasText: STRAY })
     await row.click()
     await expect(page.getByTestId('line-candidate').filter({ hasText: STRAY })).toHaveCount(0)
-    // Two buttons on the row, one destructive: the cross belongs to the one that throws
-    // the line away, and releasing a reading carries its own mark.
-    await row.hover()
-    await expect(row.getByTestId('delete-line')).toHaveText('\u00d7')
-    await expect(row.locator('button', { hasText: /^\u00d7$/ })).toHaveCount(1)
-    await row.getByTestId('release-line-reading').click()
+    const inUse = page.getByTestId('line-candidate-in-use').filter({ hasText: STRAY })
+    await expect(inUse).toHaveCount(1)
+    await expect(inUse.getByTestId('release-candidate')).toHaveAccessibleName('Release this reading')
+    await expect(row.getByTestId('delete-line')).toHaveAccessibleName('Delete line')
+    await inUse.getByTestId('release-candidate').click()
 
     await expect.poll(async () => (await stray(pageId)).line_id).toBeNull()
     // Back in the panel, beside the reading it displaced when it landed.
