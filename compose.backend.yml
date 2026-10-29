@@ -47,6 +47,11 @@ services:
       MAX_ZIP_EXTRACT_GB: ${MAX_ZIP_EXTRACT_GB:-50}
       MAX_IMAGE_PIXELS: ${MAX_IMAGE_PIXELS:-1000000000}
       INGEST_ROOTS: ${INGEST_ROOTS:-}
+      # IIIF imports; see .env.backend.example.
+      IIIF_MAX_WIDTH: ${IIIF_MAX_WIDTH:-6000}
+      IIIF_MAX_MB: ${IIIF_MAX_MB:-50}
+      IIIF_MAX_PAGES: ${IIIF_MAX_PAGES:-2000}
+      IIIF_ALLOWED_HOSTS: ${IIIF_ALLOWED_HOSTS:-}
       # LLM pre-annotation. Connections and keys are per person, set up under Settings;
       # this only decides whether the feature exists and how its keys are encrypted at
       # rest. See .env.backend.example.

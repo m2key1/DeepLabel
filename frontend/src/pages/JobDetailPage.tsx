@@ -30,12 +30,13 @@ import {
   PHASE_CAPABILITY,
   uploadPages,
   listPageRows,
+  retryIiifDownloads,
   ApiError,
 } from '../api'
 import type {
   JobEvent, NewerModelOffer, JobWithoutPages, LlmReadStatus, MapClass, PageDetail,
   PageFilter as PageFilterKey, PagePhase, PageRows, PageSort, PageSummary, PurgeManifest, Region,
-  ReviewQueue, StaleLines, UnreadablePage,
+  ReviewQueue, StaleLines, UnreadablePage, IiifSource,
 } from '../api'
 import { useAuth } from '../auth'
 import { useCommand } from '../commands'
@@ -1148,7 +1149,7 @@ export function JobDetailPage() {
                 </Button>
                 {exportOpen && (
                   <div className={`absolute right-0 top-full z-10 mt-1 overflow-hidden ${popoverChrome}`}>
-                    <ExportMenu jobId={jobId} onPicked={() => setExportOpen(false)} />
+                    <ExportMenu jobId={jobId} iiif={!!job.iiif_source} onPicked={() => setExportOpen(false)} />
                   </div>
                 )}
               </div>
@@ -1198,11 +1199,21 @@ export function JobDetailPage() {
             </span>
           )}
         </p>
+        {job.iiif_source && <IiifSourceLine source={job.iiif_source} />}
         <div className="mt-1.5">
           <PhaseStrip job={job} />
         </div>
         {job.error && <p className="mt-2 text-sm text-danger">{job.error}</p>}
-        {!!job.unreadable?.length && <UnreadablePages pages={job.unreadable} />}
+        {!!job.unreadable?.length && (
+          <UnreadablePages pages={job.unreadable} onRetry={canOwn && !active ? async () => {
+            try {
+              await retryIiifDownloads(jobId)
+              refetch()
+            } catch (err) {
+              setError((err as Error).message)
+            }
+          } : undefined} />
+        )}
         {error && <p className="mt-2 text-sm text-danger">{error}</p>}
         {notice && (
           <p data-testid="job-notice" className="mt-2 text-sm text-ink-muted">
@@ -1642,18 +1653,52 @@ export function JobDetailPage() {
 }
 
 
-function UnreadablePages({ pages }: { pages: UnreadablePage[] }) {
-  const one = pages.length === 1
+function UnreadablePages({ pages, onRetry }: { pages: UnreadablePage[]; onRetry?: () => void }) {
+  const files = pages.filter((page) => !page.iiif)
+  const downloads = pages.filter((page) => page.iiif)
+  const one = (list: UnreadablePage[]) => list.length === 1
   return (
     <div data-testid="unreadable-pages" className="mt-2 text-sm text-danger">
-      <p>
-        {one ? 'One file' : `${pages.length} files`} could not be read as an image and {one ? 'was' : 'were'} left
-        out - delete {one ? 'it' : 'them'} and upload a readable copy.
-      </p>
-      <ul className="ml-4 list-disc">
-        {pages.map((page) => <li key={page.id}>{page.error}</li>)}
-      </ul>
+      {files.length > 0 && (<>
+        <p>
+          {one(files) ? 'One file' : `${files.length} files`} could not be read as an image and{' '}
+          {one(files) ? 'was' : 'were'} left out - delete {one(files) ? 'it' : 'them'} and upload a readable copy.
+        </p>
+        <ul className="ml-4 list-disc">
+          {files.map((page) => <li key={page.id}>{page.error}</li>)}
+        </ul>
+      </>)}
+      {downloads.length > 0 && (<>
+        <p data-testid="iiif-failed">
+          {one(downloads) ? 'One page' : `${downloads.length} pages`} could not be downloaded from the image server
+          and {one(downloads) ? 'is' : 'are'} left out for now.
+          {onRetry && (
+            <button type="button" data-testid="iiif-retry" onClick={onRetry} className="ml-2 font-medium underline">
+              Retry
+            </button>
+          )}
+        </p>
+        <ul className="ml-4 list-disc">
+          {downloads.map((page) => <li key={page.id}>{page.error}</li>)}
+        </ul>
+      </>)}
     </div>
+  )
+}
+
+/** Where a IIIF dataset came from, as the archive asks to be credited. */
+function IiifSourceLine({ source }: { source: IiifSource }) {
+  const rightsLink = /^https?:\/\//.test(source.rights)
+  return (
+    <p data-testid="iiif-source-line" className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-muted">
+      <Badge tone="accent" className="shrink-0">IIIF</Badge>
+      {source.attribution && <span data-testid="iiif-source-attribution">{source.attribution}</span>}
+      {source.rights && (rightsLink
+        ? <a href={source.rights} target="_blank" rel="noreferrer" className="text-accent-ink hover:underline">{source.rights}</a>
+        : <span>{source.rights}</span>)}
+      <a data-testid="iiif-source-manifest" href={source.manifest} target="_blank" rel="noreferrer"
+         className="text-accent-ink hover:underline">manifest ↗</a>
+    </p>
   )
 }
 

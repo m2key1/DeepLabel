@@ -96,7 +96,8 @@ class TestUnreadableScans:
         finally:
             app.dependency_overrides.clear()
 
-        expected = [{'id': bad, 'filename': 'b.png', 'error': 'b.png could not be read: the file is empty'}]
+        expected = [{'id': bad, 'filename': 'b.png', 'error': 'b.png could not be read: the file is empty',
+                     'iiif': False}]
         assert full['unreadable'] == expected
         assert lean['unreadable'] == expected
         assert (full['pages_live'], full['tiles_total']) == (1, 1)

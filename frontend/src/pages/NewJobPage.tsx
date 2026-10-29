@@ -1,18 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
-  PHASE_CAPABILITY, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromPath,
-  ApiError, getEnabledTasks, getLayoutTemplates, getMapModels, importJob, isTileTask, listConventionFlags,
+  PHASE_CAPABILITY, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromIiif,
+  createJobFromPath, iiifThumbnailUrl, ApiError, getEnabledTasks, getLayoutTemplates, getMapModels, importJob, isTileTask, listConventionFlags,
   listModels, uploadJob,
 } from '../api'
 import type {
-  ConventionFlag, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, OcrDecode,
+  ConventionFlag, JobOptions, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, OcrDecode,
   Phases, RegistryModel, Task,
 } from '../api'
 import { useAuth } from '../auth'
 import { conventionLabel } from '../components/conventionLabel'
 import { ConventionFlags, flagsOn, toggledFlag } from '../components/job/ConventionFlags'
-import { PagePicker } from '../components/job/PagePicker'
+import { IiifSource, NO_IIIF } from '../components/job/IiifSource'
+import type { IiifChoice } from '../components/job/IiifSource'
+import { PagePicker, useFileItems } from '../components/job/PagePicker'
 import { LINE_MODE_CHOICES, NEEDS_LAYOUT, PHASE_CHOICES } from '../components/job/processing'
 import { Stepper } from '../components/ui/Stepper'
 import { SkippedSymlinks } from '../components/job/SkippedSymlinks'
@@ -23,7 +25,7 @@ import { PageHeader } from '../components/ui/PageHeader'
 import { pageShell } from '../components/ui/page'
 import { useAutoClear } from '../messages'
 
-type Mode = 'upload' | 'path'
+type Mode = 'upload' | 'iiif' | 'path'
 type Step = 'source' | 'pages' | 'run' | 'models' | 'review'
 
 const STEP_LABEL: Record<Step, string> = {
@@ -68,6 +70,12 @@ function NewJobSummary({ rows, onEdit, full = false }: {
 const INGEST_EXTENSIONS = /\.(jpe?g|png|tiff?|bmp|webp|pdf|txt|zip)$/i
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|tiff?|bmp|webp)$/i
 const EXPORT_ARCHIVE = /\.zip$/i
+function toggled<K>(held: Set<K>, key: K): Set<K> {
+  const next = new Set(held)
+  if (!next.delete(key)) next.add(key)
+  return next
+}
+
 const READING_OFF = 'OCR is off for this dataset, so nothing is matched or cut until its pages are read.'
 
 export function NewJobPage() {
@@ -83,6 +91,8 @@ export function NewJobPage() {
   const [files, setFiles] = useState<File[]>([])
   const [skipped, setSkipped] = useState(0)
   const [serverPath, setServerPath] = useState('')
+  const [iiif, setIiif] = useState<IiifChoice>(NO_IIIF)
+  const [iiifExcluded, setIiifExcluded] = useState<Set<string>>(new Set())
   const [lineMode, setLineMode] = useState<LineMode>('per_page')
   const [structure, setStructure] = useState('auto')
   const [templates, setTemplates] = useState<LayoutTemplate[]>([])
@@ -237,13 +247,19 @@ export function NewJobPage() {
     : `${pairedCount} of ${imageStems.size} ${pageWord(imageStems.size)}`
 
   // The scans themselves, which the Pages step shows; transcriptions travel with them.
-  const pageFiles = files.filter((f) => !/\.(txt|zip)$/i.test(f.name))
+  const pageFiles = useMemo(() => files.filter((f) => !/\.(txt|zip)$/i.test(f.name)), [files])
+  const fileItems = useFileItems(pageFiles)
+  const manifest = mode === 'iiif' ? iiif.manifest : null
+  const canvasItems = useMemo(() => (iiif.manifest?.canvases ?? []).map((c, i) => ({
+    key: c.canvas, name: `${i + 1} · ${c.label || 'untitled'}`, preview: iiifThumbnailUrl(c.thumbnail),
+  })), [iiif.manifest])
+  const canvasesKept = (manifest?.canvases ?? []).filter((c) => !iiifExcluded.has(c.canvas))
   const sentFiles = files.filter((f) => !excluded.has(f))
   const ocrModel = models.find((m) => (picks.ocr === '' ? m.task === 'ocr' && m.is_default : m.id === Number(picks.ocr)))
 
   const applies: Record<Step, boolean> = {
     source: true,
-    pages: mode === 'upload' && !archive && pageFiles.length > 0,
+    pages: (mode === 'upload' && !archive && pageFiles.length > 0) || manifest !== null,
     // An imported dataset is already segmented and transcribed: nothing is run on it.
     run: !archive,
     // A map job picks its model with what it runs.
@@ -269,8 +285,16 @@ export function NewJobPage() {
           : 'Select at least one image or PDF'
         : mode === 'path' && serverPath.trim() === ''
           ? 'Enter an absolute server directory path'
-          : null,
-    pages: applies.pages && pageFiles.every((f) => excluded.has(f)) ? 'Leave at least one page in' : null,
+          : mode === 'iiif' && manifest === null
+            ? 'Load a IIIF manifest'
+            : null,
+    pages: !applies.pages
+      ? null
+      : manifest
+        ? canvasesKept.length === 0
+          ? 'Leave at least one page in'
+          : canvasesKept.length > manifest.max_pages ? `Choose at most ${manifest.max_pages} pages` : null
+        : pageFiles.every((f) => excluded.has(f)) ? 'Leave at least one page in' : null,
     run: applies.run && isMap && effectivePhases.tile && !tileSizeValid
       ? `Choose a tile size from ${TILE_SIZE_MIN} to ${TILE_SIZE_MAX} px`
       : null,
@@ -291,12 +315,16 @@ export function NewJobPage() {
       label: 'Source',
       value: mode === 'path'
         ? serverPath.trim() || '-'
-        : archive ? `${archive.name}, imported as it is` : `${pageFiles.length} file${pageFiles.length === 1 ? '' : 's'}`,
+        : mode === 'iiif'
+          ? manifest ? `IIIF - ${manifest.label || manifest.url}` : '-'
+          : archive ? `${archive.name}, imported as it is` : `${pageFiles.length} file${pageFiles.length === 1 ? '' : 's'}`,
       step: 'source',
     },
     ...(applies.pages ? [{
       label: 'Pages', step: 'pages' as Step,
-      value: `${pageFiles.filter((f) => !excluded.has(f)).length} of ${pageFiles.length} included`,
+      value: manifest
+        ? `${canvasesKept.length} of ${manifest.canvases.length} included`
+        : `${pageFiles.filter((f) => !excluded.has(f)).length} of ${pageFiles.length} included`,
     }] : []),
     ...(applies.run && !isMap ? [
       { label: 'Runs', step: 'run' as Step,
@@ -318,6 +346,18 @@ export function NewJobPage() {
       }] : []),
     ] : []),
   ]
+
+  const jobOptions = (): JobOptions => ({
+    name: name.trim(), line_mode: effectiveLineMode, page_reading_order: structure, task,
+    model_id: isMap ? modelId || null : null,
+    run_layout: effectivePhases.layout, run_lines: effectivePhases.lines, run_ocr: effectivePhases.ocr,
+    run_predict: effectivePhases.predict, run_tile: effectivePhases.tile, tile_size: tileSize,
+    tile_skip_blank: skipBlank, line_width: lineWidth,
+    model_layout_id: modelPicks.layout ?? null, model_lines_id: modelPicks.lines ?? null,
+    model_ocr_id: modelPicks.ocr ?? null, ocr_decode: ocrDecode, gt_autocheck: gtAutocheck,
+    gt_ordered: gtOrdered, gt_from_pdf: gtFromPdf, layout_template_id: isMap ? null : templateId,
+    ocr_convention: ran('ocr') && !isMap ? convention : {},
+  })
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -367,12 +407,10 @@ export function NewJobPage() {
         }
       } else if (mode === 'upload') {
         job_id = (await upload(sentFiles)).job_id
+      } else if (manifest) {
+        job_id = (await createJobFromIiif(manifest.url, canvasesKept.map((c) => c.canvas), jobOptions())).job_id
       } else {
-        const res = await createJobFromPath(
-          name.trim(), serverPath.trim(), effectiveLineMode, effectivePhases, task,
-          isMap ? modelId || null : null, tileSize, skipBlank, lineWidth,
-          modelPicks, ocrDecode, gtAutocheck, gtOrdered, gtFromPdf, structure, isMap ? null : templateId,
-          ran('ocr') && !isMap ? convention : {})
+        const res = await createJobFromPath(serverPath.trim(), jobOptions())
         if (res.skipped_symlinks.length > 0) {
           setBusy(false)
           setMadeWithSkips({ jobId: res.job_id, skipped: res.skipped_symlinks })
@@ -442,6 +480,7 @@ export function NewJobPage() {
                       title={offered ? undefined : 'Not enabled on this deployment'}
                       onClick={() => {
                         setTask(value)
+                        if (isTileTask(value) && mode === 'iiif') setMode('upload')
                         // A PDF picked for a text job must not linger when switching to map.
                         setFiles((prev) => prev.filter((f) => (isTileTask(value) ? IMAGE_EXTENSIONS : INGEST_EXTENSIONS).test(f.name)))
                       }}
@@ -462,6 +501,11 @@ export function NewJobPage() {
               <button type="button" onClick={() => setMode('upload')} className={tabClass('upload')}>
                 Upload files
               </button>
+              {!isMap && (
+                <button type="button" data-testid="source-iiif" onClick={() => setMode('iiif')} className={tabClass('iiif')}>
+                  IIIF
+                </button>
+              )}
               {isAdmin && (
                 <button type="button" onClick={() => setMode('path')} className={tabClass('path')}>
                   Server path
@@ -643,6 +687,11 @@ export function NewJobPage() {
                   <p data-testid="reading-off" className="mt-2 text-sm text-warn">{READING_OFF}</p>
                 )}
               </div>
+            ) : mode === 'iiif' ? (
+              <IiifSource value={iiif} onChange={(next) => {
+                if (next.manifest !== iiif.manifest) setIiifExcluded(new Set())
+                setIiif(next)
+              }} />
             ) : (
               <div>
                 <label htmlFor="server-path" className="mb-1 block text-sm font-medium text-ink">
@@ -711,15 +760,16 @@ export function NewJobPage() {
               </div>
             )}
         </>)}
-        {step === 'pages' && (
-          <PagePicker files={pageFiles} excluded={excluded}
-                      onToggle={(file) => setExcluded((held) => {
-                        const next = new Set(held)
-                        if (!next.delete(file)) next.add(file)
-                        return next
-                      })}
-                      onAll={(included) => setExcluded(included ? new Set() : new Set(pageFiles))} />
-        )}
+        {step === 'pages' && (manifest ? (
+          <PagePicker items={canvasItems} excluded={iiifExcluded} unit="page" onExclude={setIiifExcluded}
+                      onToggle={(key) => setIiifExcluded((held) => toggled(held, key))}
+                      note="Thumbnails come from the archive's image server; the full images are downloaded when the dataset starts." />
+        ) : (
+          <PagePicker items={fileItems} excluded={excluded} onExclude={setExcluded}
+                      onToggle={(file) => setExcluded((held) => toggled(held, file))}
+                      note={pageFiles.some((f) => /\.pdf$/i.test(f.name))
+                        ? "A PDF's pages are split once it is uploaded, so it is taken whole here." : undefined} />
+        ))}
         {step === 'run' && (<>
             {!isMap && (
             /* An imported dataset is already segmented and transcribed, so every

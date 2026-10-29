@@ -1,6 +1,6 @@
 export type JobStatus = 'uploading' | 'queued' | 'running' | 'done' | 'error' | 'cancelled'
 export type Phase = 'ingest' | 'layout' | 'lines' | 'ocr' | 'predict' | 'tile'
-export type ExportFormat = 'json' | 'md' | 'txt' | 'zip' | 'page' | 'alto' | 'hocr' | 'tei'
+export type ExportFormat = 'json' | 'md' | 'txt' | 'zip' | 'page' | 'alto' | 'hocr' | 'tei' | 'iiif'
 export type Task = 'text' | 'map_segmentation' | 'map_lines'
 
 // Both map tasks annotate tiles: same ingest/tiling/classes/export machinery, same
@@ -73,6 +73,8 @@ export interface Job {
   ocr_convention?: OcrConvention
   /** The flags the last OCR run could honour; null before any run recorded them. */
   ocr_convention_read?: string[] | null
+  /** The IIIF manifest it was imported from; null for any other dataset. */
+  iiif_source?: IiifSource | null
   /** Whether layout elements are boxes or outlines. */
   layout_shape?: LayoutShape
   /** Language models this dataset is read with, and how its agreement is settled. */
@@ -175,6 +177,16 @@ export interface UnreadablePage {
   id: number
   filename: string
   error: string
+  /** Imported from IIIF, so it can be downloaded again. */
+  iiif: boolean
+}
+
+/** The manifest a dataset was imported from, which every export carries. */
+export interface IiifSource {
+  manifest: string
+  label: string
+  attribution: string
+  rights: string
 }
 
 export interface JobDetail extends Job {
@@ -1112,50 +1124,72 @@ export function importJob(
   return uploadForm('/api/jobs/import', form, onProgress)
 }
 
+/** What a dataset made from a server path or a IIIF manifest runs, as the API takes it. */
+export interface JobOptions {
+  name: string
+  line_mode: LineMode
+  page_reading_order: string
+  task: Task
+  model_id: string | null
+  run_layout: boolean
+  run_lines: boolean
+  run_ocr: boolean
+  run_predict: boolean
+  run_tile: boolean
+  tile_size: number
+  tile_skip_blank: boolean
+  line_width: number
+  model_layout_id: number | null
+  model_lines_id: number | null
+  model_ocr_id: number | null
+  ocr_decode: OcrDecode
+  gt_autocheck: boolean
+  gt_ordered: boolean
+  gt_from_pdf: boolean
+  layout_template_id: number | null
+  ocr_convention: OcrConvention
+}
+
 export function createJobFromPath(
-  name: string,
-  serverPath: string,
-  lineMode: LineMode,
-  phases: Phases,
-  task: Task = 'text',
-  modelId?: string | null,
-  tileSize = 512,
-  skipBlank = true,
-  lineWidth = 3,
-  models?: ModelPicks,
-  ocrDecode?: OcrDecode,
-  gtAutocheck?: boolean,
-  gtOrdered?: boolean,
-  gtFromPdf?: boolean,
-  readingOrder = 'auto',
-  layoutTemplateId?: number | null,
-  ocrConvention: OcrConvention = {},
+  serverPath: string, options: JobOptions,
 ): Promise<{ job_id: string; skipped_symlinks: string[] }> {
-  return request('/api/jobs/path', json('POST', {
-    name,
-    server_path: serverPath,
-    line_mode: lineMode,
-    page_reading_order: readingOrder,
-    task,
-    model_id: modelId ?? null,
-    run_layout: phases.layout,
-    run_lines: phases.lines,
-    run_ocr: phases.ocr,
-    run_predict: phases.predict,
-    run_tile: phases.tile,
-    tile_size: tileSize,
-    tile_skip_blank: skipBlank,
-    line_width: lineWidth,
-    model_layout_id: models?.layout ?? null,
-    model_lines_id: models?.lines ?? null,
-    model_ocr_id: models?.ocr ?? null,
-    ocr_decode: ocrDecode ?? 'beam',
-    gt_autocheck: gtAutocheck ?? false,
-    gt_ordered: gtOrdered ?? false,
-    gt_from_pdf: gtFromPdf ?? false,
-    layout_template_id: layoutTemplateId ?? null,
-    ocr_convention: ocrConvention,
-  }))
+  return request('/api/jobs/path', json('POST', { ...options, server_path: serverPath }))
+}
+
+export interface IiifCanvas {
+  canvas: string
+  label: string
+  width: number | null
+  height: number | null
+  image: string
+  thumbnail: string
+}
+
+export type IiifInspection =
+  | ({ kind: 'manifest'; url: string; version: 2 | 3; canvases: IiifCanvas[]; max_pages: number; max_width: number }
+     & Omit<IiifSource, 'manifest'>)
+  | { kind: 'collection'; url: string; label: string; max_pages: number
+      members: { url: string; label: string; kind: 'manifest' | 'collection' }[] }
+
+/** A manifest's pages or a collection's members, read by the backend. */
+export function inspectIiif(url: string): Promise<IiifInspection> {
+  return request('/api/iiif/inspect', json('POST', { url }))
+}
+
+/** A canvas thumbnail, fetched through the backend. */
+export function iiifThumbnailUrl(url: string): string {
+  return `/api/iiif/thumbnail?url=${encodeURIComponent(url)}`
+}
+
+export function createJobFromIiif(
+  manifest: string, canvases: string[], options: JobOptions,
+): Promise<{ job_id: string; pages: number }> {
+  return request('/api/jobs/iiif', json('POST', { ...options, manifest, canvases }))
+}
+
+/** Download again the IIIF pages whose image could not be fetched. */
+export function retryIiifDownloads(jobId: string): Promise<{ retried: number }> {
+  return request(`/api/jobs/${jobId}/iiif/retry`, json('POST', {}))
 }
 
 export function uploadPages(

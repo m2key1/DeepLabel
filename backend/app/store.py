@@ -76,7 +76,10 @@ CREATE TABLE IF NOT EXISTS jobs (
     reference_overlap INTEGER NOT NULL DEFAULT 2,
     -- Highest map class id removed from the palette. New classes are numbered above it,
     -- since masks and predictions made under a removed id still carry it.
-    max_retired_class_id INTEGER NOT NULL DEFAULT 0
+    max_retired_class_id INTEGER NOT NULL DEFAULT 0,
+    -- The IIIF manifest a dataset was imported from (JSON): its URL, label, attribution
+    -- and rights, which every export carries. NULL for any other dataset.
+    iiif_source TEXT
 );
 CREATE TABLE IF NOT EXISTS pages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,7 +118,10 @@ CREATE TABLE IF NOT EXISTS pages (
     is_test INTEGER NOT NULL DEFAULT 0,
     note TEXT,
     note_by TEXT,
-    note_at TEXT
+    note_at TEXT,
+    -- A page imported from IIIF (JSON): its canvas, label and size, and the image URL it
+    -- is downloaded from at ingest. NULL for every other page.
+    iiif TEXT
 );
 -- Full map scans awaiting/after tiling (run_tile map jobs). A map is the source of
 -- tiles, never annotated itself; its tiles are ordinary pages referencing it via
@@ -816,6 +822,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE pages ADD COLUMN origin_file TEXT')
     if 'error' not in page_cols:
         conn.execute('ALTER TABLE pages ADD COLUMN error TEXT')
+    if 'iiif' not in page_cols:
+        conn.execute('ALTER TABLE pages ADD COLUMN iiif TEXT')
     if 'layout_model_id' not in page_cols:
         # The layout and lines models that last ran on this page, and when.
         for stage in ('layout', 'lines'):
@@ -871,6 +879,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE jobs ADD COLUMN line_width INTEGER NOT NULL DEFAULT 3')
     if 'max_retired_class_id' not in job_cols:
         conn.execute('ALTER TABLE jobs ADD COLUMN max_retired_class_id INTEGER NOT NULL DEFAULT 0')
+    if 'iiif_source' not in job_cols:
+        conn.execute('ALTER TABLE jobs ADD COLUMN iiif_source TEXT')
     model_cols = {row[1] for row in conn.execute('PRAGMA table_info(llm_models)')}
     if 'max_tokens' not in model_cols:
         conn.execute('ALTER TABLE llm_models ADD COLUMN max_tokens INTEGER')
@@ -1399,6 +1409,7 @@ def job_row_to_dict(row: sqlite3.Row) -> dict:
     job['llm_model_ids'] = json.loads(job.get('llm_model_ids') or '[]')
     job['gt_model_ids'] = json.loads(job.get('gt_model_ids') or '[]')
     job['ocr_convention'] = json.loads(job.get('ocr_convention') or '{}')
+    job['iiif_source'] = json.loads(job['iiif_source']) if job.get('iiif_source') else None
     read = job.get('ocr_convention_read')
     job['ocr_convention_read'] = json.loads(read) if read is not None else None
     job['llm_consensus_min'] = int(job.get('llm_consensus_min') or 2)

@@ -41,6 +41,9 @@ services:
       MODEL_BACKEND_EDGES_URL: http://model-stub:9100
       MODEL_BACKEND_EDGES_SECRET: e2e-model-secret
       MODEL_BACKEND_FETCH_URL: http://backend:8000
+      # The fixture IIIF archive sits on the stack's own network, which the address
+      # checks would otherwise refuse.
+      IIIF_ALLOWED_HOSTS: iiif
 
   # A deterministic OpenAI-compatible provider (e2e/stub/llm/server.py). It runs under the
   # backend image because that image already has a python and the stub is pure stdlib.
@@ -54,6 +57,15 @@ services:
       - ./e2e/stub:/stub:ro
     ports:
       - "${E2E_LLM_PORT:-8002}:8000"
+
+  # A small IIIF archive (e2e/stub/iiif/server.py): manifests, a collection and an image
+  # service, under the backend image for its python and Pillow.
+  iiif:
+    build: ./backend
+    container_name: deeplabel-e2e-iiif
+    command: ["python", "/stub/iiif/server.py"]
+    volumes:
+      - ./e2e/stub:/stub:ro
 
   # Every task, deterministic and torch-free, served over the model backend contract.
   # Built from a checkout of the deeplabel-backends repository, beside this one unless

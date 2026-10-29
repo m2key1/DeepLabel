@@ -58,8 +58,16 @@ dataset at hand, such as models for a map or a transcribed import, is skipped.
 - Upload images, PDFs, a zip of scans, or a transcribed dataset as a zip, or (admins)
   point at a folder on the server. The form lists every file and lets you remove any
   before sending.
-- **Pages** shows the uploaded scans as thumbnails; untick any to leave it out. A PDF is
-  split into pages once it is uploaded, so it is taken whole here.
+- Or paste a **IIIF** manifest address (Presentation API 2 or 3) for a text dataset; a
+  collection lists its manifests to choose from. The form shows the manifest's title, page
+  count, attribution and rights. The pages are downloaded through the archive's image server
+  when the dataset starts, no wider than the deployment allows, and from then on behave like
+  uploaded scans. A page whose image cannot be downloaded is left out with the reason and can
+  be fetched again with **Retry** on the dataset page. The dataset keeps its manifest,
+  attribution and rights, shows them under its name, and every export carries them. Private
+  and internal addresses are never fetched.
+- **Pages** shows the scans as thumbnails; untick any to leave it out, or give a range such
+  as `3-22, 35`. A PDF is split into pages once it is uploaded, so it is taken whole here.
 - Choose which phases run: layout detection, line detection and OCR. Layout is off by
   default; lines are then detected on the whole page. With layout on, lines can be detected
   inside each layout box instead.
@@ -241,6 +249,9 @@ Press `e` to edit the page.
 - Export a dataset as PAGE XML, ALTO, hOCR or TEI with its scans, as JSON, Markdown, plain
   text or DeepLabel's own zip, either complete or only what was reviewed. Lines inside
   tables and other containers are included.
+- A dataset imported from IIIF also exports as **IIIF Web Annotations**: one annotation page
+  per canvas, each line with its text placed on the original canvas, so an archive can show
+  the transcription in its own viewer (Mirador, Universal Viewer).
 - A DeepLabel zip export can be uploaded to another instance and arrives with its classes,
   text, corrections and review state intact.
 

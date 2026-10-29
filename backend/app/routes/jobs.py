@@ -1,19 +1,20 @@
 import asyncio
 import json
 import math
+import re
 from datetime import datetime, timezone
 import shutil
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
-from app import (blobs, caches, config, consensus, conventions, corpus, decode, evaluator, geometry, layout_templates,
-                 imports, ingest, jobs, llm, map_classes, model_registry, page_rows, queue_eta, reading_order,
-                 registry, schemas, store, trainer)
+from app import (blobs, caches, config, consensus, conventions, corpus, decode, evaluator, geometry, iiif,
+                 imports, ingest, jobs, layout_templates, llm, map_classes, model_registry, page_rows, queue_eta,
+                 reading_order, registry, schemas, store, trainer)
 from app.deps import (can_access_job, can_reach_group, check_capability, current_user, get_db, get_user,
                       require_job_access, require_job_owner, require_role)
 
@@ -297,9 +298,8 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True),
     return {'job_id': job_id, 'format': pages[0].get('format'), **counts}
 
 
-class PathJob(BaseModel):
+class JobOptions(BaseModel):
     name: str
-    server_path: str
     line_mode: str = 'per_crop'
     task: str = 'text'
     run_layout: bool = True
@@ -323,15 +323,20 @@ class PathJob(BaseModel):
     ocr_convention: dict[str, bool] = {}
 
 
-@router.post('/api/jobs/path')
-def create_job_from_path(body: PathJob, conn=Depends(get_db), user: str = Depends(get_user),
-                         _admin=Depends(require_role('admin'))):
-    """Create a dataset from a directory that already sits on the backend host."""
+class PathJob(JobOptions):
+    server_path: str
+
+
+class IiifJob(JobOptions):
+    manifest: str
+    canvases: list[str]
+
+
+def _checked_options(conn, body: JobOptions, grants) -> dict:
+    """What a JSON-created dataset will run, once everything that can refuse it has been asked."""
     ingest.valid_task(body.task)
     ingest.valid_line_mode(body.line_mode)
-    name = ingest.require_unique_name(conn, body.name)
     is_map = ingest.is_tile_task(body.task)
-    extensions = config.IMAGE_EXTENSIONS if is_map else config.INGEST_EXTENSIONS
     models = {'layout': body.model_layout_id, 'lines': body.model_lines_id, 'ocr': body.model_ocr_id}
     for _mtask, _mid in models.items():
         if _mid is not None:
@@ -340,7 +345,7 @@ def create_job_from_path(body: PathJob, conn=Depends(get_db), user: str = Depend
     run_layout, run_lines, run_ocr, line_mode = ingest.coherent_phases(
         not is_map and body.run_layout, not is_map and body.run_lines,
         not is_map and body.run_ocr, body.line_mode)
-    _require_phase_grants(_admin, run_layout=run_layout, run_lines=run_lines, run_ocr=run_ocr)
+    _require_phase_grants(grants, run_layout=run_layout, run_lines=run_lines, run_ocr=run_ocr)
     run_predict = body.run_predict and is_map  # prediction is a map-only phase
     run_tile = body.run_tile and is_map        # tiling is a map-only phase
     tile_size = _valid_map_phases(run_tile, run_predict, body.tile_size)
@@ -349,36 +354,54 @@ def create_job_from_path(body: PathJob, conn=Depends(get_db), user: str = Depend
         raise HTTPException(400, f'reading order must be one of {list(reading_order.CHOICES)}')
     model_id, seed_classes = _resolve_map_model(conn, is_map, body.model_id, run_predict, body.task)
     _require_layout_template(conn, body.layout_template_id)
-    convention = _valid_convention(body.ocr_convention)
+    return {'name': ingest.require_unique_name(conn, body.name), 'is_map': is_map, 'models': models,
+            'run_layout': run_layout, 'run_lines': run_lines, 'run_ocr': run_ocr, 'line_mode': line_mode,
+            'run_predict': run_predict, 'run_tile': run_tile, 'tile_size': tile_size, 'line_width': line_width,
+            'model_id': model_id, 'seed_classes': seed_classes,
+            'convention': _valid_convention(body.ocr_convention),
+            'gt_from_pdf': body.gt_from_pdf and not is_map}  # map jobs have no transcriptions at all
+
+
+def _insert_job(conn, job_id: str, user: str, body: JobOptions, o: dict,
+                source_path: str | None = None, iiif_source: dict | None = None) -> None:
+    conn.execute(
+        'INSERT INTO jobs (id, name, owner, source_path, iiif_source, line_mode, task, run_layout, run_lines, '
+        'run_ocr, run_predict, model_id, run_tile, tile_size, tile_skip_blank, line_width, '
+        'model_layout_id, model_lines_id, model_ocr_id, ocr_decode, gt_autocheck, gt_ordered, '
+        'gt_from_pdf, reading_order) '
+        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        (job_id, o['name'], user, source_path, json.dumps(iiif_source) if iiif_source else None,
+         o['line_mode'], body.task, int(o['run_layout']), int(o['run_lines']), int(o['run_ocr']),
+         int(o['run_predict']), o['model_id'], int(o['run_tile']), o['tile_size'], int(body.tile_skip_blank),
+         o['line_width'], o['models']['layout'], o['models']['lines'], o['models']['ocr'], body.ocr_decode,
+         int(body.gt_autocheck), int(body.gt_ordered), int(o['gt_from_pdf']), body.page_reading_order))
+    _set_convention(conn, job_id, o['convention'])
+
+
+@router.post('/api/jobs/path')
+def create_job_from_path(body: PathJob, conn=Depends(get_db), user: str = Depends(get_user),
+                         _admin=Depends(require_role('admin'))):
+    """Create a dataset from a directory that already sits on the backend host."""
+    o = _checked_options(conn, body, _admin)
+    is_map = o['is_map']
+    extensions = config.IMAGE_EXTENSIONS if is_map else config.INGEST_EXTENSIONS
     root, sources, skipped_symlinks = ingest.scan_path(body.server_path, extensions=extensions)
     job_id = uuid4().hex[:12]
     config.job_dir(job_id).mkdir(parents=True, exist_ok=True)
-    gt_from_pdf = body.gt_from_pdf and not is_map  # map jobs have no transcriptions at all
     try:
-        entries, gt_texts, corpus_texts = ingest.read_path(job_id, root, sources, 0, gt_from_pdf)
+        entries, gt_texts, corpus_texts = ingest.read_path(job_id, root, sources, 0, o['gt_from_pdf'])
     except ingest.IngestError as e:
         shutil.rmtree(config.job_dir(job_id), ignore_errors=True)
         raise HTTPException(e.status_code, e.detail)
-    conn.execute(
-        'INSERT INTO jobs (id, name, owner, source_path, line_mode, task, run_layout, run_lines, run_ocr, '
-        'run_predict, model_id, run_tile, tile_size, tile_skip_blank, line_width, '
-        'model_layout_id, model_lines_id, model_ocr_id, ocr_decode, gt_autocheck, gt_ordered, '
-        'gt_from_pdf, reading_order) '
-        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        (job_id, name, user, str(root), line_mode, body.task,
-         int(run_layout), int(run_lines), int(run_ocr), int(run_predict), model_id,
-         int(run_tile), tile_size, int(body.tile_skip_blank), line_width,
-         models['layout'], models['lines'], models['ocr'], body.ocr_decode,
-         int(body.gt_autocheck), int(body.gt_ordered), int(gt_from_pdf), body.page_reading_order))
-    _set_convention(conn, job_id, convention)
+    _insert_job(conn, job_id, user, body, o, source_path=str(root))
     # Path-ingested map sources point at the user's external files; purge never touches
     # them (only pages under job_dir). Tile PNGs land in job_dir/tiles/, which purge owns.
-    if run_tile:
+    if o['run_tile']:
         ingest.insert_maps(conn, job_id, entries)
     else:
         page_ids = ingest.insert_pages(conn, job_id, entries)
     if is_map:
-        store.seed_job_classes(conn, job_id, seed_classes)
+        store.seed_job_classes(conn, job_id, o['seed_classes'])
         corpus_texts = {}  # map jobs have no transcriptions at all
     else:
         layout_templates.copy_into(conn, job_id, body.layout_template_id)
@@ -387,6 +410,93 @@ def create_job_from_path(body: PathJob, conn=Depends(get_db), user: str = Depend
     conn.commit()
     return {'job_id': job_id, 'documents': len(corpus_texts),
             'skipped_symlinks': skipped_symlinks}
+
+
+def _read_iiif(url: str) -> dict:
+    try:
+        return iiif.read(url)
+    except iiif.IiifError as error:
+        raise HTTPException(400, str(error))
+
+
+class IiifInspect(BaseModel):
+    url: str
+
+
+@router.post('/api/iiif/inspect')
+def inspect_iiif(body: IiifInspect, user: str = Depends(get_user), _editor=Depends(require_role('admin', 'member'))):
+    """A manifest's pages, or a collection's members, for the New dataset form to choose from."""
+    if not body.url.strip():
+        raise HTTPException(400, 'give the address of a IIIF manifest or collection')
+    return {**_read_iiif(body.url), 'max_pages': config.IIIF_MAX_PAGES, 'max_width': config.IIIF_MAX_WIDTH}
+
+
+@router.get('/api/iiif/thumbnail')
+def iiif_thumbnail(url: str, user: str = Depends(get_user)):
+    """A canvas thumbnail fetched here, so the browser needs no route to the archive and
+    the same address checks apply as to the manifest."""
+    try:
+        body, content_type = iiif.thumbnail(url)
+    except iiif.IiifError as error:
+        raise HTTPException(502, str(error))
+    return Response(content=body, media_type=content_type, headers={'Cache-Control': 'private, max-age=86400'})
+
+
+def _page_filename(position: int, label: str) -> str:
+    slug = re.sub(r'[^0-9A-Za-z]+', '-', label).strip('-')[:40]
+    return f'{position:04d}{"_" + slug if slug else ""}.jpg'
+
+
+@router.post('/api/jobs/iiif')
+def create_job_from_iiif(body: IiifJob, conn=Depends(get_db), user: str = Depends(get_user),
+                         _editor=Depends(require_role('admin', 'member'))):
+    """Create a text dataset from canvases of a IIIF manifest. The manifest is read again
+    here rather than trusted from the form; each page's image is downloaded at ingest."""
+    if body.task != 'text':
+        raise HTTPException(400, 'a IIIF manifest makes a text dataset')
+    o = _checked_options(conn, body, _editor)
+    manifest = _read_iiif(body.manifest)
+    if manifest['kind'] != 'manifest':
+        raise HTTPException(400, 'this is a collection - choose one of its manifests')
+    chosen = set(body.canvases)
+    canvases = [c for c in manifest['canvases'] if c['canvas'] in chosen]
+    if not canvases:
+        raise HTTPException(400, 'choose at least one page')
+    if len(canvases) > config.IIIF_MAX_PAGES:
+        raise HTTPException(400, f'{len(canvases)} pages is more than the {config.IIIF_MAX_PAGES} '
+                                 'one dataset may import from IIIF')
+    job_id = uuid4().hex[:12]
+    pages_dir = config.job_dir(job_id) / 'pages'
+    pages_dir.mkdir(parents=True, exist_ok=True)
+    position = {c['canvas']: i for i, c in enumerate(manifest['canvases'], 1)}
+    entries = [(name, str(pages_dir / name)) for name in
+               (_page_filename(position[c['canvas']], c['label']) for c in canvases)]
+    _insert_job(conn, job_id, user, body, o, iiif_source={
+        'manifest': manifest['url'], 'label': manifest['label'],
+        'attribution': manifest['attribution'], 'rights': manifest['rights']})
+    page_ids = ingest.insert_pages(conn, job_id, entries)
+    for (_, source), canvas in zip(entries, canvases):
+        conn.execute('UPDATE pages SET iiif = ? WHERE id = ?', (json.dumps(
+            {k: canvas[k] for k in ('canvas', 'label', 'width', 'height', 'image')}), page_ids[source]))
+    layout_templates.copy_into(conn, job_id, body.layout_template_id)
+    conn.commit()
+    return {'job_id': job_id, 'pages': len(canvases)}
+
+
+@router.post('/api/jobs/{job_id}/iiif/retry')
+def retry_iiif_downloads(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Download again the IIIF pages whose image could not be fetched."""
+    require_job_owner(conn, job_id, user)
+    _require_appendable(conn, job_id)
+    retried = conn.execute(
+        "UPDATE pages SET status = 'pending', error = NULL "
+        "WHERE job_id = ? AND deleted = 0 AND status = 'unreadable' AND iiif IS NOT NULL", (job_id,)).rowcount
+    if not retried:
+        raise HTTPException(409, 'no IIIF page is waiting for its image')
+    store.recount_pages(conn, job_id, commit=False)
+    _queue_unless_held(conn, job_id)
+    conn.commit()
+    return {'retried': retried}
 
 
 UPLOADING = 'uploading'
@@ -589,8 +699,8 @@ def get_job(job_id: str, pages: bool = True, conn=Depends(get_db),
     if row is None:
         raise HTTPException(404)
     job = _job_payload(conn, row)
-    job['unreadable'] = [dict(r) for r in conn.execute(
-        "SELECT id, filename, error FROM pages WHERE job_id = ? AND deleted = 0 AND status = 'unreadable' "
+    job['unreadable'] = [{**dict(r), 'iiif': bool(r['iiif'])} for r in conn.execute(
+        "SELECT id, filename, error, iiif FROM pages WHERE job_id = ? AND deleted = 0 AND status = 'unreadable' "
         'ORDER BY idx', (job_id,))]
     job['pages_live'] = conn.execute(
         f'SELECT COUNT(*) c FROM pages WHERE job_id = ? AND {caches.counted_page()}',

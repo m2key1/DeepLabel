@@ -3,7 +3,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from app import formats
+from app import formats, iiif
 from app.caches import counted_page
 
 
@@ -22,7 +22,8 @@ def _rounded(polygon: list) -> list:
 
 
 def collect_job(conn, job_id: str, checked_only: bool = False) -> dict:
-    job = conn.execute('SELECT id, name, owner, created_at, layout_shape FROM jobs WHERE id = ?', (job_id,)).fetchone()
+    job = conn.execute('SELECT id, name, owner, created_at, layout_shape, iiif_source FROM jobs WHERE id = ?',
+                       (job_id,)).fetchone()
     outlines = job is not None and job['layout_shape'] == 'polygon'
     pages = []
     for page in conn.execute(
@@ -56,8 +57,12 @@ def collect_job(conn, job_id: str, checked_only: bool = False) -> dict:
                       'rotation': page['rotation'],
                       # Which pages were reviewed whole, so an import elsewhere keeps them ground truth.
                       'layout_checked': bool(page['layout_checked']), 'lines_checked': bool(page['lines_checked']),
-                      'elements': elements})
+                      'elements': elements,
+                      **({'iiif': {k: v for k, v in json.loads(page['iiif']).items() if k != 'image'}}
+                         if page['iiif'] else {})})
     described = {k: job[k] for k in ('id', 'name', 'owner', 'created_at')} if job else {}
+    if job and job['iiif_source']:
+        described['iiif_source'] = json.loads(job['iiif_source'])
     return {'job': described, 'pages': pages}
 
 
@@ -85,15 +90,18 @@ def to_text(data: dict) -> str:
     return '\n\n'.join(parts)
 
 
-def write_archive(conn, data: dict, files: dict[str, str], out) -> None:
+def write_archive(conn, data: dict, files: dict[str, str], out, scans: bool = True) -> None:
     """A zip of these text files and every page's scan under images/, written to `out` (a
     path or a file object) so a volume's worth of scans never has to fit in memory. The
     scans are stored as they are - they are compressed already."""
+    source = data['job'].get('iiif_source')
+    if source:
+        files = {**files, 'SOURCE.txt': source_note(source)}
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zf:
         for name, text in files.items():
             zf.writestr(name, text)
         written = set()
-        for page in data['pages']:
+        for page in data['pages'] if scans else []:
             name = f"images/{page['filename']}"
             if name in written:
                 continue
@@ -101,6 +109,20 @@ def write_archive(conn, data: dict, files: dict[str, str], out) -> None:
             if row and row['source_file'] and Path(row['source_file']).is_file():
                 zf.write(row['source_file'], name, compress_type=zipfile.ZIP_STORED)
                 written.add(name)
+
+
+def source_note(source: dict) -> str:
+    rows = [('Imported from the IIIF manifest', source['manifest']), ('Title', source.get('label')),
+            ('Attribution', source.get('attribution')), ('Rights', source.get('rights'))]
+    return ''.join(f'{label}: {value}\n' for label, value in rows if value)
+
+
+def iiif_files(data: dict) -> dict[str, str]:
+    """Each IIIF page's lines as an annotation page on its original canvas."""
+    stems = _file_stems(data)
+    return {f'annotations/{stems[page["id"]]}.json':
+            json.dumps(iiif.annotation_page(page, data['job']['id']), ensure_ascii=False, indent=2)
+            for page in data['pages'] if page.get('iiif')}
 
 
 def page_stem(page: dict) -> str:
@@ -132,6 +154,7 @@ def standard_files(data: dict, fmt: str) -> dict[str, str]:
         return {'tei.xml': formats.tei(data)}
     stems = _file_stems(data)
     title = data['job'].get('name', '')
-    render = {'page': (formats.page_xml, 'xml'), 'alto': (formats.alto, 'xml'),
+    source = data['job'].get('iiif_source')
+    render = {'page': (lambda page: formats.page_xml(page, source), 'xml'), 'alto': (formats.alto, 'xml'),
               'hocr': (lambda page: formats.hocr(page, title), 'hocr')}[fmt]
     return {f'{fmt}/{stems[page["id"]]}.{render[1]}': render[0](page) for page in data['pages']}

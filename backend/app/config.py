@@ -75,6 +75,12 @@ MAX_IMAGE_PIXELS = _number('MAX_IMAGE_PIXELS', 1_000_000_000, int)
 # Where a server-path dataset may be read from; empty means anywhere. See .env.backend.example.
 INGEST_ROOTS = _folders('INGEST_ROOTS')
 PDF_EXTRACT_COVERAGE = _number('PDF_EXTRACT_COVERAGE', 0.9, float)
+# IIIF imports; see .env.backend.example.
+IIIF_MAX_WIDTH = _number('IIIF_MAX_WIDTH', 6000, int)
+IIIF_MAX_PAGES = _number('IIIF_MAX_PAGES', 2000, int)
+IIIF_MAX_MB = _number('IIIF_MAX_MB', 50, float)
+IIIF_ALLOWED_HOSTS = frozenset(h.strip().lower() for h in (os.environ.get('IIIF_ALLOWED_HOSTS') or '').split(',')
+                               if h.strip())
 
 FRONTEND_SECRET = os.environ.get('FRONTEND_SECRET', '')
 

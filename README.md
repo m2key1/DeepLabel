@@ -40,6 +40,7 @@ Import (New dataset: drop files, or one zip):
 | What | Formats |
 |---|---|
 | Scans | JPG, PNG, TIFF, BMP, WebP, PDF (one page per PDF page), or a zip of these |
+| IIIF | a Presentation 2 or 3 manifest or collection address; the chosen pages are downloaded from the image server |
 | Page transcriptions | `.txt` named like its scan, or a PDF's own text layer; matched to the recognised lines |
 | Whole-document text | any other `.txt`, cut across the pages it spans |
 | Transcribed datasets | zip of PAGE XML, ALTO, hOCR or TEI with the scans (Transkribus, eScriptorium, OCR-D, Tesseract, Kraken), or a DeepLabel zip. Taken over as they are, no recognition runs |
@@ -54,9 +55,11 @@ Export (dataset > Export, all pages or reviewed lines only):
 | TEI P5 | `tei.xml` (facsimile zones, linked from `pb`/`lb`) + `images/` | editions, TEI Publisher |
 | DeepLabel zip | `job.json`, a JSON and Markdown file per page, `images/` | DeepLabel (lossless) |
 | JSON, Markdown, text | one file | |
+| IIIF Web Annotations (IIIF datasets) | `annotations/<scan>.json`, one AnnotationPage per canvas | Mirador, Universal Viewer |
 
 Every export keeps regions with their class, line outlines (boxes in hOCR), the text, and
-which lines were checked; ALTO has no place for the last. The class and the checks are read
+which lines were checked; ALTO has no place for the last. A dataset imported from IIIF adds
+its manifest, attribution and rights (`SOURCE.txt`, the TEI header, PAGE metadata). The class and the checks are read
 back from files DeepLabel wrote. Map datasets export class-index PNG masks with geometry JSON.
 
 ## Real models and production

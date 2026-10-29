@@ -120,7 +120,7 @@ export function JobActions(p: JobActionsProps) {
                                            'One mask per source map, reviewed tiles stitched back into place')}
               </>
             ) : (
-              <ExportMenu jobId={job.id} onPicked={() => p.onToggleDownload()} />
+              <ExportMenu jobId={job.id} iiif={!!job.iiif_source} onPicked={() => p.onToggleDownload()} />
             )}
           </div>
         )}

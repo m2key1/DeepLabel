@@ -43,7 +43,7 @@ def _text_regions(page: dict):
             yield r, element
 
 
-def page_xml(page: dict) -> str:
+def page_xml(page: dict, source: dict | None = None) -> str:
     now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
     regions, order = [], []
     for r, element in _text_regions(page):
@@ -64,7 +64,8 @@ def page_xml(page: dict) -> str:
             f'<Coords points="{_points_attr(_region_points(page, element))}"/>{"".join(lines)}</TextRegion>')
     return (
         f'<?xml version="1.0" encoding="UTF-8"?>\n<PcGts xmlns="{PAGE_NS}">'
-        f'<Metadata><Creator>DeepLabel</Creator><Created>{now}</Created><LastChange>{now}</LastChange></Metadata>'
+        f'<Metadata><Creator>DeepLabel</Creator><Created>{now}</Created><LastChange>{now}</LastChange>'
+        f'{f"<Comments>{escape(_source_line(source))}</Comments>" if source else ""}</Metadata>'
         f'<Page imageFilename={quoteattr(page["filename"])} imageWidth="{page["width"]}" imageHeight="{page["height"]}">'
         f'<ReadingOrder><OrderedGroup id="ro">{"".join(order)}</OrderedGroup></ReadingOrder>'
         f'{"".join(regions)}</Page></PcGts>\n')
@@ -132,6 +133,21 @@ def hocr(page: dict, title: str) -> str:
         f"{''.join(areas)}</div></body></html>\n")
 
 
+def _source_line(source: dict) -> str:
+    parts = [f'IIIF manifest {source["manifest"]}', source.get('attribution'), source.get('rights')]
+    return '; '.join(p for p in parts if p)
+
+
+def _tei_source(source: dict) -> str:
+    """The manifest a IIIF dataset came from, with its attribution and rights."""
+    rights = source.get('rights')
+    licence = (f'<licence{f" target={quoteattr(rights)}" if rights else ""}>'
+               f'{escape(source.get("attribution") or rights or "")}</licence>')
+    return (f'<bibl><title>{escape(source.get("label") or "")}</title>'
+            f'<idno type="IIIF-manifest">{escape(source["manifest"])}</idno>'
+            f'<availability>{licence}</availability></bibl>')
+
+
 def tei(data: dict) -> str:
     """The dataset as one TEI document, as Transkribus and eScriptorium write it: a surface
     per page with a zone per region and per line, and a body whose page and line breaks
@@ -158,10 +174,11 @@ def tei(data: dict) -> str:
             f'<graphic url={quoteattr("images/" + page["filename"])} width="{page["width"]}px" '
             f'height="{page["height"]}px"/>{"".join(zones)}</surface>')
     title = escape(data['job'].get('name', ''))
+    source = data['job'].get('iiif_source')
     return (
         f'<?xml version="1.0" encoding="UTF-8"?>\n<TEI xmlns="{TEI_NS}"><teiHeader><fileDesc>'
         f'<titleStmt><title>{title}</title></titleStmt>'
         '<publicationStmt><p>Exported from DeepLabel</p></publicationStmt>'
-        f'<sourceDesc><p>{title}</p></sourceDesc></fileDesc></teiHeader>'
+        f'<sourceDesc>{_tei_source(source) if source else f"<p>{title}</p>"}</sourceDesc></fileDesc></teiHeader>'
         f'<facsimile>{"".join(surfaces)}</facsimile>'
         f'<text><body>{"".join(body)}</body></text></TEI>\n')

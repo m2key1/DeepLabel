@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageStat
 
-from app import (align, backend_client, candidates, config, conventions, corpus, geometry, layout_classes,
+from app import (align, backend_client, candidates, config, conventions, corpus, geometry, iiif, layout_classes,
                  layout_templates, ocr_phase, pdf, registry, scans, store)
 from app.caches import counted_page
 from app.ocr_phase import is_cancelled
@@ -85,6 +85,20 @@ def materialize_pdf_page(conn, page, specs: dict, job_path: Path):
     return conn.execute('SELECT * FROM pages WHERE id = ?', (page['id'],)).fetchone()
 
 
+def download_iiif_page(conn, page) -> bool:
+    """Fetch a IIIF page's image to where the row points, unless it is there already;
+    a page whose image cannot be had is marked unreadable with the reason."""
+    target = Path(page['source_file'])
+    if target.exists():
+        return True
+    try:
+        iiif.download(json.loads(page['iiif'])['image'], target)
+    except iiif.IiifError as error:
+        scans.mark_unreadable(conn, page['id'], f"{page['filename']}: {error}")
+        return False
+    return True
+
+
 def phase_ingest(conn, job_id: str, job_path: Path):
     rend_dir = job_path / 'renditions'
     rend_dir.mkdir(parents=True, exist_ok=True)
@@ -105,6 +119,9 @@ def phase_ingest(conn, job_id: str, job_path: Path):
     for page in pages:
         if page['source_pdf']:
             page = materialize_pdf_page(conn, page, specs, job_path)
+        if page['iiif'] and not download_iiif_page(conn, page):
+            uncounted = True
+            continue
         if scans.ingest_page(conn, page, job_path, seen, config.BLOBS_DIR, 'ingested') != 'ingested':
             uncounted = True
             continue

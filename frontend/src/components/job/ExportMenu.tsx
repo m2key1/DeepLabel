@@ -23,9 +23,15 @@ const GROUPS: { title: string; formats: { format: ExportFormat; label: string; h
   },
 ]
 
+const IIIF_GROUP = {
+  title: 'Back to the archive',
+  formats: [{ format: 'iiif' as const, label: 'IIIF Web Annotations', hint: 'lines and text on the canvases' }],
+}
+
 /** The download formats of a dataset, the standard ones first, with the choice of taking
- *  only what was reviewed. Rendered inside the dataset page's and the list's menus. */
-export function ExportMenu({ jobId, onPicked }: { jobId: string; onPicked: () => void }) {
+ *  only what was reviewed; a dataset imported from IIIF also offers annotations for its
+ *  canvases. Rendered inside the dataset page's and the list's menus. */
+export function ExportMenu({ jobId, iiif = false, onPicked }: { jobId: string; iiif?: boolean; onPicked: () => void }) {
   const [reviewed, setReviewed] = useState(false)
   return (
     <div data-testid="export-menu" className="w-72 py-1" onClick={(e) => e.stopPropagation()}>
@@ -34,7 +40,7 @@ export function ExportMenu({ jobId, onPicked }: { jobId: string; onPicked: () =>
                onChange={(e) => setReviewed(e.target.checked)} className="accent-accent" />
         Reviewed lines only
       </label>
-      {GROUPS.map((group) => (
+      {(iiif ? [GROUPS[0], IIIF_GROUP, GROUPS[1]] : GROUPS).map((group) => (
         <div key={group.title}>
           <div className="px-2.5 pb-0.5 pt-2 text-[10px] uppercase tracking-wide text-ink-subtle">{group.title}</div>
           {group.formats.map(({ format, label, hint }) => (
