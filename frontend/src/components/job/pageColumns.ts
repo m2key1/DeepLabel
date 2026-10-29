@@ -14,12 +14,29 @@ export const PAGE_COLUMNS: PageColumnDef[] = [
   { key: 'thumb', label: '', width: 52, min: 52, drop: 6 },
   { key: 'idx', label: '#', width: 56, min: 48, align: 'right', sort: 'idx', drop: 8 },
   { key: 'dimensions', label: 'Size', width: 104, min: 88, align: 'right', sort: 'dimensions', drop: 1 },
-  { key: 'status', label: 'Status', width: 92, min: 76, sort: 'status', drop: 3 },
+  { key: 'status', label: 'Status', width: 112, min: 92, sort: 'status', drop: 3 },
   { key: 'layout', label: 'Layout', width: 84, min: 72, sort: 'layout', drop: 2 },
   { key: 'reviewed', label: 'Lines reviewed', width: 168, min: 128, sort: 'checked', drop: 7 },
   { key: 'confidence', label: 'Confidence', width: 136, min: 112, sort: 'confidence', drop: 5 },
   { key: 'llm', label: 'Read by', width: 82, min: 68, align: 'right', sort: 'llm', drop: 4 },
 ]
+
+// The furthest step a page has been through, in words: the stored names are the
+// pipeline's, and "done" says nothing about which step finished.
+const PAGE_STATUS: Record<string, string> = {
+  pending: 'Waiting',
+  ingested: 'Uploaded',
+  layout_done: 'Layout found',
+  lines_done: 'Lines found',
+  done: 'Read',
+  duplicate: 'Duplicate',
+  unreadable: 'Unreadable',
+}
+
+export function pageStatusLabel(status: string, isMap: boolean): string {
+  if (status === 'done' && isMap) return 'Processed'
+  return PAGE_STATUS[status] ?? status
+}
 
 export const DEFAULT_PAGE_COLUMNS = ['thumb', 'idx', 'reviewed', 'confidence', 'llm']
 

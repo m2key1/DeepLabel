@@ -49,7 +49,7 @@ import { TEST_PAGE_MEANING, TestDataChip, TestPageSwitch } from '../components/T
 import { Badge } from '../components/ui/Badge'
 import { PhaseStrip } from '../components/job/PhaseStrip'
 import { Avatar } from '../components/ui/Avatar'
-import { loadHiddenColumns, saveHiddenColumns } from '../components/job/pageColumns'
+import { loadHiddenColumns, pageStatusLabel, saveHiddenColumns } from '../components/job/pageColumns'
 import { appendRows, fetchWindow } from '../components/job/pageWindow'
 
 /** A screenful. Large enough that a volume is scrolled rather than paged through,
@@ -842,7 +842,7 @@ export function JobDetailPage() {
             deleted
           </span>
         ) : (
-          <span className="text-ink-muted">{page.status}</span>
+          <span data-status={page.status} className="text-ink-muted">{pageStatusLabel(page.status, isMap)}</span>
         )
       case 'layout':
         return page.layout_checked ? badge(isMap ? 'reviewed' : 'complete') : null

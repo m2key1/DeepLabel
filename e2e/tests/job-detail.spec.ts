@@ -32,6 +32,17 @@ test.describe('Scenario: working with a dataset', () => {
     await expect(page.locator('tbody').getByText('complete')).toHaveCount(3)
   })
 
+  test('the status column says which step a page has been through, in words', async ({ page }) => {
+    const jobId = await seedCompletedJob(uniqueName('Status words'), 1)
+    const [pageId] = await jobPageIds(jobId)
+    // Backend oracle: the stored name is still the pipeline's own.
+    expect((await getPageDetail(jobId, pageId)).status).toBe('done')
+
+    await page.goto(`/jobs/${jobId}`)
+    const cell = page.locator('tbody tr').first().locator('td[data-col="status"]')
+    await expect(cell.locator('[data-status="done"]')).toHaveText('Read')
+  })
+
   test('the review column counts lines, and says how the regions stand on hover',
     async ({ page }) => {
       const jobId = await seedCompletedJob(uniqueName('Counted'), 1)

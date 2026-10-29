@@ -210,6 +210,8 @@ Press `e` to edit the page.
   to its OCR text and unchecks it.
 - Mark a page's layout as complete separately from its lines; the page table filters on
   both.
+- The page table's **Status** column says how far a page has come: Waiting, Uploaded, Layout
+  found, Lines found or Read (Processed for map tiles), or Duplicate or Unreadable.
 - Build your own character keyboard under Settings, from a grid of characters grouped by
   script or from presets, or let it fill itself with the characters the dataset uses. The
   bar sits above the status bar; drag its top handle to move it anywhere, put it back with
