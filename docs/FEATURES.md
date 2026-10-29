@@ -50,11 +50,16 @@ The start page lists every dataset you can open, as a table or as cards.
 
 ## Creating a dataset
 
-Choose **New job**, pick the task, name the dataset and add files.
+Choose **New job** and go through five steps: **Source**, **Pages**, **What to run**,
+**Models and conventions** and **Review**. A summary beside them fills in as you go and leads
+back to any step; going back keeps everything chosen. A step with nothing to choose for the
+dataset at hand, such as models for a map or a transcribed import, is skipped.
 
 - Upload images, PDFs, a zip of scans, or a transcribed dataset as a zip, or (admins)
   point at a folder on the server. The form lists every file and lets you remove any
   before sending.
+- **Pages** shows the uploaded scans as thumbnails; untick any to leave it out. A PDF is
+  split into pages once it is uploaded, so it is taken whole here.
 - Choose which phases run: layout detection, line detection and OCR. Layout is off by
   default; lines are then detected on the whole page. With layout on, lines can be detected
   inside each layout box instead.

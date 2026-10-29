@@ -156,3 +156,66 @@ def test_an_existing_database_starts_its_catalog_from_its_models_and_datasets(tm
     assert [tuple(row) for row in conn.execute('SELECT name, label, added_from FROM convention_flags ORDER BY name')] == [
         ('keep_hyphens', 'keep_hyphens', None), ('long_s', 'long_s', 'Kurrent v3')]
     conn.close()
+
+
+class TestConventionAtCreation:
+    """A dataset can start with its convention, picked on the New job page, rather than
+    getting one from the model picker after its first read."""
+
+    SECRET = 'test-secret'
+    ADMIN = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'admin'}
+    PNG = b'\x89PNG\r\n\x1a\n'
+
+    @pytest.fixture
+    def api(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+        from app.deps import get_db
+        from app.main import app
+        monkeypatch.setattr('app.config.FRONTEND_SECRET', self.SECRET)
+        monkeypatch.setattr('app.config.JOBS_DIR', tmp_path / 'jobs')
+        conn = store.connect(tmp_path / 'app.db')
+        app.dependency_overrides[get_db] = lambda: conn
+        yield TestClient(app), conn
+        app.dependency_overrides.clear()
+        conn.close()
+
+    def stored(self, conn, job_id) -> tuple:
+        row = conn.execute('SELECT ocr_convention FROM jobs WHERE id = ?', (job_id,)).fetchone()
+        names = [r[0] for r in conn.execute('SELECT name FROM convention_flags ORDER BY name')]
+        return conventions.parse(row[0]), names
+
+    def test_an_upload_starts_with_the_flags_it_was_given(self, api):
+        client, conn = api
+        r = client.post('/api/jobs', headers=self.ADMIN, files=[('files', ('a.png', self.PNG, 'image/png'))],
+                        data={'name': 'Briefe', 'run_layout': 'false',
+                              'ocr_convention': '{"long_s": true, "keep_hyphens": false}'})
+        assert r.status_code == 200, r.text
+
+        assert self.stored(conn, r.json()['job_id']) == ({'long_s': True, 'keep_hyphens': False}, ['long_s'])
+
+    def test_a_server_path_does_too(self, api, tmp_path):
+        client, conn = api
+        (tmp_path / 'scans').mkdir()
+        (tmp_path / 'scans' / 'a.png').write_bytes(self.PNG)
+        r = client.post('/api/jobs/path', headers=self.ADMIN, json={
+            'name': 'Briefe', 'server_path': str(tmp_path / 'scans'), 'run_layout': False,
+            'ocr_convention': {'keep_hyphens': True}})
+        assert r.status_code == 200, r.text
+
+        assert self.stored(conn, r.json()['job_id']) == ({'keep_hyphens': True}, ['keep_hyphens'])
+
+    def test_without_one_it_starts_normalized(self, api):
+        client, conn = api
+        r = client.post('/api/jobs', headers=self.ADMIN, files=[('files', ('a.png', self.PNG, 'image/png'))],
+                        data={'name': 'Briefe', 'run_layout': 'false'})
+
+        assert self.stored(conn, r.json()['job_id']) == ({}, [])
+
+    @pytest.mark.parametrize('convention', ['{"Long S": true}', 'not json', '["long_s"]'])
+    def test_a_convention_that_is_none_is_refused_before_anything_is_written(self, api, convention):
+        client, conn = api
+        r = client.post('/api/jobs', headers=self.ADMIN, files=[('files', ('a.png', self.PNG, 'image/png'))],
+                        data={'name': 'Briefe', 'ocr_convention': convention})
+
+        assert r.status_code == 400
+        assert conn.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 0

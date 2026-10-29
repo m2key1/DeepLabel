@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { createDataset, wizardStep } from '../helpers/new-dataset'
 import {
   backendFetch, getJob, getPageDetail, importStubModel, jobPageIds, listRegistryModels, markLayoutChecked,
   seedCompletedJob, uniqueName, waitForJobStatus,
@@ -77,6 +78,7 @@ test.describe('Scenario: layout classes from templates', () => {
     await page.goto('/new')
     await page.getByLabel('Job name').fill(dataset)
     await page.locator('input[type="file"]').setInputFiles([{ name: 'letter.png', mimeType: 'image/png', buffer: scanPng() }])
+    await wizardStep(page, 'run')
     // Schematismus is what a dataset gets unless something else is chosen.
     const picker = page.getByTestId('layout-template-choice')
     const schematismus = (await templates()).find((t) => t.name === 'Schematismus')!
@@ -84,7 +86,7 @@ test.describe('Scenario: layout classes from templates', () => {
     const chosen = (await templates()).find((t) => t.name === name)!
     await picker.selectOption(String(chosen.id))
     await expect(page.getByTestId('layout-template-summary')).toHaveText('Salutation, Body · containers: Panel')
-    await page.getByRole('button', { name: 'Create job' }).click()
+    await createDataset(page)
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!
     expect(shape(await datasetClasses(jobId))).toEqual(

@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { createDataset } from '../helpers/new-dataset'
 import { getJob, getPageDetail, jobPageIds, uniqueName, waitForJobStatus } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { makeZip } from '../helpers/zip'
@@ -46,9 +47,12 @@ test.describe('Scenario: importing an existing dataset', () => {
 
     // The form recognizes the archive and drops the recognition choices.
     await expect(page.getByTestId('import-notice')).toContainText('Zip archive')
-    await expect(page.getByTestId('ocr-decode-greedy')).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Import dataset' })).toBeEnabled()
-    await page.getByRole('button', { name: 'Import dataset' }).click()
+    // Nothing is run on an export, so there is nothing to choose about running it.
+    for (const skipped of ['pages', 'run', 'models']) {
+      await expect(page.getByTestId(`wizard-step-${skipped}`)).toHaveAttribute('data-skipped', 'true')
+    }
+    await expect(page.getByTestId('wizard-step-review')).not.toHaveAttribute('data-skipped', 'true')
+    await createDataset(page, 'Import dataset')
 
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!
@@ -83,7 +87,7 @@ test.describe('Scenario: importing an existing dataset', () => {
       mimeType: 'application/zip',
       buffer: makeZip({ 'minutes.xml': Buffer.from('<minutes>nothing to see</minutes>') }),
     })
-    await page.getByRole('button', { name: 'Import dataset' }).click()
+    await createDataset(page, 'Import dataset')
     await expect(page.getByText(/no PAGE XML, ALTO, hOCR or TEI with matching images/)).toBeVisible()
     await expect(page).toHaveURL(/\/new$/)
   })

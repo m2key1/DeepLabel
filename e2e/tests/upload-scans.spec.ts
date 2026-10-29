@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { createDataset } from '../helpers/new-dataset'
 import { backendFetch, getJob, uniqueName, waitForJobStatus } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { openDatasetMenu } from '../helpers/dataset'
@@ -11,7 +12,7 @@ async function createFromUpload(page: import('@playwright/test').Page, name: str
   await page.getByLabel('Job name').fill(name)
   await page.locator('input[type="file"]').setInputFiles(
     files.map((f) => ({ name: f.name, mimeType: 'image/png', buffer: f.buffer })))
-  await page.getByRole('button', { name: 'Create job' }).click()
+  await createDataset(page)
   await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
   return page.url().split('/').pop()!
 }

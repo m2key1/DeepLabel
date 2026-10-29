@@ -3,6 +3,7 @@ import { test, expect } from '../helpers/test'
 import { createJob, getJob, identity, uniqueName, waitForJobStatus } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { FRONTEND } from '../helpers/frontend'
+import { createDataset, wizardStep } from '../helpers/new-dataset'
 import { seedSession, useSession, userRecord } from '../helpers/session'
 
 async function signedInMember(browser: Browser, prefix: string) {
@@ -77,6 +78,10 @@ test.describe('Scenario: making a dataset asks for the phases it runs', () => {
       const name = uniqueName('Made without OCR')
       await member.page.goto('/new')
       await member.page.getByLabel('Job name').fill(name)
+      await member.page.locator('input[type="file"]').setInputFiles([
+        { name: 'folio_1.png', mimeType: 'image/png', buffer: scanPng() },
+      ])
+      await wizardStep(member.page, 'run')
       const ocr = member.page.getByRole('checkbox', { name: /^OCR/ })
       const lines = member.page.getByRole('checkbox', { name: /^Line segmentation/ })
       await expect(lines).toBeChecked()
@@ -87,10 +92,7 @@ test.describe('Scenario: making a dataset asks for the phases it runs', () => {
         .toHaveText('You have not been granted OCR - an admin can grant it on the Admin page.')
       await expect(member.page.getByTestId('phase-locked-lines')).toHaveCount(0)
 
-      await member.page.locator('input[type="file"]').setInputFiles([
-        { name: 'folio_1.png', mimeType: 'image/png', buffer: scanPng() },
-      ])
-      await member.page.getByRole('button', { name: 'Create job' }).click()
+      await createDataset(member.page)
       await expect(member.page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
       const jobId = member.page.url().split('/').pop()!
       const job = await getJob(jobId)

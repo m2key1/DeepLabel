@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process'
 import { test, expect } from '../helpers/test'
+import { createDataset, wizardStep } from '../helpers/new-dataset'
 import { getJob, listJobs, uniqueName } from '../helpers/api'
 
 /** Builds a folder in the backend container, where a server path is read: a volume, the
@@ -34,9 +35,9 @@ test.describe('Scenario: a server folder with links and NAS leftovers', () => {
     await page.getByLabel('Job name').fill(name)
     await page.getByRole('button', { name: 'Server path' }).click()
     await page.getByLabel('Server directory (absolute path)').fill(dir)
-    await expect(page.getByRole('button', { name: 'Create job' })).toBeEnabled()
+    await expect(page.getByTestId('wizard-next')).toBeEnabled()
     await expect(page.getByTestId('skipped-symlinks')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Create job' }).click()
+    await createDataset(page)
 
     const notice = page.getByTestId('skipped-symlinks')
     await expect(notice).toBeVisible()
@@ -62,7 +63,7 @@ test.describe('Scenario: a server folder with links and NAS leftovers', () => {
     await page.getByLabel('Job name').fill(name)
     await page.getByRole('button', { name: 'Server path' }).click()
     await page.getByLabel('Server directory (absolute path)').fill('data/scans')
-    await page.getByRole('button', { name: 'Create job' }).click()
+    await createDataset(page)
 
     await expect(page.getByText('the server path must be absolute: data/scans')).toBeVisible()
     await expect(page).toHaveURL(/\/new$/)

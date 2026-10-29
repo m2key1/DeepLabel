@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { createDataset, wizardStep } from '../helpers/new-dataset'
 import {
   backendFetch, getJob, jobPageIds, listEvaluations, listRegistryModels, markLinesChecked, markTestPages,
   seedDistinctPagesJob, TEST_SCAN_WIDTH, testFlags, uniqueName,
@@ -114,8 +115,9 @@ test.describe('Scenario: marking test data on a dataset', () => {
     await page.getByLabel('Job name').fill(name)
     await page.locator('input[type="file"]').setInputFiles(
       [{ name: 'a.png', mimeType: 'image/png', buffer: scanPng(TEST_SCAN_WIDTH, 800, 41) }])
+    await wizardStep(page, 'run')
     await page.getByTestId('as-test').check()
-    await page.getByRole('button', { name: 'Create job' }).click()
+    await createDataset(page)
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!
 

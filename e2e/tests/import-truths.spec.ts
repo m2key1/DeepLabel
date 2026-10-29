@@ -5,6 +5,7 @@ import {
   seedCompletedJob, uniqueName, waitForJobStatus,
 } from '../helpers/api'
 import { scanPng } from '../helpers/image'
+import { wizardStep } from '../helpers/new-dataset'
 import { makeZip, zipEntries } from '../helpers/zip'
 
 const HEADERS = {
@@ -92,6 +93,7 @@ async function importThroughForm(page: Page, name: string, zip: Buffer) {
   await expect(page.getByTestId('import-notice')).toContainText('Zip archive')
   // The form's default: the transcriptions are final, so every imported line is reviewed.
   await expect(page.getByTestId('import-reviewed')).toBeChecked()
+  await wizardStep(page, 'review')
   const [response] = await Promise.all([
     page.waitForResponse((r) => r.url().endsWith('/api/jobs/import')),
     page.getByRole('button', { name: 'Import dataset' }).click(),
@@ -282,6 +284,7 @@ test.describe('Scenario: out in a standard format and back in', () => {
     await page.getByLabel('Job name').fill(name)
     await page.locator('input[type="file"]').setInputFiles({ name: 'scans.zip', mimeType: 'application/zip', buffer: zip })
     await expect(page.getByTestId('import-notice')).toContainText('A zip of scans alone is read like any other upload')
+    await wizardStep(page, 'review')
     const [refused, uploaded] = await Promise.all([
       page.waitForResponse((r) => r.url().endsWith('/api/jobs/import')),
       page.waitForResponse((r) => r.url().endsWith('/api/jobs') && r.request().method() === 'POST'),

@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { createDataset, wizardStep } from '../helpers/new-dataset'
 import { backendFetch, getJob, listJobs, uniqueName, waitForJobStatus } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 
@@ -21,6 +22,7 @@ test.describe('Scenario: a map dataset on a deployment without the map runner', 
     const name = uniqueName('No runner')
     await page.goto('/new')
     await page.getByTestId('task-map_segmentation').click()
+    await wizardStep(page, 'run')
 
     const predict = page.getByRole('checkbox', { name: /Model pre-annotation/ })
     const tile = page.getByRole('checkbox', { name: /Process map images into tiles/ })
@@ -31,11 +33,12 @@ test.describe('Scenario: a map dataset on a deployment without the map runner', 
     await expect(page.getByTestId('map-phase-predict-hint')).toHaveText(NO_RUNNER)
     await expect(page.getByTestId('map-phase-tile-hint')).toHaveText(NO_RUNNER)
 
+    await wizardStep(page, 'source')
     await page.getByLabel('Job name').fill(name)
     await page.locator('input[type="file"]').setInputFiles([
       { name: 'tile.png', mimeType: 'image/png', buffer: scanPng(64, 64) },
     ])
-    await page.getByRole('button', { name: 'Create job' }).click()
+    await createDataset(page)
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!
 

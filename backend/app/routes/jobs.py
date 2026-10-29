@@ -132,6 +132,7 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
                gt_autocheck: bool = Form(False), gt_ordered: bool = Form(False),
                gt_from_pdf: bool = Form(False), layout_template_id: int | None = Form(None),
                hold: bool = Form(False), as_test: bool = Form(False),
+               ocr_convention: str = Form('{}'),
                files: list[UploadFile] = None, conn=Depends(get_db),
                user: str = Depends(get_user), _editor=Depends(require_role('admin', 'member'))):
     """Create a dataset from uploaded files - a .txt beside an image is ingested as that page's transcription.
@@ -165,6 +166,10 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
         raise HTTPException(400, f'reading order must be one of {list(reading_order.CHOICES)}')
     model_id, seed_classes = _resolve_map_model(conn, is_map, model_id, run_predict, task)
     _require_layout_template(conn, layout_template_id)
+    try:
+        convention = _valid_convention(json.loads(ocr_convention or '{}'))
+    except json.JSONDecodeError:
+        raise HTTPException(400, 'the convention is not JSON')
     job_id = uuid4().hex[:12]
     try:
         images, transcriptions = ingest.split_transcriptions(files)
@@ -202,6 +207,7 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
          models['layout'], models['lines'], models['ocr'], ocr_decode, int(gt_autocheck),
          int(gt_ordered), int(gt_from_pdf), page_reading_order, int(as_test),
          UPLOADING if hold else 'queued'))
+    _set_convention(conn, job_id, convention)
     # Tiling jobs register the uploads as full maps (job_maps); the tile phase produces
     # the page rows. Non-tiling jobs treat each upload as a ready tile (a page).
     if run_tile:
@@ -216,6 +222,22 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
         corpus.store_documents(conn, job_id, corpus_texts)
     conn.commit()
     return {'job_id': job_id, 'documents': len(corpus_texts)}
+
+
+def _valid_convention(requested) -> dict[str, bool]:
+    if not isinstance(requested, dict):
+        raise HTTPException(400, 'the convention is a map of flag names to true or false')
+    try:
+        return conventions.validate(requested)
+    except ValueError as error:
+        raise HTTPException(400, str(error))
+
+
+def _set_convention(conn, job_id: str, convention: dict[str, bool]) -> None:
+    """The flags a dataset starts with, picked when it was created."""
+    if convention:
+        conn.execute('UPDATE jobs SET ocr_convention = ? WHERE id = ?', (json.dumps(convention), job_id))
+        conventions.note(conn, [name for name, on in convention.items() if on])
 
 
 def _require_layout_template(conn, template_id: int | None) -> None:
@@ -298,6 +320,7 @@ class PathJob(BaseModel):
     gt_from_pdf: bool = False
     page_reading_order: str = reading_order.AUTO
     layout_template_id: int | None = None
+    ocr_convention: dict[str, bool] = {}
 
 
 @router.post('/api/jobs/path')
@@ -326,6 +349,7 @@ def create_job_from_path(body: PathJob, conn=Depends(get_db), user: str = Depend
         raise HTTPException(400, f'reading order must be one of {list(reading_order.CHOICES)}')
     model_id, seed_classes = _resolve_map_model(conn, is_map, body.model_id, run_predict, body.task)
     _require_layout_template(conn, body.layout_template_id)
+    convention = _valid_convention(body.ocr_convention)
     root, sources, skipped_symlinks = ingest.scan_path(body.server_path, extensions=extensions)
     job_id = uuid4().hex[:12]
     config.job_dir(job_id).mkdir(parents=True, exist_ok=True)
@@ -346,6 +370,7 @@ def create_job_from_path(body: PathJob, conn=Depends(get_db), user: str = Depend
          int(run_tile), tile_size, int(body.tile_skip_blank), line_width,
          models['layout'], models['lines'], models['ocr'], body.ocr_decode,
          int(body.gt_autocheck), int(body.gt_ordered), int(gt_from_pdf), body.page_reading_order))
+    _set_convention(conn, job_id, convention)
     # Path-ingested map sources point at the user's external files; purge never touches
     # them (only pages under job_dir). Tile PNGs land in job_dir/tiles/, which purge owns.
     if run_tile:
@@ -1008,12 +1033,9 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
     if 'ocr_convention' in fields and body.ocr_convention is not None:
         if user['role'] != 'admin' and job['owner'] != user['username']:
             raise HTTPException(403, 'not permitted')
-        try:
-            chosen = conventions.validate(body.ocr_convention)
-        except ValueError as error:
-            raise HTTPException(400, str(error))
-        conn.execute('UPDATE jobs SET ocr_convention = ? WHERE id = ?', (json.dumps(chosen), job_id))
-        conventions.note(conn, [name for name, on in chosen.items() if on])
+        conn.execute('UPDATE jobs SET ocr_convention = ? WHERE id = ?',
+                     (json.dumps(_valid_convention(body.ocr_convention)), job_id))
+        conventions.note(conn, [name for name, on in body.ocr_convention.items() if on])
     asked = fields.intersection(PROCESSING_FIELDS)
     if asked:
         _patch_processing(conn, job_id, job, body, asked, user)

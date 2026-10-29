@@ -6,6 +6,7 @@ import type {
   ConventionFlag, Job, LlmModel, ModelTask, OcrConvention, OcrDecode, RegistryModel, ReocrPreview,
 } from '../../api'
 import { conventionLabel } from '../conventionLabel'
+import { ConventionFlags, flagsOn, toggledFlag } from './ConventionFlags'
 import { Modal, modalBtn, modalPrimaryBtn } from '../Modal'
 import { readerName } from '../viewer/readers'
 import { DECODE_CHOICES } from './processing'
@@ -16,9 +17,6 @@ interface ModelPickerDialogProps {
   onSaved: () => void
   onError: (message: string) => void
 }
-
-const flagsOn = (convention: OcrConvention) =>
-  Object.keys(convention).filter((name) => convention[name]).sort()
 
 const TASKS: { task: ModelTask; label: string; field: 'model_layout_id' | 'model_lines_id' | 'model_ocr_id' }[] = [
   { task: 'layout', label: 'Layout detection', field: 'model_layout_id' },
@@ -64,16 +62,7 @@ export function ModelPickerDialog({ job, onClose, onSaved, onError }: ModelPicke
   const ocrModel = models?.find((m) => (picks.ocr === ''
     ? m.task === 'ocr' && m.is_default
     : m.id === Number(picks.ocr)))
-  const knownFlags = ocrModel?.conventions ?? null
-  // What the model reads first, in its order; then every other flag there is, so a rule can
-  // be set on the dataset ahead of a model that reads it.
-  const otherFlags = [...new Set([...(catalog ?? []).map((f) => f.name), ...flagsOn(convention)])]
-    .filter((name) => !(knownFlags ?? []).includes(name))
   const flagLabel = (name: string) => conventionLabel(name, catalog)
-  const description = (name: string) => catalog?.find((f) => f.name === name)?.description ?? ''
-  const toggleFlag = (name: string) =>
-    setConvention((held) => Object.fromEntries(
-      flagsOn({ ...held, [name]: !held[name] }).map((on) => [on, true])))
 
   const ocrSettingsChanged = () =>
     decode !== (job.ocr_decode ?? 'beam') ||
@@ -209,53 +198,8 @@ export function ModelPickerDialog({ job, onClose, onSaved, onError }: ModelPicke
           ))}
         </select>
       </div>
-      <fieldset className="mb-4" data-testid="ocr-convention">
-        <legend className="mb-1 flex w-full items-baseline text-sm font-medium text-ink">
-          Transcription convention
-          {/* A new tab, so what is picked here so far is not lost on the way. */}
-          <a href="/conventions" target="_blank" rel="noreferrer" data-testid="conventions-link"
-             className="ml-auto text-xs font-normal text-ink-subtle hover:text-accent-ink">
-            What these mean
-          </a>
-        </legend>
-        {knownFlags === null && (
-          <p className="mb-1 text-xs text-ink-muted">
-            This model's convention switches are known once it has read a page.
-          </p>
-        )}
-        {knownFlags !== null && knownFlags.length === 0 && (
-          <p className="mb-1 text-xs text-ink-muted">This model reads one convention only.</p>
-        )}
-        <div className="space-y-1">
-          {[...(knownFlags ?? []), ...otherFlags].map((name) => {
-            const supported = knownFlags === null || knownFlags.includes(name)
-            return (
-              <label key={name} data-testid="convention-flag" data-flag={name}
-                     data-supported={supported}
-                     className="flex cursor-pointer items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={!!convention[name]}
-                  onChange={() => toggleFlag(name)}
-                  className="mt-1 cursor-pointer accent-accent"
-                />
-                <span className="min-w-0">
-                  <span className="block">{flagLabel(name)}</span>
-                  {description(name) && (
-                    <span data-testid="convention-description" className="block text-xs text-ink-muted">
-                      {description(name)}
-                    </span>
-                  )}
-                  {!supported && (
-                    <span data-testid="convention-ignored" className="block text-xs text-warn">
-                      {ocrModel?.name ?? 'This model'} ignores this
-                    </span>
-                  )}
-                </span>
-              </label>
-            )
-          })}
-        </div>
+      <ConventionFlags catalog={catalog} model={ocrModel} convention={convention}
+                       onToggle={(name) => setConvention((held) => toggledFlag(held, name))}>
         {job.ocr_convention_read != null && (
           <p data-testid="convention-read" className="mt-1 text-xs text-ink-muted">
             Last read {job.ocr_convention_read.length === 0
@@ -263,7 +207,7 @@ export function ModelPickerDialog({ job, onClose, onSaved, onError }: ModelPicke
               : `with ${job.ocr_convention_read.map(flagLabel).join(', ').toLowerCase()}`}.
           </p>
         )}
-      </fieldset>
+      </ConventionFlags>
       {readers !== null && readers.length > 0 && (
         <div className="mb-4" data-testid="pick-llm-models">
           <span className="mb-1 block text-sm font-medium text-ink">

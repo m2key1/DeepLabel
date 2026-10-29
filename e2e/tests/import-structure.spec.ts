@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { createDataset } from '../helpers/new-dataset'
 import { getPageDetail, jobPageIds, uniqueName, waitForJobStatus } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { makeZip } from '../helpers/zip'
@@ -52,7 +53,7 @@ test.describe('Scenario: importing an export whose lines sit in tables and neste
       name: 'export.zip', mimeType: 'application/zip', buffer: zip,
     })
     await expect(page.getByTestId('import-notice')).toContainText('Zip archive')
-    await page.getByRole('button', { name: 'Import dataset' }).click()
+    await createDataset(page, 'Import dataset')
 
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!

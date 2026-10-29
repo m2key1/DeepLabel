@@ -4,7 +4,7 @@ import {
 } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { textPdf } from '../helpers/pdf'
-import { withLayoutPerCrop } from '../helpers/new-dataset'
+import { createDataset, withLayoutPerCrop } from '../helpers/new-dataset'
 
 type Line = { text: string; corrected_text: string | null; checked: boolean }
 
@@ -35,7 +35,7 @@ test.describe('Scenario: ingesting pages with existing transcriptions', () => {
     ])
     await expect(page.getByTestId('gt-pairing')).toContainText('Transcriptions found for 1 of 1 page')
     await page.getByTestId('gt-autocheck').check()
-    await page.getByRole('button', { name: 'Create job' }).click()
+    await createDataset(page)
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!
     await waitForJobStatus(jobId, 'done')
@@ -121,7 +121,7 @@ test.describe('Scenario: ingesting pages with existing transcriptions', () => {
     await expect(page.getByTestId('gt-ordered')).toHaveCount(0)
     await page.getByTestId('gt-autocheck').check()
     await page.getByTestId('gt-ordered').check()
-    await page.getByRole('button', { name: 'Create job' }).click()
+    await createDataset(page)
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!
     await waitForJobStatus(jobId, 'done')
@@ -171,7 +171,7 @@ test.describe("Scenario: ingesting a PDF that carries its own text layer", () =>
     ])
     await expect(page.getByTestId('gt-from-pdf')).toHaveCount(1)
     await page.getByTestId('gt-from-pdf').check()
-    await page.getByRole('button', { name: 'Create job' }).click()
+    await createDataset(page)
 
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!
@@ -210,7 +210,7 @@ test.describe("Scenario: ingesting a PDF that carries its own text layer", () =>
     ])
     await page.getByTestId('gt-autocheck').check()
     await page.getByTestId('gt-from-pdf').check()
-    await page.getByRole('button', { name: 'Create job' }).click()
+    await createDataset(page)
 
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!

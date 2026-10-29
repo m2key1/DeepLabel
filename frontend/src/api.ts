@@ -1069,9 +1069,11 @@ export function uploadJob(
   readingOrder = 'auto',
   layoutTemplateId?: number | null,
   asTest = false,
+  ocrConvention: OcrConvention = {},
 ): Promise<{ job_id: string }> {
   const form = new FormData()
   if (asTest) form.append('as_test', 'true')
+  form.append('ocr_convention', JSON.stringify(ocrConvention))
   form.append('name', name)
   form.append('line_mode', lineMode)
   form.append('page_reading_order', readingOrder)
@@ -1127,6 +1129,7 @@ export function createJobFromPath(
   gtFromPdf?: boolean,
   readingOrder = 'auto',
   layoutTemplateId?: number | null,
+  ocrConvention: OcrConvention = {},
 ): Promise<{ job_id: string; skipped_symlinks: string[] }> {
   return request('/api/jobs/path', json('POST', {
     name,
@@ -1151,6 +1154,7 @@ export function createJobFromPath(
     gt_ordered: gtOrdered ?? false,
     gt_from_pdf: gtFromPdf ?? false,
     layout_template_id: layoutTemplateId ?? null,
+    ocr_convention: ocrConvention,
   }))
 }
 

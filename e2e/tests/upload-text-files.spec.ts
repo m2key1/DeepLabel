@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { createDataset, wizardStep } from '../helpers/new-dataset'
 import { backendFetch, getJob, getPageDetail, uniqueName, waitForJobStatus } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { textPdf } from '../helpers/pdf'
@@ -20,7 +21,7 @@ test.describe('Scenario: the upload form says what becomes of each text file', (
       '1 text file is named after no image and is kept as a corpus document')
     await expect(page.getByTestId('corpus-documents')).toContainText('volume.txt')
 
-    await page.getByRole('button', { name: 'Create job' }).click()
+    await createDataset(page)
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!
     await waitForJobStatus(jobId, 'done')
@@ -41,7 +42,7 @@ test.describe('Scenario: the upload form says what becomes of each text file', (
     ])
 
     await expect(page.getByText('Select at least one image or PDF')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Create job' }).click()
+    await createDataset(page)
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!
     await waitForJobStatus(jobId, 'done')
@@ -85,7 +86,7 @@ test.describe('Scenario: the form follows the backend in what a text file is for
       await expect(corpus).not.toContainText('volume_p0002.txt')
       await expect(corpus).not.toContainText('leaf_2.TXT')
 
-      await page.getByRole('button', { name: 'Create job' }).click()
+      await createDataset(page)
       await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
       const jobId = page.url().split('/').pop()!
       await waitForJobStatus(jobId, 'done')
@@ -120,7 +121,10 @@ test.describe('Scenario: with reading off the form promises no matching', () => 
       await expect(corpus).toContainText('cut onto the pages they cover after reading')
       await expect(page.getByTestId('reading-off')).toHaveCount(0)
 
+      // Reading is chosen on the next step; the files' step then says what waits for it.
+      await wizardStep(page, 'run')
       await page.getByRole('checkbox', { name: /^OCR/ }).uncheck()
+      await wizardStep(page, 'source')
       await expect(pairing).toHaveText('Transcriptions found for 1 page - kept with their pages, '
         + 'to be matched to the recognized lines once the pages are read.')
       await expect(page.getByTestId('gt-autocheck')).toHaveCount(0)
@@ -129,12 +133,16 @@ test.describe('Scenario: with reading off the form promises no matching', () => 
       await expect(page.getByTestId('gt-from-pdf')).toBeVisible()
 
       // Line detection off takes reading with it, and the form says the same.
+      await wizardStep(page, 'run')
       await page.getByRole('checkbox', { name: /^OCR/ }).check()
+      await wizardStep(page, 'source')
       await expect(page.getByTestId('reading-off')).toHaveCount(0)
+      await wizardStep(page, 'run')
       await page.getByRole('checkbox', { name: /^Line segmentation/ }).uncheck()
+      await wizardStep(page, 'source')
       await expect(page.getByTestId('reading-off')).toHaveText(unread)
 
-      await page.getByRole('button', { name: 'Create job' }).click()
+      await createDataset(page)
       await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
       const jobId = page.url().split('/').pop()!
       await waitForJobStatus(jobId, 'done')
@@ -159,7 +167,7 @@ test.describe('Scenario: an export zip in a mixed selection', () => {
     await expect(notice).toBeVisible()
     await expect(page.getByTestId('import-ignored'))
       .toHaveText('Only one.zip is imported; left out: two.zip, extra.png.')
-    await expect(page.getByRole('button', { name: 'Import dataset' })).toBeVisible()
+    await expect(page.getByTestId('wizard-step-run')).toHaveAttribute('data-skipped', 'true')
 
     await page.getByRole('button', { name: 'Remove one.zip' }).click()
     await expect(page.getByTestId('import-ignored'))
@@ -168,7 +176,7 @@ test.describe('Scenario: an export zip in a mixed selection', () => {
     await expect(notice).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Remove extra.png' })).toBeVisible()
 
-    await page.getByRole('button', { name: 'Create job' }).click()
+    await createDataset(page)
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!
     await waitForJobStatus(jobId, 'done')
