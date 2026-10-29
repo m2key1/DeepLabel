@@ -263,6 +263,15 @@ CREATE TABLE IF NOT EXISTS revisions (
     client_id TEXT,
     checks_line INTEGER NOT NULL DEFAULT 0
 );
+-- The transcription-convention flags people and models speak of: the name is what a model
+-- declares and a dataset stores, the label and description are what people read.
+CREATE TABLE IF NOT EXISTS convention_flags (
+    name TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    added_from TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS models (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task TEXT NOT NULL,
@@ -697,6 +706,7 @@ DECODE_RELABEL = 1
 CORRECTED_BY_BACKFILL = 2
 PROVENANCE_BACKFILL = 3
 TEXT_COMPOSED = 4
+CONVENTION_CATALOG = 5
 
 
 def _mark_former_test_sets(conn: sqlite3.Connection) -> None:
@@ -1117,6 +1127,14 @@ def connect(db_path: Path) -> sqlite3.Connection:
         for column in ('text', 'corrected_text'):
             conn.execute(f'UPDATE lines SET {column} = nfc({column}) WHERE {column} != nfc({column})')
         conn.execute(f'PRAGMA user_version = {TEXT_COMPOSED}')
+    # The catalog starts with every flag a model has declared or a dataset asks for.
+    if conn.execute('PRAGMA user_version').fetchone()[0] < CONVENTION_CATALOG:
+        conn.execute("INSERT OR IGNORE INTO convention_flags (name, label, added_from) "
+                     "SELECT DISTINCT flag.value, flag.value, models.name FROM models, json_each(models.conventions) flag "
+                     "WHERE models.conventions IS NOT NULL")
+        conn.execute("INSERT OR IGNORE INTO convention_flags (name, label) "
+                     "SELECT DISTINCT flag.key, flag.key FROM jobs, json_each(jobs.ocr_convention) flag")
+        conn.execute(f'PRAGMA user_version = {CONVENTION_CATALOG}')
     conn.commit()
     return conn
 

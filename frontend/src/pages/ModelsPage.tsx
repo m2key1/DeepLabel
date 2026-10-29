@@ -189,6 +189,7 @@ export function ModelsPage() {
         actions={<>
           <Link to="/models/evaluations" data-testid="evaluations-list" className={buttonClass()}>Evaluations</Link>
           <Link to="/augmentations" className={buttonClass()}>Augmentations</Link>
+          <Link to="/conventions" data-testid="conventions-page" className={buttonClass()}>Conventions</Link>
         </>}
       >
         One model per pipeline stage runs by default; datasets can pick specific ones. Trained models

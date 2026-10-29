@@ -159,7 +159,7 @@ class TestMigrations:
 
         assert [tuple(r) for r in conn.execute('SELECT text, corrected_text FROM lines ORDER BY id')] == [
             ('M\u00e4rz', 'J\u00fcli'), ('April', None)]
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == store.TEXT_COMPOSED
+        assert conn.execute('PRAGMA user_version').fetchone()[0] >= store.TEXT_COMPOSED
 
     # What each table held in the commit that created it, read out of this repo's own
     # history. Every deployment has at least these columns; anything the schema has
@@ -167,6 +167,7 @@ class TestMigrations:
     # column that never got one is invisible until a live database answers 500 on it.
     ORIGINAL_COLUMNS = {
         'augmentation_pipelines': ['created_at', 'id', 'is_default', 'name', 'owner', 'spec', 'task', 'updated_at'],
+        'convention_flags': ['added_from', 'created_at', 'description', 'label', 'name'],
         'candidates': ['author', 'checked', 'created_at', 'dismissed', 'id', 'line_id', 'llm_model_id', 'order_idx', 'page_id', 'polygon', 'similarity', 'source', 'text'],
         'declined_models': ['job_id', 'model_id', 'task'],
         'elements': ['bbox', 'checked', 'class_name', 'conf', 'deleted', 'id', 'kind', 'lines_bbox', 'order_idx', 'page_id', 'raw_class_name'],

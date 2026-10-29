@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import {
-  listModels, listUsableLlmModels, reocr, reocrPreview, setJobLlmSettings, setJobModels,
+  listConventionFlags, listModels, listUsableLlmModels, reocr, reocrPreview, setJobLlmSettings, setJobModels,
 } from '../../api'
 import type {
-  Job, LlmModel, ModelTask, OcrConvention, OcrDecode, RegistryModel, ReocrPreview,
+  ConventionFlag, Job, LlmModel, ModelTask, OcrConvention, OcrDecode, RegistryModel, ReocrPreview,
 } from '../../api'
+import { conventionLabel } from '../conventionLabel'
 import { Modal, modalBtn, modalPrimaryBtn } from '../Modal'
 import { readerName } from '../viewer/readers'
 import { DECODE_CHOICES } from './processing'
@@ -14,11 +15,6 @@ interface ModelPickerDialogProps {
   onClose: () => void
   onSaved: () => void
   onError: (message: string) => void
-}
-
-const flagLabel = (name: string) => {
-  const words = name.replaceAll('_', ' ')
-  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
 const flagsOn = (convention: OcrConvention) =>
@@ -39,6 +35,7 @@ export function ModelPickerDialog({ job, onClose, onSaved, onError }: ModelPicke
   })
   const [decode, setDecode] = useState<OcrDecode>(job.ocr_decode ?? 'beam')
   const [convention, setConvention] = useState<OcrConvention>(job.ocr_convention ?? {})
+  const [catalog, setCatalog] = useState<ConventionFlag[] | null>(null)
   // The models a page is read with are pinned here like the rest, rather than being
   // whatever the last run happened to tick.
   const [readers, setReaders] = useState<LlmModel[] | null>(null)
@@ -55,6 +52,9 @@ export function ModelPickerDialog({ job, onClose, onSaved, onError }: ModelPicke
     reocrPreview(job.id)
       .then(setPreview)
       .catch(() => {})
+    listConventionFlags()
+      .then((r) => setCatalog(r.flags))
+      .catch(() => setCatalog([]))
     // Absent on a deployment with the feature switched off, which is not an error here.
     listUsableLlmModels()
       .then((r) => setReaders(r.models))
@@ -65,7 +65,12 @@ export function ModelPickerDialog({ job, onClose, onSaved, onError }: ModelPicke
     ? m.task === 'ocr' && m.is_default
     : m.id === Number(picks.ocr)))
   const knownFlags = ocrModel?.conventions ?? null
-  const otherFlags = flagsOn(convention).filter((name) => !(knownFlags ?? []).includes(name))
+  // What the model reads first, in its order; then every other flag there is, so a rule can
+  // be set on the dataset ahead of a model that reads it.
+  const otherFlags = [...new Set([...(catalog ?? []).map((f) => f.name), ...flagsOn(convention)])]
+    .filter((name) => !(knownFlags ?? []).includes(name))
+  const flagLabel = (name: string) => conventionLabel(name, catalog)
+  const description = (name: string) => catalog?.find((f) => f.name === name)?.description ?? ''
   const toggleFlag = (name: string) =>
     setConvention((held) => Object.fromEntries(
       flagsOn({ ...held, [name]: !held[name] }).map((on) => [on, true])))
@@ -205,7 +210,14 @@ export function ModelPickerDialog({ job, onClose, onSaved, onError }: ModelPicke
         </select>
       </div>
       <fieldset className="mb-4" data-testid="ocr-convention">
-        <legend className="mb-1 block text-sm font-medium text-ink">Transcription convention</legend>
+        <legend className="mb-1 flex w-full items-baseline text-sm font-medium text-ink">
+          Transcription convention
+          {/* A new tab, so what is picked here so far is not lost on the way. */}
+          <a href="/conventions" target="_blank" rel="noreferrer" data-testid="conventions-link"
+             className="ml-auto text-xs font-normal text-ink-subtle hover:text-accent-ink">
+            What these mean
+          </a>
+        </legend>
         {knownFlags === null && (
           <p className="mb-1 text-xs text-ink-muted">
             This model's convention switches are known once it has read a page.
@@ -220,17 +232,26 @@ export function ModelPickerDialog({ job, onClose, onSaved, onError }: ModelPicke
             return (
               <label key={name} data-testid="convention-flag" data-flag={name}
                      data-supported={supported}
-                     className="flex cursor-pointer items-center gap-2 text-sm">
+                     className="flex cursor-pointer items-start gap-2 text-sm">
                 <input
                   type="checkbox"
                   checked={!!convention[name]}
                   onChange={() => toggleFlag(name)}
-                  className="cursor-pointer accent-accent"
+                  className="mt-1 cursor-pointer accent-accent"
                 />
-                <span className="min-w-0 truncate">{flagLabel(name)}</span>
-                {!supported && (
-                  <span className="shrink-0 text-xs text-warn">not supported by this model</span>
-                )}
+                <span className="min-w-0">
+                  <span className="block">{flagLabel(name)}</span>
+                  {description(name) && (
+                    <span data-testid="convention-description" className="block text-xs text-ink-muted">
+                      {description(name)}
+                    </span>
+                  )}
+                  {!supported && (
+                    <span data-testid="convention-ignored" className="block text-xs text-warn">
+                      {ocrModel?.name ?? 'This model'} ignores this
+                    </span>
+                  )}
+                </span>
               </label>
             )
           })}

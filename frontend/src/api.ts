@@ -26,6 +26,30 @@ export interface Counters {
 
 export type OcrConvention = Record<string, boolean>
 
+/** A transcription-convention flag as people read it: `name` is what models declare and
+ *  datasets store, `label` and `description` what an admin wrote for it. */
+export interface ConventionFlag {
+  name: string
+  label: string
+  description: string
+  /** The model it was first seen on, when a model brought it. */
+  added_from: string | null
+  models: number
+  datasets: number
+}
+
+export function listConventionFlags(): Promise<{ flags: ConventionFlag[] }> {
+  return request('/api/convention-flags')
+}
+
+export function addConventionFlag(body: { name: string; label: string; description: string }): Promise<ConventionFlag> {
+  return request('/api/convention-flags', json('POST', body))
+}
+
+export function updateConventionFlag(name: string, body: { label: string; description: string }): Promise<ConventionFlag> {
+  return request(`/api/convention-flags/${encodeURIComponent(name)}`, json('PATCH', body))
+}
+
 /** A shared remark on a dataset or a page, and who last wrote it when. */
 export interface Note {
   text: string

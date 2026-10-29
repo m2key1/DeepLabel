@@ -60,7 +60,13 @@ Choose **New job**, pick the task, name the dataset and add files.
   inside each layout box instead.
 - Pick the model for each phase, the OCR decoding (beam search with a language model, beam
   search reranked by the decoder, or fast greedy), and the transcription convention flags
-  the OCR model supports (for example long s or typographic punctuation).
+  (for example long s or typographic punctuation). Every flag is offered with what it means;
+  one the chosen OCR model ignores stays set on the dataset as a rule for annotators and
+  for a later model.
+- The **Conventions** page, opened from the Models page or from **What these mean** beside the
+  flags, lists every flag with how many models read it and how many datasets ask for it. A
+  flag a model declares is added by itself; admins write its label and description, and can
+  add a flag ahead of any model that reads it.
 - Pick a layout template; it decides the dataset's layout classes.
 - Pages are sorted in natural order (`scan_2` before `scan_10`).
 - Photos are turned upright from their EXIF data, 16-bit scans are converted to 8-bit and

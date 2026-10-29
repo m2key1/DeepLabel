@@ -1,6 +1,8 @@
 import json
 import os
 
+from app import conventions
+
 TASKS = ('layout', 'lines', 'ocr')
 
 # The registry id of the model each phase runs, handed to the job's process so what it
@@ -64,6 +66,9 @@ def note_model_facts(conn, model_id: int, facts: dict, convention_names: list[st
                      (int(facts['target_height']), int(facts.get('max_width') or 0), model_id))
     conn.execute('UPDATE models SET conventions = ? WHERE id = ? AND conventions IS NULL',
                  (json.dumps(list(convention_names)), model_id))
+    model = conn.execute('SELECT name, conventions FROM models WHERE id = ?', (model_id,)).fetchone()
+    if model is not None:
+        conventions.note(conn, json.loads(model['conventions']), model['name'])
     conn.commit()
 
 

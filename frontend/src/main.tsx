@@ -34,6 +34,7 @@ import { TrainingRunPage } from './pages/TrainingRunPage'
 import { EvaluationPage } from './pages/EvaluationPage'
 import { EvaluationsPage } from './pages/EvaluationsPage'
 import { AugmentationsPage } from './pages/AugmentationsPage'
+import { ConventionsPage } from './pages/ConventionsPage'
 import { TranscriptPage } from './pages/TranscriptPage'
 import { CorpusPage } from './pages/CorpusPage'
 import { NotFoundPage, RouteError } from './pages/NotFoundPage'
@@ -65,6 +66,7 @@ const router = createBrowserRouter([
           { path: '/models/:id', element: <ModelPage /> },
           { path: '/evaluations/:id', element: <EvaluationPage /> },
           { path: '/augmentations', element: <AugmentationsPage /> },
+          { path: '/conventions', element: <ConventionsPage /> },
           { path: '/templates', element: <LayoutTemplatesPage /> },
           { path: '/jobs/:id', element: <JobDetailPage /> },
           { path: '/jobs/:id/transcript', element: <TranscriptPage /> },

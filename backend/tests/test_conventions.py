@@ -40,3 +40,119 @@ def test_a_model_not_yet_loaded_has_unknown_flags(tmp_path):
     row = conn.execute('SELECT * FROM models WHERE id = 1').fetchone()
     assert registry.model_payload(row)['conventions'] is None
     conn.close()
+
+
+class TestCatalog:
+    """The flags people read about: named as models declare them, described by an admin."""
+
+    SECRET = 'test-secret'
+
+    @staticmethod
+    def headers(user: str, role: str) -> dict:
+        return {'X-Frontend-Secret': TestCatalog.SECRET, 'X-Auth-User': user, 'X-Auth-Role': role}
+
+    @pytest.fixture
+    def conn(self, tmp_path, monkeypatch):
+        monkeypatch.setattr('app.config.FRONTEND_SECRET', self.SECRET)
+        conn = store.connect(tmp_path / 'app.db')
+        yield conn
+        conn.close()
+
+    @pytest.fixture
+    def client(self, conn):
+        from fastapi.testclient import TestClient
+        from app.deps import get_db
+        from app.main import app
+        app.dependency_overrides[get_db] = lambda: conn
+        yield TestClient(app)
+        app.dependency_overrides.clear()
+
+    def flags(self, client) -> dict:
+        r = client.get('/api/convention-flags', headers=self.headers('bob', 'member'))
+        assert r.status_code == 200
+        return {f['name']: f for f in r.json()['flags']}
+
+    def test_a_flag_a_model_declares_joins_the_catalog_under_its_own_name(self, conn, client):
+        conn.execute("INSERT INTO models (id, task, name, checkpoint) VALUES (1, 'ocr', 'Kurrent v4', '/m.ckpt')")
+        registry.note_model_facts(conn, 1, {}, ['long_s', 'superscript_e'])
+
+        flags = self.flags(client)
+        assert {name: (f['label'], f['description'], f['added_from'], f['models'])
+                for name, f in flags.items()} == {
+            'long_s': ('long_s', '', 'Kurrent v4', 1), 'superscript_e': ('superscript_e', '', 'Kurrent v4', 1)}
+
+    def test_a_flag_a_dataset_asks_for_joins_it_too_and_is_counted(self, conn, client):
+        conn.execute("INSERT INTO jobs (id, name, owner) VALUES ('j1', 'Briefe', 'bob')")
+        conn.commit()
+        r = client.patch('/api/jobs/j1', json={'ocr_convention': {'keep_hyphens': True, 'long_s': False}},
+                         headers=self.headers('bob', 'member'))
+        assert r.status_code == 200
+
+        flags = self.flags(client)
+        assert list(flags) == ['keep_hyphens']
+        assert (flags['keep_hyphens']['datasets'], flags['keep_hyphens']['models']) == (1, 0)
+
+    def test_an_admin_describes_a_flag_and_adds_one_no_model_has_yet(self, conn, client):
+        conventions.note(conn, ['long_s'])
+        conn.commit()
+        root = self.headers('root', 'admin')
+
+        r = client.patch('/api/convention-flags/long_s', headers=root,
+                         json={'label': 'Keep long s', 'description': 'ſ is transcribed as ſ, not s.'})
+        assert r.status_code == 200
+        r = client.post('/api/convention-flags', headers=root,
+                        json={'name': 'keep_abbreviations', 'label': 'Keep abbreviations'})
+        assert r.status_code == 200
+
+        flags = self.flags(client)
+        assert {name: (f['label'], f['description']) for name, f in flags.items()} == {
+            'long_s': ('Keep long s', 'ſ is transcribed as ſ, not s.'),
+            'keep_abbreviations': ('Keep abbreviations', '')}
+
+    def test_a_model_load_leaves_a_described_flag_as_it_was(self, conn, client):
+        conventions.note(conn, ['long_s'])
+        conn.execute("UPDATE convention_flags SET label = 'Keep long s' WHERE name = 'long_s'")
+        conn.execute("INSERT INTO models (id, task, name, checkpoint) VALUES (1, 'ocr', 'Kurrent v4', '/m.ckpt')")
+        registry.note_model_facts(conn, 1, {}, ['long_s'])
+
+        assert self.flags(client)['long_s']['label'] == 'Keep long s'
+
+    def test_only_an_admin_changes_the_catalog(self, conn, client):
+        conventions.note(conn, ['long_s'])
+        conn.commit()
+        bob = self.headers('bob', 'member')
+
+        assert client.patch('/api/convention-flags/long_s', headers=bob, json={'label': 'x'}).status_code == 403
+        assert client.post('/api/convention-flags', headers=bob,
+                           json={'name': 'new_flag', 'label': 'x'}).status_code == 403
+        assert self.flags(client)['long_s']['label'] == 'long_s'
+        assert 'new_flag' not in self.flags(client)
+
+    def test_a_name_must_be_a_flag_name_and_new(self, conn, client):
+        conventions.note(conn, ['long_s'])
+        conn.commit()
+        root = self.headers('root', 'admin')
+
+        assert client.post('/api/convention-flags', headers=root,
+                           json={'name': 'Long S', 'label': 'x'}).status_code == 400
+        assert client.post('/api/convention-flags', headers=root,
+                           json={'name': 'long_s', 'label': 'x'}).status_code == 409
+        assert client.patch('/api/convention-flags/nope', headers=root, json={'label': 'x'}).status_code == 404
+
+
+def test_an_existing_database_starts_its_catalog_from_its_models_and_datasets(tmp_path):
+    db = tmp_path / 'app.db'
+    conn = store.connect(db)
+    conn.execute("INSERT INTO models (task, name, checkpoint, conventions) VALUES ('ocr', 'Kurrent v3', '/m', '[\"long_s\"]')")
+    conn.execute("INSERT INTO jobs (id, name, ocr_convention) VALUES ('j1', 'Briefe', '{\"keep_hyphens\": true}')")
+    conn.execute('DELETE FROM convention_flags')
+    conn.execute(f'PRAGMA user_version = {store.CONVENTION_CATALOG - 1}')
+    conn.commit()
+    conn.close()
+
+    conn = store.connect(db)
+    store.connect(db).close()
+
+    assert [tuple(row) for row in conn.execute('SELECT name, label, added_from FROM convention_flags ORDER BY name')] == [
+        ('keep_hyphens', 'keep_hyphens', None), ('long_s', 'long_s', 'Kurrent v3')]
+    conn.close()

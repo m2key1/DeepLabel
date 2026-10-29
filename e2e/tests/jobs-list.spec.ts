@@ -128,10 +128,12 @@ test.describe('Scenario: managing datasets from the list', () => {
     await openModels()
     await page.getByTestId('model-pick-ocr').selectOption(String(builtinOcr.id))
 
-    // One switch per flag the stub model knows, in its order, all off for a new dataset.
+    // One switch per flag the stub model knows, first and in its order, all off for a new
+    // dataset; any other flag of the catalog follows, marked as one the model ignores.
     const flags = page.getByTestId('convention-flag')
-    await expect(flags).toHaveCount(4)
-    expect(await flags.evaluateAll((els) => els.map((el) => el.getAttribute('data-flag')))).toEqual(
+    const read = flags.and(page.locator('[data-supported="true"]'))
+    await expect(read).toHaveCount(4)
+    expect((await flags.evaluateAll((els) => els.map((el) => el.getAttribute('data-flag')))).slice(0, 4)).toEqual(
       ['long_s', 'oblique_hyphen', 'typographic_punctuation', 'abbreviations'])
     for (const box of await flags.getByRole('checkbox').all()) await expect(box).not.toBeChecked()
     await expect(page.getByTestId('convention-read')).toHaveText('Last read normalized.')
@@ -159,10 +161,9 @@ test.describe('Scenario: managing datasets from the list', () => {
     await setOcrConvention(jobId, { long_s: true, ligatures: true })
     await page.reload()
     await openModels()
-    await expect(flags).toHaveCount(5)
-    const unknown = flags.filter({ hasText: 'Ligatures' })
+    const unknown = page.locator('[data-testid="convention-flag"][data-flag="ligatures"]')
     await expect(unknown).toHaveAttribute('data-supported', 'false')
-    await expect(unknown).toContainText('not supported by this model')
+    await expect(unknown.getByTestId('convention-ignored')).toHaveText(`${builtinOcr.name} ignores this`)
     await expect(unknown.getByRole('checkbox')).toBeChecked()
     const known = flags.filter({ hasText: 'Long s' })
     await expect(known).toHaveAttribute('data-supported', 'true')

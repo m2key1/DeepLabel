@@ -1,10 +1,11 @@
 import { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  cancelEvaluation, getLayoutTemplates, getModelUsage, listEvaluations, listModels, listTrainings, patchModel,
-  retryEvaluation,
+  cancelEvaluation, getLayoutTemplates, getModelUsage, listConventionFlags, listEvaluations, listModels, listTrainings,
+  patchModel, retryEvaluation,
 } from '../api'
-import type { Evaluation, LayoutTemplate, ModelUsage, RegistryModel, Training } from '../api'
+import type { ConventionFlag, Evaluation, LayoutTemplate, ModelUsage, RegistryModel, Training } from '../api'
+import { conventionLabel } from '../components/conventionLabel'
 import { useAuth } from '../auth'
 import { useCrumb } from '../components/NavBar'
 import { EditModelDialog } from '../components/models/EditModelDialog'
@@ -148,6 +149,7 @@ export function ModelPage() {
   const [evaluations, setEvaluations] = useState<Evaluation[]>([])
   const [usage, setUsage] = useState<ModelUsage | null>(null)
   const [templates, setTemplates] = useState<LayoutTemplate[]>([])
+  const [catalog, setCatalog] = useState<ConventionFlag[] | null>(null)
   const [editing, setEditing] = useState(false)
   const [evaluating, setEvaluating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -159,6 +161,7 @@ export function ModelPage() {
     listEvaluations().then((r) => setEvaluations(r.evaluations)).catch(() => {})
     getModelUsage(modelId).then(setUsage).catch(() => {})
     getLayoutTemplates().then(setTemplates).catch(() => {})
+    listConventionFlags().then((r) => setCatalog(r.flags)).catch(() => {})
   }, [modelId])
   usePolling(refresh, 10000)
 
@@ -248,7 +251,7 @@ export function ModelPage() {
             <dt className="text-ink-muted">Conventions</dt>
             <dd data-testid="model-conventions">{model.conventions === null ? 'known once it has read a page'
               : model.conventions.length === 0 ? 'one convention only'
-                : `knows ${model.conventions.length}: ${model.conventions.map((c) => c.replaceAll('_', ' ')).join(', ')}`}</dd>
+                : `knows ${model.conventions.length}: ${model.conventions.map((c) => conventionLabel(c, catalog).toLowerCase()).join(', ')}`}</dd>
           </>}
           {model.metrics && <>
             <dt className="text-ink-muted">Training reported</dt>

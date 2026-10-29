@@ -7,8 +7,8 @@ from PIL import Image
 
 from app import (augmentations, caches, config, dataset_sync, geometry, jobs, llm_gt, llm_ocr,
                  llm_queue, store, trainer, training, weights)
-from app.routes import (augmentations as augmentation_routes, backend_api, bulk, contributors, elements, evaluations,
-                        exports, groups, lines, llm, maps, models, pages, people, pipeline, presence,
+from app.routes import (augmentations as augmentation_routes, backend_api, bulk, contributors, conventions, elements,
+                        evaluations, exports, groups, lines, llm, maps, models, pages, people, pipeline, presence,
                         reference as reference_routes, trainings)
 from app.routes import jobs as job_routes
 from app.routes import layout_templates as layout_template_routes
@@ -102,6 +102,7 @@ def get_tasks():
 
 app.include_router(job_routes.router)
 app.include_router(layout_template_routes.router)
+app.include_router(conventions.router)
 app.include_router(pages.router)
 app.include_router(elements.router)
 app.include_router(lines.router)

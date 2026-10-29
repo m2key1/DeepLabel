@@ -1013,6 +1013,7 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
         except ValueError as error:
             raise HTTPException(400, str(error))
         conn.execute('UPDATE jobs SET ocr_convention = ? WHERE id = ?', (json.dumps(chosen), job_id))
+        conventions.note(conn, [name for name, on in chosen.items() if on])
     asked = fields.intersection(PROCESSING_FIELDS)
     if asked:
         _patch_processing(conn, job_id, job, body, asked, user)
