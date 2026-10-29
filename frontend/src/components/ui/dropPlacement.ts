@@ -20,16 +20,36 @@ export function useDropPlacement(open: boolean) {
     }
     const anchor = panel.parentElement
     if (!anchor) return
-    const panelHeight = panel.getBoundingClientRect().height
-    const { top, bottom } = anchor.getBoundingClientRect()
-    const below = window.innerHeight - bottom
-    // Only flip when going up actually helps: near the top of a short window, neither
-    // direction fits and downwards at least starts on screen.
-    setUp(panelHeight > below && top > panelHeight)
+    const place = () => {
+      const panelHeight = panel.getBoundingClientRect().height
+      const { top, bottom } = anchor.getBoundingClientRect()
+      const view = visibleArea(anchor)
+      // Only flip when going up actually helps: near the top of a short window, neither
+      // direction fits and downwards at least starts on screen.
+      setUp(panelHeight > view.bottom - bottom && top - view.top > panelHeight)
+    }
+    place()
+    // A panel that fetches what it shows is short until it arrives, so it is measured
+    // again at its full height.
+    const watch = new ResizeObserver(place)
+    watch.observe(panel)
+    return () => watch.disconnect()
   }, [open])
 
   return {
     ref,
     className: up ? 'absolute bottom-full mb-1' : 'absolute top-full mt-1',
   }
+}
+
+/** The part of the window an element can be seen in: a list that scrolls inside the page
+ *  hides whatever hangs past its own edges, not the window's. */
+function visibleArea(el: HTMLElement): { top: number; bottom: number } {
+  for (let up = el.parentElement; up; up = up.parentElement) {
+    if (/auto|scroll/.test(getComputedStyle(up).overflowY)) {
+      const { top, bottom } = up.getBoundingClientRect()
+      return { top: Math.max(top, 0), bottom: Math.min(bottom, window.innerHeight) }
+    }
+  }
+  return { top: 0, bottom: window.innerHeight }
 }
