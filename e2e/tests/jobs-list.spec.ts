@@ -456,4 +456,47 @@ test.describe('Scenario: downloading from the list', () => {
     }
     await expect(menu.locator('[data-format="page"]')).toContainText('Transkribus, eScriptorium, OCR-D')
   })
+
+  test('opening the download or the actions menu closes the info panel', async ({ page }) => {
+    const name = uniqueName('One popover')
+    await seedCompletedJob(name, 1)
+    await page.goto(`/?q=${encodeURIComponent(name)}`)
+    const card = page.getByTestId('job-card').filter({ hasText: name })
+
+    await card.getByTestId('job-info-toggle').click()
+    await expect(card.getByTestId('job-info')).toBeVisible()
+    await card.getByTitle('Download this dataset').click()
+    await expect(card.getByTestId('job-info')).toHaveCount(0)
+    await expect(card.getByTestId('export-menu')).toBeVisible()
+
+    await card.getByTestId('job-info-toggle').click()
+    await expect(card.getByTestId('job-info')).toBeVisible()
+    await expect(card.getByTestId('export-menu')).toHaveCount(0)
+    await card.getByTestId('job-menu').click()
+    await expect(card.getByTestId('job-info')).toHaveCount(0)
+    await expect(card.getByRole('button', { name: 'Rename' })).toBeVisible()
+  })
+})
+
+test.describe('Scenario: the foot of a long list', () => {
+  test('the last dataset opens its info panel where it can be seen', async ({ page }) => {
+    const prefix = uniqueName('Foot of list')
+    for (let i = 1; i <= 16; i++) await createJob(`${prefix} ${String(i).padStart(2, '0')}`, 1)
+    await page.setViewportSize({ width: 1280, height: 700 })
+    await page.goto(`/?q=${encodeURIComponent(prefix)}`)
+    const cards = page.getByTestId('job-card')
+    await expect(cards).toHaveCount(16)
+
+    const last = cards.last()
+    await last.scrollIntoViewIfNeeded()
+    await last.getByTestId('job-info-toggle').click()
+    const panel = last.getByTestId('job-info')
+    // Loaded, at its full height, before it is measured against the list it sits in.
+    await expect(panel.locator('[data-field="pages"]')).toContainText('1 page')
+    const scroller = await page.getByTestId('jobs-scroller').boundingBox()
+    await expect.poll(async () => {
+      const box = (await panel.boundingBox())!
+      return box.y >= scroller!.y && box.y + box.height <= scroller!.y + scroller!.height
+    }).toBe(true)
+  })
 })

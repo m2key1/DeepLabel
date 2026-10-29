@@ -660,6 +660,14 @@ export function JobsPage() {
   const { dragging, dragSource, dropZone } = useDatasetDrag(
     selected, canEdit, (ids, groupId) => void moveDatasets(ids, groupId))
 
+  // A card's three buttons stop their click from reaching the page, which is what shuts
+  // the others otherwise - so each one shuts the other two itself.
+  const showCardPopover = (which: 'info' | 'download' | 'menu', jobId: string | null) => {
+    setInfoJob(which === 'info' ? jobId : null)
+    setDownloadMenu(which === 'download' ? jobId : null)
+    setOpenMenu(which === 'menu' ? jobId : null)
+  }
+
   const actionsFor = (job: Job) => ({
     job,
     canManage: isAdmin || job.owner === user,
@@ -667,9 +675,9 @@ export function JobsPage() {
     openDownload: downloadMenu === job.id,
     openMenu: openMenu === job.id,
     preparing: preparing === job.id,
-    onToggleInfo: () => setInfoJob(infoJob === job.id ? null : job.id),
-    onToggleDownload: () => setDownloadMenu(downloadMenu === job.id ? null : job.id),
-    onToggleMenu: () => setOpenMenu(openMenu === job.id ? null : job.id),
+    onToggleInfo: () => showCardPopover('info', infoJob === job.id ? null : job.id),
+    onToggleDownload: () => showCardPopover('download', downloadMenu === job.id ? null : job.id),
+    onToggleMenu: () => showCardPopover('menu', openMenu === job.id ? null : job.id),
     onMasks: (fused: boolean) => void downloadMasks(job.id, fused),
     onRename: () => startRename(job),
     onMove: () => setMoveJob(job),
@@ -1295,7 +1303,7 @@ export function JobsPage() {
             </button>
           </div>
         )}
-        <div ref={listRef} className="min-h-0 flex-1 overflow-auto px-2 py-3">
+        <div ref={listRef} data-testid="jobs-scroller" className="min-h-0 flex-1 overflow-auto px-2 py-3">
           {error && <p role="alert" className="mb-3 px-2 text-sm text-danger">{error}</p>}
           {!jobs && <JobCardSkeletons />}
           {jobs && jobs.length === 0 && groups.length === 0 && (
