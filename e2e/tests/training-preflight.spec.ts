@@ -61,7 +61,7 @@ test.describe('Scenario: the training pre-flight', () => {
     await page.goto('/models/train?task=ocr')
     await page.getByLabel('Model name').fill(runName)
     await pickDataset(page, trainName)
-    await page.getByLabel('Test set').selectOption({ label: `${testName} - 1 test page` })
+    await page.getByTestId('training-test-sets').getByRole('checkbox', { name: testName }).check()
     await page.getByTestId('advanced-toggle').click()
     await page.getByLabel('Epochs', { exact: true }).fill('2')
 

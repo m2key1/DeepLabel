@@ -316,8 +316,8 @@ Start a run with **Train model** on the Models page. Training runs on the model'
 local GPU or on a Slurm cluster (marked *highly experimental*).
 
 - Pick the base model, the datasets (by project, with search), the validation split and
-  optionally a test set: the test pages of a dataset, scored with the base and the new model
-  once the run is trained.
+  optionally one or more test sets: the test pages of datasets, scored with the base and the
+  new model once the run is trained.
 - Train only on lines a person verified, or include lines settled by language-model
   agreement.
 - Tune epochs, batch size, learning rate, early stopping and every other setting the

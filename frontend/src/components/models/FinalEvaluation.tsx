@@ -1,4 +1,4 @@
-import type { FinalEvaluation, TestEvaluation } from '../../api'
+import type { Evaluation, FinalEvaluation, TestEvaluation } from '../../api'
 import { percent } from '../evaluation/format'
 import { cardChrome } from '../ui/Card'
 
@@ -69,6 +69,17 @@ export function FinalEvaluationTable({ evaluation, datasets }: {
   )
 }
 
+/** An OCR run's test-set scores in the shape a layout or lines run reports them, so both
+ *  are read off the same table: the stored per-dataset breakdown is its rows. */
+export function ocrTestEvaluation(trained: Evaluation, base: Evaluation | null): TestEvaluation {
+  const asScores = (ev: Evaluation): FinalEvaluation => ({
+    metric: 'CER',
+    overall: { CER: ev.cer ?? NaN, instances: ev.line_count ?? NaN },
+    by_dataset: Object.fromEntries((ev.breakdown ?? []).map((row) => [row.job_id, { CER: row.cer, instances: row.lines }])),
+  })
+  return { trained: asScores(trained), base: base ? asScores(base) : undefined }
+}
+
 /** The test datasets read by the base model and by the trained one, side by side: whether
  *  the run helped, on pages it never saw. */
 export function TestEvaluationTable({ evaluation, datasets }: {
@@ -80,6 +91,10 @@ export function TestEvaluationTable({ evaluation, datasets }: {
     return <p data-testid="test-evaluation-error" className="text-xs text-danger">{trained.error}</p>
   }
   const metric = trained.metric
+  // An error rate improves by going down; every other metric here by going up.
+  const better = (change: number) => (metric === 'CER' ? change <= 0 : change >= 0)
+  // An OCR score counts lines, not pages.
+  const byPage = metric !== 'CER'
   const baseScores = base && !base.error ? base : null
   const rows = [
     { id: 'overall', label: 'all test pages', scores: trained.overall, before: baseScores?.overall },
@@ -92,7 +107,7 @@ export function TestEvaluationTable({ evaluation, datasets }: {
         <thead className="text-left text-ink-subtle">
           <tr>
             <th className="p-2 font-normal">dataset</th>
-            <th className="p-2 text-right font-normal">pages</th>
+            {byPage && <th className="p-2 text-right font-normal">pages</th>}
             <th className="p-2 text-right font-normal">{metric === 'mAP50' ? 'boxes' : 'lines'}</th>
             <th className="p-2 text-right font-normal">base {metric}</th>
             <th className="p-2 text-right font-normal">trained {metric}</th>
@@ -107,12 +122,12 @@ export function TestEvaluationTable({ evaluation, datasets }: {
             return (
               <tr key={row.id} data-dataset={row.id} className="border-t border-line">
                 <td className={`p-2 ${row.id === 'overall' ? 'font-semibold text-ink' : 'text-ink'}`}>{row.label}</td>
-                <td className="p-2 text-right font-mono tabular-nums">{row.scores.pages ?? '-'}</td>
+                {byPage && <td className="p-2 text-right font-mono tabular-nums">{row.scores.pages ?? '-'}</td>}
                 <td className="p-2 text-right font-mono tabular-nums">{row.scores.instances ?? '-'}</td>
                 <td data-score="base" className="p-2 text-right font-mono tabular-nums">{percent(before)}</td>
                 <td data-score="trained" className="p-2 text-right font-mono tabular-nums text-ink">{percent(after)}</td>
                 <td data-score="change"
-                    className={`p-2 text-right font-mono tabular-nums ${change === null ? '' : change >= 0 ? 'text-ok' : 'text-danger'}`}>
+                    className={`p-2 text-right font-mono tabular-nums ${change === null ? '' : better(change) ? 'text-ok' : 'text-danger'}`}>
                   {change === null ? '-' : `${change >= 0 ? '+' : ''}${change.toFixed(2)} pt`}
                 </td>
               </tr>

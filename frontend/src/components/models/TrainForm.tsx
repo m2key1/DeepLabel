@@ -217,7 +217,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
   const [valPct, setValPct] = useState(from ? restoredValPct(from) : '10')
   const [strategy, setStrategy] = useState<SplitStrategy>(
     from && from.split_strategy !== 'holdout' ? from.split_strategy : 'uniform')
-  const [testId, setTestId] = useState(from?.test_job_ids[0] ?? '')
+  const [testIds, setTestIds] = useState<string[]>(from?.test_job_ids ?? [])
   const [buildLm, setBuildLm] = useState(from?.build_lm ?? false)
   const [options, setOptions] = useState<TrainingOptions | null>(null)
   const [cannotTrain, setCannotTrain] = useState<string | null>(null)
@@ -293,9 +293,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
           const reachable = from.dataset_job_ids.filter((id) => rows.some((j) => j.id === id))
           setChosen(new Set(reachable))
           setDroppedDatasets(from.dataset_job_ids.length - reachable.length)
-          if (from.test_job_ids[0] && !rows.some((j) => j.id === from.test_job_ids[0] && j.test_pages)) {
-            setTestId('')
-          }
+          setTestIds(from.test_job_ids.filter((id) => rows.some((j) => j.id === id && j.test_pages)))
         }
         if (rows.length) {
           const res = await trainingPreview(task, rows.map((j) => j.id))
@@ -431,7 +429,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
       val_fraction: Number(valPct) / 100,
       split_strategy: strategy,
       valid_job_ids: [],
-      test_job_ids: testId ? [testId] : [],
+      test_job_ids: testIds,
       build_lm: lmOffered && buildLm,
       human_checked_only: humanOnly,
       ...(task === 'lines' ? { line_shape: lineShape || null } : {}),
@@ -550,33 +548,42 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
         </div>
 
         <div>
-        <label className={labelClass} htmlFor="training-test-set">
-          Test set
-        </label>
+        <fieldset data-testid="training-test-sets">
+        <legend className={labelClass}>Test sets</legend>
         <p className="mb-1 text-xs text-ink-muted">
-          Optional - the test pages of a dataset, never trained on and scored with the base
+          Optional - the test pages of datasets, never trained on and scored with the base
           and the new model once the training finishes.
         </p>
-        <select
-          id="training-test-set"
-          value={testId}
-          onChange={(e) => setTestId(e.target.value)}
-          className={`${inputClass} mb-3`}
-        >
-          <option value="">None</option>
-          {sections.map((section) => {
-            const options = section.jobs.filter((j) => testCandidates.includes(j))
-            if (options.length === 0) return null
-            const items = options.map((job) => (
-              <option key={job.id} value={job.id}>
-                {job.name} - {job.test_pages} test page{job.test_pages === 1 ? '' : 's'}
-              </option>
-            ))
-            return section.label
-              ? <optgroup key={section.key} label={section.label}>{items}</optgroup>
-              : <Fragment key={section.key}>{items}</Fragment>
-          })}
-        </select>
+        {testCandidates.length === 0 ? (
+          <p className="mb-3 text-xs text-ink-subtle">No dataset has test pages yet.</p>
+        ) : (
+          <div className={`mb-3 max-h-48 overflow-y-auto rounded border border-line-strong py-1`}>
+            {sections.map((section) => {
+              const options = section.jobs.filter((j) => testCandidates.includes(j))
+              if (options.length === 0) return null
+              return (
+                <Fragment key={section.key}>
+                  {section.label && (
+                    <div className="px-2 pt-1 text-[10px] uppercase tracking-wide text-ink-subtle">{section.label}</div>
+                  )}
+                  {options.map((job) => (
+                    <label key={job.id} className="flex cursor-pointer items-center gap-2 px-2 py-0.5 text-sm hover:bg-raised">
+                      <input type="checkbox" className="accent-accent"
+                             checked={testIds.includes(job.id)}
+                             onChange={(e) => setTestIds((ids) =>
+                               e.target.checked ? [...ids, job.id] : ids.filter((id) => id !== job.id))} />
+                      <span className="min-w-0 flex-1 truncate">{job.name}</span>
+                      <span className="shrink-0 text-xs text-ink-muted">
+                        {job.test_pages} test page{job.test_pages === 1 ? '' : 's'}
+                      </span>
+                    </label>
+                  ))}
+                </Fragment>
+              )
+            })}
+          </div>
+        )}
+        </fieldset>
         {settledInChosen > 0 && (
           <label className="mb-3 flex items-start gap-1.5 text-xs text-ink-muted">
             <input
@@ -933,7 +940,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
           `lr ${learningRate.trim() || lrDefault}`,
           earlyStop ? `early stop after ${patience.trim() || '10'}` : 'no early stop',
           `${valPct}% ${strategy === 'uniform' ? 'random' : 'per-dataset'} validation split`,
-          ...(testId ? [`test: ${jobs?.find((j) => j.id === testId)?.name ?? ''}`] : []),
+          ...(testIds.length ? [`test: ${testIds.map((id) => jobs?.find((j) => j.id === id)?.name ?? '').join(', ')}`] : []),
           ...(target === 'slurm' ? [`${gpuCount}x ${GPU_LABELS[gpuType] ?? gpuType}`] : []),
           `augmentation: ${stackLabel}`,
           ...(tunedCount > 0 ? [`${tunedCount} more knob${tunedCount === 1 ? '' : 's'} tuned`] : []),

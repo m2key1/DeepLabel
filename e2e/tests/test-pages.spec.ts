@@ -183,10 +183,11 @@ test.describe('Scenario: training and scoring around test pages', () => {
       await expect(page.getByText('6 checked lines selected')).toBeVisible()
       await expect(page.getByTestId('left-out-notice')).toHaveText(
         `1 page left out: same scan as test pages in ${heldName}`)
-      const testSet = page.getByLabel('Test set')
-      await expect(testSet).toHaveValue('')
-      await expect(testSet.locator('option', { hasText: `${heldName} - 1 test page` })).toHaveCount(1)
-      await expect(testSet.locator('option', { hasText: trainName })).toHaveCount(0)
+      const testSets = page.getByTestId('training-test-sets')
+      const held = testSets.getByRole('checkbox', { name: heldName })
+      await expect(held).toHaveCount(1)
+      await expect(held).not.toBeChecked()
+      await expect(testSets.getByRole('checkbox', { name: trainName })).toHaveCount(0)
     })
 
   test('an evaluation of a dataset with test pages scores them unless all pages are asked for',

@@ -9,7 +9,7 @@ import {
 import type { Evaluation, FinalEvaluation, OcrDecode, ProgressPoint, TestEvaluation, Training } from '../api'
 import { useAuth } from '../auth'
 import { useSetCrumbs } from '../components/NavBar'
-import { FinalEvaluationTable, TestEvaluationTable } from '../components/models/FinalEvaluation'
+import { FinalEvaluationTable, TestEvaluationTable, ocrTestEvaluation } from '../components/models/FinalEvaluation'
 import { RunMetrics } from '../components/models/RunMetrics'
 import { describeMetric, headlineKeys } from '../components/models/metrics'
 import { PreflightPanel } from '../components/models/PreflightReport'
@@ -206,7 +206,10 @@ export function TrainingRunPage() {
   const lastLoss = last ? (last as unknown as Record<string, unknown>)[lossKey] : undefined
   const itemsLabel = run.task === 'ocr' ? 'lines' : 'pages'
   const finalEvaluation = (run.metrics?.evaluation ?? null) as FinalEvaluation | null
-  const testEvaluation = (run.metrics?.test_evaluation ?? null) as TestEvaluation | null
+  const ocrTest = run.task === 'ocr' ? scored(run.model_id, true) : null
+  const testEvaluation = ocrTest
+    ? ocrTestEvaluation(ocrTest, scored(run.base_model_id, true))
+    : (run.metrics?.test_evaluation ?? null) as TestEvaluation | null
   const headlineLabel = headline ? describeMetric(headline.key, metricInfo ?? []).info?.label ?? headline.key : null
 
   const panels: Record<RunTab, ReactNode> = {
