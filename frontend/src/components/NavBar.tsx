@@ -35,7 +35,9 @@ export function useCrumb(label: string) {
 
 export function Shell() {
   const [crumbs, setCrumbs] = useState<Crumb[]>([])
-  const inEditor = !!useMatch('/jobs/:id/pages/:pageId') || !!useMatch('/jobs/:id/tiles/:pageId')
+  const inPageEditor = !!useMatch('/jobs/:id/pages/:pageId')
+  const inTileEditor = !!useMatch('/jobs/:id/tiles/:pageId')
+  const inEditor = inPageEditor || inTileEditor
   // The shell owns the viewport and the page scrolls inside it, rather than the document
   // scrolling around a nav bar of its own height. A full-height page (the editors) can then
   // ask for h-full and get exactly the space left under the nav — as the document, it would
