@@ -708,6 +708,11 @@ that declares none trains on polygons. A detector that learns a shrunk core of e
 (DB-style) does better with `rotated`: the shrink falls apart on an outline that steps
 around ascenders and word gaps.
 
+An `ocr` backend may also declare `conventions: true`: its runs condition on each dataset's
+transcription-convention flags (6.3) and can teach the base model flags it does not know yet.
+For a backend that declares nothing, the datasets' flags are left out and the run's review
+says so.
+
 The training form renders whatever the backend declares - tunables, their groups and
 defaults, the augmentation catalogue - the same way the run page renders whatever metrics
 arrive.
@@ -740,6 +745,17 @@ validation curves and evaluations. `classes` lists a layout snapshot's category 
 id, empty for other kinds. `splits.test` appears only when the run has a test split.
 `files` lists every file with its hash so the snapshot can be transferred and verified
 file by file (6.4). `counts.json` sits beside it.
+
+An `ocr-lines` snapshot for a backend that declares `conventions` (6.2) also carries the flags
+its datasets were transcribed under, when the base model or any dataset has one:
+
+```json
+"conventions": {"names": ["oblique_hyphen", "long_s"], "by_dataset": {"4b1f0c": [0, 1]}}
+```
+
+`names` lists the base model's flags first, in its order, then the ones the run teaches;
+`by_dataset` gives every dataset of `groups` a 0/1 row in that order. A backend keeps what its
+base learned of a flag it already knew and starts a new one from nothing.
 
 | Kind | Tasks | Layout |
 |---|---|---|
@@ -1145,7 +1161,7 @@ drives the backend. It asserts:
 | health and info | schema valid; contract major is 1; declared tasks have `tasks_detail`; a train block names a known snapshot kind |
 | auth | every `/v1` route answers `401` without the secret; `/health` does not need it |
 | weights | load reaches `loaded`; the second load of the same version is instant; a corrupted file yields `weights_checksum_mismatch`; an interrupted download resumes with a `Range` request (the fixture server drops the connection once); an unknown URL yields `weights_unavailable`; predict before load yields `weights_not_loaded` |
-| predict, per declared task | fixture images in, schema-valid results out; result count and `id` order equal the request's; every coordinate in `[0, 1]`; deterministic output for a fixed image (two calls agree); a batch over `max_items` yields `413` |
+| predict, per declared task | fixture images in, schema-valid results out; result count and `id` order equal the request's; every coordinate in `[0, 1]`; two calls on a fixed image agree, except that a score may differ by a rounding step (`confidence` by 0.01, a `conf_profile` band by 1); a batch over `max_items` yields `413` |
 | ocr | the returned `decode` is one of the declared decodes; `conf_profile` bands are ordered and within `[0, 1]` |
 | concurrency | requests over `concurrency` get `429` with `Retry-After` |
 | errors | every error body has `code`, `message`, `retryable` |

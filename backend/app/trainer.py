@@ -11,8 +11,8 @@ import threading
 import time
 from pathlib import Path
 
-from app import (backend_client, caches, config, decode, evaluator, line_shapes, registry, remote_training,
-                 slurm_session, store, train_snapshot, weights)
+from app import (backend_client, caches, config, conventions, decode, evaluator, line_shapes, registry,
+                 remote_training, slurm_session, store, train_snapshot, weights)
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -418,6 +418,7 @@ def prepare_snapshot(conn, training: dict) -> dict:
                                   human_checked_only=bool(training.get('human_checked_only')),
                                   test_job_ids=json.loads(training.get('test_job_ids') or '[]'),
                                   line_shape=training.get('line_shape') or 'polygon')
+    _write_conventions(conn, training)
     marker.write_text(kind, encoding='utf-8')
     set_state(conn, training['id'], snapshot_counts=json.dumps(counts), snapshot_progress=None)
     return counts
@@ -448,6 +449,30 @@ def line_shape_for(conn, task: str, base_model_id: int | None, asked: str | None
         return line_shapes.BACKEND_DEFAULT
     declared = client.info()['train'].get('line_shape')
     return declared if declared in line_shapes.LINE_SHAPES else line_shapes.BACKEND_DEFAULT
+
+
+def _write_conventions(conn, training: dict) -> None:
+    """The flags each dataset was transcribed under, beside the snapshot, for a backend that
+    can learn them (6.3 `conventions`)."""
+    if not trains_conventions(conn, training['task'], training['base_model_id']):
+        return
+    job_ids = list(dict.fromkeys([*json.loads(training['dataset_job_ids']),
+                                  *json.loads(training.get('valid_job_ids') or '[]')]))
+    plan = conventions.for_training(conn, training['base_model_id'], job_ids)
+    if plan is not None:
+        (config.training_dir(training['id']) / 'snapshot' / remote_training.CONVENTIONS_NAME).write_text(
+            json.dumps({'names': plan['names'], 'by_dataset': plan['by_dataset']}), encoding='utf-8')
+
+
+def trains_conventions(conn, task: str, base_model_id: int | None) -> bool:
+    """Whether the run's model backend can be taught transcription-convention flags (6.2)."""
+    if task != 'ocr':
+        return False
+    try:
+        client = remote_training.training_backend(conn, {'task': task, 'base_model_id': base_model_id})
+    except (remote_training.CannotTrain, backend_client.BackendError):
+        return False
+    return client is not None and bool(client.info()['train'].get('conventions'))
 
 
 def run_scaling(conn, task: str, target: str, gpu_type: str | None, gpu_count: int | None,

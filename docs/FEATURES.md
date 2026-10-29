@@ -335,6 +335,9 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   trainer offers; empty fields use the trainer's defaults, which are shown.
 - For OCR, optionally fit a language model to the training text. For line models, choose
   the line shape to train on.
+- An OCR run trains each line under its dataset's convention flags. It keeps every flag its
+  base model knew and can teach it new ones; the pre-flight names what the run teaches, how
+  many training lines carry each flag, and warns when a new one has too few to be learned.
 - **Next** opens a pre-flight review of exactly the material the run will use: the split,
   crop sizes, characters per line and a character table that flags rare characters,
   lookalikes (such as a Cyrillic a in Latin text), characters only in validation, and

@@ -52,3 +52,28 @@ def catalog(conn: sqlite3.Connection) -> list[dict]:
              'added_from': row['added_from'], 'models': models.get(row['name'], 0),
              'datasets': datasets.get(row['name'], 0)}
             for row in conn.execute('SELECT * FROM convention_flags ORDER BY label COLLATE NOCASE')]
+
+
+def for_training(conn: sqlite3.Connection, base_model_id: int | None, job_ids: list[str]) -> dict | None:
+    """The flags an OCR run conditions on: its base model's, in the base's order so what it
+    learned of them carries over, then any its datasets set that the base does not know -
+    the ones this run teaches. Each dataset gets its 0/1 row over those names. None when
+    neither the base nor any dataset has a flag."""
+    base = conn.execute('SELECT conventions FROM models WHERE id = ?', (base_model_id,)).fetchone() \
+        if base_model_id else None
+    known = json.loads(base['conventions']) if base is not None and base['conventions'] else []
+    asked = {row['id']: parse(row['ocr_convention']) for row in conn.execute(
+        f"SELECT id, ocr_convention FROM jobs WHERE id IN ({','.join('?' * len(job_ids))})", job_ids)}
+    new = sorted({name for flags in asked.values() for name, on in flags.items() if on} - set(known))
+    names = known + new
+    if not names:
+        return None
+    return {'names': names, 'new': new, 'base': known,
+            'by_dataset': {job_id: model_row(asked.get(job_id, {}), names) for job_id in job_ids}}
+
+
+def label(conn: sqlite3.Connection, name: str) -> str:
+    """What people read for a flag: its label, or until it has one its name in words."""
+    row = conn.execute('SELECT label FROM convention_flags WHERE name = ?', (name,)).fetchone()
+    words = row['label'] if row and row['label'] != name else name.replace('_', ' ')
+    return words[:1].upper() + words[1:]

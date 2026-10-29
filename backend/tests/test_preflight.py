@@ -606,3 +606,45 @@ class TestWhatTheBackendSaid:
     def test_no_backend_leaves_the_epochs_unknown(self, conn, monkeypatch):
         monkeypatch.setattr('app.config.MODEL_BACKENDS', {})
         assert preflight.default_epochs(conn, 'ocr', None) is None
+
+
+class TestConventions:
+    """A run's flags: the ones it teaches its base, warned about when few lines carry them."""
+
+    @pytest.fixture
+    def flagged(self, material, monkeypatch):
+        material.execute("INSERT INTO models (id, task, name, checkpoint, conventions) "
+                         "VALUES (1, 'ocr', 'Kurrent v3', '/m', '[\"oblique_hyphen\"]')")
+        material.execute("UPDATE jobs SET ocr_convention = '{\"long_s\": true}' WHERE id = 'jA'")
+        material.execute("INSERT INTO convention_flags (name, label) VALUES ('long_s', 'Keep long s')")
+        material.commit()
+        monkeypatch.setattr(preflight.trainer, 'trains_conventions', lambda conn, task, base: True)
+        return material
+
+    def test_the_flags_taught_are_named_with_the_lines_that_carry_them(self, flagged):
+        result = preflight.compute(flagged, {**HOLDOUT, 'base_model_id': 1})
+        trained = next(row for row in result['split']['datasets'] if row['job_id'] == 'jA')['train']['items']
+
+        assert result['conventions'] == {
+            'names': ['oblique_hyphen', 'long_s'], 'base': ['oblique_hyphen'], 'new': ['long_s'],
+            'lines': {'oblique_hyphen': 0, 'long_s': trained}, 'supported': True,
+            'labels': {'oblique_hyphen': 'Oblique hyphen', 'long_s': 'Keep long s'}}
+        warning = next(f for f in result['findings'] if f['code'] == 'convention_few_lines')
+        assert warning == {'code': 'convention_few_lines', 'level': 'warn',
+                           'message': f'Keep long s is new to the base model, but it is set on only '
+                                      f'{trained} training lines - fewer than 200 is too few for it to be learned '
+                                      'reliably'}
+
+    def test_a_backend_that_cannot_learn_them_says_they_are_left_out(self, flagged, monkeypatch):
+        monkeypatch.setattr(preflight.trainer, 'trains_conventions', lambda conn, task, base: False)
+        result = preflight.compute(flagged, {**HOLDOUT, 'base_model_id': 1})
+
+        assert result['conventions']['supported'] is False
+        assert codes(result).get('conventions_ignored') == 'info'
+        assert 'convention_few_lines' not in codes(result)
+
+    def test_a_run_with_no_flags_anywhere_has_no_section(self, material):
+        result = preflight.compute(material, HOLDOUT)
+        assert result['conventions'] is None
+        assert not {'convention_few_lines', 'conventions_ignored'} & set(codes(result))
+

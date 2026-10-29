@@ -260,6 +260,20 @@ def test_the_snapshot_is_described_file_by_file_with_its_groups(conn, backend):
                                     'size': 8}
 
 
+def test_the_flags_each_dataset_was_transcribed_under_travel_in_the_manifest_not_as_a_file(conn, backend):
+    flags = {'names': ['long_s', 'keep_hyphens'], 'by_dataset': {'j1': [1.0, 0.0], 'j2': [0.0, 1.0]}}
+    (config.training_dir(7) / 'snapshot' / remote_training.CONVENTIONS_NAME).write_text(json.dumps(flags))
+
+    manifest = remote_training.write_snapshot_manifest(trainer.get_training(conn, 7))
+
+    assert manifest['conventions'] == flags
+    assert remote_training.CONVENTIONS_NAME not in [f['path'] for f in manifest['files']]
+
+
+def test_a_snapshot_without_flags_has_no_conventions_field(conn, backend):
+    assert 'conventions' not in remote_training.write_snapshot_manifest(trainer.get_training(conn, 7))
+
+
 def test_a_run_that_fails_there_fails_here_with_its_reason(conn, backend):
     TrainingBackend.finish_as = 'error'
     trainer.run_local(conn, 7)

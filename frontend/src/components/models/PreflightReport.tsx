@@ -532,6 +532,39 @@ function Characters({ rows, hasTest }: { rows: PreflightChar[]; hasTest: boolean
   )
 }
 
+function Conventions({ flags }: { flags: NonNullable<PreflightResult['conventions']> }) {
+  const label = (name: string) => flags.labels[name] ?? name
+  const listed = (names: string[]) => names.map((name) => (
+    <span key={name} data-testid="preflight-convention" data-flag={name}
+          className="mr-3 inline-flex items-baseline gap-1 whitespace-nowrap">
+      <span className="text-ink">{label(name)}</span>
+      <span className="font-mono text-[11px] tabular-nums text-ink-subtle">{count(flags.lines[name] ?? 0)} lines</span>
+    </span>
+  ))
+  return (
+    <div data-testid="preflight-conventions">
+      <SubHeading>Transcription conventions</SubHeading>
+      {!flags.supported ? (
+        <p className="text-xs text-ink-muted">
+          The datasets set {flags.names.map(label).join(', ')}, but this model's backend cannot be taught
+          convention flags, so the run ignores them.
+        </p>
+      ) : (
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">
+          {flags.new.length > 0 && <>
+            <dt className="text-ink-muted">This run teaches</dt>
+            <dd data-testid="preflight-conventions-new">{listed(flags.new)}</dd>
+          </>}
+          {flags.base.length > 0 && <>
+            <dt className="text-ink-muted">Kept from the base</dt>
+            <dd data-testid="preflight-conventions-base">{listed(flags.base)}</dd>
+          </>}
+        </dl>
+      )}
+    </div>
+  )
+}
+
 function Settings({ result }: { result: PreflightResult }) {
   const s = result.settings
   const entries: [string, string][] = [
@@ -598,6 +631,8 @@ export function PreflightReport({ preflight }: { preflight: Preflight }) {
         <SubHeading>The split</SubHeading>
         <SplitTable result={result} datasets={datasets} />
       </div>
+
+      {result.conventions && <Conventions flags={result.conventions} />}
 
       <Distributions joint={result.joint} datasets={datasets} items={[
         { label: 'height', metric: 'height', dist: result.crops?.height ?? null, unit: 'px' },

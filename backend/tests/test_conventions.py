@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app import conventions, registry, store
@@ -219,3 +221,62 @@ class TestConventionAtCreation:
 
         assert r.status_code == 400
         assert conn.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 0
+
+
+class TestForTraining:
+    """What an OCR run conditions on: its base model's flags first, then the ones its
+    datasets set that the base does not know."""
+
+    @pytest.fixture
+    def conn(self, tmp_path):
+        conn = store.connect(tmp_path / 'app.db')
+        conn.execute("INSERT INTO models (id, task, name, checkpoint, conventions) "
+                     "VALUES (1, 'ocr', 'Kurrent v3', '/m', '[\"oblique_hyphen\", \"long_s\"]')")
+        conn.execute("INSERT INTO models (id, task, name, checkpoint) VALUES (2, 'ocr', 'Unread', '/n')")
+        for job_id, flags in (('j1', '{"long_s": true, "keep_hyphens": true}'), ('j2', '{"long_s": false}'),
+                              ('j3', '{}')):
+            conn.execute('INSERT INTO jobs (id, name, ocr_convention) VALUES (?, ?, ?)', (job_id, job_id, flags))
+        yield conn
+        conn.close()
+
+    def test_the_base_keeps_its_order_and_a_new_flag_follows(self, conn):
+        plan = conventions.for_training(conn, 1, ['j1', 'j2'])
+        assert plan == {'names': ['oblique_hyphen', 'long_s', 'keep_hyphens'], 'base': ['oblique_hyphen', 'long_s'],
+                        'new': ['keep_hyphens'],
+                        'by_dataset': {'j1': [0.0, 1.0, 1.0], 'j2': [0.0, 0.0, 0.0]}}
+
+    def test_a_base_whose_flags_are_not_known_yet_teaches_whatever_the_datasets_set(self, conn):
+        plan = conventions.for_training(conn, 2, ['j1'])
+        assert (plan['names'], plan['new']) == (['keep_hyphens', 'long_s'], ['keep_hyphens', 'long_s'])
+
+    def test_nothing_to_condition_on_is_no_plan(self, conn):
+        assert conventions.for_training(conn, 2, ['j2', 'j3']) is None
+        assert conventions.for_training(conn, None, ['j3']) is None
+
+
+class TestSnapshotConventions:
+    @pytest.fixture
+    def conn(self, tmp_path, monkeypatch):
+        monkeypatch.setattr('app.config.TRAININGS_DIR', tmp_path / 'trainings')
+        conn = store.connect(tmp_path / 'app.db')
+        conn.execute("INSERT INTO jobs (id, name, ocr_convention) VALUES ('j1', 'Briefe', '{\"long_s\": true}')")
+        (tmp_path / 'trainings' / '7' / 'snapshot').mkdir(parents=True)
+        yield conn
+        conn.close()
+
+    TRAINING = {'id': 7, 'task': 'ocr', 'base_model_id': None, 'dataset_job_ids': '["j1"]', 'valid_job_ids': '[]'}
+
+    def test_a_backend_that_learns_flags_gets_each_datasets_row_beside_the_snapshot(self, conn, monkeypatch):
+        from app import config, remote_training, trainer
+        monkeypatch.setattr(trainer, 'trains_conventions', lambda conn, task, base: True)
+        trainer._write_conventions(conn, self.TRAINING)
+
+        written = config.training_dir(7) / 'snapshot' / remote_training.CONVENTIONS_NAME
+        assert json.loads(written.read_text()) == {'names': ['long_s'], 'by_dataset': {'j1': [1.0]}}
+
+    def test_one_that_cannot_gets_nothing(self, conn, monkeypatch):
+        from app import config, remote_training, trainer
+        monkeypatch.setattr(trainer, 'trains_conventions', lambda conn, task, base: False)
+        trainer._write_conventions(conn, self.TRAINING)
+
+        assert not (config.training_dir(7) / 'snapshot' / remote_training.CONVENTIONS_NAME).exists()

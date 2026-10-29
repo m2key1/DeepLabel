@@ -9,8 +9,8 @@ from collections import defaultdict
 from functools import partial
 from itertools import combinations
 
-from app import (augmentations, characters, config, layout_templates, linecrop, registry, remote_training, store,
-                 train_snapshot, trainer)
+from app import (augmentations, characters, config, conventions, layout_templates, linecrop, registry,
+                 remote_training, store, train_snapshot, trainer)
 from app.backend_client import BackendError
 from app.training import MIN_SIDE
 
@@ -18,6 +18,9 @@ SPLITS = ('train', 'val', 'test')
 UNITS = {'ocr': 'lines', 'layout': 'boxes', 'lines': 'lines'}
 
 RARE_BELOW = 5
+# A flag a run teaches its base model that fewer training lines than this carry is learned
+# from too little to be relied on.
+CONVENTION_LINES_BELOW = 200
 # A line holding this many times the median text per crop length is two lines' text on
 # one crop, or a crop cut short.
 RUN_ON_FACTOR = 3
@@ -380,6 +383,31 @@ def _character_findings(table: list[dict]) -> list[dict]:
     return findings
 
 
+def _conventions(conn, request: dict, split: dict) -> tuple[dict | None, list[dict]]:
+    """The convention flags the run conditions on - its base model's and the ones it teaches -
+    with how many training lines carry each, or why its datasets' flags are left out."""
+    job_ids = [j for j in job_order(request) if j not in (request.get('test_job_ids') or [])]
+    plan = conventions.for_training(conn, request.get('base_model_id'), job_ids)
+    if plan is None:
+        return None, []
+    trained = {row['job_id']: row['train']['items'] for row in split['datasets']}
+    lines = {name: sum(trained.get(job_id, 0) for job_id, row in plan['by_dataset'].items() if row[i])
+             for i, name in enumerate(plan['names'])}
+    supported = trainer.trains_conventions(conn, 'ocr', request.get('base_model_id'))
+    section = {'names': plan['names'], 'base': plan['base'], 'new': plan['new'], 'lines': lines,
+               'supported': supported, 'labels': {name: conventions.label(conn, name) for name in plan['names']}}
+    if not supported:
+        return section, [{'code': 'conventions_ignored', 'level': 'info',
+                          'message': "The base model's backend cannot be taught convention flags, so the "
+                                     "datasets' flags are left out of this run"}]
+    thin = [name for name in plan['new'] if lines[name] < CONVENTION_LINES_BELOW]
+    return section, [{'code': 'convention_few_lines', 'level': 'warn',
+                      'message': f"{conventions.label(conn, name)} is new to the base model, but it is "
+                                 f"set on only {plural(lines[name], 'training line')} - fewer than "
+                                 f"{CONVENTION_LINES_BELOW} is too few for it to be learned reliably"}
+                     for name in thin]
+
+
 def _flag(count: int, code: str, level: str, message: str) -> list[dict]:
     return [{'code': code, 'level': level, 'message': message[0].upper() + message[1:]}] if count else []
 
@@ -521,10 +549,14 @@ def compute(conn, request: dict) -> dict:
         _segmentation(conn, request, tally)
     split = {**tally.section(job_order(request)),
              'left_out': train_snapshot.left_out(conn, trained_from(request))}
+    flags = None
+    if task == 'ocr':
+        flags, found = _conventions(conn, request, split)
+        findings = findings + found
     # A recognizer batches line crops; the layout and line models batch whole pages.
     batched = 'items' if task == 'ocr' else 'pages'
     return {'task': task, 'unit': UNITS[task], 'split': split, 'crops': crops, 'text': text,
-            'joint': joint, 'classes': classes, 'settings': _settings(conn, request, split['totals']['train'][batched]),
+            'joint': joint, 'classes': classes, 'conventions': flags, 'settings': _settings(conn, request, split['totals']['train'][batched]),
             'findings': _split_findings(split, request) + findings}
 
 

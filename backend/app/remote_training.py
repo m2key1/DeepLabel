@@ -11,6 +11,8 @@ FALLBACK_NAME = 'fallback.json'
 # The snapshot kind DeepLabel cuts for each task, in the contract's terms (6.3).
 SNAPSHOT_KINDS = {'ocr': 'ocr-lines/1', 'lines': 'page-lines/1', 'layout': 'page-boxes/1'}
 MANIFEST_NAME = 'snapshot-manifest.json'
+# The flags each dataset was transcribed under, written beside an OCR snapshot (6.3).
+CONVENTIONS_NAME = 'conventions.json'
 BACKEND_LOG_NAME = 'backend.log'
 POLL_SECONDS = 2.0
 # A backend that stops answering for this long has lost the run.
@@ -63,10 +65,12 @@ def write_snapshot_manifest(training: dict) -> dict:
     root = config.training_dir(training['id']) / 'snapshot'
     native = root / 'manifest.json'
     groups = json.loads(native.read_text(encoding='utf-8')) if native.is_file() else {}
+    flags_file = root / CONVENTIONS_NAME
+    flags = json.loads(flags_file.read_text(encoding='utf-8')) if flags_file.is_file() else None
     counts_file = root / 'counts.json'
     counts = json.loads(counts_file.read_text(encoding='utf-8')) if counts_file.is_file() else {}
     files = []
-    for path in sorted(p for p in root.rglob('*') if p.is_file() and p != native):
+    for path in sorted(p for p in root.rglob('*') if p.is_file() and p not in (native, flags_file)):
         files.append({'path': path.relative_to(root).as_posix(), 'sha256': weights.file_sha256(path),
                       'size': path.stat().st_size})
     kind, version = SNAPSHOT_KINDS[training['task']].split('/')
@@ -74,7 +78,8 @@ def write_snapshot_manifest(training: dict) -> dict:
                 'task': training['task'], 'training_id': training['id'],
                 'splits': {'train': counts.get('train', 0), 'valid': counts.get('val', counts.get('valid', 0)),
                            **({'test': counts['test']} if counts.get('test') else {})},
-                'groups': groups, 'classes': snapshot_classes(root), 'files': files}
+                'groups': groups, 'classes': snapshot_classes(root), 'files': files,
+                **({'conventions': flags} if flags else {})}
     (config.training_dir(training['id']) / MANIFEST_NAME).write_text(json.dumps(manifest), encoding='utf-8')
     return manifest
 

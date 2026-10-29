@@ -2098,6 +2098,19 @@ export interface PreflightResult {
   /** Absent from a pre-flight stored before bars were linked. */
   joint?: PreflightJoint | null
   classes: ({ name: string; flags: string[] } & Record<PreflightSplit, number>)[] | null
+  /** The convention flags an OCR run conditions on; absent before runs carried them. */
+  conventions?: {
+    names: string[]
+    /** What the base model already knew, in its order. */
+    base: string[]
+    /** What this run teaches it. */
+    new: string[]
+    /** Training lines carrying each flag. */
+    lines: Record<string, number>
+    labels: Record<string, string>
+    /** Whether the run's backend can learn flags at all; when not, they are left out. */
+    supported: boolean
+  } | null
   settings: {
     base_model: string | null
     target: 'local' | 'slurm'

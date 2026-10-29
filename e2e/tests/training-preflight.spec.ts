@@ -1,7 +1,7 @@
 import { test, expect } from '../helpers/test'
 import {
   TEST_SCAN_WIDTH, backendFetch, correctLine, getPageDetail, jobPageIds, listTrainings, markLinesChecked, seedDistinctPagesJob,
-  uniqueName,
+  setOcrConvention, uniqueName,
 } from '../helpers/api'
 import { JSON_HEADERS } from '../helpers/map'
 import { pickDataset } from '../helpers/training'
@@ -198,4 +198,52 @@ test.describe('Scenario: the training pre-flight', () => {
 
     await backendFetch(`/api/trainings/${created.id}/cancel`, { method: 'POST' }).catch(() => undefined)
   })
+
+  // A dataset's convention flags reach its training run, and one its base model does not
+  // know yet is what the run teaches it - named, counted, and warned about when few lines
+  // carry it.
+  test('the review names the flags a run teaches, with the lines that carry them', async ({ page }) => {
+    const flag = `rule_${Date.now()}`
+    await backendFetch('/api/convention-flags', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: flag, label: 'Keep the double hyphen', description: '' }),
+    })
+    const flaggedName = uniqueName('Flagged letters')
+    const plainName = uniqueName('Plain letters')
+    const flaggedId = await seedDistinctPagesJob(flaggedName, 1, 121)
+    const plainId = await seedDistinctPagesJob(plainName, 1, 122)
+    await markLinesChecked(flaggedId, 6)
+    await markLinesChecked(plainId, 6)
+    await setOcrConvention(flaggedId, { [flag]: true })
+    const started: number[] = []
+    page.on('response', async (res) => {
+      if (res.request().method() === 'POST' && res.url().endsWith('/api/trainings/preflights') && res.ok()) {
+        started.push((await res.json()).id)
+      }
+    })
+
+    await page.goto('/models/train?task=ocr')
+    await page.getByLabel('Model name').fill(uniqueName('Teaching run'))
+    await pickDataset(page, flaggedName)
+    await pickDataset(page, plainName)
+    await page.getByRole('button', { name: 'Next', exact: true }).click()
+    const review = page.getByTestId('training-review')
+    await expect(review.getByTestId('preflight')).toHaveAttribute('data-status', 'done')
+
+    // Only the flagged dataset's lines carry it: six of the twelve the run trains on.
+    const taught = review.getByTestId('preflight-conventions-new')
+      .locator(`[data-testid="preflight-convention"][data-flag="${flag}"]`)
+    await expect(taught).toHaveText('Keep the double hyphen6 lines')
+    await expect(review.locator('[data-testid="preflight-finding"][data-code="convention_few_lines"]'))
+      .toHaveText('warningKeep the double hyphen is new to the base model, but it is set on only 6 training lines - '
+                  + 'fewer than 200 is too few for it to be learned reliably')
+
+    // Oracle: the stored review says the same, and the run's backend can learn flags.
+    await expect.poll(() => started.length).toBe(1)
+    const stored = await backendFetch(`/api/trainings/preflights/${started[0]}`)
+    expect(stored.result.conventions.supported).toBe(true)
+    expect(stored.result.conventions.new).toContain(flag)
+    expect(stored.result.conventions.lines[flag]).toBe(6)
+  })
 })
+
