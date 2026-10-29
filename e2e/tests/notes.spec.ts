@@ -68,3 +68,31 @@ test.describe('Scenario: a note on a page', () => {
       await expect(noteOf('scan_2.png')).toHaveCount(0)
     })
 })
+
+test.describe('Scenario: a narrow page viewer', () => {
+  test('a long page note shortens rather than running over the test page switch', async ({ page }) => {
+    const jobId = await seedDistinctPagesJob(uniqueName('Narrow note'), 1)
+    const [pageId] = await jobPageIds(jobId)
+    const text = 'Second hand from folio 12 onwards, the ink changes and the margin notes are later'
+    await backendFetch(`/api/pages/${pageId}/note`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+    })
+    expect((await pageNote(jobId, pageId))?.text).toBe(text)
+
+    await page.setViewportSize({ width: 900, height: 700 })
+    await openViewer(page, jobId, pageId)
+    const note = page.getByTestId('note-tag')
+    const toggle = page.getByTestId('page-test-toggle')
+    await expect(note).toBeVisible()
+    await expect(toggle).toBeVisible()
+    await toggle.locator('xpath=ancestor::header[1]').screenshot({ path: '/tmp/claude-1000/-home-david-Documents-DeepLabel/e105cc2f-851f-4ed6-a7f4-0662778d9c33/scratchpad/issues/22-header.png' })
+    const noteBox = (await note.boundingBox())!
+    const toggleBox = (await toggle.boundingBox())!
+    expect(noteBox.x + noteBox.width).toBeLessThanOrEqual(toggleBox.x)
+    // And the switch itself is whole, not cut off by the header's edge.
+    expect(await toggle.evaluate((el) => {
+      const header = el.parentElement!.getBoundingClientRect()
+      return el.getBoundingClientRect().right <= header.right
+    })).toBe(true)
+  })
+})

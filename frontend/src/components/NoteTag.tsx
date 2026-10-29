@@ -22,18 +22,18 @@ export function NoteTag({ note, title, canEdit, addable = false, compact = false
   if (!note && !(canEdit && addable)) return null
   return (
     // The tag sits in clickable rows, and the dialog's events bubble through the portal.
-    <span onClick={(e) => e.stopPropagation()} className="inline-flex min-w-0">
+    <span onClick={(e) => e.stopPropagation()} className="inline-flex min-w-8">
       <button
         data-testid={note ? 'note-tag' : 'note-add'}
         aria-label={note ? 'Note' : 'Add note'}
         title={note ? 'Show the note' : 'Add a note others can read'}
         onClick={() => setOpen(true)}
-        className={`inline-flex min-w-0 shrink-0 items-center gap-1 rounded-full ${compact ? 'p-1' : 'px-2 py-0.5'} text-[11px] font-medium ${note
+        className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded-full ${compact ? 'p-1' : 'px-2 py-0.5'} text-[11px] font-medium ${note
           ? 'bg-note-wash text-note hover:brightness-95'
           : 'border border-dashed border-line-strong text-ink-subtle hover:border-note hover:text-note'}`}
       >
-        <NoteIcon />
-        {note ? !compact && <span className="max-w-[14rem] truncate">{note.text.split('\n')[0]}</span> : '+ Note'}
+        <span className="shrink-0"><NoteIcon /></span>
+        {note ? !compact && <span className="min-w-0 max-w-[14rem] truncate">{note.text.split('\n')[0]}</span> : '+ Note'}
       </button>
       {open && createPortal(
         <span onClick={(e) => e.stopPropagation()}>
