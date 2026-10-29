@@ -91,7 +91,7 @@ import { eraseFromGeom } from '../lib/geometry/region'
 import {
   REVIEW_THRESHOLDS, classColor, confBadgeClass, getHiddenClasses, setClassColors, getLinePenShape, getOcrFrac,
   getPenClass, clampKeyboardSize, clampLoupeHeight, getKeyboardPlace, getKeyboardSize, getLoupeHeight,
-  getReadingsFrac, setHiddenClasses, setLoupeHeight,
+  getReadingsFrac, getReadingsOpen, setReadingsOpen, setHiddenClasses, setLoupeHeight,
   setKeyboardPlace, setKeyboardSize, setLinePenShape, setOcrFrac, setPenClass, setReadingsFrac, setReviewConf,
 } from '../util'
 import type { LinePenShape } from '../util'
@@ -298,6 +298,7 @@ export function PageViewerPage() {
   const [hidden, setHidden] = useState<Set<string>>(() => getHiddenClasses())
   const [ocrFrac, setOcrFracState] = useState(getOcrFrac)
   const [readingsFrac, setReadingsFracState] = useState(getReadingsFrac)
+  const [readingsOpen, setReadingsOpenState] = useState(getReadingsOpen)
   const [kbSize, setKbSize] = useState(getKeyboardSize)
   const [kbPlace, setKbPlace] = useState(getKeyboardPlace)
   const [kbSnap, setKbSnap] = useState(false)
@@ -3322,6 +3323,12 @@ export function PageViewerPage() {
   const arm = (candidate: LineCandidate | null) => {
     armedRef.current = candidate
     setArmed(candidate)
+    if (candidate) foldReadings(false)
+  }
+
+  const foldReadings = (folded: boolean) => {
+    setReadingsOpenState(!folded)
+    setReadingsOpen(!folded)
   }
 
   // Gone for good, and the agreement it was part of is worked out again without it.
@@ -4049,16 +4056,18 @@ export function PageViewerPage() {
                     {/* As much room as they need, up to the share the divider gives them:
                         two readings should not hold a third of the panel open. */}
                     <div data-testid="unmatched-pane"
-                         style={{ maxHeight: `${readingsFrac * 100}%` }}
+                         style={readingsOpen ? { maxHeight: `${readingsFrac * 100}%` } : undefined}
                          className="min-h-0 shrink-0 overflow-y-auto pr-1">
                       <UnmatchedReadings
                         readings={unmatchedReadings}
+                        open={readingsOpen}
+                        onToggle={() => foldReadings(readingsOpen)}
                         armed={armed}
                         canEdit={canEdit}
                         onArm={arm}
                       />
                     </div>
-                    <Splitter
+                    {readingsOpen && <Splitter
                       orientation="horizontal"
                       onPointerDown={beginReadingsDivider}
                       onDoubleClick={() => setReadingsFracState(0.35)}
@@ -4075,7 +4084,7 @@ export function PageViewerPage() {
                       aria-valuenow={Math.round(readingsFrac * 100)}
                       aria-controls="lines-pane"
                       title="Drag to give the readings more or less room · double-click to reset"
-                    />
+                    />}
                     <div id="lines-pane" data-testid="lines-pane" className="min-h-0 flex-1 overflow-y-auto pr-1">
                       {(reviewMode ? reviewLines : sortedPageLines).map(lineBlock)}
                     </div>

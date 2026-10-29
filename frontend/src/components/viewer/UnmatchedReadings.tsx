@@ -1,10 +1,14 @@
 import type { LineCandidate } from '../../api'
 import { displayed } from '../../lib/text'
+import { CaretIcon } from '../icons'
 import { READER_CHIP } from './LineCandidates'
 import { readerName } from './readers'
 
 interface UnmatchedReadingsProps {
   readings: LineCandidate[]
+  /** Folded down to the count, or the readings themselves. */
+  open: boolean
+  onToggle: () => void
   /** The one waiting for a line, from a click. A drag carries its own. */
   armed: LineCandidate | null
   canEdit: boolean
@@ -14,17 +18,23 @@ interface UnmatchedReadingsProps {
 /** What a language model transcribed that the matcher could place on no line - usually a
  *  line the segmentation missed, or the page number. Drag one onto a line to say where it
  *  belongs; clicking arms it instead, so the same thing can be done from the keyboard. */
-export function UnmatchedReadings({ readings, armed, canEdit, onArm }: UnmatchedReadingsProps) {
+export function UnmatchedReadings({ readings, open, onToggle, armed, canEdit, onArm }: UnmatchedReadingsProps) {
   return (
     <div data-testid="unmatched-readings"
          className="mb-2 rounded border border-warn p-1.5">
-      <p className="mb-1 text-xs text-warn">
-        {readings.length} reading{readings.length === 1 ? '' : 's'} matched no line.
-        {canEdit && (armed
-          ? ' Now click the line it belongs to, or Esc to stop.'
-          : ' Drag one onto its line, or click it and then the line.')}
-      </p>
-      <div className="space-y-0.5">
+      <button type="button" data-testid="unmatched-toggle" aria-expanded={open} onClick={onToggle}
+              className="flex w-full items-center gap-1 text-left text-xs font-medium text-warn">
+        <span className={open ? '' : '-rotate-90'}><CaretIcon /></span>
+        {readings.length} reading{readings.length === 1 ? '' : 's'} matched no line
+      </button>
+      {open && canEdit && (
+        <p className="mb-1 mt-0.5 text-xs text-ink-muted">
+          {armed
+            ? 'Now click the line it belongs to, or Esc to stop.'
+            : 'Drag one onto its line, or click it and then the line.'}
+        </p>
+      )}
+      {open && <div className="space-y-0.5">
         {readings.map((candidate) => {
           const on = armed?.id === candidate.id
           return (
@@ -62,7 +72,7 @@ export function UnmatchedReadings({ readings, armed, canEdit, onArm }: Unmatched
             </button>
           )
         })}
-      </div>
+      </div>}
     </div>
   )
 }

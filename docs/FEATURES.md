@@ -203,6 +203,7 @@ Press `e` to edit the page.
   reading deleted with its trash can.
 - Readings that matched no line are listed on the page; drag one onto the line it belongs
   to.
+  Click their heading to fold them down to their count; the choice is remembered.
 - The "edited" or "settled" chip on a line is also its revert button: it puts the line back
   to its OCR text and unchecks it.
 - Mark a page's layout as complete separately from its lines; the page table filters on

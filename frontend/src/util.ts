@@ -211,6 +211,18 @@ export function setReadingsFrac(v: number): void {
   localStorage.setItem(READINGS_FRAC_KEY, String(v))
 }
 
+// Whether those readings are folded down to their count, so a page that has a few of them
+// does not give up the room every time it is opened.
+const READINGS_OPEN_KEY = 'deeplabel.readingsOpen'
+
+export function getReadingsOpen(): boolean {
+  return localStorage.getItem(READINGS_OPEN_KEY) !== 'false'
+}
+
+export function setReadingsOpen(open: boolean): void {
+  localStorage.setItem(READINGS_OPEN_KEY, String(open))
+}
+
 // How tall the line loupe is, in pixels. Kept with the browser like the dividers beside it
 // rather than with the account: how much room a line crop wants is a property of the screen
 // it is being read on, and a big monitor and a laptop want different answers.

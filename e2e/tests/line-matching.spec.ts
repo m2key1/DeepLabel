@@ -189,6 +189,30 @@ test.describe('Scenario: room for the readings and the lines at once', () => {
       .toBe(after)
   })
 
+  test('they fold down to their count, and stay folded', async ({ page }) => {
+    const { jobId, pageId } = await seedStrayReading(page, 'Folded readings')
+    await openViewer(page, jobId, pageId)
+
+    const toggle = page.getByTestId('unmatched-toggle')
+    await expect(toggle).toHaveText('1 reading matched no line')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByTestId('unmatched-reading')).toHaveCount(1)
+    await expect(page.getByTestId('readings-divider')).toBeVisible()
+
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await expect(page.getByTestId('unmatched-reading')).toHaveCount(0)
+    await expect(page.getByTestId('readings-divider')).toHaveCount(0)
+    await expect(page.getByTestId('line-row').first()).toBeVisible()
+
+    // Remembered: the next page opens folded too.
+    await openViewer(page, jobId, pageId)
+    await expect(page.getByTestId('unmatched-toggle')).toHaveAttribute('aria-expanded', 'false')
+    await expect(page.getByTestId('unmatched-reading')).toHaveCount(0)
+    await page.getByTestId('unmatched-toggle').click()
+    await expect(page.getByTestId('unmatched-reading')).toHaveCount(1)
+  })
+
   test('a page with nothing unmatched is one list, not two', async ({ page }) => {
     const jobId = await seedDistinctPagesJob(uniqueName('Nothing stray'), 1)
     const [pageId] = await jobPageIds(jobId)
