@@ -26,7 +26,9 @@ export function EvaluateDialog({ model, onClose, onStarted }: EvaluateDialogProp
 
   useEffect(() => {
     listJobs()
-      .then(async (rows) => {
+      .then(async (all) => {
+        // A dataset whose owner switched scoring off is not offered; the backend refuses it too.
+        const rows = all.filter((j) => j.data_use.test)
         setJobs(rows)
         if (rows.length) {
           const ids = rows.map((j) => j.id)

@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
-  PHASE_CAPABILITY, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromIiif,
+  ALL_USES, PHASE_CAPABILITY, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromIiif,
   createJobFromPath, iiifThumbnailUrl, ApiError, getEnabledTasks, getLayoutTemplates, getMapModels, importJob, isTileTask, listConventionFlags,
   listModels, uploadJob,
 } from '../api'
 import type {
-  ConventionFlag, JobOptions, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, OcrDecode,
+  ConventionFlag, DataUse, JobOptions, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, OcrDecode,
   Phases, RegistryModel, Task,
 } from '../api'
 import { useAuth } from '../auth'
 import { conventionLabel } from '../components/conventionLabel'
 import { ConventionFlags, flagsOn, toggledFlag } from '../components/job/ConventionFlags'
+import { DataUseSwitches, dataUseSummary } from '../components/job/DataUseSwitches'
 import { IiifSource, NO_IIIF } from '../components/job/IiifSource'
 import type { IiifChoice } from '../components/job/IiifSource'
 import { PagePicker, useFileItems } from '../components/job/PagePicker'
@@ -123,6 +124,7 @@ export function NewJobPage() {
   const [excluded, setExcluded] = useState<Set<File>>(new Set())
   const [catalog, setCatalog] = useState<ConventionFlag[] | null>(null)
   const [convention, setConvention] = useState<OcrConvention>({})
+  const [dataUse, setDataUse] = useState<DataUse>(ALL_USES)
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<UploadState | null>(null)
@@ -345,6 +347,7 @@ export function NewJobPage() {
         value: flagsOn(convention).map((flag) => conventionLabel(flag, catalog).toLowerCase()).join(', ') || 'normalized',
       }] : []),
     ] : []),
+    { label: 'Data use', value: dataUseSummary(dataUse), step: 'review' },
   ]
 
   const jobOptions = (): JobOptions => ({
@@ -357,6 +360,7 @@ export function NewJobPage() {
     model_ocr_id: modelPicks.ocr ?? null, ocr_decode: ocrDecode, gt_autocheck: gtAutocheck,
     gt_ordered: gtOrdered, gt_from_pdf: gtFromPdf, layout_template_id: isMap ? null : templateId,
     ocr_convention: ran('ocr') && !isMap ? convention : {},
+    data_use: dataUse,
   })
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -392,13 +396,14 @@ export function NewJobPage() {
           isMap ? null : templateId,
           !isMap && asTest,
           ran('ocr') && !isMap ? convention : {},
+          dataUse,
         )
       }
       if (archive) {
         setProgress({ loaded: 0, total: archive.size })
         try {
           job_id = (await importJob(name.trim(), archive, importReviewed,
-                                    (loaded, total) => setProgress({ loaded, total }))).job_id
+                                    (loaded, total) => setProgress({ loaded, total }), dataUse)).job_id
         } catch (err) {
           // A zip of scans with nothing describing them is a set of pages: it goes up as
           // an upload and is read like any other.
@@ -1144,9 +1149,17 @@ export function NewJobPage() {
                              onToggle={(flag) => setConvention((held) => toggledFlag(held, flag))} />
           )}
         </>)}
-        {step === 'review' && (
+        {step === 'review' && (<>
+          <section data-testid="new-job-data-use" className="rounded-md border border-line bg-surface px-4 py-3">
+            <h2 className="text-sm font-semibold text-ink">Data use</h2>
+            <p className="text-xs text-ink-muted">
+              What this dataset's pages and lines may be used for. It applies to everyone, you included, and
+              can be changed later on the dataset page.
+            </p>
+            <DataUseSwitches value={dataUse} onChange={setDataUse} />
+          </section>
           <NewJobSummary rows={summary} onEdit={setStep} full />
-        )}
+        </>)}
         {progress && <UploadProgress progress={progress} />}
         {error && <p className="text-sm text-danger">{error}</p>}
         {madeWithSkips && (

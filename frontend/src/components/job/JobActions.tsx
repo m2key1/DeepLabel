@@ -6,7 +6,7 @@ import { Button } from '../ui/Button'
 import { useDropPlacement } from '../ui/dropPlacement'
 import { menuTrigger } from '../ui/menu'
 import { JobInfo } from './JobInfo'
-import { ExportMenu } from './ExportMenu'
+import { ExportBlockedNote, ExportMenu, exportBlocked } from './ExportMenu'
 import { popoverChrome } from '../ui/Card'
 
 export const menuItem =
@@ -37,7 +37,8 @@ interface JobActionsProps {
 
 export function JobActions(p: JobActionsProps) {
   const { job } = p
-  const { can } = useAuth()
+  const { can, user } = useAuth()
+  const blocked = exportBlocked(job, user)
   const active = job.status === 'queued' || job.status === 'running'
   const tiles = isTileTask(job.task)
   // A row near the foot of the list has no room beneath it, and most rows are.
@@ -111,7 +112,9 @@ export function JobActions(p: JobActionsProps) {
             {/* A map job has no text to export - json/md/txt would all come back empty,
                 since a tile's annotations are regions, not elements and lines. Masks are
                 the export it does have. */}
-            {tiles ? (
+            {blocked ? (
+              <ExportBlockedNote owner={job.owner} />
+            ) : tiles ? (
               <>
                 {maskEntry(false, 'Masks (zip)',
                            'Class-index mask PNGs + geometry JSON for reviewed tiles')}

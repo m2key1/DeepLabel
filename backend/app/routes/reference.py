@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from app import config, corpus, ingest, llm, llm_gt, store
+from app import config, corpus, data_use, ingest, llm, llm_gt, store
 from app.caches import counted_page
 from app.deps import current_user, get_db, require_job_access, require_job_owner
 from app.routes.selection import selected_pages
@@ -212,6 +212,7 @@ def groundtruth_read(job_id: str, body: GroundTruthRequest | None = None,
     chosen = _models(conn, job_id, body)
     if not chosen:
         raise HTTPException(400, 'choose at least one model to read with')
+    data_use.require_llm(conn, job_id, chosen)
     unknown = llm.unknown_placeholders(llm.effective_gt_prompt(job['gt_prompt']))
     if unknown:
         raise HTTPException(400, f'the wording asks for {{{{{unknown[0]}}}}}, which nothing '

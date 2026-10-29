@@ -16,7 +16,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from app import candidates, config, consensus, llm, llm_client, llm_queue
+from app import candidates, config, consensus, data_use, llm, llm_client, llm_queue
 from app.caches import counted_page
 
 # What the cached page rendition is written at; asking for no more than this costs no
@@ -407,6 +407,9 @@ def _prepare(conn, read) -> dict:
         (read['content_hash'],)).fetchone()
     if page is None:
         return {'error': 'the page this reading was queued for is gone'}
+    refused = data_use.llm_refusal(conn, read['job_id'], [read['llm_model_id']])
+    if refused:
+        return {'error': refused}
     try:
         model, connection, key = llm.credentials(conn, read['llm_model_id'])
     except (LookupError, llm.SecretUnavailable) as exc:

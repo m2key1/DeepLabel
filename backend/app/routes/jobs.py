@@ -12,8 +12,8 @@ from fastapi.responses import Response, StreamingResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
-from app import (blobs, caches, config, consensus, conventions, corpus, decode, evaluator, geometry, iiif,
-                 imports, ingest, jobs, layout_templates, llm, map_classes, model_registry, page_rows, queue_eta,
+from app import (blobs, caches, config, consensus, conventions, corpus, data_use, decode, evaluator, geometry,
+                 iiif, imports, ingest, jobs, layout_templates, llm, map_classes, model_registry, page_rows, queue_eta,
                  reading_order, registry, schemas, store, trainer)
 from app.deps import (can_access_job, can_reach_group, check_capability, current_user, get_db, get_user,
                       require_job_access, require_job_owner, require_role)
@@ -133,7 +133,7 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
                gt_autocheck: bool = Form(False), gt_ordered: bool = Form(False),
                gt_from_pdf: bool = Form(False), layout_template_id: int | None = Form(None),
                hold: bool = Form(False), as_test: bool = Form(False),
-               ocr_convention: str = Form('{}'),
+               ocr_convention: str = Form('{}'), data_use: str = Form('{}'),
                files: list[UploadFile] = None, conn=Depends(get_db),
                user: str = Depends(get_user), _editor=Depends(require_role('admin', 'member'))):
     """Create a dataset from uploaded files - a .txt beside an image is ingested as that page's transcription.
@@ -171,6 +171,10 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
         convention = _valid_convention(json.loads(ocr_convention or '{}'))
     except json.JSONDecodeError:
         raise HTTPException(400, 'the convention is not JSON')
+    try:
+        uses = _valid_data_use(json.loads(data_use or '{}'))
+    except json.JSONDecodeError:
+        raise HTTPException(400, 'the data use is not JSON')
     job_id = uuid4().hex[:12]
     try:
         images, transcriptions = ingest.split_transcriptions(files)
@@ -209,6 +213,7 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
          int(gt_ordered), int(gt_from_pdf), page_reading_order, int(as_test),
          UPLOADING if hold else 'queued'))
     _set_convention(conn, job_id, convention)
+    _set_data_use(conn, job_id, uses)
     # Tiling jobs register the uploads as full maps (job_maps); the tile phase produces
     # the page rows. Non-tiling jobs treat each upload as a ready tile (a page).
     if run_tile:
@@ -234,6 +239,18 @@ def _valid_convention(requested) -> dict[str, bool]:
         raise HTTPException(400, str(error))
 
 
+def _valid_data_use(requested) -> dict[str, bool]:
+    if not isinstance(requested, dict) or set(requested) - set(store.DATA_USE_COLUMNS) \
+            or not all(isinstance(on, bool) for on in requested.values()):
+        raise HTTPException(400, f'the data use is a map of {", ".join(store.DATA_USE_COLUMNS)} to true or false')
+    return requested
+
+
+def _set_data_use(conn, job_id: str, uses: dict[str, bool]) -> None:
+    for use, on in uses.items():
+        conn.execute(f'UPDATE jobs SET {store.DATA_USE_COLUMNS[use]} = ? WHERE id = ?', (int(on), job_id))
+
+
 def _set_convention(conn, job_id: str, convention: dict[str, bool]) -> None:
     """The flags a dataset starts with, picked when it was created."""
     if convention:
@@ -248,7 +265,7 @@ def _require_layout_template(conn, template_id: int | None) -> None:
 
 
 @router.post('/api/jobs/import')
-def import_job(name: str = Form(...), reviewed: bool = Form(True),
+def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str = Form('{}'),
                file: UploadFile = None, conn=Depends(get_db),
                user: str = Depends(get_user), _editor=Depends(require_role('admin', 'member'))):
     """Transkribus/eScriptorium-style export: pages arrive segmented and
@@ -257,6 +274,10 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True),
     if file is None:
         raise HTTPException(400, 'no file uploaded')
     name = ingest.require_unique_name(conn, name)
+    try:
+        uses = _valid_data_use(json.loads(data_use or '{}'))
+    except json.JSONDecodeError:
+        raise HTTPException(400, 'the data use is not JSON')
     try:
         pages = imports.read_export_zip(file.file)
     except imports.ScansOnly as e:
@@ -277,6 +298,7 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True),
     try:
         conn.execute('INSERT INTO jobs (id, name, owner, line_mode, run_layout, run_lines, run_ocr) '
                      "VALUES (?,?,?,'per_page',0,0,0)", (job_id, name, user))
+        _set_data_use(conn, job_id, uses)
         layout_templates.copy_into(conn, job_id)
         # An import may bring classes this instance's template lacks; they join the
         # dataset. Matched without case, as class names are (a Schematismus dataset stores
@@ -321,6 +343,7 @@ class JobOptions(BaseModel):
     page_reading_order: str = reading_order.AUTO
     layout_template_id: int | None = None
     ocr_convention: dict[str, bool] = {}
+    data_use: dict[str, bool] = {}
 
 
 class PathJob(JobOptions):
@@ -358,7 +381,7 @@ def _checked_options(conn, body: JobOptions, grants) -> dict:
             'run_layout': run_layout, 'run_lines': run_lines, 'run_ocr': run_ocr, 'line_mode': line_mode,
             'run_predict': run_predict, 'run_tile': run_tile, 'tile_size': tile_size, 'line_width': line_width,
             'model_id': model_id, 'seed_classes': seed_classes,
-            'convention': _valid_convention(body.ocr_convention),
+            'convention': _valid_convention(body.ocr_convention), 'data_use': _valid_data_use(body.data_use),
             'gt_from_pdf': body.gt_from_pdf and not is_map}  # map jobs have no transcriptions at all
 
 
@@ -376,6 +399,7 @@ def _insert_job(conn, job_id: str, user: str, body: JobOptions, o: dict,
          o['line_width'], o['models']['layout'], o['models']['lines'], o['models']['ocr'], body.ocr_decode,
          int(body.gt_autocheck), int(body.gt_ordered), int(o['gt_from_pdf']), body.page_reading_order))
     _set_convention(conn, job_id, o['convention'])
+    _set_data_use(conn, job_id, o['data_use'])
 
 
 @router.post('/api/jobs/path')
@@ -698,6 +722,7 @@ def get_job(job_id: str, pages: bool = True, conn=Depends(get_db),
     row = conn.execute('SELECT * FROM jobs WHERE id = ?', (job_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
+    data_use.note_admin_visit(conn, job_id, user)
     job = _job_payload(conn, row)
     job['unreadable'] = [{**dict(r), 'iiif': bool(r['iiif'])} for r in conn.execute(
         "SELECT id, filename, error, iiif FROM pages WHERE job_id = ? AND deleted = 0 AND status = 'unreadable' "
@@ -1197,6 +1222,34 @@ def share_job(job_id: str, body: Share, conn=Depends(get_db), user: dict = Depen
                      [(job_id, n) for n in names])
     conn.commit()
     return {'job_id': job_id, 'shared_with': names}
+
+
+def _data_use_payload(conn, job_id: str) -> dict:
+    row = conn.execute('SELECT * FROM jobs WHERE id = ?', (job_id,)).fetchone()
+    return {'data_use': store.job_row_to_dict(row)['data_use'],
+            'models': data_use.models_made_from(conn, job_id),
+            'admin_visits': data_use.admin_visits(conn, job_id)}
+
+
+@router.get('/api/jobs/{job_id}/data-use')
+def get_data_use(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """What the dataset may be used for, the models already made from it, and the admins
+    who opened it while it restricted its use."""
+    require_job_owner(conn, job_id, user)
+    return _data_use_payload(conn, job_id)
+
+
+@router.put('/api/jobs/{job_id}/data-use')
+def put_data_use(job_id: str, body: dict[str, bool], conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Switch uses on or off. Models already trained on the dataset stay as they are."""
+    require_job_owner(conn, job_id, user)
+    uses = _valid_data_use(body)
+    before = store.job_row_to_dict(conn.execute('SELECT * FROM jobs WHERE id = ?', (job_id,)).fetchone())['data_use']
+    changed = {use: on for use, on in uses.items() if before[use] != on}
+    if changed:
+        _set_data_use(conn, job_id, changed)
+        data_use.log(conn, job_id, user['username'], 'data_use', changed)
+    return _data_use_payload(conn, job_id)
 
 
 class Note(BaseModel):

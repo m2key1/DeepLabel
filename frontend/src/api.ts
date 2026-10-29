@@ -57,6 +57,33 @@ export interface Note {
   at: string
 }
 
+/** What a dataset's owner allows its data to be used for; the backend holds everyone to it. */
+export interface DataUse {
+  training: boolean
+  test: boolean
+  external_llm: boolean
+  export: boolean
+}
+
+export const ALL_USES: DataUse = { training: true, test: true, external_llm: true, export: true }
+
+export interface DataUseDetail {
+  data_use: DataUse
+  /** Models already trained, validated or scored on the dataset, which a switch leaves as they are. */
+  models: { id: number; name: string; task: string; created_at: string; training_id: number | null
+            roles: ('train' | 'valid' | 'test')[] }[]
+  /** Admins who opened it while it restricted its use, without owning it or having it shared. */
+  admin_visits: { username: string; created_at: string }[]
+}
+
+export function getDataUse(jobId: string): Promise<DataUseDetail> {
+  return request(`/api/jobs/${jobId}/data-use`)
+}
+
+export function setDataUse(jobId: string, uses: Partial<DataUse>): Promise<DataUseDetail> {
+  return request(`/api/jobs/${jobId}/data-use`, json('PUT', uses))
+}
+
 export interface Job {
   id: string
   name: string
@@ -75,6 +102,8 @@ export interface Job {
   ocr_convention_read?: string[] | null
   /** The IIIF manifest it was imported from; null for any other dataset. */
   iiif_source?: IiifSource | null
+  /** What its owner allows its data to be used for. */
+  data_use: DataUse
   /** Whether layout elements are boxes or outlines. */
   layout_shape?: LayoutShape
   /** Language models this dataset is read with, and how its agreement is settled. */
@@ -1082,10 +1111,12 @@ export function uploadJob(
   layoutTemplateId?: number | null,
   asTest = false,
   ocrConvention: OcrConvention = {},
+  dataUse: DataUse = ALL_USES,
 ): Promise<{ job_id: string }> {
   const form = new FormData()
   if (asTest) form.append('as_test', 'true')
   form.append('ocr_convention', JSON.stringify(ocrConvention))
+  form.append('data_use', JSON.stringify(dataUse))
   form.append('name', name)
   form.append('line_mode', lineMode)
   form.append('page_reading_order', readingOrder)
@@ -1116,10 +1147,12 @@ export function importJob(
   file: File,
   reviewed: boolean,
   onProgress: (loaded: number, total: number) => void,
+  dataUse: DataUse = ALL_USES,
 ): Promise<{ job_id: string; format: string; pages: number; lines: number }> {
   const form = new FormData()
   form.append('name', name)
   form.append('reviewed', String(reviewed))
+  form.append('data_use', JSON.stringify(dataUse))
   form.append('file', file)
   return uploadForm('/api/jobs/import', form, onProgress)
 }
@@ -1148,6 +1181,7 @@ export interface JobOptions {
   gt_from_pdf: boolean
   layout_template_id: number | null
   ocr_convention: OcrConvention
+  data_use: DataUse
 }
 
 export function createJobFromPath(
@@ -2804,6 +2838,8 @@ export interface LlmConnection {
   name: string
   base_url: string
   shared: boolean
+  /** Marked by an admin as run in-house, so datasets kept from external providers may use it. */
+  self_hosted: boolean
   editable: boolean
   has_key: boolean
   key_hint: string
@@ -2838,6 +2874,7 @@ export function patchLlmConnection(id: number, body: {
   base_url?: string
   api_key?: string | null
   shared?: boolean
+  self_hosted?: boolean
 }): Promise<LlmConnection> {
   return request(`/api/llm/connections/${id}`, json('PATCH', body))
 }
@@ -2880,7 +2917,7 @@ export function deleteLlmModel(id: number): Promise<{ ok: boolean }> {
 }
 
 /** Every enabled model the caller may read a page with - what a dataset's picker offers. */
-export function listUsableLlmModels(): Promise<{ models: (LlmModel & { shared: boolean })[] }> {
+export function listUsableLlmModels(): Promise<{ models: (LlmModel & { shared: boolean; self_hosted: boolean })[] }> {
   return request('/api/llm/models')
 }
 

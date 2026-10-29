@@ -15,6 +15,15 @@ class Counters(BaseModel):
     lines_ocr_done: int
 
 
+class DataUse(BaseModel):
+    """What the owner allows a dataset's data to be used for."""
+
+    training: bool
+    test: bool
+    external_llm: bool
+    export: bool
+
+
 class JobSummary(BaseModel):
     """A dataset. Additional fields may be present."""
 
@@ -37,6 +46,7 @@ class JobSummary(BaseModel):
     ocr_decode: str
     ocr_convention: dict[str, bool]
     ocr_convention_read: list[str] | None
+    data_use: DataUse
     layout_shape: str = 'box'
 
 

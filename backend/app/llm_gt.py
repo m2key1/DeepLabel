@@ -15,7 +15,7 @@ different question and is not reusable.
 """
 import json
 
-from app import align, candidates, llm, llm_client, llm_ocr, llm_queue
+from app import align, candidates, data_use, llm, llm_client, llm_ocr, llm_queue
 from app.caches import counted_page
 
 GT_SOURCE = 'llm'
@@ -251,6 +251,9 @@ def _prepare(conn, read) -> dict:
                         (read['page_id'],)).fetchone()
     if page is None:
         return {'error': 'the page this reading was queued for is gone'}
+    refused = data_use.llm_refusal(conn, read['job_id'], [read['llm_model_id']])
+    if refused:
+        return {'error': refused}
     try:
         model, connection, key = llm.credentials(conn, read['llm_model_id'])
     except (LookupError, llm.SecretUnavailable) as exc:

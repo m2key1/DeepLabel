@@ -5,6 +5,7 @@ import {
   type LlmConnection, type LlmModel, type LlmSettings,
 } from '../../api'
 import { useAuth } from '../../auth'
+import { Badge } from '../ui/Badge'
 import { Button, Toggle } from '../ui/Button'
 import { useAutoClear } from '../../messages'
 import { Input, Textarea } from '../ui/Field'
@@ -272,6 +273,15 @@ Refresh & { connection: LlmConnection; secretConfigured: boolean; inherited: str
     }
   }
 
+  const markSelfHosted = async () => {
+    try {
+      await patchLlmConnection(connection.id, { self_hosted: !connection.self_hosted })
+      refresh()
+    } catch (error) {
+      fail(error)
+    }
+  }
+
   const remove = async () => {
     if (!confirm(`Delete "${connection.name}" and its models?`)) return
     try {
@@ -301,6 +311,7 @@ Refresh & { connection: LlmConnection; secretConfigured: boolean; inherited: str
         <div className="flex flex-wrap items-center gap-2" data-testid="llm-connection-head">
           <span className="font-medium">{connection.name}</span>
           <VisibilityBadge shared={connection.shared} />
+          {connection.self_hosted && <Badge tone="accent" data-testid="llm-self-hosted">self-hosted</Badge>}
           {connection.shared && (
             <span data-testid="llm-owner" className="text-xs text-ink-muted">
               published by {connection.owner}
@@ -310,8 +321,19 @@ Refresh & { connection: LlmConnection; secretConfigured: boolean; inherited: str
           <span className="text-xs text-ink-muted" data-testid="llm-key-state">
             {connection.has_key ? `key …${connection.key_hint}` : 'no key'}
           </span>
+          {isAdmin && (
+            <Toggle
+              on={connection.self_hosted}
+              onClick={markSelfHosted}
+              data-testid="llm-mark-self-hosted"
+              className="ml-auto"
+              title="Admins only. A self-hosted endpoint runs in-house, so datasets that keep their pages from external LLM providers may still be read with it."
+            >
+              Self-hosted
+            </Toggle>
+          )}
           {connection.editable && (
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className={`${isAdmin ? '' : 'ml-auto '}flex items-center gap-1.5`}>
               {connection.has_key && (
                 <Button size="xs" onClick={clearKey} data-testid="llm-clear-key">Clear key</Button>
               )}

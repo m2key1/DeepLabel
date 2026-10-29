@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from app import config, consensus, llm, llm_client, llm_ocr, store
+from app import config, consensus, data_use, llm, llm_client, llm_ocr, store
 from app.deps import current_user, get_db, require_job_access, require_job_owner, require_page_access
 from app.routes.selection import selected_pages
 
@@ -212,14 +212,21 @@ class ConnectionPatch(BaseModel):
     # Omitted leaves the stored key alone; null clears it; a string replaces it.
     api_key: str | None = None
     shared: bool | None = None
+    self_hosted: bool | None = None
 
 
 @router.patch('/api/llm/connections/{connection_id}')
 def patch_connection(connection_id: int, body: ConnectionPatch, conn=Depends(get_db),
                      user: dict = Depends(current_user), _on=Depends(require_enabled)):
-    """Rename an endpoint, repoint it, replace or clear its key, or publish it."""
-    _owned(conn, connection_id, user)
+    """Rename an endpoint, repoint it, replace or clear its key, publish it, or - an admin, on
+    any connection they can see - mark it self-hosted."""
     fields = body.model_fields_set
+    if fields == {'self_hosted'} and user['role'] == 'admin':
+        connection = llm.get_connection(conn, connection_id)
+        if connection is None or not llm.visible_to(connection, user):
+            raise HTTPException(404)
+    else:
+        _owned(conn, connection_id, user)
     if 'name' in fields and body.name is not None:
         name = _clean_name(body.name)
         if llm.name_taken(conn, user['username'], name, except_id=connection_id):
@@ -238,6 +245,12 @@ def patch_connection(connection_id: int, body: ConnectionPatch, conn=Depends(get
             token = hint = None
         conn.execute('UPDATE llm_connections SET api_key = ?, api_key_hint = ? WHERE id = ?',
                      (token, hint, connection_id))
+    if 'self_hosted' in fields and body.self_hosted is not None:
+        # Datasets that keep their pages in the house trust this mark, so it is an admin's.
+        if user['role'] != 'admin':
+            raise HTTPException(403, 'only an admin can mark a connection self-hosted')
+        conn.execute('UPDATE llm_connections SET self_hosted = ? WHERE id = ?',
+                     (int(body.self_hosted), connection_id))
     if 'shared' in fields and body.shared is not None:
         # Publishing puts this endpoint - and whatever it is billed to - in front of
         # everyone, so it is an admin's call even on their own connection.
@@ -427,6 +440,7 @@ def read_dataset(job_id: str, body: ReadRequest | None = None, conn=Depends(get_
     chosen = _job_models(conn, job_id, body)
     if not chosen:
         raise HTTPException(400, 'choose at least one model to read with')
+    data_use.require_llm(conn, job_id, chosen)
     result = llm_ocr.enqueue(conn, job_id, chosen, user,
                              refresh=bool(body and body.refresh),
                              page_ids=selected_pages(conn, job_id, body.page_ids if body else None))

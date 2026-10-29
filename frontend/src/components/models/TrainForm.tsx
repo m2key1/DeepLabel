@@ -290,10 +290,10 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
       .then(async (rows) => {
         setJobs(rows)
         if (from) {
-          const reachable = from.dataset_job_ids.filter((id) => rows.some((j) => j.id === id))
+          const reachable = from.dataset_job_ids.filter((id) => rows.some((j) => j.id === id && j.data_use.training))
           setChosen(new Set(reachable))
           setDroppedDatasets(from.dataset_job_ids.length - reachable.length)
-          setTestIds(from.test_job_ids.filter((id) => rows.some((j) => j.id === id && j.test_pages)))
+          setTestIds(from.test_job_ids.filter((id) => rows.some((j) => j.id === id && j.test_pages && j.data_use.test)))
         }
         if (rows.length) {
           const res = await trainingPreview(task, rows.map((j) => j.id))
@@ -308,6 +308,9 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
 
   // The test-set dropdown groups by the same rule the picker does.
   const sections = useMemo(() => datasetSections(jobs, groups), [jobs, groups])
+  // A dataset whose owner switched training off is not offered; the backend refuses it too.
+  const trainable = useMemo(() => jobs?.filter((j) => j.data_use.training) ?? null, [jobs])
+  const notTrainable = (jobs?.length ?? 0) - (trainable?.length ?? 0)
 
   const setMany = (ids: string[], on: boolean) =>
     setChosen((prev) => {
@@ -369,7 +372,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
     : chosenPipeline?.spec ?? builtinStack
   const setKnob = (key: string, value: string) => setTuned((prev) => ({ ...prev, [key]: value }))
   const totalPages = [...chosen].reduce((sum, id) => sum + (trainPages[id] ?? 0), 0)
-  const testCandidates = (jobs ?? []).filter((j) => (j.test_pages ?? 0) > 0)
+  const testCandidates = (jobs ?? []).filter((j) => (j.test_pages ?? 0) > 0 && j.data_use.test)
   const leftOutPages = leftOut.reduce((sum, row) => sum + row.pages, 0)
   const nameTaken = takenNames.some((n) => n.trim().toLowerCase() === name.trim().toLowerCase())
   // The stored batch was measured for the hardware that run used, so a rerun on other
@@ -537,13 +540,19 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
           Only {TASK_UNIT[task]} are used; the snapshot is frozen when the training starts.
         </p>
         <DatasetPicker
-          jobs={jobs}
+          jobs={trainable}
           groups={groups}
           counts={counts}
           chosen={chosen}
           onToggle={toggle}
           onSetMany={setMany}
         />
+        {notTrainable > 0 && (
+          <p data-testid="not-trainable" className="mt-1 text-xs text-ink-muted">
+            {notTrainable} dataset{notTrainable === 1 ? '' : 's'} you can open {notTrainable === 1 ? 'is' : 'are'} not
+            offered: {notTrainable === 1 ? 'its owner doesn\'t' : 'their owners don\'t'} allow training.
+          </p>
+        )}
 
         </div>
 

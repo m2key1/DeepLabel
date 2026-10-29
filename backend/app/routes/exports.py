@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
 from starlette.background import BackgroundTask
 
-from app import coco, config, export, schemas, store
+from app import coco, config, data_use, export, schemas, store
 from app.deps import attachment, current_user, get_db, require_job_access, require_role
 
 router = APIRouter(tags=['exports'])
@@ -29,6 +29,7 @@ def export_job(job_id: str, format: str = 'json', checked_only: bool = False,
     or TEI with its scans, or as IIIF annotations on the canvases it was imported from;
     checked_only keeps the reviewed lines and the pages that hold one."""
     require_job_access(conn, job_id, user)
+    data_use.require_export(conn, job_id, user)
     if format not in EXPORT_FORMATS:
         raise HTTPException(400, f'format must be one of {sorted(EXPORT_FORMATS)}')
     if store.get_job(conn, job_id) is None:
@@ -77,8 +78,9 @@ def coco_preview(job_id: str, conn=Depends(get_db), user: dict = Depends(current
 
 
 @router.post('/api/jobs/{job_id}/coco')
-def coco_export(job_id: str, conn=Depends(get_db), _admin=Depends(require_role('admin'))):
+def coco_export(job_id: str, conn=Depends(get_db), admin=Depends(require_role('admin'))):
     """Write the COCO layout export into the server's export directory."""
+    data_use.require_export(conn, job_id, admin)
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)

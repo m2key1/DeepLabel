@@ -84,6 +84,9 @@ interface LlmReadDialogProps {
   /** Owner or admin. What settles a line, and whether that checks it off, is theirs alone
    *  to decide - the backend refuses those two settings to anyone else. */
   canOwn: boolean
+  /** The owner keeps the pages from LLM providers outside the house: only models on a
+   *  connection an admin marked self-hosted may read them. */
+  keptInHouse: boolean
   onClose: () => void
   /** What the run actually took on - nothing queued is a real outcome, not a failure. */
   onStarted: (outcome: { queued: number; reused: number }) => void
@@ -92,9 +95,9 @@ interface LlmReadDialogProps {
 
 export function LlmReadDialog({
   jobId, pageIds, pageCount, selected, consensusMin, autocheck, consensusWithOcr, prompt,
-  canOwn, onClose, onStarted, onError,
+  canOwn, keptInHouse, onClose, onStarted, onError,
 }: LlmReadDialogProps) {
-  const [models, setModels] = useState<(LlmModel & { shared: boolean })[]>([])
+  const [models, setModels] = useState<(LlmModel & { shared: boolean; self_hosted: boolean })[]>([])
   const [chosen, setChosen] = useState<number[]>(selected)
   const [preview, setPreview] = useState<LlmReadPreview | null>(null)
   const [minAgree, setMinAgree] = useState(consensusMin)
@@ -118,7 +121,10 @@ export function LlmReadDialog({
   const [scope, setScope] = useState<number[] | undefined>(pageIds)
 
   useEffect(() => {
-    listUsableLlmModels().then((r) => setModels(r.models)).catch((e: Error) => onError(e.message))
+    listUsableLlmModels().then((r) => {
+      setModels(r.models)
+      if (keptInHouse) setChosen((held) => held.filter((id) => r.models.some((m) => m.id === id && m.self_hosted)))
+    }).catch((e: Error) => onError(e.message))
     // What a model with no wording of its own is asked: the personal default, else the
     // shipped one. The editor starts from what is in force, so replacing it means editing
     // the rules rather than losing them.
@@ -199,12 +205,22 @@ export function LlmReadDialog({
         </p>
       ) : (
         <div className="mb-3 space-y-1" data-testid="llm-model-picker">
+          {keptInHouse && (
+            <p data-testid="llm-kept-in-house" className="text-xs text-ink-muted">
+              This dataset's owner keeps its pages from external providers: only self-hosted models can read it.
+            </p>
+          )}
           {models.map((model) => (
             <label key={model.id} data-testid="llm-pick" data-label={model.label}
-                   className="flex cursor-pointer items-center gap-2 text-sm">
+                   data-kept-out={keptInHouse && !model.self_hosted}
+                   title={keptInHouse && !model.self_hosted
+                     ? "This dataset's owner keeps its pages from providers an admin hasn't marked self-hosted" : undefined}
+                   className={`flex items-center gap-2 text-sm ${
+                     keptInHouse && !model.self_hosted ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
               <input
                 type="checkbox"
                 checked={chosen.includes(model.id)}
+                disabled={keptInHouse && !model.self_hosted}
                 onChange={() => toggle(model.id)}
                 className="cursor-pointer accent-accent"
               />

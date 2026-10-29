@@ -9,7 +9,7 @@ from fastapi.responses import Response
 from PIL import Image
 from pydantic import BaseModel
 
-from app import (config, edge_registry, ingest, jobs, map_classes, map_export, model_registry, revert,
+from app import (config, data_use, edge_registry, ingest, jobs, map_classes, map_export, model_registry, revert,
                  serializers, store, weights)
 from app.backend_client import BackendClient, BackendError, Item
 from app.remote_models import scan_image
@@ -614,6 +614,7 @@ def maskset_download(job_id: str, include_all: bool = False, fused: bool = False
                      conn=Depends(get_db), auth: dict = Depends(current_user)):
     """Download the prepared mask export."""
     job = _require_map_job(conn, job_id, auth)
+    data_use.require_export(conn, job_id, auth)
     payload, manifest = _collect_export(conn, job, include_all, fused)
     _refuse_empty(manifest, fused)
     classes, stroke = store.job_classes(conn, job_id), job['line_width']
@@ -629,6 +630,7 @@ def maskset_export(job_id: str, include_all: bool = False, fused: bool = False,
                    _admin=Depends(require_role('admin'))):
     """Render reviewed tiles into class-index PNG masks plus geometry sidecars."""
     job = _require_map_job(conn, job_id, auth)
+    data_use.require_export(conn, job_id, auth)
     payload, manifest = _collect_export(conn, job, include_all, fused)
     _refuse_empty(manifest, fused)
     dest = _export_dest(job, fused)

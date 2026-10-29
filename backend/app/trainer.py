@@ -11,7 +11,7 @@ import threading
 import time
 from pathlib import Path
 
-from app import (backend_client, caches, config, conventions, decode, evaluator, line_shapes, registry,
+from app import (backend_client, caches, config, conventions, data_use, decode, evaluator, line_shapes, registry,
                  remote_training, slurm_session, store, train_snapshot, weights)
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -310,6 +310,7 @@ def register_result(conn, training: dict, out_dir: Path) -> int:
                          (json.dumps([{'id': i + 1, 'name': n} for i, n in enumerate(learned)]), model_id))
     conn.execute('UPDATE trainings SET model_id = ?, metrics = ? WHERE id = ?',
                  (model_id, metrics, training['id']))
+    store.record_model_datasets(conn, model_id, training)
     conn.commit()
     # Into the weight store as well, so model backends can fetch it. Best effort: the run
     # has its model either way, and `python -m app.weights import-existing` catches up.
@@ -325,7 +326,8 @@ def register_result(conn, training: dict, out_dir: Path) -> int:
         evaluator.create_result_eval(conn, training, model_id)
         # A test set is never trained on and never steers the run - it is scored once,
         # base model and new model alike, so "did it help?" has an untouched answer.
-        test_ids = json.loads(training.get('test_job_ids') or '[]')
+        test_ids = [job_id for job_id in json.loads(training.get('test_job_ids') or '[]')
+                    if data_use.allowed(conn, job_id, 'test')]
         if test_ids:
             test_source = {'jobs': test_ids, 'test_pages': True}
             if training.get('human_checked_only'):
@@ -407,6 +409,12 @@ def prepare_snapshot(conn, training: dict) -> dict:
     cut_as = marker.read_text(encoding='utf-8') if marker.is_file() else 'native'
     if counts and (tdir / 'snapshot').is_dir() and cut_as == kind:
         return counts
+    # Checked again here, not only when the run was asked for: an owner may have switched
+    # a dataset's training off while the run waited in the queue.
+    refused = data_use.refusal(conn, [*json.loads(training['dataset_job_ids']),
+                                      *json.loads(training.get('valid_job_ids') or '[]')], 'training')
+    if refused:
+        raise remote_training.CannotTrain(refused)
     set_state(conn, training['id'], status='preparing', phase='snapshot')
     counts = train_snapshot.build(conn, training['id'], training['task'],
                                   json.loads(training['dataset_job_ids']),

@@ -224,6 +224,7 @@ def connection_payload(conn, row, user: dict) -> dict:
     connection['has_key'] = bool(row['api_key'])
     connection['key_hint'] = row['api_key_hint'] or ''
     connection['shared'] = bool(row['shared'])
+    connection['self_hosted'] = bool(row['self_hosted'])
     connection['editable'] = editable_by(dict(row), user)
     models = conn.execute('SELECT * FROM llm_models WHERE connection_id = ? ORDER BY lower(label)',
                           (row['id'],)).fetchall()
@@ -242,11 +243,13 @@ def usable_models(conn, user: dict) -> list[dict]:
     """Every enabled model the caller may read a page with, connection included. This is
     what a dataset's model picker offers."""
     rows = conn.execute(
-        'SELECT m.*, c.name AS connection_name, c.owner AS connection_owner, c.shared AS shared '
+        'SELECT m.*, c.name AS connection_name, c.owner AS connection_owner, c.shared AS shared, '
+        'c.self_hosted AS self_hosted '
         'FROM llm_models m JOIN llm_connections c ON m.connection_id = c.id '
         'WHERE m.enabled = 1 AND (c.owner = ? OR c.shared = 1) '
         'ORDER BY lower(c.name), lower(m.label)', (user['username'],)).fetchall()
-    return [{**model_payload(r), 'shared': bool(r['shared'])} for r in rows]
+    return [{**model_payload(r), 'shared': bool(r['shared']), 'self_hosted': bool(r['self_hosted'])}
+            for r in rows]
 
 
 def name_taken(conn, owner: str, name: str, except_id: int | None = None) -> bool:

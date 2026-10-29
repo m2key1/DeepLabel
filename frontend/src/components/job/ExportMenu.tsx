@@ -1,6 +1,19 @@
 import { useState } from 'react'
 import { exportUrl } from '../../api'
-import type { ExportFormat } from '../../api'
+import type { ExportFormat, Job } from '../../api'
+
+/** Whether the owner keeps this dataset's exports to themselves, from this viewer. */
+export function exportBlocked(job: Pick<Job, 'owner' | 'data_use'>, user: string | null): boolean {
+  return !job.data_use.export && job.owner !== user
+}
+
+export function ExportBlockedNote({ owner }: { owner: string }) {
+  return (
+    <p data-testid="export-blocked" className="w-64 px-2.5 py-2 text-xs text-ink-muted">
+      The owner keeps exports of this dataset to themselves. Ask {owner} for a copy.
+    </p>
+  )
+}
 
 const GROUPS: { title: string; formats: { format: ExportFormat; label: string; hint: string }[] }[] = [
   {

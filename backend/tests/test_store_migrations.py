@@ -179,6 +179,7 @@ class TestMigrations:
         'job_assignees': ['job_id', 'username'],
         'job_classes': ['class_id', 'color', 'job_id', 'name', 'priority_rank'],
         'job_documents': ['created_at', 'id', 'idx', 'job_id', 'name', 'text'],
+        'job_log': ['action', 'created_at', 'detail', 'id', 'job_id', 'username'],
         'job_layout_classes': ['class_id', 'color', 'job_id', 'name', 'position', 'reads', 'role'],
         'job_maps': ['content_hash', 'deleted', 'filename', 'height', 'id', 'idx', 'job_id', 'n_tiles', 'source_file', 'status', 'width'],
         'jobs': ['checked', 'counters', 'created_at', 'error', 'id', 'line_mode', 'name', 'owner', 'phase', 'pid', 'source_path', 'status'],
@@ -193,6 +194,7 @@ class TestMigrations:
         'llm_reads': ['completion_tokens', 'content_hash', 'created_at', 'error', 'finished_at', 'id', 'label', 'llm_model_id', 'model', 'prompt_tokens', 'raw_text', 'requested_by', 'status'],
         'llm_references': ['bytes', 'created_at', 'digest', 'filename', 'id', 'job_id', 'mime', 'order_idx', 'owner'],
         'model_files': ['filename', 'model_id', 'role', 'sha256', 'size'],
+        'model_datasets': ['job_id', 'model_id', 'role'],
         'models': ['archived', 'checkpoint', 'created_at', 'id', 'is_default', 'metrics', 'name', 'notes', 'source', 'task', 'trained_from'],
         'pages': ['content_hash', 'deleted', 'filename', 'height', 'id', 'idx', 'job_id', 'layout_checked', 'lines_checked', 'source_file', 'source_page', 'source_pdf', 'status', 'width'],
         'regions': ['checked', 'class_id', 'deleted', 'holes', 'id', 'order_idx', 'page_id', 'points'],
@@ -703,7 +705,7 @@ class TestLlmTables:
     def test_fresh_database_has_the_connection_and_model_tables(self, tmp_path):
         conn = store.connect(tmp_path / 'app.db')
         assert cols(conn, 'llm_connections') == {'id', 'owner', 'name', 'base_url', 'api_key',
-                                                 'api_key_hint', 'shared', 'created_at'}
+                                                 'api_key_hint', 'shared', 'created_at', 'self_hosted'}
         assert cols(conn, 'llm_models') == {'id', 'connection_id', 'model', 'label', 'prompt',
                                             'temperature', 'max_image_edge', 'max_tokens',
                                             'extra_body', 'max_concurrency', 'enabled',

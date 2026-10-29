@@ -87,7 +87,9 @@ import { RedetectDialog } from '../components/job/RedetectDialog'
 import { LlmReadDialog } from '../components/job/LlmReadDialog'
 import { NewerModelsDialog } from '../components/job/NewerModelsDialog'
 import { LlmProgress } from '../components/job/LlmProgress'
-import { ExportMenu } from '../components/job/ExportMenu'
+import { ExportBlockedNote, ExportMenu, exportBlocked } from '../components/job/ExportMenu'
+import { DataUseDialog } from '../components/job/DataUseDialog'
+import { DataUseChips } from '../components/job/DataUseSwitches'
 import { LayoutClassesDialog } from '../components/job/LayoutClassesDialog'
 import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
 import { SettleAgainDialog } from '../components/job/SettleAgainDialog'
@@ -239,6 +241,7 @@ export function JobDetailPage() {
   const [review, setReview] = useState<ReviewQueue | null>(null)
   const [maxConf, setMaxConf] = useState(getReviewConf)
   const [exportOpen, setExportOpen] = useState(false)
+  const [dataUseOpen, setDataUseOpen] = useState(false)
 
   useDismiss(exportOpen, () => setExportOpen(false))
 
@@ -1103,6 +1106,12 @@ export function JobDetailPage() {
                 {/* The title lives on the wrapper: a disabled button takes no pointer
                     events, so its own tooltip would never appear — and "why is this off"
                     is exactly what needs saying then. */}
+                {exportBlocked(job, user) ? (
+                  <span data-testid="export-blocked" className="text-xs text-ink-muted"
+                        title={`Ask ${job.owner} for a copy`}>
+                    Exports are kept to the owner
+                  </span>
+                ) : (<>
                 <span title={job.tiles_reviewed
                   ? 'Download class-index mask PNGs + geometry JSON for reviewed tiles'
                   : 'Nothing to export yet - mark tiles reviewed in the tile editor first'}>
@@ -1129,6 +1138,7 @@ export function JobDetailPage() {
                     </Button>
                   </span>
                 )}
+                </>)}
                 {isAdmin && (
                   <Button onClick={() => setMaskOpen(true)} title="Write the mask set to a directory on the server">
                     Export to server
@@ -1149,7 +1159,9 @@ export function JobDetailPage() {
                 </Button>
                 {exportOpen && (
                   <div className={`absolute right-0 top-full z-10 mt-1 overflow-hidden ${popoverChrome}`}>
-                    <ExportMenu jobId={jobId} iiif={!!job.iiif_source} onPicked={() => setExportOpen(false)} />
+                    {exportBlocked(job, user)
+                      ? <ExportBlockedNote owner={job.owner} />
+                      : <ExportMenu jobId={jobId} iiif={!!job.iiif_source} onPicked={() => setExportOpen(false)} />}
                   </div>
                 )}
               </div>
@@ -1179,6 +1191,12 @@ export function JobDetailPage() {
                   testId: 'remove-readings',
                   onSelect: () => setRemoveReadingsOpen(true),
                 }] : []),
+                ...(canOwn ? [{
+                  label: 'Data use…',
+                  hint: 'What its data may be used for: training, scoring, LLM providers, export',
+                  testId: 'data-use-open',
+                  onSelect: () => setDataUseOpen(true),
+                }] : []),
                 ...(isAdmin && !active && purgeable?.files ? [{
                   label: `Purge ${plural(purgeable.pages, 'deleted page')}`,
                   hint: 'Delete their image files for good',
@@ -1193,6 +1211,7 @@ export function JobDetailPage() {
         <p data-testid="job-meta" className="mt-1 flex items-center gap-1.5 text-xs text-ink-muted">
           <Avatar name={job.owner} size="xs" />
           <span title="Owner">{job.owner}</span>
+          <DataUseChips value={job.data_use} />
           {(job.counters.gt_total ?? 0) > 0 && (
             <span title="Transcription lines matched to recognized lines">
               {' · '}transcriptions {job.counters.gt_matched ?? 0}/{job.counters.gt_total}
@@ -1258,6 +1277,7 @@ export function JobDetailPage() {
           consensusWithOcr={job.llm_consensus_with_ocr ?? false}
           prompt={job.llm_prompt ?? ''}
           canOwn={canOwn}
+          keptInHouse={!job.data_use.external_llm}
           onClose={() => setLlmOpen(false)}
           onStarted={(outcome) => {
             pollLlm()
@@ -1273,6 +1293,9 @@ export function JobDetailPage() {
           }}
           onError={setError}
         />
+      )}
+      {dataUseOpen && (
+        <DataUseDialog jobId={jobId} jobName={job.name} onClose={() => setDataUseOpen(false)} onSaved={refetch} />
       )}
       {purgeOpen && (
         <PurgeDialog jobId={jobId} onClose={() => setPurgeOpen(false)} onPurged={refetch} onError={setError} />

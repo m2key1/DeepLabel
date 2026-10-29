@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from app import config
 from app import decode as decode_modes
-from app import caches, eval_lines, eval_metrics, evaluator, preflight, registry, store, trainer
+from app import caches, data_use, eval_lines, eval_metrics, evaluator, preflight, registry, store, trainer
 from app.deps import can_access_job, current_user, get_db, require_job_access, require_role
 
 router = APIRouter(tags=['evaluations'])
@@ -77,6 +77,7 @@ def create_evaluation(body: EvaluationCreate, conn=Depends(get_db),
         require_job_access(conn, job_id, user)
         if store.get_job(conn, job_id) is None:
             raise HTTPException(404, f'dataset {job_id} not found')
+    data_use.require(conn, body.job_ids, 'test')
     test_pages = body.pages == 'test' or (body.pages is None and _have_test_pages(conn, body.job_ids))
     if test_pages:
         counts = trainer.eligible_counts(conn, 'ocr', body.job_ids, pages='test')
@@ -111,6 +112,7 @@ def retry_evaluation(eval_id: int, conn=Depends(get_db), user: dict = Depends(cu
     snapshot = json.loads(evaluation['source'] or '{}').get('snapshot')
     if snapshot is not None and not (config.training_dir(snapshot) / 'snapshot' / 'valid').is_dir():
         raise HTTPException(409, 'the frozen split it scored on is gone')
+    data_use.require(conn, json.loads(evaluation['source'] or '{}').get('jobs') or [], 'test')
     evaluator.set_state(conn, eval_id, status='queued', error=None, pid=None)
     return evaluator.payload(
         conn.execute('SELECT * FROM evaluations WHERE id = ?', (eval_id,)).fetchone())

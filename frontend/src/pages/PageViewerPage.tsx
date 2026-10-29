@@ -3839,6 +3839,7 @@ export function PageViewerPage() {
           consensusWithOcr={job.llm_consensus_with_ocr ?? false}
           prompt={job.llm_prompt ?? ''}
           canOwn={isAdmin || job.owner === user}
+          keptInHouse={!job.data_use.external_llm}
           onClose={() => setReadOpen(false)}
           onStarted={() => {
             getJob(jobId).then(setJob).catch(() => undefined)

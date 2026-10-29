@@ -79,7 +79,14 @@ CREATE TABLE IF NOT EXISTS jobs (
     max_retired_class_id INTEGER NOT NULL DEFAULT 0,
     -- The IIIF manifest a dataset was imported from (JSON): its URL, label, attribution
     -- and rights, which every export carries. NULL for any other dataset.
-    iiif_source TEXT
+    iiif_source TEXT,
+    -- What the owner allows the data to be used for (#29), enforced wherever it is used:
+    -- training or validating a model, scoring one, being read by an LLM provider an
+    -- admin has not marked self-hosted, and export by the people it is shared with.
+    use_training INTEGER NOT NULL DEFAULT 1,
+    use_test INTEGER NOT NULL DEFAULT 1,
+    use_external_llm INTEGER NOT NULL DEFAULT 1,
+    use_export INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS pages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -454,7 +461,10 @@ CREATE TABLE IF NOT EXISTS llm_connections (
     api_key TEXT,
     api_key_hint TEXT,
     shared INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    -- Set by an admin: the endpoint runs in-house, so datasets that keep their pages from
+    -- external providers may still be read by it.
+    self_hosted INTEGER NOT NULL DEFAULT 0
 );
 -- Each person's own default transcription prompt: what a model with no wording of its own
 -- is asked with, for runs that person starts. Empty or absent means the shipped default.
@@ -635,6 +645,27 @@ CREATE TABLE IF NOT EXISTS group_assignees (
     username TEXT NOT NULL,
     PRIMARY KEY (group_id, username)
 );
+-- The datasets a model was made from: trained on (train), chosen for validation (valid) or
+-- scored on after its training (test). Kept when a dataset is deleted, so which data a
+-- model saw can always be answered.
+CREATE TABLE IF NOT EXISTS model_datasets (
+    model_id INTEGER NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+    job_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    PRIMARY KEY (model_id, job_id, role)
+);
+CREATE INDEX IF NOT EXISTS idx_model_datasets_job ON model_datasets(job_id);
+-- What happened to a dataset that is not an edit of its pages: its data use changing, and
+-- an admin who is neither its owner nor shared on it opening it while it restricts use.
+CREATE TABLE IF NOT EXISTS job_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    username TEXT NOT NULL,
+    action TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_job_log_job ON job_log(job_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_pages_job ON pages(job_id);
 CREATE INDEX IF NOT EXISTS idx_elements_page ON elements(page_id);
 CREATE INDEX IF NOT EXISTS idx_lines_element ON lines(element_id);
@@ -713,6 +744,20 @@ CORRECTED_BY_BACKFILL = 2
 PROVENANCE_BACKFILL = 3
 TEXT_COMPOSED = 4
 CONVENTION_CATALOG = 5
+MODEL_DATASETS_BACKFILL = 6
+
+# The dataset fields behind each data use a dataset's owner can switch off.
+DATA_USE_COLUMNS = {'training': 'use_training', 'test': 'use_test',
+                    'external_llm': 'use_external_llm', 'export': 'use_export'}
+TRAINING_DATASET_ROLES = {'train': 'dataset_job_ids', 'valid': 'valid_job_ids', 'test': 'test_job_ids'}
+
+
+def record_model_datasets(conn: sqlite3.Connection, model_id: int, training: sqlite3.Row) -> None:
+    """Which datasets a training's model was trained on, validated on and scored on."""
+    for role, column in TRAINING_DATASET_ROLES.items():
+        for job_id in json.loads(training[column] or '[]'):
+            conn.execute('INSERT OR IGNORE INTO model_datasets (model_id, job_id, role) VALUES (?, ?, ?)',
+                         (model_id, job_id, role))
 
 
 def _mark_former_test_sets(conn: sqlite3.Connection) -> None:
@@ -881,6 +926,11 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE jobs ADD COLUMN max_retired_class_id INTEGER NOT NULL DEFAULT 0')
     if 'iiif_source' not in job_cols:
         conn.execute('ALTER TABLE jobs ADD COLUMN iiif_source TEXT')
+    for _col in DATA_USE_COLUMNS.values():
+        if _col not in job_cols:
+            conn.execute(f'ALTER TABLE jobs ADD COLUMN {_col} INTEGER NOT NULL DEFAULT 1')
+    if 'self_hosted' not in {row[1] for row in conn.execute('PRAGMA table_info(llm_connections)')}:
+        conn.execute('ALTER TABLE llm_connections ADD COLUMN self_hosted INTEGER NOT NULL DEFAULT 0')
     model_cols = {row[1] for row in conn.execute('PRAGMA table_info(llm_models)')}
     if 'max_tokens' not in model_cols:
         conn.execute('ALTER TABLE llm_models ADD COLUMN max_tokens INTEGER')
@@ -1145,6 +1195,10 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute("INSERT OR IGNORE INTO convention_flags (name, label) "
                      "SELECT DISTINCT flag.key, flag.key FROM jobs, json_each(jobs.ocr_convention) flag")
         conn.execute(f'PRAGMA user_version = {CONVENTION_CATALOG}')
+    if conn.execute('PRAGMA user_version').fetchone()[0] < MODEL_DATASETS_BACKFILL:
+        for training in conn.execute('SELECT * FROM trainings WHERE model_id IN (SELECT id FROM models)').fetchall():
+            record_model_datasets(conn, training['model_id'], training)
+        conn.execute(f'PRAGMA user_version = {MODEL_DATASETS_BACKFILL}')
     conn.commit()
     return conn
 
@@ -1410,6 +1464,7 @@ def job_row_to_dict(row: sqlite3.Row) -> dict:
     job['gt_model_ids'] = json.loads(job.get('gt_model_ids') or '[]')
     job['ocr_convention'] = json.loads(job.get('ocr_convention') or '{}')
     job['iiif_source'] = json.loads(job['iiif_source']) if job.get('iiif_source') else None
+    job['data_use'] = {use: bool(job.pop(col, 1)) for use, col in DATA_USE_COLUMNS.items()}
     read = job.get('ocr_convention_read')
     job['ocr_convention_read'] = json.loads(read) if read is not None else None
     job['llm_consensus_min'] = int(job.get('llm_consensus_min') or 2)

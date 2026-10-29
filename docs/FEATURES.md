@@ -9,6 +9,7 @@ overview and setup.
 - [Creating a dataset](#creating-a-dataset)
 - [The dataset page](#the-dataset-page)
 - [Test data](#test-data)
+- [Data use](#data-use)
 - [Layout classes and templates](#layout-classes-and-templates)
 - [Processing and re-runs](#processing-and-re-runs)
 - [Reading order](#reading-order)
@@ -118,6 +119,30 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
   preset from it.
 - Test pages stay fully editable. The dataset list shows "test set" or "40 of 300 test pages"
   and filters by **Has test data**.
+
+## Data use
+
+What a dataset may be used for is its owner's call. Four switches, all on unless the owner
+turns one off, apply to everyone, the owner and admins included:
+
+- **Training:** the dataset may train or validate a model. Switched off, the training form
+  does not offer it ("2 datasets you can open are not offered") and a run that was already
+  queued stops before it cuts any material.
+- **Test set:** the dataset may score models, as a training's test set or in an evaluation.
+- **External LLM providers:** its pages may go to LLM connections an admin has not marked
+  **Self-hosted** (Settings, on the connection). Switched off, only self-hosted models can
+  read it, and a reading queued earlier is not sent.
+- **Export by others:** the people it is shared with, admins included, may export it. The
+  owner always can. Viewing and editing are not affected.
+
+The switches are set on the wizard's Review step and changed later with **Data use** in the
+dataset page's **⋯** menu. That dialog also lists the models already trained, validated or
+scored on the dataset; switching training off leaves them as they are, so an admin has to
+remove one that must go. Every model records the datasets it was made from.
+
+Others see a switched-off use as a chip beside the owner's name ("no training"). Admins can
+still open any dataset for support: while a dataset restricts any use, each visit by an admin
+who neither owns it nor has it shared is listed under **Opened by admins** in the dialog.
 
 ## Layout classes and templates
 
@@ -294,8 +319,9 @@ Any OpenAI-compatible endpoint (a hosted provider, vLLM, Ollama) can read pages 
 reader.
 
 - Add a connection under Settings. **Ask what it offers** tests it and lists its models.
-  Connections are private; an admin can publish one to everyone. API keys are stored
-  encrypted and never shown again in full.
+  Connections are private; an admin can publish one to everyone, and mark one as
+  **Self-hosted** for datasets that keep their pages in the house ([Data use](#data-use)).
+  API keys are stored encrypted and never shown again in full.
 - Each model can have its own prompt, token limit and extra request fields. A dataset can
   have its own prompt and up to four reference images (for example a glyph chart).
 - Start a reading from the dataset, a page selection, or a single page in the viewer. The

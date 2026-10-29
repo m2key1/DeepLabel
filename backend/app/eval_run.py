@@ -3,7 +3,7 @@ import itertools
 import json
 from pathlib import Path
 
-from app import backend_client, config, eval_material, evaluator, store
+from app import backend_client, config, data_use, eval_material, evaluator, store
 from app.eval_metrics import line_record
 from app.remote_models import RemoteOcrEngine
 from app.scoring import corpus_scores, group_breakdown
@@ -66,6 +66,10 @@ def main():
     evaluation = evaluator.get_evaluation(conn, args.evaluation_id)
     if evaluation is None:
         raise SystemExit(1)
+    refused = data_use.refusal(conn, json.loads(evaluation['source'] or '{}').get('jobs') or [], 'test')
+    if refused:
+        evaluator.finish(conn, evaluation['id'], status='error', error=refused)
+        return
     client = backend_client.client_for(conn, evaluation['model_id'])
     if client is None:
         evaluator.finish(conn, evaluation['id'], status='error',

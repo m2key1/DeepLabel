@@ -5,8 +5,8 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import (augmentations, backend_client, config, line_shapes, preflight, registry, remote_training,
-                 slurm_session, store, train_snapshot, trainer, tunables)
+from app import (augmentations, backend_client, config, data_use, line_shapes, preflight, registry,
+                 remote_training, slurm_session, store, train_snapshot, trainer, tunables)
 from app.deps import can_access_job, current_user, get_db, require_job_access, require_role
 
 router = APIRouter(tags=['training'])
@@ -315,6 +315,7 @@ def _validate_settings(conn, body: TrainingCreate, user: dict) -> dict:
         require_job_access(conn, job_id, user)
         if store.get_job(conn, job_id) is None:
             raise HTTPException(404, f'dataset {job_id} not found')
+    data_use.require(conn, body.dataset_job_ids, 'training')
     if body.base_model_id is not None:
         base = registry.get_model(conn, body.base_model_id)
         if base is None or base['task'] != body.task:
@@ -367,6 +368,7 @@ def _validate_settings(conn, body: TrainingCreate, user: dict) -> dict:
             require_job_access(conn, job_id, user)
             if store.get_job(conn, job_id) is None:
                 raise HTTPException(404, f'dataset {job_id} not found')
+        data_use.require(conn, body.valid_job_ids, 'training')
         valid_counts = trainer.eligible_counts(conn, body.task, body.valid_job_ids,
                                                body.human_checked_only)
         if sum(valid_counts.values()) == 0:
@@ -384,6 +386,7 @@ def _validate_settings(conn, body: TrainingCreate, user: dict) -> dict:
         if conn.execute('SELECT 1 FROM pages WHERE job_id = ? AND is_test = 1 AND deleted = 0',
                         (job_id,)).fetchone() is None:
             raise HTTPException(400, f'{job["name"]} has no test pages')
+    data_use.require(conn, body.test_job_ids, 'test')
     if body.test_job_ids:
         test_counts = trainer.eligible_counts(conn, body.task, body.test_job_ids,
                                               body.human_checked_only, pages='test')
@@ -513,6 +516,8 @@ def retry_training(training_id: int, conn=Depends(get_db), user: dict = Depends(
             raise HTTPException(409, clash)
     if training['base_model_id'] is not None:
         _refuse_archived_base(registry.get_model(conn, training['base_model_id']))
+    data_use.require(conn, [*json.loads(training['dataset_job_ids']),
+                            *json.loads(training.get('valid_job_ids') or '[]')], 'training')
     if training['target'] == 'slurm' and not trainer.slurm_available():
         raise HTTPException(409, 'no cluster is configured')
     # Claimed rather than simply set: two retries arriving together would otherwise each
