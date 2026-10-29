@@ -260,7 +260,8 @@ CREATE TABLE IF NOT EXISTS revisions (
     action TEXT NOT NULL,
     snapshot TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    client_id TEXT
+    client_id TEXT,
+    checks_line INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS models (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -679,6 +680,8 @@ CREATE INDEX IF NOT EXISTS idx_revisions_target ON revisions(target_type, target
 CREATE INDEX IF NOT EXISTS idx_revisions_job ON revisions(job_id, id);
 -- Per-person activity on the Users page reads the log by author.
 CREATE INDEX IF NOT EXISTS idx_revisions_author ON revisions(author, id);
+-- A profile's year of activity and its recent datasets, read from the index alone.
+CREATE INDEX IF NOT EXISTS idx_revisions_person_days ON revisions(author, id, created_at, job_id, action);
 -- Which datasets are shared with the caller, asked by every non-admin dataset list.
 CREATE INDEX IF NOT EXISTS idx_job_assignees_user ON job_assignees(username);
 CREATE INDEX IF NOT EXISTS idx_group_assignees_user ON group_assignees(username);
@@ -762,6 +765,21 @@ def connect(db_path: Path) -> sqlite3.Connection:
         # The browser tab a write came from, so that tab alone skips its echo on the live
         # feed. NULL for scripts, runners and everything logged before it was recorded.
         conn.execute('ALTER TABLE revisions ADD COLUMN client_id TEXT')
+    if 'checks_line' not in revision_cols:
+        # Whether a line revision turned the line from unchecked to checked, which a
+        # profile counts. Worked out once here for the history, then at each write -
+        # asking every revision's predecessor on each profile view took seconds.
+        conn.execute('ALTER TABLE revisions ADD COLUMN checks_line INTEGER NOT NULL DEFAULT 0')
+        conn.execute("""
+            UPDATE revisions SET checks_line = 1 WHERE id IN (
+                SELECT id FROM (
+                    SELECT id, action, json_extract(snapshot, '$.checked') AS now_checked,
+                           LAG(json_extract(snapshot, '$.checked')) OVER (PARTITION BY target_id ORDER BY id)
+                               AS was_checked
+                    FROM revisions WHERE target_type = 'line')
+                WHERE action != 'origin' AND now_checked = 1 AND COALESCE(was_checked, 0) = 0)""")
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_revisions_person '
+                 'ON revisions(author, target_type, checks_line, action, target_id)')
     page_cols = {row[1] for row in conn.execute('PRAGMA table_info(pages)')}
     if 'layout_checked' not in page_cols:
         conn.execute('ALTER TABLE pages ADD COLUMN layout_checked INTEGER NOT NULL DEFAULT 0')
@@ -1138,10 +1156,21 @@ def log_revision(conn: sqlite3.Connection, target_type: str, target_id: int, job
                  author: str, action: str, snapshot: dict):
     """Append one revision. Never commits - the caller's transaction must carry
     both the materialized write and this log entry."""
-    conn.execute('INSERT INTO revisions (target_type, target_id, job_id, author, action, snapshot, client_id) '
-                 'VALUES (?,?,?,?,?,?,?)',
+    conn.execute('INSERT INTO revisions (target_type, target_id, job_id, author, action, snapshot, client_id, '
+                 'checks_line) VALUES (?,?,?,?,?,?,?,?)',
                  (target_type, target_id, job_id, author, action, json.dumps(snapshot),
-                  revision_client.get()))
+                  revision_client.get(), checks_line(conn, target_type, target_id, action, snapshot)))
+
+
+def checks_line(conn: sqlite3.Connection, target_type: str, target_id: int, action: str, snapshot: dict) -> bool:
+    """Whether this revision is a line going from unchecked to checked: a correction of a
+    line already checked is not checking it again."""
+    if target_type != 'line' or action == 'origin' or snapshot.get('checked') != 1:
+        return False
+    before = conn.execute(
+        "SELECT json_extract(snapshot, '$.checked') FROM revisions "
+        "WHERE target_type = 'line' AND target_id = ? ORDER BY id DESC LIMIT 1", (target_id,)).fetchone()
+    return not (before and before[0])
 
 
 def log_element(conn: sqlite3.Connection, element_id: int, author: str, action: str):

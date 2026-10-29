@@ -213,7 +213,7 @@ class TestCost:
         for sql in people.WINDOWED_QUERIES:
             plan = ' '.join(row['detail'] for row in conn.execute(f'EXPLAIN QUERY PLAN {sql}',
                                                                   {'user': 'bob', 'since': 1, 'cutoff': ''}))
-            assert 'USING INDEX idx_revisions_author (author=? AND id>?)' in plan, plan
+            assert 'USING COVERING INDEX idx_revisions_person_days (author=? AND id>?)' in plan, plan
         conn.close()
 
     def test_a_second_view_within_the_ttl_is_not_counted_again(self, conn):

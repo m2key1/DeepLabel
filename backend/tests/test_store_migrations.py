@@ -1493,3 +1493,65 @@ class TestModelVersions:
         assert conn.execute('SELECT supersedes FROM models').fetchone()[0] is None
         assert conn.execute('SELECT COUNT(*) FROM declined_models').fetchone()[0] == 0
         conn.close()
+
+
+class TestChecksLine:
+    """Whether a line revision checked the line, which a profile counts. The history is
+    marked once by the migration and every later revision as it is written; both must
+    say what reading each revision's predecessor says."""
+
+    # (line, author, action, checked): a recheck, an uncheck and a check again, a line
+    # whose first revision is a check, an origin that is checked, and a region.
+    HISTORY = [
+        ('line', 1, 'system', 'origin', False),
+        ('line', 1, 'bob', 'update', True),
+        ('line', 1, 'bob', 'update', True),
+        ('line', 1, 'alice', 'update', False),
+        ('line', 1, 'bob', 'update', True),
+        ('line', 2, 'alice', 'update', True),
+        ('line', 2, 'bob', 'update', True),
+        ('line', 3, 'system', 'origin', True),
+        ('line', 3, 'bob', 'update', True),
+        ('region', 1, 'bob', 'update', True),
+    ]
+    EXPECTED = [0, 1, 0, 0, 1, 1, 0, 0, 0, 0]
+
+    @staticmethod
+    def by_predecessor(conn) -> list[int]:
+        return [row[0] for row in conn.execute("""
+            SELECT r.target_type = 'line' AND r.action != 'origin' AND json_extract(r.snapshot, '$.checked') = 1
+                   AND COALESCE((SELECT json_extract(prior.snapshot, '$.checked') FROM revisions prior
+                                 WHERE prior.target_type = 'line' AND prior.target_id = r.target_id
+                                   AND prior.id < r.id ORDER BY prior.id DESC LIMIT 1), 0) = 0
+            FROM revisions r ORDER BY r.id""")]
+
+    def test_a_revision_is_marked_as_it_is_written(self, tmp_path):
+        conn = store.connect(tmp_path / 'app.db')
+        for target_type, target_id, author, action, checked in self.HISTORY:
+            store.log_revision(conn, target_type, target_id, 'j1', author, action, {'checked': checked})
+
+        marked = [row[0] for row in conn.execute('SELECT checks_line FROM revisions ORDER BY id')]
+        assert marked == self.EXPECTED
+        assert self.by_predecessor(conn) == self.EXPECTED
+        conn.close()
+
+    def test_an_older_database_has_its_history_marked(self, tmp_path):
+        db = tmp_path / 'app.db'
+        conn = store.connect(db)
+        conn.executemany(
+            "INSERT INTO revisions (target_type, target_id, job_id, author, action, snapshot) VALUES (?, ?, 'j1', ?, ?, ?)",
+            [(t, i, a, act, json.dumps({'checked': c})) for t, i, a, act, c in self.HISTORY])
+        conn.commit()
+        conn.close()
+        raw = sqlite3.connect(db)
+        raw.execute('DROP INDEX idx_revisions_person')
+        raw.execute('ALTER TABLE revisions DROP COLUMN checks_line')
+        raw.commit()
+        raw.close()
+
+        conn = store.connect(db)
+        store.connect(db).close()
+
+        assert [row[0] for row in conn.execute('SELECT checks_line FROM revisions ORDER BY id')] == self.EXPECTED
+        assert self.by_predecessor(conn) == self.EXPECTED
+        conn.close()

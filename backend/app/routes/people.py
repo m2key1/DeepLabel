@@ -14,15 +14,11 @@ PROFILE_TTL = 60
 YEAR = 365
 RECENT_DATASETS = 8
 
-# A person's check is a line revision of theirs that has the line checked where the one
-# before it had not: a correction of a line already checked is not checking it again.
+# A person's check is a line revision of theirs that turned the line from unchecked to
+# checked, which the log marks as it is written (store.checks_line).
 _LINES_CHECKED = """
-    SELECT COUNT(DISTINCT r.target_id) FROM revisions r
-    WHERE r.author = :user AND r.action != 'origin' AND r.target_type = 'line'
-      AND json_extract(r.snapshot, '$.checked') = 1
-      AND COALESCE((SELECT json_extract(prior.snapshot, '$.checked') FROM revisions prior
-                    WHERE prior.target_type = 'line' AND prior.target_id = r.target_id AND prior.id < r.id
-                    ORDER BY prior.id DESC LIMIT 1), 0) = 0
+    SELECT COUNT(DISTINCT target_id) FROM revisions
+    WHERE author = :user AND target_type = 'line' AND checks_line = 1
 """
 
 # A page revision carries only the flags that request set, so one naming a flag as true
