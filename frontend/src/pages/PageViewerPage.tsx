@@ -260,6 +260,12 @@ export function PageViewerPage() {
   // Manual rotations not yet persisted; kept frontend-side and saved when the line is checked.
   const [pendingOrient, setPendingOrient] = useState<Map<number, number>>(new Map())
   const [editing, setEditing] = useState(false)
+  // Edit mode's own pair of layer switches: it starts with everything drawn, since what is
+  // hidden cannot be edited, and leaves the view's choice as it was.
+  const [editLayers, setEditLayers] = useState({ layout: true, lines: true })
+  useEffect(() => {
+    if (editing) setEditLayers({ layout: true, lines: true })
+  }, [editing])
   // Which of selectedId / activeLine the one editor is currently acting on.
   const [selKind, setSelKind] = useState<'element' | 'line'>('element')
   const [mergeSet, setMergeSet] = useState<Set<number>>(new Set())
@@ -504,10 +510,12 @@ export function PageViewerPage() {
   const selectable = useMemo(
     () =>
       editing
-        ? (page?.elements.filter(
-            (e) => isEditable(e) && !hidden.has(e.class_name) && !hiddenEls.has(e.id)) ?? [])
+        ? (editLayers.layout
+            ? page?.elements.filter(
+              (e) => isEditable(e) && !hidden.has(e.class_name) && !hiddenEls.has(e.id)) ?? []
+            : [])
         : elements,
-    [editing, page, elements, hidden, hiddenEls],
+    [editing, editLayers.layout, page, elements, hidden, hiddenEls],
   )
   // Everything the region list shows: hidden entries stay listed (dimmed), which
   // is the only way back from having hidden them.
@@ -525,12 +533,12 @@ export function PageViewerPage() {
     [page],
   )
   const visibleLines = useMemo(() => {
-    if (hidden.has(LINE_CLASS)) return []
+    if (hidden.has(LINE_CLASS) || (editing && !editLayers.lines)) return []
     if (hiddenEls.size === 0) return pageLines
     const hiddenLineIds = new Set(
       (page?.elements ?? []).filter((e) => hiddenEls.has(e.id)).flatMap((e) => e.lines.map((l) => l.id)))
     return pageLines.filter((l) => !hiddenLineIds.has(l.id))
-  }, [hidden, hiddenEls, page, pageLines])
+  }, [hidden, hiddenEls, page, pageLines, editing, editLayers.lines])
   // The brush takes exactly what is drawn: a line on the scan can be swept whatever its
   // region's class, and one the eye has taken off cannot.
   const drawnLineIds = useMemo(() => new Set(visibleLines.map((l) => l.id)), [visibleLines])
@@ -3717,8 +3725,19 @@ export function PageViewerPage() {
         </>),
         actions: (<>
             <ButtonGroup aria-label="Show on the scan">
-              <GroupButton on={showLayout} onClick={() => setShowLayout((v) => !v)}>Layout</GroupButton>
-              <GroupButton on={showLinePolys} onClick={toggleLinePolys}>Lines</GroupButton>
+              {editing ? (
+                <>
+                  <GroupButton on={editLayers.layout}
+                               onClick={() => setEditLayers((l) => ({ ...l, layout: !l.layout }))}>Layout</GroupButton>
+                  <GroupButton on={editLayers.lines}
+                               onClick={() => setEditLayers((l) => ({ ...l, lines: !l.lines }))}>Lines</GroupButton>
+                </>
+              ) : (
+                <>
+                  <GroupButton on={showLayout} onClick={() => setShowLayout((v) => !v)}>Layout</GroupButton>
+                  <GroupButton on={showLinePolys} onClick={toggleLinePolys}>Lines</GroupButton>
+                </>
+              )}
               <GroupButton on={showLabels} onClick={() => setShowLabels((v) => !v)}>Labels</GroupButton>
               <GroupButton on={showConfidence} onClick={() => setShowConfidence((v) => !v)}>Confidence</GroupButton>
               <GroupButton on={showOrder} onClick={() => setShowOrder((v) => !v)}>Order</GroupButton>

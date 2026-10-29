@@ -366,6 +366,37 @@ test.describe('Scenario: reading a processed page', () => {
     await expect(overlay.locator('marker#ro-arrow')).toHaveCount(1)
   })
 
+  test('in edit mode the layout and lines buttons hide what is being edited, then hand the view back',
+    async ({ page }) => {
+      const { jobId, pageIds } = await seedViewer(1)
+      await openViewer(page, jobId, pageIds[0])
+      const overlay = page.getByTestId('overlay-box')
+      const layout = page.getByRole('button', { name: 'Layout', exact: true })
+      const lines = page.getByRole('button', { name: 'Lines', exact: true })
+      // The view as it opens: boxes on, lines off.
+      await expect(overlay.locator('rect[data-id]')).toHaveCount(2)
+      await expect(overlay.locator('svg polygon')).toHaveCount(0)
+
+      // Editing starts with everything drawn, whatever the view showed.
+      await enterEditMode(page)
+      await expect(page.getByTestId('region-box')).toHaveCount(2)
+      await expect(page.getByTestId('line-poly')).toHaveCount(6)
+
+      await lines.click()
+      await expect(page.getByTestId('line-poly')).toHaveCount(0)
+      await expect(page.getByTestId('region-box')).toHaveCount(2)
+      await layout.click()
+      await expect(page.getByTestId('region-box')).toHaveCount(0)
+      await lines.click()
+      await expect(page.getByTestId('line-poly')).toHaveCount(6)
+      await expect(page.getByTestId('region-box')).toHaveCount(0)
+
+      // Back to viewing: the view's own choice, untouched by the editing.
+      await page.getByRole('button', { name: 'View', exact: true }).click()
+      await expect(overlay.locator('rect[data-id]')).toHaveCount(2)
+      await expect(overlay.locator('svg polygon')).toHaveCount(0)
+    })
+
   // The loupe shows the crop the model reads, but nothing on the page said which region
   // became it - and on a line the backend refuses to straighten that region is an upright
   // box swallowing the neighbours, which is exactly when someone needs to see it.

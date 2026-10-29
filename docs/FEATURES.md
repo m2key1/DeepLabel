@@ -185,6 +185,8 @@ Press `e` to edit the page.
 - **Erase** (Shift+E): sweep away line corners with a brush. Lines you or others have
   checked are skipped unless you hold Shift.
 - Hold Space or Alt for the hand tool.
+- In edit mode, Layout and Lines hide the boxes or the lines while you edit; editing always
+  starts with both shown, and the view keeps its own setting.
 - Delete a line straight from the text list with its trash can, without entering edit mode.
 - Ctrl+Z undoes and Ctrl+Shift+Z redoes any edit, including merges and splits, in or out of
   edit mode.
