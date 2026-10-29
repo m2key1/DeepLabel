@@ -311,7 +311,8 @@ Refresh & { connection: LlmConnection; secretConfigured: boolean; inherited: str
         <div className="flex flex-wrap items-center gap-2" data-testid="llm-connection-head">
           <span className="font-medium">{connection.name}</span>
           <VisibilityBadge shared={connection.shared} />
-          {connection.self_hosted && <Badge tone="accent" data-testid="llm-self-hosted">self-hosted</Badge>}
+          {/* An admin reads the state off the toggle that changes it. */}
+          {connection.self_hosted && !isAdmin && <Badge tone="accent" data-testid="llm-self-hosted">self-hosted</Badge>}
           {connection.shared && (
             <span data-testid="llm-owner" className="text-xs text-ink-muted">
               published by {connection.owner}

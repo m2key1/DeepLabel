@@ -84,6 +84,7 @@ export function CorpusPage() {
           <DiplomaticRead
             jobId={jobId}
             selected={settings.gt_model_ids.length > 0 ? settings.gt_model_ids : settings.llm_model_ids}
+            keptInHouse={!settings.data_use.external_llm}
             revision={revision}
             onChanged={load}
           />

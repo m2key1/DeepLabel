@@ -4,7 +4,7 @@ import { getDataUse, setDataUse } from '../../api'
 import type { DataUse, DataUseDetail } from '../../api'
 import { formatDate } from '../../util'
 import { Modal, modalBtn, modalPrimaryBtn } from '../Modal'
-import { DataUseSwitches } from './DataUseSwitches'
+import { DataUseSwitches, USES } from './DataUseSwitches'
 
 const ROLE = { train: 'trained', valid: 'validated', test: 'scored' }
 
@@ -38,6 +38,7 @@ export function DataUseDialog({ jobId, jobName, onClose, onSaved }: {
     }
   }
 
+  const changed = !!draft && !!detail && USES.some(({ use }) => draft[use] !== detail.data_use[use])
   const trainedOn = detail?.models.filter((m) => m.roles.some((r) => r !== 'test')) ?? []
   const trainingNote = draft && !draft.training && trainedOn.length > 0 && (
     <div data-testid="data-use-models" className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-ink">
@@ -79,7 +80,7 @@ export function DataUseDialog({ jobId, jobName, onClose, onSaved }: {
       )}
       <div className="mt-4 flex justify-end gap-2">
         <button onClick={onClose} className={modalBtn}>Cancel</button>
-        <button data-testid="data-use-save" onClick={save} disabled={!draft || busy}
+        <button data-testid="data-use-save" onClick={save} disabled={!changed || busy}
                 className={`${modalPrimaryBtn} disabled:opacity-40`}>
           Save
         </button>

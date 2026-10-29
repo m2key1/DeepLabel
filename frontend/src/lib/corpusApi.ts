@@ -1,4 +1,5 @@
 import { json, request } from '../api'
+import type { DataUse } from '../api'
 
 const jobUrl = (jobId: string) => `/api/jobs/${jobId}`
 
@@ -141,6 +142,7 @@ export function getGroundTruthWording(jobId: string): Promise<GroundTruthWording
 export interface CorpusSettings {
   name: string
   status: string
+  data_use: DataUse
   /** This dataset's own wording for the diplomatic read. Empty uses the shipped one. */
   gt_prompt: string
   /** Corpus lines of slack given to each side of a page's span, 0 to 20. */

@@ -59,8 +59,11 @@ function NewJobSummary({ rows, onEdit, full = false }: {
           <div key={row.label} className="contents" data-testid="summary-row" data-label={row.label}>
             <dt className="text-ink-subtle">{row.label}</dt>
             <dd className="min-w-0 break-words text-ink">{row.value}</dd>
-            <button type="button" onClick={() => onEdit(row.step)}
-                    className="justify-self-end text-accent-ink hover:underline">edit</button>
+            {/* On the Review step its own rows are set right above, so there is nothing to go to. */}
+            {full && row.step === 'review' ? <span /> : (
+              <button type="button" onClick={() => onEdit(row.step)}
+                      className="justify-self-end text-accent-ink hover:underline">edit</button>
+            )}
           </div>
         ))}
       </dl>
@@ -125,6 +128,8 @@ export function NewJobPage() {
   const [catalog, setCatalog] = useState<ConventionFlag[] | null>(null)
   const [convention, setConvention] = useState<OcrConvention>({})
   const [dataUse, setDataUse] = useState<DataUse>(ALL_USES)
+  const dataUseSection = useRef<HTMLElement>(null)
+  const [toDataUse, setToDataUse] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<UploadState | null>(null)
@@ -349,6 +354,18 @@ export function NewJobPage() {
     ] : []),
     { label: 'Data use', value: dataUseSummary(dataUse), step: 'review' },
   ]
+
+  // The side summary's Data use row leads to the switches, which sit on the Review step.
+  const editRow = (target: Step) => {
+    if (target === 'review') setToDataUse(true)
+    setStep(target)
+  }
+  useEffect(() => {
+    if (!toDataUse || step !== 'review') return
+    dataUseSection.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    dataUseSection.current?.querySelector('input')?.focus({ preventScroll: true })
+    setToDataUse(false)
+  }, [toDataUse, step])
 
   const jobOptions = (): JobOptions => ({
     name: name.trim(), line_mode: effectiveLineMode, page_reading_order: structure, task,
@@ -1150,7 +1167,7 @@ export function NewJobPage() {
           )}
         </>)}
         {step === 'review' && (<>
-          <section data-testid="new-job-data-use" className="rounded-md border border-line bg-surface px-4 py-3">
+          <section ref={dataUseSection} data-testid="new-job-data-use" className="rounded-md border border-line bg-surface px-4 py-3">
             <h2 className="text-sm font-semibold text-ink">Data use</h2>
             <p className="text-xs text-ink-muted">
               What this dataset's pages and lines may be used for. It applies to everyone, you included, and
@@ -1204,7 +1221,7 @@ export function NewJobPage() {
       </form>
       {step !== 'review' && (
         <aside className="hidden lg:block">
-          <NewJobSummary rows={summary} onEdit={setStep} />
+          <NewJobSummary rows={summary} onEdit={editRow} />
         </aside>
       )}
       </div>

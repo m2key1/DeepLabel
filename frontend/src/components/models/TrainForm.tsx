@@ -9,6 +9,7 @@ import type {
 } from '../../api'
 import { modalBtn, modalPrimaryBtn } from '../Modal'
 import { DatasetPicker, datasetSections } from './DatasetPicker'
+import { LeftOutNote } from '../ui/LeftOutNote'
 import { Button } from '../ui/Button'
 import { Hint } from '../ui/Hint'
 import { AugmentOverlay } from './AugmentOverlay'
@@ -310,7 +311,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
   const sections = useMemo(() => datasetSections(jobs, groups), [jobs, groups])
   // A dataset whose owner switched training off is not offered; the backend refuses it too.
   const trainable = useMemo(() => jobs?.filter((j) => j.data_use.training) ?? null, [jobs])
-  const notTrainable = (jobs?.length ?? 0) - (trainable?.length ?? 0)
+  const notTrainable = (jobs ?? []).filter((j) => !j.data_use.training).map((j) => j.name)
 
   const setMany = (ids: string[], on: boolean) =>
     setChosen((prev) => {
@@ -547,11 +548,9 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
           onToggle={toggle}
           onSetMany={setMany}
         />
-        {notTrainable > 0 && (
-          <p data-testid="not-trainable" className="mt-1 text-xs text-ink-muted">
-            {notTrainable} dataset{notTrainable === 1 ? '' : 's'} you can open {notTrainable === 1 ? 'is' : 'are'} not
-            offered: {notTrainable === 1 ? 'its owner doesn\'t' : 'their owners don\'t'} allow training.
-          </p>
+        {notTrainable.length > 0 && (
+          <LeftOutNote data-testid="not-trainable" className="mt-1.5" names={notTrainable}
+                       reason={`as ${notTrainable.length === 1 ? 'its owner does' : 'their owners do'} not allow training`} />
         )}
 
         </div>

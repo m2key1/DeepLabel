@@ -42,7 +42,7 @@ test.describe('Scenario: an owner decides what a dataset may be used for', () =>
       await page.goto('/models/train?task=ocr')
       await expect(await datasetOption(page, trainable)).toBeVisible()
       await expect(await datasetOption(page, name)).toHaveCount(0)
-      await expect(page.getByTestId('not-trainable')).toContainText('not offered')
+      await expect(page.getByTestId('not-trainable')).toContainText('Not offered, as')
     })
 
   test('an admin who neither owns nor shares it cannot export it, and the visit is listed for the owner',

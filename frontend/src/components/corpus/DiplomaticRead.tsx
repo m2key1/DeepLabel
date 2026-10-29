@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { listUsableLlmModels, type ApiError, type LlmModel } from '../../api'
+import { KeptOutModels, keptOut } from '../job/DataUseSwitches'
 import {
   cancelGroundTruthRead, getGroundTruthPreview, getGroundTruthStatus, startGroundTruthRead,
   type GroundTruthPreview, type GroundTruthStatus,
@@ -32,16 +33,18 @@ function costOf(preview: GroundTruthPreview | null): string {
     + `${reused > 0 ? `, ${reused} already read and free` : ''}.`
 }
 
-export function DiplomaticRead({ jobId, selected, revision, onChanged }: {
+export function DiplomaticRead({ jobId, selected, keptInHouse, revision, onChanged }: {
   jobId: string
   selected: number[]
   /** Changes whenever the page around this is reloaded. A cut moves which pages carry a
    *  span, so both the bill and the tally are about to be answering for the wrong set. */
+  /** Only self-hosted models may read a dataset whose owner keeps it from external providers. */
+  keptInHouse: boolean
   revision: number
   /** Called once a run settles, so the pages' new ground truth can be reloaded. */
   onChanged: () => void
 }) {
-  const [models, setModels] = useState<(LlmModel & { shared: boolean })[]>([])
+  const [models, setModels] = useState<(LlmModel & { shared: boolean; self_hosted: boolean })[]>([])
   const [chosen, setChosen] = useState<number[]>(selected)
   const [preview, setPreview] = useState<GroundTruthPreview | null>(null)
   const [status, setStatus] = useState<GroundTruthStatus | null>(null)
@@ -55,9 +58,12 @@ export function DiplomaticRead({ jobId, selected, revision, onChanged }: {
 
   useEffect(() => {
     listUsableLlmModels()
-      .then((r) => setModels(r.models))
+      .then((r) => {
+        setModels(r.models)
+        setChosen((held) => held.filter((id) => r.models.some((m) => m.id === id && !keptOut(keptInHouse, m))))
+      })
       .catch((error: ApiError) => setNote({ tone: 'bad', text: error.message }))
-  }, [])
+  }, [keptInHouse])
 
   const chosenKey = chosen.join(',')
   useEffect(() => {
@@ -182,7 +188,7 @@ export function DiplomaticRead({ jobId, selected, revision, onChanged }: {
         </div>
       ) : (
         <div className="mb-2 space-y-1" data-testid="gt-model-picker">
-          {models.map((model) => (
+          {models.filter((m) => !keptOut(keptInHouse, m)).map((model) => (
             <label
               key={model.id}
               data-testid="gt-pick"
@@ -198,6 +204,7 @@ export function DiplomaticRead({ jobId, selected, revision, onChanged }: {
               <VisibilityBadge shared={model.shared} className="ml-auto shrink-0" />
             </label>
           ))}
+          <KeptOutModels names={models.filter((m) => keptOut(keptInHouse, m)).map((m) => m.label)} />
         </div>
       )}
 

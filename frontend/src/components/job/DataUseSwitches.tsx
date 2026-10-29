@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { DataUse } from '../../api'
 import { Badge } from '../ui/Badge'
+import { LeftOutNote } from '../ui/LeftOutNote'
 import { SwitchKnob } from '../ui/SwitchKnob'
 
 type Use = keyof DataUse
@@ -58,4 +59,19 @@ export function DataUseChips({ value }: { value: DataUse | undefined }) {
 export function dataUseSummary(value: DataUse): string {
   const off = USES.filter(({ use }) => !value[use]).map(({ off }) => off)
   return off.length ? off.join(', ') : 'everything allowed'
+}
+
+/** A model a dataset kept from external providers may not be read with: one on a
+ *  connection no admin has marked self-hosted. */
+export function keptOut(keptInHouse: boolean, model: { self_hosted: boolean }): boolean {
+  return keptInHouse && !model.self_hosted
+}
+
+/** Beneath a model list for a dataset kept in the house: the models it leaves out. */
+export function KeptOutModels({ names }: { names: string[] }) {
+  if (names.length === 0) return null
+  return (
+    <LeftOutNote data-testid="llm-kept-out" className="mt-1.5" names={names}
+                 reason="as this dataset's owner keeps its pages from providers an admin hasn't marked self-hosted" />
+  )
 }

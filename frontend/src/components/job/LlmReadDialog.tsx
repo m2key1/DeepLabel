@@ -3,6 +3,7 @@ import {
   getLlmPrompt, getLlmReadPreview, listUsableLlmModels, setJobLlmSettings, startLlmRead,
   type LlmModel, type LlmReadPreview,
 } from '../../api'
+import { KeptOutModels, keptOut } from './DataUseSwitches'
 import { Modal, modalBtn, modalPrimaryBtn } from '../Modal'
 import { LlmReferences } from '../llm/LlmReferences'
 import { VisibilityBadge } from '../llm/VisibilityBadge'
@@ -123,7 +124,7 @@ export function LlmReadDialog({
   useEffect(() => {
     listUsableLlmModels().then((r) => {
       setModels(r.models)
-      if (keptInHouse) setChosen((held) => held.filter((id) => r.models.some((m) => m.id === id && m.self_hosted)))
+      setChosen((held) => held.filter((id) => r.models.some((m) => m.id === id && !keptOut(keptInHouse, m))))
     }).catch((e: Error) => onError(e.message))
     // What a model with no wording of its own is asked: the personal default, else the
     // shipped one. The editor starts from what is in force, so replacing it means editing
@@ -144,6 +145,7 @@ export function LlmReadDialog({
     return () => { live = false }
   }, [jobId, chosen, scopeKey, onError])
 
+  const offered = models.filter((m) => !keptOut(keptInHouse, m))
   const toggle = (id: number) =>
     setChosen((current) => (current.includes(id) ? current.filter((c) => c !== id) : [...current, id]))
 
@@ -205,22 +207,12 @@ export function LlmReadDialog({
         </p>
       ) : (
         <div className="mb-3 space-y-1" data-testid="llm-model-picker">
-          {keptInHouse && (
-            <p data-testid="llm-kept-in-house" className="text-xs text-ink-muted">
-              This dataset's owner keeps its pages from external providers: only self-hosted models can read it.
-            </p>
-          )}
-          {models.map((model) => (
+          {offered.map((model) => (
             <label key={model.id} data-testid="llm-pick" data-label={model.label}
-                   data-kept-out={keptInHouse && !model.self_hosted}
-                   title={keptInHouse && !model.self_hosted
-                     ? "This dataset's owner keeps its pages from providers an admin hasn't marked self-hosted" : undefined}
-                   className={`flex items-center gap-2 text-sm ${
-                     keptInHouse && !model.self_hosted ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
+                   className="flex cursor-pointer items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={chosen.includes(model.id)}
-                disabled={keptInHouse && !model.self_hosted}
                 onChange={() => toggle(model.id)}
                 className="cursor-pointer accent-accent"
               />
@@ -234,6 +226,7 @@ export function LlmReadDialog({
               <VisibilityBadge shared={model.shared} className="ml-auto shrink-0" />
             </label>
           ))}
+          <KeptOutModels names={models.filter((m) => keptOut(keptInHouse, m)).map((m) => m.label)} />
         </div>
       )}
 

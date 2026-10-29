@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   listConventionFlags, listModels, listUsableLlmModels, reocr, reocrPreview, setJobLlmSettings, setJobModels,
 } from '../../api'
+import { KeptOutModels, keptOut } from './DataUseSwitches'
 import type {
   ConventionFlag, Job, LlmModel, ModelTask, OcrConvention, OcrDecode, RegistryModel, ReocrPreview,
 } from '../../api'
@@ -36,7 +37,8 @@ export function ModelPickerDialog({ job, onClose, onSaved, onError }: ModelPicke
   const [catalog, setCatalog] = useState<ConventionFlag[] | null>(null)
   // The models a page is read with are pinned here like the rest, rather than being
   // whatever the last run happened to tick.
-  const [readers, setReaders] = useState<LlmModel[] | null>(null)
+  const [readers, setReaders] = useState<(LlmModel & { self_hosted: boolean })[] | null>(null)
+  const keptInHouse = !job.data_use.external_llm
   const [readWith, setReadWith] = useState<number[]>(job.llm_model_ids ?? [])
   const [preview, setPreview] = useState<ReocrPreview | null>(null)
   const [applyStep, setApplyStep] = useState(false)
@@ -81,7 +83,10 @@ export function ModelPickerDialog({ job, onClose, onSaved, onError }: ModelPicke
         lines: picks.lines === '' ? null : Number(picks.lines),
         ocr: picks.ocr === '' ? null : Number(picks.ocr),
       }, decode, convention)
-      if (readers !== null) await setJobLlmSettings(job.id, { llm_model_ids: readWith })
+      if (readers !== null) {
+        const allowed = readWith.filter((id) => !readers.some((m) => m.id === id && keptOut(keptInHouse, m)))
+        await setJobLlmSettings(job.id, { llm_model_ids: allowed })
+      }
       if (offerApply) {
         setApplyStep(true)
         return
@@ -218,7 +223,7 @@ export function ModelPickerDialog({ job, onClose, onSaved, onError }: ModelPicke
             still started deliberately - this only says who does it.
           </p>
           <div className="space-y-1">
-            {readers.map((model) => (
+            {readers.filter((m) => !keptOut(keptInHouse, m)).map((model) => (
               <label key={model.id} data-testid="llm-model-pin" data-label={model.label}
                      className="flex cursor-pointer items-center gap-2 text-sm">
                 <input
@@ -232,6 +237,7 @@ export function ModelPickerDialog({ job, onClose, onSaved, onError }: ModelPicke
                 <span className="min-w-0 truncate">{model.label}</span>
               </label>
             ))}
+            <KeptOutModels names={readers.filter((m) => keptOut(keptInHouse, m)).map((m) => m.label)} />
           </div>
         </div>
       )}
