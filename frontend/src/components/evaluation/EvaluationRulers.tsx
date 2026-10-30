@@ -6,9 +6,7 @@ import { popoverChrome } from '../ui/Card'
 import { TestDataChip } from '../TestPage'
 import { useDismiss } from '../ui/menu'
 import { percent } from './format'
-import { buildRulers, scaleMax, type ModelMark, type Ruler } from './rulers'
-
-const TICKS = 4
+import { buildRulers, scaleMax, scaleTicks, type ModelMark, type Ruler } from './rulers'
 
 function waitingText(waiting: Evaluation[]): string {
   const count = (status: string) => waiting.filter((w) => w.status === status).length
@@ -75,13 +73,12 @@ export function EvaluationRulers({ evaluations, modelNames }: {
   const [open, setOpen] = useState<string | null>(null)
   useDismiss(open !== null, () => setOpen(null))
   const at = (cer: number) => `${Math.min(100, (cer / max) * 100)}%`
+  const ticks = scaleTicks(max)
+  const tickLabel = (cer: number) => percent(cer, max < 0.05 ? 1 : 0)
   const name = (id: number) => modelNames.get(id) ?? `model ${id}`
 
   return (
     <div data-testid="evaluation-rulers" className="space-y-1">
-      <div className="ml-[13rem] mr-2 flex justify-between text-[10px] text-ink-subtle" aria-hidden="true">
-        {Array.from({ length: TICKS + 1 }, (_, i) => <span key={i}>{percent((max * i) / TICKS, max < 0.05 ? 1 : 0)}</span>)}
-      </div>
       {rulers.map((ruler) => {
         const lines = ruler.marks[0]?.shown.line_count
         return (
@@ -104,14 +101,15 @@ export function EvaluationRulers({ evaluations, modelNames }: {
             <div className="mr-2 min-w-0">
               <div className="relative h-6">
                 <div className={`absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 ${ruler.marks.length ? 'bg-line-strong' : 'border-t-2 border-dashed border-line-strong bg-transparent'}`} />
-                {Array.from({ length: TICKS - 1 }, (_, i) => (
-                  <div key={i} className="absolute top-1 h-4 w-px bg-line" style={{ left: `${((i + 1) / TICKS) * 100}%` }} />
+                {ticks.map((tick) => (
+                  <div key={tick} className="absolute top-1/2 h-2.5 w-px -translate-y-1/2 bg-ink-subtle/60" style={{ left: at(tick) }} />
                 ))}
                 {ruler.marks.map((mark, i) => {
                   const key = `${ruler.label}:${mark.modelId}`
                   const best = i === 0 && ruler.marks.length > 1
                   return (
-                    <div key={mark.modelId} className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2"
+                    <div key={mark.modelId}
+                         className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 ${open === key ? 'z-30' : ''}`}
                          style={{ left: at(mark.shown.cer!) }}>
                       <button type="button" data-testid="evaluation-dot" data-model={mark.modelId}
                               aria-expanded={open === key}
@@ -128,7 +126,15 @@ export function EvaluationRulers({ evaluations, modelNames }: {
                   )
                 })}
               </div>
-              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs">
+              <div data-testid="ruler-scale" aria-hidden="true" className="relative h-3 font-mono text-[10px] leading-none text-ink-subtle">
+                {ticks.map((tick, i) => (
+                  <span key={tick} className={`absolute top-0 ${i === 0 ? '' : i === ticks.length - 1 ? '-translate-x-full' : '-translate-x-1/2'}`}
+                        style={{ left: at(tick) }}>
+                    {tickLabel(tick)}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs">
                 {ruler.marks.map((mark, i) => (
                   <button key={mark.modelId} type="button" onClick={(e) => { e.stopPropagation(); setOpen(`${ruler.label}:${mark.modelId}`) }}
                           className="text-left hover:text-accent-ink">

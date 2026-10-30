@@ -64,3 +64,10 @@ export function scaleMax(rulers: Ruler[]): number {
   const worst = Math.max(0, ...rulers.flatMap((r) => r.marks.map((m) => m.shown.cer!)))
   return NICE.find((n) => worst <= n * 0.95) ?? 1
 }
+
+/** The CERs a ruler is marked at, 0 to the scale's end in round steps: fifths of a 1, 5
+ *  or 10, quarters of a 2. */
+export function scaleTicks(max: number): number[] {
+  const steps = String(Math.round(max * 1000)).startsWith('2') ? 4 : 5
+  return Array.from({ length: steps + 1 }, (_, i) => (max * i) / steps)
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Evaluation } from '../../api'
-import { buildRulers, scaleMax } from './rulers'
+import { buildRulers, scaleMax, scaleTicks } from './rulers'
 
 const ev = (id: number, modelId: number, label: string, cer: number | null, over: Partial<Evaluation> = {}): Evaluation => ({
   id, model_id: modelId, training_id: null, source: { jobs: ['j'] }, source_label: label, decode: 'beam',
@@ -46,5 +46,14 @@ describe('the evaluation rulers', () => {
   it('ends the scale at the next round CER above the worst mark', () => {
     expect(scaleMax(buildRulers([ev(1, 1, 'A', 0.032), ev(2, 2, 'A', 0.0948)]))).toBe(0.1)
     expect(scaleMax(buildRulers([ev(1, 1, 'A', 0.012)]))).toBe(0.02)
+  })
+
+  it('marks the scale in round steps', () => {
+    const pct = (max: number) => scaleTicks(max).map((t) => Math.round(t * 1000) / 10)
+    expect(pct(0.5)).toEqual([0, 10, 20, 30, 40, 50])
+    expect(pct(0.2)).toEqual([0, 5, 10, 15, 20])
+    expect(pct(0.1)).toEqual([0, 2, 4, 6, 8, 10])
+    expect(pct(0.02)).toEqual([0, 0.5, 1, 1.5, 2])
+    expect(pct(1)).toEqual([0, 20, 40, 60, 80, 100])
   })
 })
