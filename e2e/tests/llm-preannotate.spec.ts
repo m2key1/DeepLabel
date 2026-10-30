@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { openSettings, saveSettings } from '../helpers/dataset-settings'
 import {
   backendFetch, getPageDetail, identity, jobPageIds, llmStats, pageCandidates, redetectLines,
   resetLlmStats, seedDistinctPagesJob, seedLlmConnection, setElementBbox, uniqueName,
@@ -222,13 +223,10 @@ test.describe('Scenario: reading part of a dataset', () => {
       await seedLlmConnection(connection, [PERFECT], DEV)
       await resetLlmStats()
 
-      await page.goto('/')
-      const card = page.getByTestId('job-card').filter({ hasText: name })
-      await card.getByTestId('job-menu').click()
-      await card.getByRole('button', { name: 'Models…' }).click()
+      await openSettings(page, name, 'models')
       await page.locator(`[data-testid="llm-model-pin"][data-label="${connection} ${PERFECT}"]`)
         .getByRole('checkbox').check()
-      await page.getByRole('button', { name: 'Save' }).click()
+      await saveSettings(page)
 
       // Backend oracle: pinned on the dataset, and nothing was read to say so.
       await expect.poll(async () =>

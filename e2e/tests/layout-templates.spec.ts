@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { openSettings, phaseBox } from '../helpers/dataset-settings'
 import { createDataset, wizardStep } from '../helpers/new-dataset'
 import {
   backendFetch, getJob, getPageDetail, importStubModel, jobPageIds, listRegistryModels, markLayoutChecked,
@@ -181,10 +182,7 @@ test.describe('Scenario: a layout model on a dataset of other classes', () => {
         .map((p: { label: string; how: string; class_id: number | null }) => [p.label, [p.how, p.class_id]]))
       expect(await plan()).toEqual({ Header: ['undecided', null], Paragraph: ['undecided', null] })
 
-      await page.goto('/')
-      const card = page.getByTestId('job-card').filter({ hasText: name })
-      await card.getByTestId('job-menu').click()
-      await card.getByTestId('processing-open').click()
+      await openSettings(page, name)
       const mapping = page.getByTestId('label-mapping')
       await expect(mapping.getByTestId('label-choice')).toHaveCount(2)
       await mapping.getByLabel('Class for Paragraph').selectOption({ label: 'Body' })
@@ -283,15 +281,12 @@ test.describe('Scenario: the reading order is set in the template', () => {
       // Its layout model belongs to the Schematismus template, which reads top to bottom.
       expect((await getJob(jobId)).reading_order_template).toBe('Schematismus')
 
-      await page.goto('/')
-      const card = page.getByTestId('job-card').filter({ hasText: name })
-      await card.getByTestId('job-menu').click()
-      await card.getByTestId('processing-open').click()
+      await openSettings(page, name)
       await expect(page.getByTestId('reading-order-set-by')).toContainText('Set by the Schematismus template')
       await expect(page.getByTestId('reading-order-choice')).toBeDisabled()
 
       // Without its layout model the dataset's own structure decides again.
-      await page.locator('[data-testid="processing-phase"][data-phase="layout"]').getByRole('checkbox').uncheck()
+      await phaseBox(page, 'layout').uncheck()
       await expect(page.getByTestId('reading-order-set-by')).toHaveCount(0)
       await expect(page.getByTestId('reading-order-choice')).toBeEnabled()
     })

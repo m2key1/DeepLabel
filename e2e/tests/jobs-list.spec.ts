@@ -1,4 +1,6 @@
 import { test, expect } from '../helpers/test'
+import { openSettings, saveSettings } from '../helpers/dataset-settings'
+import { wizardStep } from '../helpers/new-dataset'
 import {
   createGroup,
   createJob,
@@ -48,22 +50,21 @@ test.describe('Scenario: managing datasets from the list', () => {
     expect(checkedBefore).toHaveLength(2)
     const builtinOcr = (await listRegistryModels()).find((m) => m.task === 'ocr' && m.source === 'backend')!
 
-    await page.goto('/')
-    const card = page.getByTestId('job-card').filter({ hasText: name })
-    await card.getByTestId('job-menu').click()
-    await card.getByRole('button', { name: 'Models…' }).click()
+    await openSettings(page, name, 'models')
 
     // Fresh datasets follow the task defaults for every stage, and the LM beam decode.
-    await expect(page.getByTestId('model-pick-ocr')).toHaveValue('')
-    await expect(page.getByTestId('pick-decode')).toHaveValue('beam')
-    await page.getByTestId('model-pick-ocr').selectOption(String(builtinOcr.id))
-    await page.getByTestId('pick-decode').selectOption('greedy')
-    await page.getByRole('button', { name: 'Save' }).click()
+    await expect(page.getByTestId('new-model-ocr')).toHaveValue('')
+    await expect(page.getByTestId('ocr-decode-beam')).toHaveAttribute('aria-pressed', 'true')
+    await page.getByTestId('new-model-ocr').selectOption(String(builtinOcr.id))
+    await page.getByTestId('ocr-decode-greedy').click()
 
-    // Saving a changed OCR setup offers the re-run with exact numbers.
-    await expect(page.getByTestId('apply-summary')).toHaveText(
-      /4 unchecked lines will be re-read with the new OCR settings\. 2 checked lines keep their text\./)
-    await page.getByRole('button', { name: 'Re-run OCR now' }).click()
+    // A changed OCR setup offers the re-read on Review, with exact numbers.
+    await wizardStep(page, 'review')
+    const reread = page.getByTestId('settings-reread')
+    await expect(reread).toContainText('Re-read the 4 unchecked lines with the new OCR settings')
+    await expect(reread).toContainText('2 checked lines keep their text')
+    await reread.getByRole('checkbox').check()
+    await saveSettings(page)
 
     // The picks are pinned and the re-run walks the queue back to done.
     await expect.poll(async () => {
@@ -101,10 +102,9 @@ test.describe('Scenario: managing datasets from the list', () => {
     expect(original?.lines).toBe(2)
 
     // Reopening shows the pinned picks and flags the mixed provenance.
-    await card.getByTestId('job-menu').click()
-    await card.getByRole('button', { name: 'Models…' }).click()
-    await expect(page.getByTestId('model-pick-ocr')).toHaveValue(String(builtinOcr.id))
-    await expect(page.getByTestId('pick-decode')).toHaveValue('greedy')
+    await openSettings(page, name, 'models')
+    await expect(page.getByTestId('new-model-ocr')).toHaveValue(String(builtinOcr.id))
+    await expect(page.getByTestId('ocr-decode-greedy')).toHaveAttribute('aria-pressed', 'true')
     await expect(page.getByTestId('ocr-provenance')).toContainText('mixed provenance')
   })
 
@@ -119,14 +119,9 @@ test.describe('Scenario: managing datasets from the list', () => {
     expect(checkedBefore).toHaveLength(2)
     const builtinOcr = (await listRegistryModels()).find((m) => m.task === 'ocr' && m.source === 'backend')!
 
-    await page.goto('/')
-    const card = page.getByTestId('job-card').filter({ hasText: name })
-    const openModels = async () => {
-      await card.getByTestId('job-menu').click()
-      await card.getByRole('button', { name: 'Models…' }).click()
-    }
+    const openModels = () => openSettings(page, name, 'models')
     await openModels()
-    await page.getByTestId('model-pick-ocr').selectOption(String(builtinOcr.id))
+    await page.getByTestId('new-model-ocr').selectOption(String(builtinOcr.id))
 
     // One switch per flag the stub model knows, first and in its order, all off for a new
     // dataset; any other flag of the catalog follows, marked as one the model ignores.
@@ -140,10 +135,11 @@ test.describe('Scenario: managing datasets from the list', () => {
 
     await flags.filter({ hasText: 'Long s' }).getByRole('checkbox').check()
     await flags.filter({ hasText: 'Abbreviations' }).getByRole('checkbox').check()
-    await page.getByRole('button', { name: 'Save' }).click()
-    await expect(page.getByTestId('apply-summary')).toHaveText(
-      /4 unchecked lines will be re-read with the new OCR settings\. 2 checked lines keep their text\./)
-    await page.getByRole('button', { name: 'Re-run OCR now' }).click()
+    await wizardStep(page, 'review')
+    const reread = page.getByTestId('settings-reread')
+    await expect(reread).toContainText('Re-read the 4 unchecked lines with the new OCR settings')
+    await reread.getByRole('checkbox').check()
+    await saveSettings(page)
 
     await expect.poll(async () => (await getJob(jobId)).ocr_convention)
       .toEqual({ long_s: true, abbreviations: true })
@@ -159,7 +155,6 @@ test.describe('Scenario: managing datasets from the list', () => {
 
     // A flag the model does not know stays set and says so.
     await setOcrConvention(jobId, { long_s: true, ligatures: true })
-    await page.reload()
     await openModels()
     const unknown = page.locator('[data-testid="convention-flag"][data-flag="ligatures"]')
     await expect(unknown).toHaveAttribute('data-supported', 'false')
@@ -278,10 +273,10 @@ test.describe('Scenario: managing datasets from the list', () => {
 
     await page.goto('/')
     const card = page.getByTestId('job-card').filter({ hasText: name })
-    await expect(card.getByTestId('status-badge')).toHaveText('running')
+    await expect(card.getByTestId('status-badge')).toHaveText('Running')
     await card.getByTestId('job-menu').click()
     await card.getByRole('button', { name: 'Cancel run' }).click()
-    await expect(card.getByTestId('status-badge')).toHaveText('cancelled')
+    await expect(card.getByTestId('status-badge')).toHaveText('Cancelled')
   })
 
   test('deleting a dataset removes it after confirmation', async ({ page }) => {

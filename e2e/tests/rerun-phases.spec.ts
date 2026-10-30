@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
 import { test, expect } from '../helpers/test'
+import { openSettings, phaseBox, saveSettings } from '../helpers/dataset-settings'
 import {
   UNASSIGNED_LINES, backendFetch, getJob, getPageDetail, jobPageIds, pageLines, seedCompletedJob, uniqueName, waitForJobStatus,
 } from '../helpers/api'
@@ -58,13 +59,9 @@ test.describe('Scenario: starting over once layout is switched off', () => {
     await expect(phaseOption(page, 'start')).toHaveCount(0)
     await page.getByRole('button', { name: 'Cancel' }).click()
 
-    await page.goto('/')
-    const card = page.getByTestId('job-card').filter({ hasText: name })
-    await card.getByTestId('job-menu').click()
-    await card.getByTestId('processing-open').click()
-    await page.locator('[data-testid="processing-phase"][data-phase="layout"]')
-      .getByRole('checkbox').uncheck()
-    await page.getByTestId('processing-save').click()
+    await openSettings(page, name)
+    await phaseBox(page, 'layout').uncheck()
+    await saveSettings(page)
     await expect.poll(async () => (await getJob(jobId)).run_layout).toBe(false)
 
     await openRerun(page, jobId)

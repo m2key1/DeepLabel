@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   bulkMove, bulkPreview, bulkRedetect, bulkReocr, bulkRerun, cancelJob, createGroup, deleteGroup,
   deleteJob, downloadMaskSet, getNewerModels, getUserNames, isTileTask, listGroups, listJobs, renameGroup,
@@ -16,7 +16,6 @@ import { COLUMNS, DEFAULT_COLUMNS, NAME_MIN, columnWidths, columnsForWidth, load
   phasesOf, saveColumns }
   from '../components/job/columns'
 import { ShareDialog } from '../components/job/ShareDialog'
-import { ModelPickerDialog } from '../components/job/ModelPickerDialog'
 import { ProcessingDialog } from '../components/job/ProcessingDialog'
 import { NewerModelsDialog } from '../components/job/NewerModelsDialog'
 import { GroupSettingsDialog } from '../components/job/GroupSettingsDialog'
@@ -204,6 +203,7 @@ const RUNS: { key: BulkAction; phase?: string; label: string; capability?: strin
 export function JobsPage() {
   const { user, isAdmin, canEdit, can } = useAuth()
   const { onJob } = usePresence()
+  const navigate = useNavigate()
   const [jobs, setJobs] = useState<Job[] | null>(null)
   const [groups, setGroups] = useState<Group[]>([])
   const [groupsFailed, setGroupsFailed] = useState(false)
@@ -222,7 +222,6 @@ export function JobsPage() {
   const [groupDraft, setGroupDraft] = useState('')
   const [renamingGroup, setRenamingGroup] = useState<number | null>(null)
   const [moveJob, setMoveJob] = useState<Job | null>(null)
-  const [modelsJob, setModelsJob] = useState<Job | null>(null)
   const [processingJob, setProcessingJob] = useState<Job | null>(null)
   const [newerFor, setNewerFor] = useState<{ job: Job; offers: NewerModelOffer[] } | null>(null)
   const [shareTarget, setShareTarget] = useState<
@@ -685,8 +684,8 @@ export function JobsPage() {
     onRename: () => startRename(job),
     onMove: () => setMoveJob(job),
     onShare: () => setShareTarget({ kind: 'dataset', job }),
-    onModels: () => setModelsJob(job),
-    onProcessing: () => setProcessingJob(job),
+    // A map dataset has only its tile size left to change; a text one, everything it was made with.
+    onSettings: () => (isTileTask(job.task) ? setProcessingJob(job) : navigate(`/jobs/${job.id}/settings`)),
     onCancel: () => void onCancel(job),
     onDelete: () => void onDelete(job),
   })
@@ -1382,14 +1381,6 @@ export function JobsPage() {
           groups={groups}
           onClose={() => setMoveJob(null)}
           onMoved={refresh}
-          onError={setError}
-        />
-      )}
-      {modelsJob && (
-        <ModelPickerDialog
-          job={modelsJob}
-          onClose={() => setModelsJob(null)}
-          onSaved={() => offerNewer(modelsJob)}
           onError={setError}
         />
       )}

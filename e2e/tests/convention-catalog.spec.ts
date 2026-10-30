@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { openSettings } from '../helpers/dataset-settings'
 import { backendFetch, listRegistryModels, seedCompletedJob, setOcrConvention, uniqueName } from '../helpers/api'
 
 interface Flag { name: string; label: string; description: string; models: number; datasets: number }
@@ -39,11 +40,8 @@ test.describe('Scenario: describing the transcription conventions', () => {
     await expect.poll(async () => (await catalogFlag(name))?.datasets).toBe(1)
     const builtinOcr = (await listRegistryModels()).find((m) => m.task === 'ocr' && m.source === 'backend')!
 
-    await page.goto(`/?q=${encodeURIComponent(datasetName)}`)
-    const card = page.getByTestId('job-card').filter({ hasText: datasetName })
-    await card.getByTestId('job-menu').click()
-    await card.getByRole('button', { name: 'Models…' }).click()
-    await page.getByTestId('model-pick-ocr').selectOption(String(builtinOcr.id))
+    await openSettings(page, datasetName, 'models')
+    await page.getByTestId('new-model-ocr').selectOption(String(builtinOcr.id))
 
     const flag = page.locator(`[data-testid="convention-flag"][data-flag="${name}"]`)
     await expect(flag).toContainText('Keep the double hyphen')

@@ -35,6 +35,7 @@ import { EvaluationPage } from './pages/EvaluationPage'
 import { EvaluationsPage } from './pages/EvaluationsPage'
 import { AugmentationsPage } from './pages/AugmentationsPage'
 import { ConventionsPage } from './pages/ConventionsPage'
+import { DatasetSettingsPage } from './pages/DatasetSettingsPage'
 import { TranscriptPage } from './pages/TranscriptPage'
 import { CorpusPage } from './pages/CorpusPage'
 import { NotFoundPage, RouteError } from './pages/NotFoundPage'
@@ -69,6 +70,7 @@ const router = createBrowserRouter([
           { path: '/conventions', element: <ConventionsPage /> },
           { path: '/templates', element: <LayoutTemplatesPage /> },
           { path: '/jobs/:id', element: <JobDetailPage /> },
+          { path: '/jobs/:id/settings', element: <DatasetSettingsPage /> },
           { path: '/jobs/:id/transcript', element: <TranscriptPage /> },
           { path: '/jobs/:id/corpus', element: <CorpusPage /> },
           { path: '/jobs/:id/pages/:pageId', element: <PageViewerPage /> },

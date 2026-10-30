@@ -89,7 +89,6 @@ import { LlmReadDialog } from '../components/job/LlmReadDialog'
 import { NewerModelsDialog } from '../components/job/NewerModelsDialog'
 import { LlmProgress } from '../components/job/LlmProgress'
 import { ExportBlockedNote, ExportMenu, exportBlocked } from '../components/job/ExportMenu'
-import { DataUseDialog } from '../components/job/DataUseDialog'
 import { DataUseChips } from '../components/job/DataUseSwitches'
 import { LayoutClassesDialog } from '../components/job/LayoutClassesDialog'
 import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
@@ -242,7 +241,6 @@ export function JobDetailPage() {
   const [review, setReview] = useState<ReviewQueue | null>(null)
   const [maxConf, setMaxConf] = useState(getReviewConf)
   const [exportOpen, setExportOpen] = useState(false)
-  const [dataUseOpen, setDataUseOpen] = useState(false)
 
   useDismiss(exportOpen, () => setExportOpen(false))
 
@@ -1179,11 +1177,11 @@ export function JobDetailPage() {
                   testId: 'remove-readings',
                   onSelect: () => setRemoveReadingsOpen(true),
                 }] : []),
-                ...(canOwn ? [{
-                  label: 'Data use…',
-                  hint: 'What its data may be used for: training, scoring, LLM providers, export',
-                  testId: 'data-use-open',
-                  onSelect: () => setDataUseOpen(true),
+                ...(canOwn && !isMap ? [{
+                  label: 'Settings…',
+                  hint: 'What it runs, its models and conventions, what its data may be used for',
+                  testId: 'settings-open',
+                  onSelect: () => navigate(`/jobs/${jobId}/settings`),
                 }] : []),
                 ...(isAdmin && !active && purgeable?.files ? [{
                   label: `Purge ${plural(purgeable.pages, 'deleted page')}`,
@@ -1290,9 +1288,6 @@ export function JobDetailPage() {
           }}
           onError={setError}
         />
-      )}
-      {dataUseOpen && (
-        <DataUseDialog jobId={jobId} jobName={job.name} onClose={() => setDataUseOpen(false)} onSaved={refetch} />
       )}
       {purgeOpen && (
         <PurgeDialog jobId={jobId} onClose={() => setPurgeOpen(false)} onPurged={refetch} onError={setError} />

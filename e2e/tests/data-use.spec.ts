@@ -32,10 +32,16 @@ test.describe('Scenario: an owner decides what a dataset may be used for', () =>
       expect((await getJob(jobId)).data_use).toEqual({ ...ALL_ON, training: false })
       await expect(page.getByTestId('data-use-chip')).toHaveText(['No training'])
 
-      await (await openDatasetMenu(page, 'dataset-more')).getByTestId('data-use-open').click()
-      await page.getByText('Export by others', { exact: true }).click()
-      await expect(page.getByRole('switch', { name: /^Export by others/ })).not.toBeChecked()
-      await page.getByTestId('data-use-save').click()
+      await (await openDatasetMenu(page, 'dataset-more')).getByTestId('settings-open').click()
+      await expect(page).toHaveURL(new RegExp(`/jobs/${jobId}/settings$`))
+      await wizardStep(page, 'review')
+      // The settings open on the switches as the dataset was created with them.
+      await expect(switches.getByRole('switch', { name: /^Training/ })).not.toBeChecked()
+      await expect(switches.getByRole('switch', { name: /^Test set/ })).toBeChecked()
+      await switches.getByText('Export by others', { exact: true }).click()
+      await expect(switches.getByRole('switch', { name: /^Export by others/ })).not.toBeChecked()
+      await page.getByRole('button', { name: 'Save settings' }).click()
+      await expect(page).toHaveURL(new RegExp(`/jobs/${jobId}$`))
       await expect.poll(async () => (await getJob(jobId)).data_use).toEqual({ ...ALL_ON, training: false, export: false })
       await expect(page.getByTestId('data-use-chip')).toHaveText(['No training', 'No export'])
 

@@ -29,8 +29,8 @@ interface JobActionsProps {
   onRename: () => void
   onMove: () => void
   onShare: () => void
-  onModels: () => void
-  onProcessing: () => void
+  /** The dataset's creation settings, to change them. */
+  onSettings: () => void
   onCancel: () => void
   onDelete: () => void
 }
@@ -148,10 +148,9 @@ export function JobActions(p: JobActionsProps) {
               <button onClick={p.onRename} className={menuItem}>Rename</button>
               <button onClick={p.onMove} className={menuItem}>Move to group…</button>
               <button onClick={p.onShare} className={menuItem}>Share…</button>
-              <button onClick={p.onModels} className={menuItem}>Models…</button>
               {!active && (!tiles || job.run_tile) && (
-                <button onClick={p.onProcessing} data-testid="processing-open" className={menuItem}>
-                  Processing…
+                <button onClick={p.onSettings} data-testid="settings-open" className={menuItem}>
+                  Settings…
                 </button>
               )}
               {active && <button onClick={p.onCancel} className={menuItem}>Cancel run</button>}

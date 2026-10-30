@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { openSettings, saveSettings } from '../helpers/dataset-settings'
 import {
   backendFetch, createTraining, getJob, getPageDetail, jobPageIds, listJobs, listRegistryModels,
   listTrainings, markLinesChecked, patchJob, seedCompletedJob, uniqueName, waitForJobStatus,
@@ -30,14 +31,12 @@ test.describe('Scenario: a dataset pinned to a model that was archived since', (
     })
     expect((await getJob(jobId)).model_ocr_id).toBe(model.id)
 
-    await page.goto('/')
-    const card = page.getByTestId('job-card').filter({ hasText: datasetName })
-    await card.getByTestId('job-menu').click()
-    await card.getByRole('button', { name: 'Models…' }).click()
-    await expect(page.getByTestId('model-pick-ocr')).toHaveValue(String(model.id))
+    await openSettings(page, datasetName, 'models')
+    await expect(page.getByTestId('new-model-ocr')).toHaveValue(String(model.id))
+    await expect(page.getByTestId('new-model-ocr').locator('option:checked')).toContainText('(archived)')
 
-    await page.getByTestId('pick-decode').selectOption('greedy')
-    await page.getByRole('button', { name: 'Save' }).click()
+    await page.getByTestId('ocr-decode-greedy').click()
+    await saveSettings(page)
     await expect.poll(async () => {
       const job = await getJob(jobId)
       return { model: job.model_ocr_id, decode: job.ocr_decode }

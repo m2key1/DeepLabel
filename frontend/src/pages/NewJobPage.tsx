@@ -3,16 +3,20 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
   ALL_USES, PHASE_CAPABILITY, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromIiif,
   createJobFromPath, iiifThumbnailUrl, ApiError, getEnabledTasks, getLayoutTemplates, getMapModels, importJob, isTileTask, listConventionFlags,
-  checkJobName, listModels, uploadJob,
+  checkJobName, listModels, listUsableLlmModels, reocr, reocrPreview, setDataUse as saveDataUse, setJobLlmSettings,
+  setJobModels, setJobProcessing, setNewPagesTest, uploadJob,
 } from '../api'
 import type {
-  ConventionFlag, DataUse, JobOptions, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, OcrDecode,
+  ConventionFlag, DataUse, JobOptions, JobWithoutPages, LayoutShape, LlmModel, ReocrPreview, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, OcrDecode,
   Phases, RegistryModel, Task,
 } from '../api'
 import { useAuth } from '../auth'
 import { conventionLabel } from '../components/conventionLabel'
 import { ConventionFlags, flagsOn, toggledFlag } from '../components/job/ConventionFlags'
-import { DataUseSwitches, dataUseSummary } from '../components/job/DataUseSwitches'
+import { DataUseSwitches, USES, dataUseSummary, keptOut } from '../components/job/DataUseSwitches'
+import { DataUseEditor } from '../components/job/DataUseEditor'
+import { LabelMapping } from '../components/job/LabelMapping'
+import { AlignmentChoice, LayoutShapeChoice, LlmReaders } from '../components/job/SettingsSections'
 import { IiifSource, NO_IIIF } from '../components/job/IiifSource'
 import type { IiifChoice } from '../components/job/IiifSource'
 import { PagePicker, useFileItems } from '../components/job/PagePicker'
@@ -20,6 +24,7 @@ import { LINE_MODE_CHOICES, NEEDS_LAYOUT, PHASE_CHOICES } from '../components/jo
 import { Stepper } from '../components/ui/Stepper'
 import { SkippedSymlinks } from '../components/job/SkippedSymlinks'
 import { useCrumb } from '../components/NavBar'
+import { readerName } from '../components/viewer/readers'
 import { humanBytes } from '../util'
 import { UploadProgress, type UploadState } from '../components/ui/UploadProgress'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -34,6 +39,11 @@ const STEP_LABEL: Record<Step, string> = {
 }
 const STEPS = Object.keys(STEP_LABEL) as Step[]
 const NAME_CHECK_MS = 250
+const DECODE_CARDS: [OcrDecode, string, string][] = [
+  ['beam', 'With language model', "Beam search with the model's language model"],
+  ['rescored', 'Best quality', 'Beam search reranked by the decoder head, no language model'],
+  ['greedy', 'Fast', 'Raw greedy CTC output'],
+]
 const TASK_LABEL: Record<Task, string> = {
   text: 'Text extraction', map_segmentation: 'Map segmentation', map_lines: 'Line tracing (maps)',
 }
@@ -41,7 +51,8 @@ const TASK_LABEL: Record<Task, string> = {
 interface SummaryRow {
   label: string
   value: string
-  step: Step
+  /** Where it was set; none for what can no longer be changed. */
+  step?: Step
 }
 
 /** What the dataset will be, as chosen so far; each row leads back to the step it was set on. */
@@ -61,8 +72,8 @@ function NewJobSummary({ rows, onEdit, full = false }: {
             <dt className="text-ink-subtle">{row.label}</dt>
             <dd className="min-w-0 break-words text-ink">{row.value}</dd>
             {/* On the Review step its own rows are set right above, so there is nothing to go to. */}
-            {full && row.step === 'review' ? <span /> : (
-              <button type="button" onClick={() => onEdit(row.step)}
+            {!row.step || (full && row.step === 'review') ? <span /> : (
+              <button type="button" onClick={() => onEdit(row.step!)}
                       className="justify-self-end text-accent-ink hover:underline">edit</button>
             )}
           </div>
@@ -83,11 +94,13 @@ function toggled<K>(held: Set<K>, key: K): Set<K> {
 
 const READING_OFF = 'OCR is off for this dataset, so nothing is matched or cut until its pages are read.'
 
-export function NewJobPage() {
+/** A new dataset, step by step; or, given `edit`, the same steps for a dataset that
+ *  exists: what it runs, its models and its data use, filled in as they stand. */
+export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   const { isAdmin, canEdit, can } = useAuth()
-  useCrumb('New job')
+  useCrumb(edit ? `${edit.name} · Settings` : 'New job')
   const navigate = useNavigate()
-  const [name, setName] = useState('')
+  const [name, setName] = useState(edit?.name ?? '')
   // Two datasets of one name cannot be told apart in any list, picker or export, so the
   // name is settled on the first step rather than found out at the last. The server holds
   // the rule, and knows of datasets this person cannot see.
@@ -96,7 +109,7 @@ export function NewJobPage() {
   } | null>(null)
   useEffect(() => {
     const asked = name.trim()
-    if (asked === '') return
+    if (asked === '' || edit) return
     let current = true
     const timer = setTimeout(() => {
       checkJobName(asked)
@@ -106,9 +119,9 @@ export function NewJobPage() {
     }, NAME_CHECK_MS)
     return () => { current = false; clearTimeout(timer) }
   }, [name])
-  const nameChecked = nameCheck !== null && nameCheck.name === name.trim()
-  const nameTaken = nameChecked && nameCheck.taken ? nameCheck : null
-  const [task, setTask] = useState<Task>('text')
+  const nameChecked = !!edit || (nameCheck !== null && nameCheck.name === name.trim())
+  const nameTaken = !edit && nameChecked && nameCheck?.taken ? nameCheck : null
+  const [task, setTask] = useState<Task>(edit?.task ?? 'text')
   // null until the deployment's enabled set arrives; the picker renders nothing until then
   // rather than flashing options that may turn out to be unavailable.
   const [enabledTasks, setEnabledTasks] = useState<Task[] | null>(null)
@@ -118,16 +131,17 @@ export function NewJobPage() {
   const [serverPath, setServerPath] = useState('')
   const [iiif, setIiif] = useState<IiifChoice>(NO_IIIF)
   const [iiifExcluded, setIiifExcluded] = useState<Set<string>>(new Set())
-  const [lineMode, setLineMode] = useState<LineMode>('per_page')
-  const [structure, setStructure] = useState('auto')
+  const [lineMode, setLineMode] = useState<LineMode>((edit?.line_mode as LineMode | undefined) ?? 'per_page')
+  const [structure, setStructure] = useState(edit?.reading_order || 'auto')
+  const [shape, setShape] = useState<LayoutShape>(edit?.layout_shape ?? 'box')
   const [templates, setTemplates] = useState<LayoutTemplate[]>([])
   const [templateId, setTemplateId] = useState<number | null>(null)
   // A phase the person may not run starts off and stays off; the backend refuses it too.
   // Layout starts off as well.
   const granted = (key: keyof typeof PHASE_CAPABILITY) => can(PHASE_CAPABILITY[key])
-  const [phases, setPhases] = useState<Phases>(() => ({
-    layout: false, lines: granted('lines'), ocr: granted('ocr'), predict: true, tile: false,
-  }))
+  const [phases, setPhases] = useState<Phases>(() => (edit
+    ? { layout: edit.run_layout, lines: edit.run_lines, ocr: edit.run_ocr, predict: edit.run_predict, tile: edit.run_tile }
+    : { layout: false, lines: granted('lines'), ocr: granted('ocr'), predict: true, tile: false }))
   // Two registries, two states: mapModels are the mapseg checkpoints a map job predicts
   // with, models are the text pipeline's trained layout/lines/ocr models.
   const [mapModels, setMapModels] = useState<MapModel[] | null>(null)
@@ -137,18 +151,32 @@ export function NewJobPage() {
   const [skipBlank, setSkipBlank] = useState(true)
   const [lineWidth, setLineWidth] = useState(3)
   const [models, setModels] = useState<RegistryModel[]>([])
-  const [picks, setPicks] = useState<Record<ModelTask, string>>({ layout: '', lines: '', ocr: '' })
-  const [ocrDecode, setOcrDecode] = useState<OcrDecode>('rescored')
-  const [gtAutocheck, setGtAutocheck] = useState(false)
-  const [asTest, setAsTest] = useState(false)
-  const [gtOrdered, setGtOrdered] = useState(false)
+  const pickOf = (id: number | null | undefined) => (id == null ? '' : String(id))
+  const [picks, setPicks] = useState<Record<ModelTask, string>>({
+    layout: pickOf(edit?.model_layout_id), lines: pickOf(edit?.model_lines_id), ocr: pickOf(edit?.model_ocr_id),
+  })
+  const [ocrDecode, setOcrDecode] = useState<OcrDecode>(edit?.ocr_decode ?? 'rescored')
+  const [gtAutocheck, setGtAutocheck] = useState(edit?.gt_autocheck ?? false)
+  const [asTest, setAsTest] = useState(edit?.new_pages_test ?? false)
+  const [gtOrdered, setGtOrdered] = useState(edit?.gt_ordered ?? false)
   const [gtFromPdf, setGtFromPdf] = useState(false)
   const [importReviewed, setImportReviewed] = useState(true)
-  const [step, setStep] = useState<Step>('source')
+  const [step, setStep] = useState<Step>(edit ? 'run' : 'source')
   const [excluded, setExcluded] = useState<Set<File>>(new Set())
   const [catalog, setCatalog] = useState<ConventionFlag[] | null>(null)
-  const [convention, setConvention] = useState<OcrConvention>({})
-  const [dataUse, setDataUse] = useState<DataUse>(ALL_USES)
+  const [convention, setConvention] = useState<OcrConvention>(edit?.ocr_convention ?? {})
+  const [dataUse, setDataUse] = useState<DataUse>(edit?.data_use ?? ALL_USES)
+  // What only a dataset that exists has: the language models that read it, and the lines
+  // a change of OCR settings could read again.
+  const [readers, setReaders] = useState<(LlmModel & { self_hosted: boolean })[] | null>(null)
+  const [readWith, setReadWith] = useState<number[]>(edit?.llm_model_ids ?? [])
+  const [reocrState, setReocrState] = useState<ReocrPreview | null>(null)
+  const [rereadNow, setRereadNow] = useState(false)
+  useEffect(() => {
+    if (!edit) return
+    listUsableLlmModels().then((r) => setReaders(r.models)).catch(() => setReaders([]))
+    reocrPreview(edit.id).then(setReocrState).catch(() => {})
+  }, [edit])
   const dataUseSection = useRef<HTMLElement>(null)
   const [toDataUse, setToDataUse] = useState(false)
   const [dragging, setDragging] = useState(false)
@@ -225,7 +253,8 @@ export function NewJobPage() {
   const otherFiles = files.filter((f) => f !== archive).map((f) => f.name)
 
   useEffect(() => {
-    listModels()
+    // Archived ones too when editing: a dataset pinned to one before it was archived still runs it.
+    listModels(!!edit)
       .then((r) => setModels(r.models))
       .catch(() => {})
     listConventionFlags()
@@ -286,8 +315,8 @@ export function NewJobPage() {
   const ocrModel = models.find((m) => (picks.ocr === '' ? m.task === 'ocr' && m.is_default : m.id === Number(picks.ocr)))
 
   const applies: Record<Step, boolean> = {
-    source: true,
-    pages: (mode === 'upload' && !archive && pageFiles.length > 0) || manifest !== null,
+    source: !edit,
+    pages: !edit && ((mode === 'upload' && !archive && pageFiles.length > 0) || manifest !== null),
     // An imported dataset is already segmented and transcribed: nothing is run on it.
     run: !archive,
     // A map job picks its model with what it runs.
@@ -298,8 +327,8 @@ export function NewJobPage() {
   // A step that stops applying, say Pages once the files are removed, is left for the first.
   const stepGone = !applies[step]
   useEffect(() => {
-    if (stepGone) setStep('source')
-  }, [stepGone])
+    if (stepGone) setStep(edit ? 'run' : 'source')
+  }, [stepGone, edit])
   const at = route.indexOf(step)
   const previous = at > 0 ? route[at - 1] : null
   const next = at >= 0 && at < route.length - 1 ? route[at + 1] : null
@@ -341,17 +370,17 @@ export function NewJobPage() {
     ? 'default'
     : models.find((m) => m.id === Number(picks[key]))?.name ?? 'default'
   const summary: SummaryRow[] = [
-    { label: 'Name', value: name.trim() || '-', step: 'source' },
-    { label: 'Task', value: TASK_LABEL[task], step: 'source' },
-    {
+    { label: 'Name', value: name.trim() || '-', step: edit ? undefined : 'source' },
+    { label: 'Task', value: TASK_LABEL[task], step: edit ? undefined : 'source' },
+    ...(edit ? [] : [{
       label: 'Source',
       value: mode === 'path'
         ? serverPath.trim() || '-'
         : mode === 'iiif'
           ? manifest ? `IIIF - ${manifest.label || manifest.url}` : '-'
           : archive ? `${archive.name}, imported as it is` : `${pageFiles.length} file${pageFiles.length === 1 ? '' : 's'}`,
-      step: 'source',
-    },
+      step: 'source' as Step,
+    }]),
     ...(applies.pages ? [{
       label: 'Pages', step: 'pages' as Step,
       value: manifest
@@ -361,8 +390,9 @@ export function NewJobPage() {
     ...(applies.run && !isMap ? [
       { label: 'Runs', step: 'run' as Step,
         value: PHASE_CHOICES.filter(([key]) => ran(key)).map(([, label]) => label).join(', ') || 'nothing yet' },
-      ...(template ? [{ label: 'Layout', value: `${template.name} template`, step: 'run' as Step }] : []),
-      ...(asTest ? [{ label: 'Test pages', value: 'yes, kept out of training', step: 'run' as Step }] : []),
+      ...(template && !edit ? [{ label: 'Layout', value: `${template.name} template`, step: 'run' as Step }] : []),
+      ...(asTest ? [{ label: 'Test pages', value: edit ? 'pages added from now on' : 'yes, kept out of training',
+                      step: 'run' as Step }] : []),
     ] : []),
     ...(applies.run && isMap ? [
       { label: 'Tiles', step: 'run' as Step,
@@ -405,6 +435,45 @@ export function NewJobPage() {
     data_use: dataUse,
   })
 
+  // The template of a dataset's layout model, where that reads top to bottom: then it, not
+  // the structure, orders the pages - as long as the dataset runs its layout model.
+  const orderSetBy = edit && phases.layout ? edit.reading_order_template ?? null : null
+  const ocrSettingsChanged = !!edit && (ocrDecode !== edit.ocr_decode || modelPicks.ocr !== edit.model_ocr_id
+    || flagsOn(convention).join() !== flagsOn(edit.ocr_convention ?? {}).join())
+  const canReread = ocrSettingsChanged && (reocrState?.unchecked ?? 0) > 0
+    && edit.status !== 'queued' && edit.status !== 'running'
+
+  /** Each changed setting through the endpoint that owns it, and nothing unchanged: what a
+   *  run uses cannot be changed while one is going, but data use can. */
+  const saveSettings = async (job: JobWithoutPages) => {
+    const processing = {
+      ...(phases.layout !== job.run_layout && { run_layout: phases.layout }),
+      ...(phases.lines !== job.run_lines && { run_lines: phases.lines }),
+      ...(phases.ocr !== job.run_ocr && { run_ocr: phases.ocr }),
+      ...(effectiveLineMode !== job.line_mode && { line_mode: effectiveLineMode }),
+      ...(structure !== (job.reading_order || 'auto') && { reading_order: structure }),
+      ...(shape !== (job.layout_shape ?? 'box') && { layout_shape: shape }),
+      ...((job.counters.gt_total ?? 0) > 0 && (gtAutocheck !== job.gt_autocheck || gtOrdered !== job.gt_ordered)
+        && { gt_autocheck: gtAutocheck, gt_ordered: gtOrdered }),
+    }
+    if (Object.keys(processing).length) await setJobProcessing(job.id, processing)
+    const keptConvention = ran('ocr') ? convention : {}
+    if (modelPicks.layout !== job.model_layout_id || modelPicks.lines !== job.model_lines_id
+        || modelPicks.ocr !== job.model_ocr_id || ocrDecode !== job.ocr_decode
+        || flagsOn(keptConvention).join() !== flagsOn(job.ocr_convention ?? {}).join()) {
+      await setJobModels(job.id, modelPicks, ocrDecode, keptConvention)
+    }
+    if (readers !== null) {
+      const allowed = readWith.filter((id) => !readers.some((m) => m.id === id && keptOut(!dataUse.external_llm, m)))
+      if ([...allowed].sort().join() !== [...(job.llm_model_ids ?? [])].sort().join()) {
+        await setJobLlmSettings(job.id, { llm_model_ids: allowed })
+      }
+    }
+    if (asTest !== (job.new_pages_test ?? false)) await setNewPagesTest(job.id, asTest)
+    if (USES.some(({ use }) => dataUse[use] !== job.data_use[use])) await saveDataUse(job.id, dataUse)
+    if (canReread && rereadNow) await reocr(job.id, 'unchecked')
+  }
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (step !== 'review') {
@@ -414,6 +483,16 @@ export function NewJobPage() {
     if (!canSubmit) return
     setError(null)
     setBusy(true)
+    if (edit) {
+      try {
+        await saveSettings(edit)
+        navigate(`/jobs/${edit.id}`)
+      } catch (err) {
+        setBusy(false)
+        setError((err as Error).message)
+      }
+      return
+    }
     try {
       let job_id: string
       const upload = async (sent: File[]) => {
@@ -480,18 +559,27 @@ export function NewJobPage() {
         : 'border-transparent text-ink-muted hover:text-ink'
     }`
 
-  const inputBase = 'w-full rounded border bg-surface px-2 py-1.5 text-sm focus:outline-none'
+  const inputBase = 'w-full rounded border bg-surface px-2 py-1.5 text-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-50'
   const inputClass = `${inputBase} border-line-strong focus-visible:border-accent`
   const invalidInputClass = `${inputBase} border-danger`
 
-  if (!canEdit) return <Navigate to="/" replace />
+  if (!canEdit) return <Navigate to={edit ? `/jobs/${edit.id}` : '/'} replace />
 
   return (
     <div className={pageShell}>
-      <PageHeader title="New dataset">
-        One step at a time; going back keeps everything chosen so far.
-      </PageHeader>
-      <Stepper steps={STEPS.map((s) => ({
+      {edit ? (
+        <PageHeader title={`Settings of ${edit.name}`} actions={
+          <Link to={`/jobs/${edit.id}`} className="text-sm text-accent-ink hover:underline">Back to the dataset</Link>
+        }>
+          The steps the dataset was created with, as it stands now. Changes apply from the next run;
+          nothing already detected or read is discarded - Re-run in the Run menu redoes work.
+        </PageHeader>
+      ) : (
+        <PageHeader title="New dataset">
+          One step at a time; going back keeps everything chosen so far.
+        </PageHeader>
+      )}
+      <Stepper steps={(edit ? route : STEPS).map((s) => ({
         id: s, label: STEP_LABEL[s], skipped: !applies[s], done: route.indexOf(s) < at,
       }))} current={step} onSelect={setStep} />
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
@@ -846,6 +934,8 @@ export function NewJobPage() {
                   return (
                     <label
                       key={key}
+                      data-testid="phase-choice"
+                      data-phase={key}
                       className={`flex items-start gap-2.5 rounded border px-3 py-2 text-left text-sm ${
                         disabled
                           ? 'cursor-not-allowed border-line-strong opacity-40'
@@ -1040,6 +1130,8 @@ export function NewJobPage() {
                         type="button"
                         disabled={disabled}
                         aria-pressed={effectiveLineMode === value}
+                        data-testid="line-mode-option"
+                        data-mode={value}
                         onClick={() => setLineMode(value)}
                         title={disabled ? NEEDS_LAYOUT : hint}
                         className={`flex-1 rounded border px-3 py-2 text-left text-sm ${
@@ -1060,7 +1152,15 @@ export function NewJobPage() {
                 </div>
               </div>
             )}
-            {!isMap && !archive && templates.length > 0 && (
+            {edit && !isMap && (<>
+              <LayoutShapeChoice value={shape} saved={edit.layout_shape ?? 'box'} onChange={setShape} />
+              {phases.layout && <LabelMapping jobId={edit.id} canEdit onError={setError} />}
+              {(edit.counters.gt_total ?? 0) > 0 && (
+                <AlignmentChoice autocheck={gtAutocheck} ordered={gtOrdered}
+                                 onAutocheck={setGtAutocheck} onOrdered={setGtOrdered} />
+              )}
+            </>)}
+            {!edit && !isMap && !archive && templates.length > 0 && (
               <div>
                 <div className="mb-1 flex items-baseline justify-between gap-2">
                   <label className="block text-sm font-medium text-ink" htmlFor="layout-template">
@@ -1103,9 +1203,15 @@ export function NewJobPage() {
                   alone, two columns come out interleaved; saying how the volume is set puts
                   them in order. Changeable afterwards.
                 </p>
+                {orderSetBy && (
+                  <p className="mb-1.5 text-xs text-ink-muted" data-testid="reading-order-set-by">
+                    {`Set by the ${orderSetBy} template of this dataset's layout model: pages read top to bottom, as the Schematismus pipeline does.`}
+                  </p>
+                )}
                 <select
                   id="page-structure"
                   data-testid="reading-order-choice"
+                  disabled={!!orderSetBy}
                   value={structure}
                   onChange={(e) => setStructure(e.target.value)}
                   className={inputClass}
@@ -1121,15 +1227,24 @@ export function NewJobPage() {
                 <input type="checkbox" data-testid="as-test" checked={asTest}
                        onChange={(e) => setAsTest(e.target.checked)} className="mt-1" />
                 <span>
-                  Add as test pages
+                  {edit ? 'Add new pages as test pages' : 'Add as test pages'}
                   <span className="block text-xs text-ink-muted">
-                    Test data that no training uses - for scoring models on. Pages added later follow.
+                    {edit
+                      ? 'Pages added from now on arrive as test data that no training uses. Pages already here keep their mark.'
+                      : 'Test data that no training uses - for scoring models on. Pages added later follow.'}
                   </span>
                 </span>
               </label>
             )}
         </>)}
         {step === 'models' && (<>
+            {edit && reocrState !== null && reocrState.authors.length > 0 && (
+              <p data-testid="ocr-provenance" className="text-xs text-ink-muted">
+                Current text was read by{' '}
+                {reocrState.authors.map((a) => `${readerName('ocr', a.author)} (${a.lines} lines)`).join(', ')}
+                {reocrState.authors.length > 1 && ' - mixed provenance'}
+              </p>
+            )}
             {/* Text-pipeline models only; a map job picks its mapseg model above. */}
             {!isMap && (
             <div>
@@ -1156,11 +1271,12 @@ export function NewJobPage() {
                     >
                       <option value="">Default</option>
                       {models
-                        .filter((m) => m.task === task && !m.archived)
+                        .filter((m) => m.task === task && (!m.archived || m.id === Number(picks[task])))
                         .map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.name}
                             {m.is_default ? ' (default)' : ''}
+                            {m.archived ? ' (archived)' : ''}
                           </option>
                         ))}
                     </select>
@@ -1175,16 +1291,12 @@ export function NewJobPage() {
                   OCR decoding
                 </label>
                 <div className="flex gap-2">
-                  {(
-                    [
-                      ['rescored', 'Best quality', 'Beam search with the language model and decoder rescoring'],
-                      ['greedy', 'Fast', 'Raw greedy CTC output - no language model, no rescoring'],
-                    ] as [OcrDecode, string, string][]
-                  ).map(([value, label, hint]) => (
+                  {DECODE_CARDS.map(([value, label, hint]) => (
                     <button
                       key={value}
                       type="button"
                       data-testid={`ocr-decode-${value}`}
+                      aria-pressed={ocrDecode === value}
                       onClick={() => setOcrDecode(value)}
                       className={`flex-1 rounded border px-3 py-2 text-left text-sm ${
                         ocrDecode === value
@@ -1201,18 +1313,47 @@ export function NewJobPage() {
             )}
           {phases.lines && phases.ocr && (
             <ConventionFlags catalog={catalog} model={ocrModel} convention={convention}
-                             onToggle={(flag) => setConvention((held) => toggledFlag(held, flag))} />
+                             onToggle={(flag) => setConvention((held) => toggledFlag(held, flag))}>
+              {edit?.ocr_convention_read != null && (
+                <p data-testid="convention-read" className="mt-1 text-xs text-ink-muted">
+                  Last read {edit.ocr_convention_read.length === 0
+                    ? 'normalized'
+                    : `with ${edit.ocr_convention_read.map((flag) => conventionLabel(flag, catalog)).join(', ').toLowerCase()}`}.
+                </p>
+              )}
+            </ConventionFlags>
+          )}
+          {edit && readers !== null && readers.length > 0 && (
+            <LlmReaders readers={readers} chosen={readWith} keptInHouse={!dataUse.external_llm} onChange={setReadWith} />
           )}
         </>)}
         {step === 'review' && (<>
           <section ref={dataUseSection} data-testid="new-job-data-use" className="rounded-md border border-line bg-surface px-4 py-3">
             <h2 className="text-sm font-semibold text-ink">Data use</h2>
             <p className="text-xs text-ink-muted">
-              What this dataset's pages and lines may be used for. It applies to everyone, you included, and
-              can be changed later on the dataset page.
+              {edit
+                ? "What this dataset's pages and lines may be used for. It applies to everyone, you included."
+                : "What this dataset's pages and lines may be used for. It applies to everyone, you included, and can be changed later in the dataset's settings."}
             </p>
-            <DataUseSwitches value={dataUse} onChange={setDataUse} />
+            {edit
+              ? <DataUseEditor jobId={edit.id} value={dataUse} onChange={setDataUse} />
+              : <DataUseSwitches value={dataUse} onChange={setDataUse} />}
           </section>
+          {canReread && (
+            <label data-testid="settings-reread" className="flex items-start gap-2 rounded-md border border-line bg-surface px-4 py-3 text-sm text-ink">
+              <input type="checkbox" checked={rereadNow} onChange={(e) => setRereadNow(e.target.checked)}
+                     className="mt-1 cursor-pointer accent-accent" />
+              <span>
+                Re-read the {reocrState!.unchecked} unchecked line{reocrState!.unchecked === 1 ? '' : 's'} with the new
+                OCR settings once saved
+                <span className="block text-xs text-ink-muted">
+                  {reocrState!.checked} checked line{reocrState!.checked === 1 ? '' : 's'} keep their text, and corrections
+                  on unchecked lines are kept too - only the raw OCR text is replaced. Left off, the new settings apply to
+                  future reading.
+                </span>
+              </span>
+            </label>
+          )}
           <NewJobSummary rows={summary} onEdit={setStep} full />
         </>)}
         {progress && <UploadProgress progress={progress} />}
@@ -1243,7 +1384,7 @@ export function NewJobPage() {
                 disabled={!canSubmit}
                 className="rounded bg-accent px-4 py-1.5 text-sm font-medium text-on-accent hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {busy ? 'Creating…' : archive ? 'Import dataset' : 'Create job'}
+                {edit ? (busy ? 'Saving…' : 'Save settings') : busy ? 'Creating…' : archive ? 'Import dataset' : 'Create job'}
               </button>
             ) : (
               <button type="submit" data-testid="wizard-next" disabled={stepMissing[step] !== null}

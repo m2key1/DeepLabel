@@ -106,8 +106,8 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
 - When a run fails, its pipeline step turns red; click it for the reason.
 - The **Run** menu holds everything that runs models on the whole dataset. Work your edits
   left behind, such as lines to read again or boxes whose lines need detecting again, is
-  counted on the menu and listed first. Rarer actions (layout classes, language model
-  readings, purging deleted pages) are in the **⋯** menu.
+  counted on the menu and listed first. Rarer actions (settings, layout classes, language
+  model readings, purging deleted pages) are in the **⋯** menu.
 - A run started elsewhere (another tab, a colleague, the API) shows up within seconds.
 - Anyone who can edit the dataset can delete pages and restore them from the Deleted
   filter.
@@ -141,10 +141,10 @@ turns one off, apply to everyone, the owner and admins included:
 - **Export by others:** the people it is shared with, admins included, may export it. The
   owner always can. Viewing and editing are not affected.
 
-The switches are set on the wizard's Review step and changed later with **Data use** in the
-dataset page's **⋯** menu. That dialog also lists the models already trained, validated or
-scored on the dataset; switching training off leaves them as they are, so an admin has to
-remove one that must go. Every model records the datasets it was made from.
+The switches are set on the wizard's Review step and changed later on the same step of the
+dataset's **Settings**. There it also lists the models already trained, validated or scored
+on the dataset; switching training off leaves them as they are, so an admin has to remove
+one that must go. Every model records the datasets it was made from.
 
 Others see a switched-off use as a chip beside the owner's name ("no training"). Admins can
 still open any dataset for support: while a dataset restricts any use, each visit by an admin
@@ -167,15 +167,19 @@ Every dataset has its own layout classes, copied from a template when it is crea
 
 ## Processing and re-runs
 
-Open **Processing** from a dataset's menu to change how it is processed. Changes apply to
-the next run; nothing already recognised is thrown away.
+Open **Settings** from a dataset's **⋯** menu, on its page or in the dataset list, to change
+how it is processed: the New job steps open filled in as the dataset stands, without the
+source and pages. Changes apply to the next run; nothing already recognised is thrown away.
 
-- Choose the phases, the models, whether layout elements are boxes or polygons, and the
-  page structure used for reading order.
+- Choose the phases, the line detection, whether layout elements are boxes or polygons, the
+  page structure used for reading order, the models, decoding and convention flags, the
+  language models that read it, and its data use.
+- When the OCR settings change, Review offers to re-read the unchecked lines at once.
+- A map dataset that cut its own tiles keeps a smaller **Settings** with only its tile size.
 - **Re-run** a phase over the dataset (from the **Run** menu on its page), a selection of
   pages, or a single page. The dialog says what will be replaced before it runs.
 - When a step of a dataset was run with a model that has since been replaced (by a new
-  default, a new version, or a model changed under Processing), its owner is asked on
+  default, a new version, or a model changed under Settings), its owner is asked on
   opening it. Each step is listed with the old and new model and what running it again
   would do. Re-reading is ticked by default and leaves checked lines alone; layout and
   lines start unticked. **Switch and run** moves the dataset to the ticked models and runs

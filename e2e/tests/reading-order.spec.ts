@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { openSettings, saveSettings } from '../helpers/dataset-settings'
 import {
   backendFetch, correctLine, deleteElement, getPageDetail, jobPageIds, pageLines, seedCompletedJob,
   seedJobWithoutLayout, uniqueName,
@@ -48,23 +49,19 @@ test.describe('Scenario: what order the lines of a page are read in', () => {
     // Left to itself, the channel down the middle is found and the columns read in turn.
     expect(await orderOf(jobId, pageId)).toEqual(byColumn)
 
-    // The settings live in the dataset's own menu on the list, not inside the dataset.
-    await page.goto('/')
-    const card = page.getByTestId('job-card').filter({ hasText: jobName })
-    await card.getByTestId('job-menu').click()
-    await card.getByTestId('processing-open').click()
+    await openSettings(page, jobName)
     await page.getByTestId('reading-order-choice').selectOption('1x1')
-    await page.getByTestId('processing-save').click()
+    await saveSettings(page)
 
     // Told the volume is set solid, the same page is read straight down - the guess is
     // overruled, and the pages already detected are put right rather than only the next
     // run. A volume of ragged single-column pages is exactly why that has to be sayable.
     await expect.poll(async () => orderOf(jobId, pageId)).toEqual(byHeight)
 
-    await card.getByTestId('job-menu').click()
-    await card.getByTestId('processing-open').click()
+    await openSettings(page, jobName)
+    await expect(page.getByTestId('reading-order-choice')).toHaveValue('1x1')
     await page.getByTestId('reading-order-choice').selectOption('1x2')
-    await page.getByTestId('processing-save').click()
+    await saveSettings(page)
 
     await expect.poll(async () => orderOf(jobId, pageId)).toEqual(byColumn)
   })

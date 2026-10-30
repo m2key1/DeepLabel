@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/test'
+import { openSettings, saveSettings } from '../helpers/dataset-settings'
 import { getPageDetail, jobPageIds, seedCompletedJob, uniqueName } from '../helpers/api'
 import { LANDSCAPE, clickAt, dragAt, enterEditMode, openViewer, toPixels } from '../helpers/viewer'
 
@@ -16,13 +17,10 @@ const PARAGRAPH: Pt[] = [[0.1, 0.2], [0.9, 0.2], [0.9, 0.85], [0.1, 0.85]]
 const PARAGRAPH_GAP: Pt = [0.5, 0.42]
 
 async function switchTo(page: import('@playwright/test').Page, name: string, shape: 'box' | 'polygon') {
-  await page.goto('/')
-  const card = page.getByTestId('job-card').filter({ hasText: name })
-  await card.getByTestId('job-menu').click()
-  await card.getByTestId('processing-open').click()
+  await openSettings(page, name)
   await page.locator(`[data-testid="processing-layout-shape-option"][data-shape="${shape}"]`).click()
   await expect(page.getByTestId('processing-layout-shape-note')).toBeVisible()
-  await page.getByTestId('processing-save').click()
+  await saveSettings(page)
 }
 
 test.describe('Scenario: layout elements as outlines', () => {
