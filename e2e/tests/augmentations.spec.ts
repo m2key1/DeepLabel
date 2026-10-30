@@ -1,6 +1,7 @@
 import { test, expect } from '../helpers/test'
 import {
-  augmentPipelines, backendFetch, identity, listTrainings, markLinesChecked, seedCompletedJob, uniqueName,
+  augmentPipelines, backendFetch, identity, jobPageIds, listTrainings, markLayoutChecked, markLinesChecked,
+  seedCompletedJob, uniqueName,
 } from '../helpers/api'
 import { seedSession, useSession } from '../helpers/session'
 import { pickDataset, startTraining, taskSection } from '../helpers/training'
@@ -266,6 +267,60 @@ test.describe('Scenario: augmentation pipelines', () => {
     await run.getByTestId('training-open').click()
     await page.getByRole('tab', { name: 'Settings' }).click()
     await expect(page.getByTestId('run-settings')).toContainText(pipelineName)
+  })
+
+  test('a layout pipeline is previewed on a page with its boxes and frozen into a layout run', async ({ page }) => {
+    const datasetName = uniqueName('Layout aug')
+    const jobId = await seedCompletedJob(datasetName, 1)
+    const [pageId] = await jobPageIds(jobId)
+    await markLayoutChecked(pageId)
+    const pipelineName = uniqueName('Page stack')
+    const runName = uniqueName('Layout run')
+
+    await page.goto('/augmentations')
+    await page.getByRole('tab', { name: 'Layout' }).click()
+    await expect(page).toHaveURL(/\/augmentations\?task=layout$/)
+    await expect(page.getByTestId('builtin-draft-note')).toContainText('the stack layout training uses today')
+    await expect(page.getByTestId('step-count')).toHaveText('5 steps')
+
+    // A page with checked layout is what a layout trainer is handed, boxes and all.
+    await page.getByLabel('Name').fill(pipelineName)
+    await page.getByLabel('Preview on').selectOption({ label: `${datasetName} (1)` })
+    await expect(page.getByTestId('preview-sample')).toHaveCount(1, { timeout: 30_000 })
+    await expect(page.getByTestId('pipeline-preview')).toContainText('one page with checked layout, its boxes outlined')
+    await expect(page.getByTestId('preview-augmented')).toHaveAttribute('alt', `page ${pageId} after augmentation`)
+    await expect(page.getByTestId('preview-harshest')).toHaveAttribute('alt', `page ${pageId} on its harshest draw`)
+    await expect(page.getByTestId('preview-change-lines')).toHaveText('Change pages')
+
+    // A crop that keeps every box needs the boxes a layout trainer has.
+    await addStep(page, 'BBoxSafeRandomCrop')
+    await expect(page.getByTestId('step-count')).toHaveText('6 steps')
+    await expect(page.getByTestId('preview-error')).toHaveCount(0)
+    await expect(page.getByTestId('preview-augmented')).toHaveCount(1)
+    await page.getByTestId('save-pipeline').click()
+    await expect(page.getByTestId('pipeline-notice')).toContainText(`Saved "${pipelineName}"`)
+
+    // Backend oracle: filed under layout, and nowhere under OCR.
+    const saved = (await augmentPipelines('layout', DEV)).pipelines.find((p) => p.name === pipelineName)!
+    expect((saved.spec.transform.transforms as Record<string, unknown>[]).map((s) => s.__class_fullname__))
+      .toEqual(['Affine', 'GaussNoise', 'OneOf', 'BBoxSafeRandomCrop'])
+    expect((await augmentPipelines('ocr', DEV)).pipelines.map((p) => p.name)).not.toContain(pipelineName)
+    expect((await augmentPipelines('ocr', DEV)).pipelines.length).toBeGreaterThan(0)
+
+    await page.goto('/models/train?task=layout')
+    await page.getByLabel('Model name').fill(runName)
+    await pickDataset(page, datasetName)
+    await page.getByRole('combobox', { name: 'Augmentation' }).selectOption({ label: pipelineName })
+    await expect(page.getByTestId('submit-summary')).toContainText(`augmentation: ${pipelineName}`)
+    await startTraining(page)
+
+    await expect
+      .poll(async () => {
+        const run = (await listTrainings()).find((t) => t.name === runName)
+        return run ? [run.task, run.augmentation_name] : null
+      }, { timeout: 30_000 })
+      .toEqual(['layout', pipelineName])
+    expect((await listTrainings()).find((t) => t.name === runName)!.augmentation).toEqual(saved.spec)
   })
 
   test('a run can train on the crops as scanned', async ({ page }) => {

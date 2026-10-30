@@ -1,10 +1,10 @@
 # Model backends
 
-Contract version **1.3**. 1.1 added batches per card, gradient accumulation,
+Contract version **1.4**. 1.1 added batches per card, gradient accumulation,
 learning-rate scaling, the out-of-memory fallback, resuming, declared metrics and the
 final evaluation (6.9); 1.2 added builtin weight facts (5.2), `default_epochs` (6.2) and
 the trainer's default augmentation stack (7.1); 1.3 added a builtin base for a training
-(6.5, 6.6).
+(6.5, 6.6); 1.4 added boxes to the augmentation preview (7.1).
 
 A *model backend* is a small HTTP service that wraps one model type, with its own image,
 GPU and dependencies. DeepLabel knows a backend only by its URL and a shared secret. It
@@ -104,7 +104,7 @@ its own.
 ### 3.3 `GET /health`
 
 ```json
-{"status": "ok", "contract": "1.3", "busy": 0, "loaded": ["9f2c...e1"]}
+{"status": "ok", "contract": "1.4", "busy": 0, "loaded": ["9f2c...e1"]}
 ```
 
 `status` is `ok`, `starting` (process up, not ready) or `error` (with `message`). `busy`
@@ -114,7 +114,7 @@ counts the requests and trainings running now; `loaded` lists the versions in me
 
 ```json
 {
-  "contract": "1.3",
+  "contract": "1.4",
   "name": "deepocr",
   "version": "2026.10.1",
   "model_type": "deepocr",
@@ -1096,7 +1096,7 @@ class Model:
     def train_command(self) -> list[str]: ...         # default: train_info()['entrypoint']
     def tunables(self) -> list[dict]: ...             # default: train_info()['tunables']
     def augmentations(self) -> dict: ...              # GET /v1/train/augmentations
-    def augmentation_preview(self, spec, images, seed, draws) -> list[PIL.Image]: ...
+    def augmentation_preview(self, spec, images, seed, draws, boxes=None) -> list[Augmented]: ...
 ```
 
 The SDK owns authentication, multipart parsing, image decoding, splitting a batch (and
@@ -1107,7 +1107,12 @@ before they leave, so a malformed result is a `500` naming the field, never bad 
 DeepLabel. `Prediction(results, extra)` adds top-level response fields such as OCR's
 `decode`. `GET /v1/train/tunables` answers `{"tunables": [...]}`. The preview takes a
 multipart body with a `request` part `{spec, seed, draws}` and the images, and answers
-`{"images": [<PNG data URLs>]}`. `GET /v1/train/augmentations` answers the catalogue
+`{"images": [<PNG data URLs>]}`. A trainer handed boxes (`"targets"` holds `bboxes`) also
+takes `boxes`, per image a list of `[x0, y0, x1, y1]` in its pixels, and then answers
+`boxes` too: each box where the draw put it, in the augmented image's pixels, `null` for one
+it cut away. `deeplabel_backend.augmentation` does all of this for an albumentations
+trainer - `catalog(default)`, `to_spec(steps)` and `preview(...)`, with a line resized to
+the height the model reads or a page fitted into `max_side`. `GET /v1/train/augmentations` answers the catalogue
 (`library`, `version`, `transforms`) and, as `default`, the stack the trainer applies when
 a run names none, serialised as albumentations does; the training form offers it as "the
 model's own".

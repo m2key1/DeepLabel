@@ -126,6 +126,7 @@ export async function markLinesChecked(jobId: string, count: number): Promise<nu
 export interface TrainingRow {
   id: number
   name: string
+  task: string
   status: string
   owner: string
   target: string

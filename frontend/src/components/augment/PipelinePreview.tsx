@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { previewAugmentation } from '../../api'
 import type { AugmentPreview, AugmentSpec, ModelTask } from '../../api'
 import { Button } from '../ui/Button'
@@ -8,12 +9,13 @@ import { cardChrome } from '../ui/Card'
 
 const DEBOUNCE_MS = 400
 
-/** What the stack does to a real checked line: a band across the top, the crop before the
- *  augmentation, one draw at the stack's own probabilities, and the harshest of the
- *  several draws taken. Steps fire at p 0.3 or so, so the damaging draw is rare - showing
- *  only a typical one would hide exactly what hurts training. Each keeps its proportions
- *  and stays no taller than a few lines of text. Re-renders as the pipeline is edited, one
- *  render per settled edit. */
+/** What the stack does to a real checked line - or, for a layout trainer, a checked page
+ *  with its boxes drawn: before the augmentation, one draw at the stack's own
+ *  probabilities, and the harshest of the several draws taken. Steps fire at p 0.3 or so,
+ *  so the damaging draw is rare - showing only a typical one would hide exactly what hurts
+ *  training. Lines are stacked, no taller than a few lines of text; pages stand side by
+ *  side, so a box that did not follow its page is seen at a glance. Re-renders as the
+ *  pipeline is edited, one render per settled edit. */
 export function PipelinePreview({ task, spec, jobIds }: {
   task: ModelTask
   spec: AugmentSpec
@@ -67,6 +69,8 @@ export function PipelinePreview({ task, spec, jobIds }: {
   }, [task, serialised, datasets, lineSeed, renderSeed])
 
   const message = error ?? (preview && !preview.ok ? preview.error : null)
+  const pages = task === 'layout'
+  const unit = pages ? 'page' : 'line'
 
   return (
     <div data-testid="pipeline-preview"
@@ -75,8 +79,10 @@ export function PipelinePreview({ task, spec, jobIds }: {
         <span className="text-sm font-medium text-ink">Preview</span>
         <span className="text-xs text-ink-muted">
           {datasets === ''
-            ? 'pick a dataset to see it on real lines'
-            : `one checked line at the model's ${preview?.height ?? '…'} px input height`}
+            ? `pick a dataset to see it on real ${unit}s`
+            : pages
+              ? 'one page with checked layout, its boxes outlined'
+              : `one checked line at the model's ${preview?.height ?? '…'} px input height`}
         </span>
         <span className="ml-auto flex items-center gap-2">
           {busy && <span className="text-xs text-ink-muted">Rendering…</span>}
@@ -84,7 +90,7 @@ export function PipelinePreview({ task, spec, jobIds }: {
             variant="ghost"
             size="xs"
             data-testid="preview-reapply"
-            title="Same lines, another random draw of this stack"
+            title={`Same ${unit}s, another random draw of this stack`}
             disabled={datasets === ''}
             onClick={() => setRenderSeed((value) => value + 1)}
           >
@@ -94,11 +100,11 @@ export function PipelinePreview({ task, spec, jobIds }: {
             variant="ghost"
             size="xs"
             data-testid="preview-change-lines"
-            title="Draw a different set of checked lines from the chosen dataset"
+            title={`Show another checked ${unit} from the chosen dataset`}
             disabled={datasets === ''}
             onClick={() => setLineSeed((value) => value + 1)}
           >
-            Change lines
+            Change {unit}s
           </Button>
         </span>
       </div>
@@ -112,46 +118,54 @@ export function PipelinePreview({ task, spec, jobIds }: {
             as one thing rather than as four loose strips. */}
         <div className="space-y-4">
           {preview?.samples.map((sample) => (
-            <div key={sample.line_id} data-testid="preview-sample">
+            <div key={sample.page_id ?? sample.line_id} data-testid="preview-sample">
               <div className="flex gap-2 text-[11px] text-ink-muted">
                 <span className="truncate">{sample.dataset}</span>
-                <span className="min-w-0 flex-1 truncate italic">{sample.text}</span>
+                <span className={`min-w-0 flex-1 truncate ${pages ? '' : 'italic'}`}>{sample.text}</span>
               </div>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
-                Before
-              </p>
-              <img src={sample.original} alt={`line ${sample.line_id} before augmentation`}
-                   className="block h-auto max-h-24 w-auto max-w-full" />
-              <p className="mt-1.5 text-[11px] font-medium uppercase tracking-wide text-accent-ink">
-                After
-              </p>
-              <img
-                src={sample.augmented}
-                alt={`line ${sample.line_id} after augmentation`}
-                data-testid="preview-augmented"
-                className="block h-auto max-h-24 w-auto max-w-full"
-              />
-              {sample.harshest && (
-                <>
-                  <p className="mt-1.5 flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-warn">
-                    Harshest of {preview?.draws ?? '…'}
-                    <Hint
-                      about="the harshest draw"
-                      text={`Every step fires at its own probability, so most draws are mild and the damaging one is rare. This is the draw, out of ${preview?.draws ?? 'several'}, that strayed furthest from the scan - what the model sees on a bad roll.`}
-                    />
-                  </p>
-                  <img
-                    src={sample.harshest}
-                    alt={`line ${sample.line_id} on its harshest draw`}
-                    data-testid="preview-harshest"
-                    className="block h-auto max-h-24 w-auto max-w-full"
-                  />
-                </>
-              )}
+              <div className={pages ? 'grid grid-cols-3 gap-3' : ''}>
+                <Shown label="Before" src={sample.original} pages={pages}
+                       alt={`${unit} ${sample.page_id ?? sample.line_id} before augmentation`} />
+                <Shown label="After" tone="text-accent-ink" src={sample.augmented} pages={pages}
+                       testId="preview-augmented"
+                       alt={`${unit} ${sample.page_id ?? sample.line_id} after augmentation`} />
+                {sample.harshest && (
+                  <Shown
+                    label={<>
+                      Harshest of {preview?.draws ?? '…'}
+                      <Hint
+                        about="the harshest draw"
+                        text={`Every step fires at its own probability, so most draws are mild and the damaging one is rare. This is the draw, out of ${preview?.draws ?? 'several'}, that strayed furthest from the scan - what the model sees on a bad roll.`}
+                      />
+                    </>}
+                    tone="text-warn" src={sample.harshest} pages={pages} testId="preview-harshest"
+                    alt={`${unit} ${sample.page_id ?? sample.line_id} on its harshest draw`} />
+                )}
+              </div>
             </div>
           ))}
         </div>
       </div>
     </div>
+  )
+}
+
+function Shown({ label, tone = 'text-ink-muted', src, alt, pages, testId }: {
+  label: ReactNode
+  tone?: string
+  src: string
+  alt: string
+  pages: boolean
+  testId?: string
+}) {
+  return (
+    <figure className={pages ? 'min-w-0' : 'mt-1.5 first:mt-0'}>
+      <figcaption className={`flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide ${tone}`}>
+        {label}
+      </figcaption>
+      <img src={src} alt={alt} data-testid={testId}
+           className={pages ? 'block h-auto max-h-[28rem] w-full object-contain object-top'
+             : 'block h-auto max-h-24 w-auto max-w-full'} />
+    </figure>
   )
 }

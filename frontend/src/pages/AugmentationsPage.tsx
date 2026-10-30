@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   createAugmentPipeline, deleteAugmentPipeline, duplicateAugmentPipeline, listAugmentPipelines, listJobs,
   setAugmentPipelineDefault, trainingPreview, updateAugmentPipeline,
@@ -14,14 +14,41 @@ import { useAutoClear } from '../messages'
 import { buttonClass } from '../components/ui/Button'
 import { controlClass } from '../components/ui/Field'
 import { PageHeader } from '../components/ui/PageHeader'
+import { Tabs, panelId, tabId } from '../components/ui/Tabs'
 
-const TASK: ModelTask = 'ocr'
+type AugmentTask = 'ocr' | 'layout'
+const TASKS: { id: AugmentTask; label: string; trains: string; material: string }[] = [
+  { id: 'ocr', label: 'OCR', trains: 'OCR', material: 'its line crops' },
+  { id: 'layout', label: 'Layout', trains: 'layout', material: 'its pages and their layout boxes' },
+]
 const EMPTY: AugmentSpec = { transform: { __class_fullname__: 'Compose', p: 1.0, transforms: [] } }
 
 const inputClass = controlClass('md', 'w-full')
 
+/** Each trainer's stacks on a tab of its own, as each is handed different material. */
 export function AugmentationsPage() {
   useCrumb('Augmentations')
+  const [params, setParams] = useSearchParams()
+  const task = TASKS.find((t) => t.id === params.get('task')) ?? TASKS[0]
+  return (
+    <div className="w-full px-6 py-6">
+      <PageHeader
+        title="Augmentations"
+        actions={<Link to="/models" className={buttonClass()}>Back to models</Link>}
+      >
+        Stacks of image transforms a training applies to {task.material}. Pipelines are yours alone; the
+        one an admin marks as the default is what every training form offers as Default.
+      </PageHeader>
+      <Tabs label="Trainer" className="mb-4" active={task.id} items={TASKS}
+            onSelect={(id) => setParams(id === 'ocr' ? {} : { task: id }, { replace: true })} />
+      <div role="tabpanel" id={panelId(task.id)} aria-labelledby={tabId(task.id)}>
+        <Workbench key={task.id} task={task.id} trains={task.trains} />
+      </div>
+    </div>
+  )
+}
+
+function Workbench({ task: TASK, trains }: { task: ModelTask; trains: string }) {
   const { canEdit, isAdmin, user } = useAuth()
   const [pipelines, setPipelines] = useState<AugmentPipeline[]>([])
   const [builtin, setBuiltin] = useState<{ spec: AugmentSpec | null; error: string | null }>(
@@ -124,18 +151,13 @@ export function AugmentationsPage() {
   }
 
   return (
-    <div className="w-full px-6 py-6">
-      <PageHeader
-        title="Augmentations"
-        actions={<Link to="/models" className={buttonClass()}>Back to models</Link>}
-      >
-        {selectedId === 'new' && pipelines.length === 0
-          ? 'Starting from the stack OCR training uses today. Change what you like and name it to keep it - '
-            + 'nothing here affects a training until you pick it on the training form.'
-          : 'Stacks of image transforms a training can apply to its line crops. Pipelines are yours alone; '
-            + 'the one an admin marks as the default is what every training form offers as Default.'}
-      </PageHeader>
-
+    <>
+      {selectedId === 'new' && pipelines.length === 0 && (
+        <p data-testid="builtin-draft-note" className="mb-3 text-sm text-ink-muted">
+          Starting from the stack {trains} training uses today. Change what you like and name it to keep it -
+          nothing here affects a training until you pick it on the training form.
+        </p>
+      )}
       <div className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <div>
           <div className="mb-1 flex items-center justify-between">
@@ -297,6 +319,6 @@ export function AugmentationsPage() {
           )}
         </div>
       </div>
-    </div>
+    </>
   )
 }

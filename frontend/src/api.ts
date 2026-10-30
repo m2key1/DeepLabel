@@ -1930,7 +1930,9 @@ export interface AugmentPipeline {
 }
 
 export interface AugmentPreviewSample {
-  line_id: number
+  /** A line crop's line, or for a trainer handed pages, the page. */
+  line_id?: number
+  page_id?: number
   dataset: string
   text: string
   original: string
@@ -1943,7 +1945,11 @@ export interface AugmentPreviewSample {
 export interface AugmentPreview {
   ok: boolean
   error: string | null
+  /** Line crops at the model's height, or whole pages with their layout boxes drawn. */
+  unit?: 'line' | 'page'
   height?: number
+  /** The longer side a page is shown at. */
+  side?: number
   line_seed?: number
   render_seed?: number
   /** How many draws the harshest was chosen from. */

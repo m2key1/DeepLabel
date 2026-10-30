@@ -272,14 +272,27 @@ def start_training(client: BackendClient, request: dict) -> Training:
     return Training(client, answer['train_id'])
 
 
+def _preview(client: BackendClient, request: dict, images: list[Image.Image]) -> dict:
+    encoded = {f'img{i}': _encode(image) for i, image in enumerate(images)}
+    body, content_type = _multipart(request, encoded)
+    return client._call('POST', '/v1/train/augmentations/preview', body, content_type,
+                        timeout=config.MODEL_BACKEND_PREDICT_TIMEOUT)
+
+
 def preview_augmentations(client: BackendClient, spec: dict, images: list[Image.Image], seed: int,
                           draws: int = 1) -> list[str]:
-    """A stack applied to the images by the backend's own trainer (6.2), one augmented
+    """A stack applied to the images by the backend's own trainer (7.1), one augmented
     image per input as a data URL - over several draws, the one that strayed furthest."""
-    encoded = {f'img{i}': _encode(image) for i, image in enumerate(images)}
-    body, content_type = _multipart({'spec': spec, 'seed': seed, 'draws': draws}, encoded)
-    return client._call('POST', '/v1/train/augmentations/preview', body, content_type,
-                        timeout=config.MODEL_BACKEND_PREDICT_TIMEOUT)['images']
+    return _preview(client, {'spec': spec, 'seed': seed, 'draws': draws}, images)['images']
+
+
+def preview_page_augmentations(client: BackendClient, spec: dict, images: list[Image.Image], boxes: list,
+                               seed: int, draws: int = 1) -> tuple[list[str], list]:
+    """As preview_augmentations, for a trainer handed boxes: each page's boxes ([x0, y0, x1,
+    y1] in its pixels) go through the stack with it and come back where the draw put them,
+    None for one it cut away."""
+    answer = _preview(client, {'spec': spec, 'seed': seed, 'draws': draws, 'boxes': boxes}, images)
+    return answer['images'], answer['boxes']
 
 
 def client_for(conn, model_id: int | None) -> BackendClient | None:

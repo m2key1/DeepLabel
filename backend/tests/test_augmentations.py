@@ -405,6 +405,78 @@ class TestPreview:
         assert res.status_code == 503 and res.json()['detail'] == 'no configured model backend trains ocr'
 
 
+class TestPagePreview:
+    """A layout trainer is handed pages with their boxes, so that is what its preview shows."""
+
+    @staticmethod
+    def _layout_checked(conn, tmp_path):
+        scan = tmp_path / 'page2.png'
+        Image.new('RGB', (400, 200), 'white').save(scan)
+        conn.execute("INSERT INTO pages (id, job_id, idx, filename, source_file, status, layout_checked) "
+                     "VALUES (2, 'j1', 1, 'page2.png', ?, 'done', 1)", (str(scan),))
+        conn.execute("INSERT INTO elements (id, page_id, order_idx, class_name, bbox, kind) "
+                     "VALUES (2, 2, 0, 'Heading', '[0.1,0.2,0.4,0.6]', 'content')")
+        conn.execute("INSERT INTO elements (id, page_id, order_idx, class_name, bbox, kind, deleted) "
+                     "VALUES (3, 2, 1, 'Paragraph', '[0,0,1,1]', 'content', 1)")
+        conn.commit()
+
+    def test_only_pages_with_checked_layout_are_sampled_with_their_live_boxes(self, client, tmp_path):
+        conn = app.dependency_overrides[get_db]()
+        assert augmentations.sample_pages(conn, ['j1'], seed=1) == []
+        self._layout_checked(conn, tmp_path)
+        [sample] = augmentations.sample_pages(conn, ['j1'], seed=1)
+        assert (sample['id'], sample['filename'], sample['dataset']) == (2, 'page2.png', 'Letters')
+        assert sample['boxes'] == [[0.1, 0.2, 0.4, 0.6]]
+
+    def test_a_layout_preview_draws_each_box_where_the_draw_put_it(self, client, monkeypatch, tmp_path):
+        conn = app.dependency_overrides[get_db]()
+        self._layout_checked(conn, tmp_path)
+        asked = []
+
+        def mirrored(client_, spec, images, boxes, seed, draws=1):
+            asked.append(([image.size for image in images], boxes, draws))
+            width = images[0].width
+            flipped = [[[width - x1, y0, width - x0, y1] for x0, y0, x1, y1 in page] for page in boxes]
+            return [augmentations.with_boxes(Image.new('RGB', image.size, 'white'), []) for image in images], flipped
+        monkeypatch.setattr(augmentations.backend_client, 'preview_page_augmentations', mirrored)
+        res = client.post('/api/augmentations/preview', headers=MEMBER,
+                          json={'task': 'layout', 'spec': SPEC, 'job_ids': ['j1'], 'line_seed': 1, 'render_seed': 1})
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert (body['ok'], body['unit'], body['draws']) == (True, 'page', augmentations.HARSHEST_DRAWS)
+        assert asked == [([(400, 200)], [[[40.0, 40.0, 160.0, 120.0]]], 1),
+                         ([(400, 200)], [[[40.0, 40.0, 160.0, 120.0]]], augmentations.HARSHEST_DRAWS)]
+        [sample] = body['samples']
+        assert (sample['page_id'], sample['text']) == (2, 'page2.png')
+        before = augmentations.from_data_url(sample['original']).convert('RGB')
+        after = augmentations.from_data_url(sample['augmented']).convert('RGB')
+        # The box's left edge before, and the mirrored box's right edge after.
+        assert before.getpixel((40, 80)) == augmentations.BOX_COLOUR
+        assert after.getpixel((40, 80)) == (255, 255, 255)
+        assert after.getpixel((359, 80)) == augmentations.BOX_COLOUR
+
+    def test_a_layout_preview_without_checked_layout_says_so(self, client, monkeypatch):
+        monkeypatch.setattr(augmentations.backend_client, 'preview_page_augmentations',
+                            lambda *args, **kwargs: pytest.fail('the backend was asked'))
+        res = client.post('/api/augmentations/preview', headers=MEMBER,
+                          json={'task': 'layout', 'spec': SPEC, 'job_ids': ['j1'], 'line_seed': 1, 'render_seed': 1})
+        assert res.json() == {'ok': False, 'samples': [],
+                              'error': 'the chosen datasets have no pages with checked layout to preview on'}
+
+    def test_a_layout_stack_is_checked_on_a_page_with_a_box(self, client, monkeypatch):
+        monkeypatch.setattr(augmentations, 'unknown_steps', lambda spec: None)
+        asked = []
+
+        def checked(client_, spec, images, boxes, seed, draws=1):
+            asked.append((images[0].size, boxes))
+            raise BackendError('bad_request', 'Compose[0].Rotate: the layout trainer would move the page '
+                                          'but not its boxes with it')
+        monkeypatch.setattr(augmentations.backend_client, 'preview_page_augmentations', checked)
+        assert REAL_CHECK_SPEC(SPEC, 'layout') == ('Compose[0].Rotate: the layout trainer would move the page '
+                                          'but not its boxes with it')
+        assert asked == [((600, 800), [[[60, 80, 540, 240]]])]
+
+
 class TestCatalog:
     def test_is_read_once_and_kept(self, fresh_catalog, monkeypatch):
         trains_with(monkeypatch, {'version': '2.3.1', 'transforms': [{'name': 'Affine'}]})

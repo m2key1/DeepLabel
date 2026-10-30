@@ -1,5 +1,6 @@
 """Augmentation pipelines: the albumentations catalog the training backends offer, the
-pipelines people save, and the preview that shows what a stack does to real line crops.
+pipelines people save, and the preview that shows what a stack does to real line crops,
+or to real pages and their layout boxes.
 
 Every albumentations call happens in the trainer of the task's model backend (6.2) - the
 app venv has neither torch nor albumentations. A spec travels in the library's own dict form
@@ -32,6 +33,12 @@ SAMPLE_COUNT = 1
 HARSHEST_DRAWS = 12
 # The height a line is shown at while its model has not reported the one it reads at.
 LINE_HEIGHT = 128
+# The longer side a page is sent and shown at; a trainer reads pages larger, but the
+# preview is about what a step does, which shows at this size.
+PAGE_SIDE = 1024
+BOX_COLOUR = (13, 148, 136)
+# Tasks whose trainer is handed whole pages with their layout boxes.
+PAGE_TASKS = ('layout',)
 MAX_SPEC_BYTES = 64_000
 MAX_NODES = 200
 MAX_NAME_LENGTH = 80
@@ -209,8 +216,12 @@ def check_spec(spec, task: str = 'ocr') -> str | None:
     if error:
         return error
     try:
-        backend_client.preview_augmentations(_trainer(task), spec,
-                                             [Image.new('RGB', (LINE_HEIGHT * 4, LINE_HEIGHT), 'white')], 0)
+        if task in PAGE_TASKS:
+            backend_client.preview_page_augmentations(_trainer(task), spec, [Image.new('RGB', (600, 800), 'white')],
+                                                      [[[60, 80, 540, 240]]], 0)
+        else:
+            backend_client.preview_augmentations(_trainer(task), spec,
+                                                 [Image.new('RGB', (LINE_HEIGHT * 4, LINE_HEIGHT), 'white')], 0)
     except BackendError as error:
         return error.message
     return None
@@ -263,6 +274,88 @@ def sample_lines(conn, job_ids: list[str], seed: int, count: int = SAMPLE_COUNT)
     return [by_id[line_id] for line_id in chosen if line_id in by_id]
 
 
+def sample_pages(conn, job_ids: list[str], seed: int, count: int = SAMPLE_COUNT) -> list[dict]:
+    """As sample_lines, over the pages whose layout is checked - what a layout training is
+    cut from - each with its elements' boxes, normalised."""
+    if not job_ids:
+        return []
+    marks = ','.join('?' * len(job_ids))
+    ids = [row['id'] for row in conn.execute(
+        f"SELECT id FROM pages WHERE job_id IN ({marks}) AND layout_checked = 1 AND {counted_page()}", job_ids)]
+    if not ids:
+        return []
+    shuffled = sorted(ids, key=lambda page_id: hashlib.sha256(f'page:{page_id}'.encode()).digest())
+    start = (seed - 1) * count % len(shuffled)
+    chosen = (shuffled[start:] + shuffled[:start])[:count]
+    marks = ','.join('?' * len(chosen))
+    rows = {row['id']: dict(row) for row in conn.execute(
+        f'SELECT p.id, p.source_file, p.filename, j.name AS dataset FROM pages p JOIN jobs j ON p.job_id = j.id '
+        f'WHERE p.id IN ({marks})', chosen)}
+    for row in rows.values():
+        row['boxes'] = [json.loads(e['bbox']) for e in conn.execute(
+            'SELECT bbox FROM elements WHERE page_id = ? AND deleted = 0 ORDER BY order_idx', (row['id'],))]
+    return [rows[page_id] for page_id in chosen if page_id in rows]
+
+
+def with_boxes(image: Image.Image, boxes: list) -> str:
+    """The image with its boxes outlined, as a data URL."""
+    from PIL import ImageDraw
+    drawn = image.convert('RGB')
+    pen = ImageDraw.Draw(drawn)
+    width = max(2, round(max(drawn.size) / 350))
+    for box in boxes:
+        if box is not None:
+            pen.rectangle([round(v) for v in box], outline=BOX_COLOUR, width=width)
+    buffer = io.BytesIO()
+    drawn.save(buffer, format='PNG')
+    return 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode()
+
+
+def from_data_url(url: str) -> Image.Image:
+    return Image.open(io.BytesIO(base64.b64decode(url.split(',', 1)[1])))
+
+
+def page_preview(conn, task: str, spec: dict, job_ids: list[str], page_seed: int, render_seed: int) -> dict:
+    """What the stack does to a checked page and its layout boxes: the page before, one
+    draw, and the harshest of many, each with its boxes where that draw put them - a step
+    that moves the page shows whether the boxes went with it."""
+    samples = sample_pages(conn, job_ids, page_seed)
+    if not samples:
+        return {'ok': False, 'error': 'the chosen datasets have no pages with checked layout to preview on',
+                'samples': []}
+    pages, boxes, shown, problems = [], [], [], []
+    for sample in samples:
+        try:
+            with Image.open(sample['source_file']) as opened:
+                page = opened.convert('RGB')
+        except (OSError, ValueError) as exc:
+            problems.append(f'the scan {sample["source_file"]} could not be read ({exc})')
+            continue
+        page.thumbnail((PAGE_SIDE, PAGE_SIDE))
+        pages.append(page)
+        boxes.append([[x0 * page.width, y0 * page.height, x1 * page.width, y1 * page.height]
+                      for x0, y0, x1, y1 in sample['boxes']])
+        shown.append(sample)
+    if not pages:
+        return {'ok': False, 'error': f'none of the sampled pages could be read: {problems[0]}', 'samples': []}
+    client = _trainer(task)
+    try:
+        drawn, drawn_boxes = backend_client.preview_page_augmentations(client, spec, pages, boxes, render_seed)
+        harshest, harshest_boxes = backend_client.preview_page_augmentations(client, spec, pages, boxes,
+                                                                             render_seed, HARSHEST_DRAWS)
+    except BackendError as error:
+        return {'ok': False, 'error': error.message, 'samples': []}
+    rendered = [{
+        'page_id': sample['id'], 'dataset': sample['dataset'], 'text': sample['filename'],
+        'original': with_boxes(page, given),
+        'augmented': with_boxes(from_data_url(once), once_boxes),
+        'harshest': with_boxes(from_data_url(worst), worst_boxes),
+    } for sample, page, given, once, once_boxes, worst, worst_boxes
+        in zip(shown, pages, boxes, drawn, drawn_boxes, harshest, harshest_boxes)]
+    return {'ok': True, 'error': None, 'unit': 'page', 'side': PAGE_SIDE, 'line_seed': page_seed,
+            'render_seed': render_seed, 'draws': HARSHEST_DRAWS, 'samples': rendered}
+
+
 def crop_samples(samples: list[dict], out_dir: Path) -> tuple[list[tuple[dict, Path]], list[str]]:
     """Cut each sampled line the way the snapshot cuts it, so the preview starts from the
     very crop a training would. Returns what was cut and, for what was not, why - the
@@ -293,7 +386,8 @@ def crop_samples(samples: list[dict], out_dir: Path) -> tuple[list[tuple[dict, P
 
 def preview(conn, task: str, spec: dict, job_ids: list[str], line_seed: int, render_seed: int) -> dict:
     """What the stack does to one of the chosen datasets' checked lines: the crop
-    before and after, at the height the model reads.
+    before and after, at the height the model reads - or, for a trainer handed pages, to
+    a checked page and its boxes.
 
     The two seeds move independently: line_seed picks which lines are shown, render_seed
     is the random draw the stack itself makes. Changing one alone answers a different
@@ -301,6 +395,8 @@ def preview(conn, task: str, spec: dict, job_ids: list[str], line_seed: int, ren
     error = spec_errors(spec)
     if error:
         return {'ok': False, 'error': error, 'samples': []}
+    if task in PAGE_TASKS:
+        return page_preview(conn, task, spec, job_ids, line_seed, render_seed)
     samples = sample_lines(conn, job_ids, line_seed)
     if not samples:
         return {'ok': False, 'error': 'the chosen datasets have no checked lines to preview on', 'samples': []}
@@ -339,7 +435,7 @@ def _backend_preview(client: BackendClient, spec: dict, cropped: list, height: i
             'original': 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode(),
             'augmented': augmented, 'harshest': worst,
         })
-    return {'ok': True, 'error': None, 'height': height, 'line_seed': line_seed, 'render_seed': render_seed,
+    return {'ok': True, 'error': None, 'unit': 'line', 'height': height, 'line_seed': line_seed, 'render_seed': render_seed,
             'draws': HARSHEST_DRAWS, 'samples': rendered}
 
 
