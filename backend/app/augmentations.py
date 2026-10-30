@@ -1,6 +1,6 @@
 """Augmentation pipelines: the albumentations catalog the training backends offer, the
 pipelines people save, and the preview that shows what a stack does to real line crops,
-or to real pages and their layout boxes.
+or to real pages and their layout boxes or line outlines.
 
 Every albumentations call happens in the trainer of the task's model backend (6.2) - the
 app venv has neither torch nor albumentations. A spec travels in the library's own dict form
@@ -37,8 +37,12 @@ LINE_HEIGHT = 128
 # preview is about what a step does, which shows at this size.
 PAGE_SIDE = 1024
 BOX_COLOUR = (13, 148, 136)
-# Tasks whose trainer is handed whole pages with their layout boxes.
-PAGE_TASKS = ('layout',)
+# Tasks whose trainer is handed whole pages: what it is handed with them, the page flag
+# that marks a page as training material, and what the preview calls them.
+PAGE_TASKS = {
+    'layout': {'kind': 'boxes', 'checked': 'layout_checked', 'shown': 'checked layout'},
+    'lines': {'kind': 'polygons', 'checked': 'lines_checked', 'shown': 'checked lines'},
+}
 MAX_SPEC_BYTES = 64_000
 MAX_NODES = 200
 MAX_NAME_LENGTH = 80
@@ -93,36 +97,36 @@ class Catalog:
                 'error': self.error}
 
 
-_catalog: Catalog | None = None
+_catalogs: dict[str, Catalog] = {}
 _catalog_lock = threading.Lock()
 
 
-def catalog() -> Catalog:
-    """The catalog, read once from a training backend and kept; a failed read is retried
-    after a pause."""
-    global _catalog
+def catalog(task: str = 'ocr') -> Catalog:
+    """The task's catalog, read once from the backend that trains it and kept - each
+    trainer offers what it can build, its own transforms among them; a failed read is
+    retried after a pause."""
     with _catalog_lock:
-        if _catalog is not None and (_catalog.error is None
-                                     or time.monotonic() - _catalog.checked_at < CATALOG_RETRY_SECONDS):
-            return _catalog
-        client = next((c for c in map(trainer_backend, ('ocr', 'lines', 'layout')) if c), None)
+        known = _catalogs.get(task)
+        if known is not None and (known.error is None
+                                  or time.monotonic() - known.checked_at < CATALOG_RETRY_SECONDS):
+            return known
         try:
-            if client is None:
-                raise NoTrainer('no configured model backend trains a task')
-            result = client._call('GET', '/v1/train/augmentations')
-            _catalog = Catalog(result.get('transforms') or [], GROUP_TYPES,
-                               result.get('version'), None, time.monotonic())
+            result = _trainer(task)._call('GET', '/v1/train/augmentations')
+            known = Catalog(result.get('transforms') or [], GROUP_TYPES, result.get('version'), None,
+                            time.monotonic())
         except (NoTrainer, BackendError) as exc:
-            _catalog = Catalog([], [], None, str(exc), time.monotonic())
-        return _catalog
+            known = Catalog([], [], None, str(exc), time.monotonic())
+        _catalogs[task] = known
+        return known
 
 
 def warm_up() -> None:
     def run():
-        try:
-            catalog()
-        except Exception as exc:
-            print(f'augmentation catalog: {exc}', flush=True)
+        for task in ('ocr', *PAGE_TASKS):
+            try:
+                catalog(task)
+            except Exception as exc:
+                print(f'augmentation catalog for {task}: {exc}', flush=True)
     threading.Thread(target=run, daemon=True).start()
 
 
@@ -185,12 +189,12 @@ def spec_errors(spec) -> str | None:
     return None
 
 
-def unknown_steps(spec) -> str | None:
+def unknown_steps(spec, task: str = 'ocr') -> str | None:
     """A step the catalog does not offer, which is also a step the builder could not have
     produced. Albumentations would happily build some of those (a font path to read, a
     transform that wants a second image), so the API accepts exactly what the UI offers.
     Skipped when the catalog itself could not be read - the runner refuses those anyway."""
-    known = catalog()
+    known = catalog(task)
     if known.error:
         return None
     names = {t['name'] for t in known.transforms} | {g['name'] for g in known.groups} | {'Compose'}
@@ -212,13 +216,15 @@ def check_spec(spec, task: str = 'ocr') -> str | None:
     """The structural check, the catalog check, then the backend's trainer building every
     step and running the lot over a stand-in line. None when the spec is sound; the
     message names the step otherwise."""
-    error = spec_errors(spec) or unknown_steps(spec)
+    error = spec_errors(spec) or unknown_steps(spec, task)
     if error:
         return error
     try:
         if task in PAGE_TASKS:
+            kind = PAGE_TASKS[task]['kind']
+            shape = [60, 80, 540, 240] if kind == 'boxes' else [[60, 80], [540, 80], [540, 120], [60, 120]]
             backend_client.preview_page_augmentations(_trainer(task), spec, [Image.new('RGB', (600, 800), 'white')],
-                                                      [[[60, 80, 540, 240]]], 0)
+                                                      [[shape]], 0, kind=kind)
         else:
             backend_client.preview_augmentations(_trainer(task), spec,
                                                  [Image.new('RGB', (LINE_HEIGHT * 4, LINE_HEIGHT), 'white')], 0)
@@ -274,14 +280,16 @@ def sample_lines(conn, job_ids: list[str], seed: int, count: int = SAMPLE_COUNT)
     return [by_id[line_id] for line_id in chosen if line_id in by_id]
 
 
-def sample_pages(conn, job_ids: list[str], seed: int, count: int = SAMPLE_COUNT) -> list[dict]:
-    """As sample_lines, over the pages whose layout is checked - what a layout training is
-    cut from - each with its elements' boxes, normalised."""
+def sample_pages(conn, task: str, job_ids: list[str], seed: int, count: int = SAMPLE_COUNT) -> list[dict]:
+    """As sample_lines, over the pages the task's training is cut from - those whose layout,
+    or whose lines, are checked - each with its shapes, normalised: its elements' boxes, or
+    its lines' outlines."""
     if not job_ids:
         return []
     marks = ','.join('?' * len(job_ids))
     ids = [row['id'] for row in conn.execute(
-        f"SELECT id FROM pages WHERE job_id IN ({marks}) AND layout_checked = 1 AND {counted_page()}", job_ids)]
+        f"SELECT id FROM pages WHERE job_id IN ({marks}) AND {PAGE_TASKS[task]['checked']} = 1 "
+        f"AND {counted_page()}", job_ids)]
     if not ids:
         return []
     shuffled = sorted(ids, key=lambda page_id: hashlib.sha256(f'page:{page_id}'.encode()).digest())
@@ -292,20 +300,38 @@ def sample_pages(conn, job_ids: list[str], seed: int, count: int = SAMPLE_COUNT)
         f'SELECT p.id, p.source_file, p.filename, j.name AS dataset FROM pages p JOIN jobs j ON p.job_id = j.id '
         f'WHERE p.id IN ({marks})', chosen)}
     for row in rows.values():
-        row['boxes'] = [json.loads(e['bbox']) for e in conn.execute(
-            'SELECT bbox FROM elements WHERE page_id = ? AND deleted = 0 ORDER BY order_idx', (row['id'],))]
+        if PAGE_TASKS[task]['kind'] == 'boxes':
+            row['shapes'] = [json.loads(e['bbox']) for e in conn.execute(
+                'SELECT bbox FROM elements WHERE page_id = ? AND deleted = 0 ORDER BY order_idx', (row['id'],))]
+        else:
+            row['shapes'] = [json.loads(line['polygon']) for line in conn.execute(
+                'SELECT l.polygon FROM lines l JOIN elements e ON l.element_id = e.id '
+                'WHERE e.page_id = ? AND l.deleted = 0 AND e.deleted = 0 ORDER BY e.order_idx, l.order_idx',
+                (row['id'],))]
     return [rows[page_id] for page_id in chosen if page_id in rows]
 
 
-def with_boxes(image: Image.Image, boxes: list) -> str:
-    """The image with its boxes outlined, as a data URL."""
+def in_pixels(shape: list, width: int, height: int) -> list:
+    """A normalised box or outline in the pixels of an image this size."""
+    if shape and isinstance(shape[0], list):
+        return [[x * width, y * height] for x, y in shape]
+    x0, y0, x1, y1 = shape
+    return [x0 * width, y0 * height, x1 * width, y1 * height]
+
+
+def outlined(image: Image.Image, shapes: list) -> str:
+    """The image with its boxes or line outlines drawn in, as a data URL."""
     from PIL import ImageDraw
     drawn = image.convert('RGB')
     pen = ImageDraw.Draw(drawn)
     width = max(2, round(max(drawn.size) / 350))
-    for box in boxes:
-        if box is not None:
-            pen.rectangle([round(v) for v in box], outline=BOX_COLOUR, width=width)
+    for shape in shapes:
+        if not shape:
+            continue
+        if isinstance(shape[0], list):
+            pen.polygon([(round(x), round(y)) for x, y in shape], outline=BOX_COLOUR, width=width)
+        else:
+            pen.rectangle([round(v) for v in shape], outline=BOX_COLOUR, width=width)
     buffer = io.BytesIO()
     drawn.save(buffer, format='PNG')
     return 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode()
@@ -316,14 +342,15 @@ def from_data_url(url: str) -> Image.Image:
 
 
 def page_preview(conn, task: str, spec: dict, job_ids: list[str], page_seed: int, render_seed: int) -> dict:
-    """What the stack does to a checked page and its layout boxes: the page before, one
-    draw, and the harshest of many, each with its boxes where that draw put them - a step
-    that moves the page shows whether the boxes went with it."""
-    samples = sample_pages(conn, job_ids, page_seed)
+    """What the stack does to a checked page and its layout boxes or line outlines: the
+    page before, one draw, and the harshest of many, each with its shapes where that draw
+    put them - a step that moves the page shows whether they went with it."""
+    handed = PAGE_TASKS[task]
+    samples = sample_pages(conn, task, job_ids, page_seed)
     if not samples:
-        return {'ok': False, 'error': 'the chosen datasets have no pages with checked layout to preview on',
+        return {'ok': False, 'error': f'the chosen datasets have no pages with {handed["shown"]} to preview on',
                 'samples': []}
-    pages, boxes, shown, problems = [], [], [], []
+    pages, shapes, shown, problems = [], [], [], []
     for sample in samples:
         try:
             with Image.open(sample['source_file']) as opened:
@@ -333,25 +360,25 @@ def page_preview(conn, task: str, spec: dict, job_ids: list[str], page_seed: int
             continue
         page.thumbnail((PAGE_SIDE, PAGE_SIDE))
         pages.append(page)
-        boxes.append([[x0 * page.width, y0 * page.height, x1 * page.width, y1 * page.height]
-                      for x0, y0, x1, y1 in sample['boxes']])
+        shapes.append([in_pixels(shape, page.width, page.height) for shape in sample['shapes']])
         shown.append(sample)
     if not pages:
         return {'ok': False, 'error': f'none of the sampled pages could be read: {problems[0]}', 'samples': []}
     client = _trainer(task)
     try:
-        drawn, drawn_boxes = backend_client.preview_page_augmentations(client, spec, pages, boxes, render_seed)
-        harshest, harshest_boxes = backend_client.preview_page_augmentations(client, spec, pages, boxes,
-                                                                             render_seed, HARSHEST_DRAWS)
+        drawn, drawn_shapes = backend_client.preview_page_augmentations(client, spec, pages, shapes, render_seed,
+                                                                        kind=handed['kind'])
+        harshest, harshest_shapes = backend_client.preview_page_augmentations(
+            client, spec, pages, shapes, render_seed, HARSHEST_DRAWS, kind=handed['kind'])
     except BackendError as error:
         return {'ok': False, 'error': error.message, 'samples': []}
     rendered = [{
         'page_id': sample['id'], 'dataset': sample['dataset'], 'text': sample['filename'],
-        'original': with_boxes(page, given),
-        'augmented': with_boxes(from_data_url(once), once_boxes),
-        'harshest': with_boxes(from_data_url(worst), worst_boxes),
-    } for sample, page, given, once, once_boxes, worst, worst_boxes
-        in zip(shown, pages, boxes, drawn, drawn_boxes, harshest, harshest_boxes)]
+        'original': outlined(page, given),
+        'augmented': outlined(from_data_url(once), once_shapes),
+        'harshest': outlined(from_data_url(worst), worst_shapes),
+    } for sample, page, given, once, once_shapes, worst, worst_shapes
+        in zip(shown, pages, shapes, drawn, drawn_shapes, harshest, harshest_shapes)]
     return {'ok': True, 'error': None, 'unit': 'page', 'side': PAGE_SIDE, 'line_seed': page_seed,
             'render_seed': render_seed, 'draws': HARSHEST_DRAWS, 'samples': rendered}
 

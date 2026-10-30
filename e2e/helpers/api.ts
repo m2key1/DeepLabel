@@ -293,6 +293,14 @@ export async function markLayoutChecked(pageId: number) {
   })
 }
 
+export async function markPageLinesChecked(pageId: number) {
+  return backendFetch(`/api/pages/${pageId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lines_checked: true }),
+  })
+}
+
 export async function setPagesDeleted(jobId: string, pageIds: number[], deleted = true) {
   return backendFetch(`/api/jobs/${jobId}/pages`, {
     method: 'PATCH',

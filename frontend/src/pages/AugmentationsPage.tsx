@@ -16,10 +16,11 @@ import { controlClass } from '../components/ui/Field'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Tabs, panelId, tabId } from '../components/ui/Tabs'
 
-type AugmentTask = 'ocr' | 'layout'
+type AugmentTask = 'ocr' | 'layout' | 'lines'
 const TASKS: { id: AugmentTask; label: string; trains: string; material: string }[] = [
   { id: 'ocr', label: 'OCR', trains: 'OCR', material: 'its line crops' },
   { id: 'layout', label: 'Layout', trains: 'layout', material: 'its pages and their layout boxes' },
+  { id: 'lines', label: 'Lines', trains: 'line segmentation', material: 'its pages and their lines' },
 ]
 const EMPTY: AugmentSpec = { transform: { __class_fullname__: 'Compose', p: 1.0, transforms: [] } }
 

@@ -6,15 +6,19 @@ import { PipelinePreview } from './PipelinePreview'
 import { countSteps, fromSpec, groupNames, toSpec } from './pipeline'
 import type { PipelineNode } from './pipeline'
 
-let cached: Promise<AugmentCatalog> | null = null
-/** The catalog never changes while the venv does not, and every editor wants it. A failed
- *  read is not kept, so the next editor asks again. */
-function loadCatalog(): Promise<AugmentCatalog> {
-  cached ??= getAugmentCatalog().catch((e: Error) => {
-    cached = null
-    throw e
-  })
-  return cached
+const cached = new Map<ModelTask, Promise<AugmentCatalog>>()
+/** A task's catalog never changes while its trainer does not, and every editor of the task
+ *  wants it. A failed read is not kept, so the next editor asks again. */
+function loadCatalog(task: ModelTask): Promise<AugmentCatalog> {
+  let loading = cached.get(task)
+  if (!loading) {
+    loading = getAugmentCatalog(task).catch((e: Error) => {
+      cached.delete(task)
+      throw e
+    })
+    cached.set(task, loading)
+  }
+  return loading
 }
 
 interface EditorProps {
@@ -35,8 +39,8 @@ export function PipelineEditor({ task, spec, onChange, jobIds, readOnly, childre
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
 
   useEffect(() => {
-    loadCatalog().then(setCatalog).catch(() => setCatalog(null))
-  }, [])
+    loadCatalog(task).then(setCatalog).catch(() => setCatalog(null))
+  }, [task])
 
   const byName = useMemo(
     () => new Map((catalog?.transforms ?? []).map((t) => [t.name, t])), [catalog])

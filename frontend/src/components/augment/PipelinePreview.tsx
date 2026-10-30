@@ -9,8 +9,8 @@ import { cardChrome } from '../ui/Card'
 
 const DEBOUNCE_MS = 400
 
-/** What the stack does to a real checked line - or, for a layout trainer, a checked page
- *  with its boxes drawn: before the augmentation, one draw at the stack's own
+/** What the stack does to a real checked line - or, for a layout or line trainer, a checked
+ *  page with its boxes or lines outlined: before the augmentation, one draw at the stack's own
  *  probabilities, and the harshest of the several draws taken. Steps fire at p 0.3 or so,
  *  so the damaging draw is rare - showing only a typical one would hide exactly what hurts
  *  training. Lines are stacked, no taller than a few lines of text; pages stand side by
@@ -69,7 +69,7 @@ export function PipelinePreview({ task, spec, jobIds }: {
   }, [task, serialised, datasets, lineSeed, renderSeed])
 
   const message = error ?? (preview && !preview.ok ? preview.error : null)
-  const pages = task === 'layout'
+  const pages = task === 'layout' || task === 'lines'
   const unit = pages ? 'page' : 'line'
 
   return (
@@ -81,7 +81,9 @@ export function PipelinePreview({ task, spec, jobIds }: {
           {datasets === ''
             ? `pick a dataset to see it on real ${unit}s`
             : pages
-              ? 'one page with checked layout, its boxes outlined'
+              ? task === 'layout'
+                ? 'one page with checked layout, its boxes outlined'
+                : 'one page with checked lines, each line outlined'
               : `one checked line at the model's ${preview?.height ?? '…'} px input height`}
         </span>
         <span className="ml-auto flex items-center gap-2">

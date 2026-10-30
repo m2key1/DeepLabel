@@ -1,7 +1,7 @@
 import { test, expect } from '../helpers/test'
 import {
   augmentPipelines, backendFetch, identity, jobPageIds, listTrainings, markLayoutChecked, markLinesChecked,
-  seedCompletedJob, uniqueName,
+  markPageLinesChecked, seedCompletedJob, uniqueName,
 } from '../helpers/api'
 import { seedSession, useSession } from '../helpers/session'
 import { pickDataset, startTraining, taskSection } from '../helpers/training'
@@ -320,6 +320,62 @@ test.describe('Scenario: augmentation pipelines', () => {
         return run ? [run.task, run.augmentation_name] : null
       }, { timeout: 30_000 })
       .toEqual(['layout', pipelineName])
+    expect((await listTrainings()).find((t) => t.name === runName)!.augmentation).toEqual(saved.spec)
+  })
+
+  test('a lines pipeline is previewed on a page with its lines and frozen into a line run', async ({ page }) => {
+    const datasetName = uniqueName('Lines aug')
+    const jobId = await seedCompletedJob(datasetName, 2)
+    const [pageId, layoutOnly] = await jobPageIds(jobId)
+    await markPageLinesChecked(pageId)
+    await markLayoutChecked(layoutOnly)
+    const pipelineName = uniqueName('Line stack')
+    const runName = uniqueName('Lines run')
+
+    await page.goto('/augmentations')
+    await page.getByRole('tab', { name: 'Lines' }).click()
+    await expect(page).toHaveURL(/\/augmentations\?task=lines$/)
+    await expect(page.getByTestId('builtin-draft-note'))
+      .toContainText('the stack line segmentation training uses today')
+    await expect(page.getByTestId('step-count')).toHaveText('5 steps')
+
+    // Only the page whose lines are checked is what a line trainer is handed; the other
+    // page has checked layout, which counts for layout alone.
+    await page.getByLabel('Name').fill(pipelineName)
+    await page.getByLabel('Preview on').selectOption({ label: `${datasetName} (1)` })
+    await expect(page.getByTestId('preview-sample')).toHaveCount(1, { timeout: 30_000 })
+    await expect(page.getByTestId('pipeline-preview')).toContainText('one page with checked lines, each line outlined')
+    await expect(page.getByTestId('preview-augmented')).toHaveAttribute('alt', `page ${pageId} after augmentation`)
+    await expect(page.getByTestId('preview-change-lines')).toHaveText('Change pages')
+    await page.getByTestId('save-pipeline').click()
+    await expect(page.getByTestId('pipeline-notice')).toContainText(`Saved "${pipelineName}"`)
+
+    // Backend oracle: filed under lines, and nowhere under layout.
+    const saved = (await augmentPipelines('lines', DEV)).pipelines.find((p) => p.name === pipelineName)!
+    expect((saved.spec.transform.transforms as Record<string, unknown>[]).map((s) => s.__class_fullname__))
+      .toEqual(['Affine', 'GaussNoise', 'OneOf'])
+    const layoutNames = (await augmentPipelines('layout', DEV)).pipelines.map((p) => p.name)
+    expect(layoutNames).not.toContain(pipelineName)
+    expect(layoutNames.length).toBeGreaterThan(0)
+
+    // A crop that keeps every box needs boxes, which a line trainer is never handed.
+    await addStep(page, 'BBoxSafeRandomCrop')
+    await expect(page.getByTestId('preview-error'))
+      .toContainText('BBoxSafeRandomCrop: applying it to an image failed: this step needs bounding boxes')
+
+    await page.goto('/models/train?task=lines')
+    await page.getByLabel('Model name').fill(runName)
+    await pickDataset(page, datasetName)
+    await page.getByRole('combobox', { name: 'Augmentation' }).selectOption({ label: pipelineName })
+    await expect(page.getByTestId('submit-summary')).toContainText(`augmentation: ${pipelineName}`)
+    await startTraining(page)
+
+    await expect
+      .poll(async () => {
+        const run = (await listTrainings()).find((t) => t.name === runName)
+        return run ? [run.task, run.augmentation_name] : null
+      }, { timeout: 30_000 })
+      .toEqual(['lines', pipelineName])
     expect((await listTrainings()).find((t) => t.name === runName)!.augmentation).toEqual(saved.spec)
   })
 

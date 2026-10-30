@@ -38,9 +38,9 @@ SPEC = {'transform': {'__class_fullname__': 'Compose', 'p': 1.0, 'transforms': [
 
 @pytest.fixture
 def fresh_catalog():
-    augmentations._catalog = None
+    augmentations._catalogs.clear()
     yield
-    augmentations._catalog = None
+    augmentations._catalogs.clear()
 
 
 class FakeTrainer:
@@ -406,7 +406,8 @@ class TestPreview:
 
 
 class TestPagePreview:
-    """A layout trainer is handed pages with their boxes, so that is what its preview shows."""
+    """A layout or line trainer is handed pages with their boxes or line outlines, so that is
+    what its preview shows."""
 
     @staticmethod
     def _layout_checked(conn, tmp_path):
@@ -420,32 +421,58 @@ class TestPagePreview:
                      "VALUES (3, 2, 1, 'Paragraph', '[0,0,1,1]', 'content', 1)")
         conn.commit()
 
+    @staticmethod
+    def _lines_checked(conn, tmp_path):
+        scan = tmp_path / 'page3.png'
+        Image.new('RGB', (400, 200), 'white').save(scan)
+        conn.execute("INSERT INTO pages (id, job_id, idx, filename, source_file, status, lines_checked) "
+                     "VALUES (3, 'j1', 2, 'page3.png', ?, 'done', 1)", (str(scan),))
+        conn.execute("INSERT INTO elements (id, page_id, order_idx, class_name, bbox, kind) "
+                     "VALUES (4, 3, 0, 'Paragraph', '[0,0,1,1]', 'content')")
+        for line_id, order, polygon, deleted in ((10, 1, '[[0.1,0.6],[0.4,0.6],[0.4,0.7],[0.1,0.7]]', 0),
+                                                 (11, 0, '[[0.1,0.2],[0.4,0.2],[0.4,0.3],[0.1,0.3]]', 0),
+                                                 (12, 2, '[[0,0],[1,0],[1,1],[0,1]]', 1)):
+            conn.execute('INSERT INTO lines (id, element_id, order_idx, polygon, deleted) VALUES (?, 4, ?, ?, ?)',
+                         (line_id, order, polygon, deleted))
+        conn.commit()
+
     def test_only_pages_with_checked_layout_are_sampled_with_their_live_boxes(self, client, tmp_path):
         conn = app.dependency_overrides[get_db]()
-        assert augmentations.sample_pages(conn, ['j1'], seed=1) == []
+        assert augmentations.sample_pages(conn, 'layout', ['j1'], seed=1) == []
         self._layout_checked(conn, tmp_path)
-        [sample] = augmentations.sample_pages(conn, ['j1'], seed=1)
+        self._lines_checked(conn, tmp_path)
+        [sample] = augmentations.sample_pages(conn, 'layout', ['j1'], seed=1)
         assert (sample['id'], sample['filename'], sample['dataset']) == (2, 'page2.png', 'Letters')
-        assert sample['boxes'] == [[0.1, 0.2, 0.4, 0.6]]
+        assert sample['shapes'] == [[0.1, 0.2, 0.4, 0.6]]
+
+    def test_only_pages_with_checked_lines_are_sampled_with_their_live_outlines_in_order(self, client, tmp_path):
+        conn = app.dependency_overrides[get_db]()
+        self._layout_checked(conn, tmp_path)
+        assert augmentations.sample_pages(conn, 'lines', ['j1'], seed=1) == []
+        self._lines_checked(conn, tmp_path)
+        [sample] = augmentations.sample_pages(conn, 'lines', ['j1'], seed=1)
+        assert (sample['id'], sample['filename']) == (3, 'page3.png')
+        assert sample['shapes'] == [[[0.1, 0.2], [0.4, 0.2], [0.4, 0.3], [0.1, 0.3]],
+                                    [[0.1, 0.6], [0.4, 0.6], [0.4, 0.7], [0.1, 0.7]]]
 
     def test_a_layout_preview_draws_each_box_where_the_draw_put_it(self, client, monkeypatch, tmp_path):
         conn = app.dependency_overrides[get_db]()
         self._layout_checked(conn, tmp_path)
         asked = []
 
-        def mirrored(client_, spec, images, boxes, seed, draws=1):
-            asked.append(([image.size for image in images], boxes, draws))
+        def mirrored(client_, spec, images, boxes, seed, draws=1, kind='boxes'):
+            asked.append(([image.size for image in images], boxes, draws, kind))
             width = images[0].width
             flipped = [[[width - x1, y0, width - x0, y1] for x0, y0, x1, y1 in page] for page in boxes]
-            return [augmentations.with_boxes(Image.new('RGB', image.size, 'white'), []) for image in images], flipped
+            return [augmentations.outlined(Image.new('RGB', image.size, 'white'), []) for image in images], flipped
         monkeypatch.setattr(augmentations.backend_client, 'preview_page_augmentations', mirrored)
         res = client.post('/api/augmentations/preview', headers=MEMBER,
                           json={'task': 'layout', 'spec': SPEC, 'job_ids': ['j1'], 'line_seed': 1, 'render_seed': 1})
         assert res.status_code == 200, res.text
         body = res.json()
         assert (body['ok'], body['unit'], body['draws']) == (True, 'page', augmentations.HARSHEST_DRAWS)
-        assert asked == [([(400, 200)], [[[40.0, 40.0, 160.0, 120.0]]], 1),
-                         ([(400, 200)], [[[40.0, 40.0, 160.0, 120.0]]], augmentations.HARSHEST_DRAWS)]
+        assert asked == [([(400, 200)], [[[40.0, 40.0, 160.0, 120.0]]], 1, 'boxes'),
+                         ([(400, 200)], [[[40.0, 40.0, 160.0, 120.0]]], augmentations.HARSHEST_DRAWS, 'boxes')]
         [sample] = body['samples']
         assert (sample['page_id'], sample['text']) == (2, 'page2.png')
         before = augmentations.from_data_url(sample['original']).convert('RGB')
@@ -454,6 +481,37 @@ class TestPagePreview:
         assert before.getpixel((40, 80)) == augmentations.BOX_COLOUR
         assert after.getpixel((40, 80)) == (255, 255, 255)
         assert after.getpixel((359, 80)) == augmentations.BOX_COLOUR
+
+    def test_a_lines_preview_draws_each_outline_where_the_draw_put_it(self, client, monkeypatch, tmp_path):
+        conn = app.dependency_overrides[get_db]()
+        self._lines_checked(conn, tmp_path)
+        asked = []
+
+        def mirrored(client_, spec, images, outlines, seed, draws=1, kind='boxes'):
+            asked.append((outlines, kind))
+            width = images[0].width
+            flipped = [[[[width - x, y] for x, y in line] for line in page] for page in outlines]
+            return [augmentations.outlined(Image.new('RGB', image.size, 'white'), []) for image in images], flipped
+        monkeypatch.setattr(augmentations.backend_client, 'preview_page_augmentations', mirrored)
+        body = client.post('/api/augmentations/preview', headers=MEMBER, json={
+            'task': 'lines', 'spec': SPEC, 'job_ids': ['j1'], 'line_seed': 1, 'render_seed': 1}).json()
+        assert (body['ok'], body['unit']) == (True, 'page')
+        first = [[40.0, 40.0], [160.0, 40.0], [160.0, 60.0], [40.0, 60.0]]
+        assert asked[0] == ([[first, [[40.0, 120.0], [160.0, 120.0], [160.0, 140.0], [40.0, 140.0]]]], 'polygons')
+        [sample] = body['samples']
+        before = augmentations.from_data_url(sample['original']).convert('RGB')
+        after = augmentations.from_data_url(sample['augmented']).convert('RGB')
+        # The first line's left edge before, and the mirrored line's right edge after.
+        assert before.getpixel((40, 50)) == augmentations.BOX_COLOUR
+        assert after.getpixel((40, 50)) == (255, 255, 255)
+        assert after.getpixel((360, 50)) == augmentations.BOX_COLOUR
+
+    def test_a_lines_preview_without_checked_lines_says_so(self, client, monkeypatch, tmp_path):
+        self._layout_checked(app.dependency_overrides[get_db](), tmp_path)
+        res = client.post('/api/augmentations/preview', headers=MEMBER,
+                          json={'task': 'lines', 'spec': SPEC, 'job_ids': ['j1'], 'line_seed': 1, 'render_seed': 1})
+        assert res.json() == {'ok': False, 'samples': [],
+                              'error': 'the chosen datasets have no pages with checked lines to preview on'}
 
     def test_a_layout_preview_without_checked_layout_says_so(self, client, monkeypatch):
         monkeypatch.setattr(augmentations.backend_client, 'preview_page_augmentations',
@@ -464,17 +522,27 @@ class TestPagePreview:
                               'error': 'the chosen datasets have no pages with checked layout to preview on'}
 
     def test_a_layout_stack_is_checked_on_a_page_with_a_box(self, client, monkeypatch):
-        monkeypatch.setattr(augmentations, 'unknown_steps', lambda spec: None)
+        monkeypatch.setattr(augmentations, 'unknown_steps', lambda spec, task: None)
         asked = []
 
-        def checked(client_, spec, images, boxes, seed, draws=1):
-            asked.append((images[0].size, boxes))
-            raise BackendError('bad_request', 'Compose[0].Rotate: the layout trainer would move the page '
+        def checked(client_, spec, images, boxes, seed, draws=1, kind='boxes'):
+            asked.append((images[0].size, boxes, kind))
+            raise BackendError('bad_request', 'Compose[0].Rotate: RF-DETR would move the page '
                                           'but not its boxes with it')
         monkeypatch.setattr(augmentations.backend_client, 'preview_page_augmentations', checked)
-        assert REAL_CHECK_SPEC(SPEC, 'layout') == ('Compose[0].Rotate: the layout trainer would move the page '
+        assert REAL_CHECK_SPEC(SPEC, 'layout') == ('Compose[0].Rotate: RF-DETR would move the page '
                                           'but not its boxes with it')
-        assert asked == [((600, 800), [[[60, 80, 540, 240]]])]
+        assert asked == [((600, 800), [[[60, 80, 540, 240]]], 'boxes')]
+
+    def test_a_lines_stack_is_checked_on_a_page_with_a_line(self, client, monkeypatch):
+        monkeypatch.setattr(augmentations, 'unknown_steps', lambda spec, task: None)
+        asked = []
+
+        def checked(client_, spec, images, outlines, seed, draws=1, kind='boxes'):
+            asked.append((images[0].size, outlines, kind))
+        monkeypatch.setattr(augmentations.backend_client, 'preview_page_augmentations', checked)
+        assert REAL_CHECK_SPEC(SPEC, 'lines') is None
+        assert asked == [((600, 800), [[[[60, 80], [540, 80], [540, 120], [60, 120]]]], 'polygons')]
 
 
 class TestCatalog:
@@ -489,7 +557,7 @@ class TestCatalog:
     def test_a_failure_is_reported_and_retried_after_a_pause(self, fresh_catalog, monkeypatch):
         monkeypatch.setattr(augmentations, 'trainer_backend', lambda task: None)
         failed = augmentations.catalog()
-        assert failed.transforms == [] and failed.error == 'no configured model backend trains a task'
+        assert failed.transforms == [] and failed.error == 'no configured model backend trains ocr'
         assert augmentations.catalog().payload()['error'] == failed.error
         trains_with(monkeypatch, {'version': 'x', 'transforms': []})
         failed.checked_at -= augmentations.CATALOG_RETRY_SECONDS + 1
@@ -499,6 +567,24 @@ class TestCatalog:
         trains_with(monkeypatch, {'version': 'x', 'transforms': []})
         body = client.get('/api/augmentations/catalog', headers=VIEWER).json()
         assert body == {'version': 'x', 'transforms': [], 'groups': augmentations.GROUP_TYPES, 'error': None}
+        assert client.get('/api/augmentations/catalog?task=maps', headers=VIEWER).status_code == 400
+
+    def test_each_task_has_the_catalog_of_the_backend_that_trains_it(self, client, fresh_catalog, monkeypatch):
+        offered = {'ocr': [{'name': 'Affine'}], 'lines': [{'name': 'Affine'}, {'name': 'utils.augment.RandomBlobs'}]}
+        monkeypatch.setattr(augmentations, 'trainer_backend', lambda task: FakeTrainer(
+            {'version': task, 'transforms': offered[task]}))
+        lines = client.get('/api/augmentations/catalog?task=lines', headers=VIEWER).json()
+        assert [t['name'] for t in lines['transforms']] == ['Affine', 'utils.augment.RandomBlobs']
+        assert augmentations.catalog('ocr').transforms == [{'name': 'Affine'}]
+
+    def test_a_step_is_known_by_the_catalog_of_the_task_it_is_saved_for(self, fresh_catalog, monkeypatch):
+        offered = {'ocr': [{'name': 'Affine'}], 'lines': [{'name': 'utils.augment.RandomBlobs'}]}
+        monkeypatch.setattr(augmentations, 'trainer_backend', lambda task: FakeTrainer(
+            {'version': task, 'transforms': offered[task]}))
+        blobs = compose({'__class_fullname__': 'utils.augment.RandomBlobs', 'p': 0.2})
+        assert augmentations.unknown_steps(blobs, 'lines') is None
+        assert augmentations.unknown_steps(blobs, 'ocr') == ('Compose[0].utils.augment.RandomBlobs: '
+                                                             'not a transform this deployment offers')
 
 
 class TestTrainingStack:

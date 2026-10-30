@@ -1957,9 +1957,9 @@ export interface AugmentPreview {
   samples: AugmentPreviewSample[]
 }
 
-/** Every transform the training backends offer, with its parameters classified for the builder. */
-export function getAugmentCatalog(): Promise<AugmentCatalog> {
-  return request('/api/augmentations/catalog')
+/** Every transform the task's trainer offers, with its parameters classified for the builder. */
+export function getAugmentCatalog(task: ModelTask): Promise<AugmentCatalog> {
+  return request(`/api/augmentations/catalog?task=${encodeURIComponent(task)}`)
 }
 
 export function listAugmentPipelines(task: ModelTask): Promise<{

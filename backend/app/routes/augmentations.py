@@ -10,10 +10,12 @@ router = APIRouter(tags=['augmentations'])
 
 
 @router.get('/api/augmentations/catalog')
-def augmentation_catalog(_user: dict = Depends(current_user)):
-    """Every albumentations transform the model venv offers, with its parameters
-    classified for the builder, plus the group types a pipeline may nest."""
-    return augmentations.catalog().payload()
+def augmentation_catalog(task: str = 'ocr', _user: dict = Depends(current_user)):
+    """Every transform the task's trainer offers, with its parameters classified for the
+    builder, plus the group types a pipeline may nest."""
+    if task not in registry.TASKS:
+        raise HTTPException(400, f'task must be one of {registry.TASKS}')
+    return augmentations.catalog(task).payload()
 
 
 @router.get('/api/augmentations/pipelines')

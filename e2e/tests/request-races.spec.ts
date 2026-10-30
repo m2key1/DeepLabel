@@ -368,7 +368,7 @@ test.describe('Scenario: polling only as much as there is news', () => {
   test('a transform catalog that failed to load is asked for again', async ({ page }) => {
     const catalogReads = countRequests(page, 'GET', '/api/augmentations/catalog')
     let refused = false
-    await page.route('**/api/augmentations/catalog', (route) => {
+    await page.route((url) => url.pathname === '/api/augmentations/catalog', (route) => {
       if (refused) return route.continue()
       refused = true
       return route.fulfill({ status: 500, contentType: 'application/json',

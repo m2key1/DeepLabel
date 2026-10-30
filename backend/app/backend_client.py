@@ -286,13 +286,14 @@ def preview_augmentations(client: BackendClient, spec: dict, images: list[Image.
     return _preview(client, {'spec': spec, 'seed': seed, 'draws': draws}, images)['images']
 
 
-def preview_page_augmentations(client: BackendClient, spec: dict, images: list[Image.Image], boxes: list,
-                               seed: int, draws: int = 1) -> tuple[list[str], list]:
-    """As preview_augmentations, for a trainer handed boxes: each page's boxes ([x0, y0, x1,
-    y1] in its pixels) go through the stack with it and come back where the draw put them,
-    None for one it cut away."""
-    answer = _preview(client, {'spec': spec, 'seed': seed, 'draws': draws, 'boxes': boxes}, images)
-    return answer['images'], answer['boxes']
+def preview_page_augmentations(client: BackendClient, spec: dict, images: list[Image.Image], shapes: list,
+                               seed: int, draws: int = 1, kind: str = 'boxes') -> tuple[list[str], list]:
+    """As preview_augmentations, for a trainer handed pages: each page's shapes - its boxes
+    ([x0, y0, x1, y1]) or its line outlines (polygons of [x, y]) as `kind` says, in its
+    pixels - go through the stack with it and come back where the draw put them, None for
+    one it cut away."""
+    answer = _preview(client, {'spec': spec, 'seed': seed, 'draws': draws, kind: shapes}, images)
+    return answer['images'], answer[kind]
 
 
 def client_for(conn, model_id: int | None) -> BackendClient | None:

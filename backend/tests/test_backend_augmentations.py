@@ -55,7 +55,7 @@ def trainer(monkeypatch):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.setattr(config, 'MODEL_BACKENDS', {
         'ocr': config.ModelBackend('ocr', f'http://127.0.0.1:{server.server_port}', 's', 'default')})
-    monkeypatch.setattr(augmentations, '_catalog', None)
+    monkeypatch.setattr(augmentations, '_catalogs', {})
     yield
     server.shutdown()
 
@@ -72,7 +72,7 @@ def test_the_catalog_is_the_training_backends(trainer):
 
 
 def test_a_stack_is_checked_by_the_backends_trainer(trainer, monkeypatch):
-    monkeypatch.setattr(augmentations, 'unknown_steps', lambda spec: None)
+    monkeypatch.setattr(augmentations, 'unknown_steps', lambda spec, task: None)
     assert augmentations.check_spec(SPEC, 'ocr') is None
     assert Trainer.previews == [({'spec': SPEC, 'seed': 0, 'draws': 1}, 1)]
 
