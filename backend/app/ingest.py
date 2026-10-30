@@ -111,11 +111,18 @@ def require_unique_name(conn, name: str, exclude_id: str | None = None) -> str:
     name = name.strip()
     if not name:
         raise HTTPException(400, 'a dataset needs a name')
-    key = _name_key(name)
-    for row in conn.execute('SELECT name FROM jobs WHERE id IS NOT ?', (exclude_id,)):
-        if _name_key(row['name']) == key:
-            raise HTTPException(409, f'a dataset named "{name}" already exists')
+    if name_holder(conn, name, exclude_id) is not None:
+        raise HTTPException(409, f'a dataset named "{name}" already exists')
     return name
+
+
+def name_holder(conn, name: str, exclude_id: str | None = None) -> str | None:
+    """The id of the dataset that already has this name, in any letter case."""
+    key = _name_key(name.strip())
+    for row in conn.execute('SELECT id, name FROM jobs WHERE id IS NOT ?', (exclude_id,)):
+        if _name_key(row['name']) == key:
+            return row['id']
+    return None
 
 
 def page_count(conn, job_id: str) -> int:

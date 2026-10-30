@@ -1023,6 +1023,12 @@ export function listJobs(): Promise<Job[]> {
   return request('/api/jobs')
 }
 
+/** Whether a new dataset of this name would be refused; the holder's id and name only
+ *  when the caller may open it. */
+export function checkJobName(name: string): Promise<{ taken: boolean; job_id: string | null; name: string | null }> {
+  return request(`/api/jobs/name-check?name=${encodeURIComponent(name)}`)
+}
+
 /** A dataset asked for without its page list. Everything read off that list - how many
  *  pages are checked, how many are live - is still answered, so a caller that reads the
  *  table from listPageRows never needs it. */

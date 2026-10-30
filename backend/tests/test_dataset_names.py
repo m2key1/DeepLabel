@@ -14,6 +14,7 @@ from app.main import app
 
 SECRET = 'test-secret'
 ADMIN = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'admin'}
+BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'member'}
 PNG = b'\x89PNG\r\n\x1a\n'
 PAGE_XML = (
     '<?xml version="1.0" encoding="UTF-8"?>'
@@ -134,3 +135,31 @@ class TestRenaming:
         assert response.status_code == 400
         assert response.json()['detail'] == 'a dataset needs a name'
         assert names(conn) == ['Äpfel']
+
+
+class TestNameCheck:
+    """The form asks before its first step lets on, by the same rule creating applies."""
+
+    def test_a_taken_name_in_any_case_is_taken_and_its_dataset_named(self, api):
+        client, conn = api
+        conn.execute("INSERT INTO jobs (id, name, owner, status) VALUES ('j1', 'Äpfel', 'alice', 'done')")
+        conn.commit()
+
+        assert client.get('/api/jobs/name-check', params={'name': ' äPFEL '}, headers=ADMIN).json() == \
+            {'taken': True, 'job_id': 'j1', 'name': 'Äpfel'}
+        assert client.get('/api/jobs/name-check', params={'name': 'Birnen'}, headers=ADMIN).json() == \
+            {'taken': False, 'job_id': None, 'name': None}
+        assert upload(client, ' äPFEL ').status_code == 409, 'the check and creating agree'
+
+    def test_a_dataset_the_asker_cannot_open_is_taken_but_not_named(self, api):
+        client, conn = api
+        conn.execute("INSERT INTO jobs (id, name, owner, status) VALUES ('j1', 'Private', 'alice', 'done')")
+        conn.commit()
+
+        assert client.get('/api/jobs/name-check', params={'name': 'private'}, headers=BOB).json() == \
+            {'taken': True, 'job_id': None, 'name': None}
+
+    def test_a_blank_name_is_not_taken(self, api):
+        client, _ = api
+        assert client.get('/api/jobs/name-check', params={'name': '  '}, headers=ADMIN).json() == \
+            {'taken': False, 'job_id': None, 'name': None}

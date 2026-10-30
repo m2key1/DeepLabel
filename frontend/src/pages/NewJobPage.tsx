@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
   ALL_USES, PHASE_CAPABILITY, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromIiif,
   createJobFromPath, iiifThumbnailUrl, ApiError, getEnabledTasks, getLayoutTemplates, getMapModels, importJob, isTileTask, listConventionFlags,
-  listModels, uploadJob,
+  checkJobName, listModels, uploadJob,
 } from '../api'
 import type {
   ConventionFlag, DataUse, JobOptions, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, OcrDecode,
@@ -33,6 +33,7 @@ const STEP_LABEL: Record<Step, string> = {
   source: 'Source', pages: 'Pages', run: 'What to run', models: 'Models and conventions', review: 'Review',
 }
 const STEPS = Object.keys(STEP_LABEL) as Step[]
+const NAME_CHECK_MS = 250
 const TASK_LABEL: Record<Task, string> = {
   text: 'Text extraction', map_segmentation: 'Map segmentation', map_lines: 'Line tracing (maps)',
 }
@@ -87,6 +88,26 @@ export function NewJobPage() {
   useCrumb('New job')
   const navigate = useNavigate()
   const [name, setName] = useState('')
+  // Two datasets of one name cannot be told apart in any list, picker or export, so the
+  // name is settled on the first step rather than found out at the last. The server holds
+  // the rule, and knows of datasets this person cannot see.
+  const [nameCheck, setNameCheck] = useState<{
+    name: string; taken: boolean; jobId: string | null; holder: string | null
+  } | null>(null)
+  useEffect(() => {
+    const asked = name.trim()
+    if (asked === '') return
+    let current = true
+    const timer = setTimeout(() => {
+      checkJobName(asked)
+        .then((r) => { if (current) setNameCheck({ name: asked, taken: r.taken, jobId: r.job_id, holder: r.name }) })
+        // Unanswered, the name goes on unchecked: creating applies the same rule.
+        .catch(() => { if (current) setNameCheck({ name: asked, taken: false, jobId: null, holder: null }) })
+    }, NAME_CHECK_MS)
+    return () => { current = false; clearTimeout(timer) }
+  }, [name])
+  const nameChecked = nameCheck !== null && nameCheck.name === name.trim()
+  const nameTaken = nameChecked && nameCheck.taken ? nameCheck : null
   const [task, setTask] = useState<Task>('text')
   // null until the deployment's enabled set arrives; the picker renders nothing until then
   // rather than flashing options that may turn out to be unavailable.
@@ -286,7 +307,11 @@ export function NewJobPage() {
   const stepMissing: Record<Step, string | null> = {
     source: name.trim() === ''
       ? 'Add a job name'
-      : mode === 'upload' && !archive && imageStems.size === 0 && pdfCount === 0
+      : nameTaken
+        ? 'Choose a name no other dataset has'
+        : !nameChecked
+          ? 'Checking the name'
+          : mode === 'upload' && !archive && imageStems.size === 0 && pdfCount === 0
         ? isMap
           ? 'Select at least one tile image'
           : 'Select at least one image or PDF'
@@ -455,8 +480,9 @@ export function NewJobPage() {
         : 'border-transparent text-ink-muted hover:text-ink'
     }`
 
-  const inputClass =
-    'w-full rounded border border-line-strong bg-surface px-2 py-1.5 text-sm focus-visible:border-accent focus:outline-none'
+  const inputBase = 'w-full rounded border bg-surface px-2 py-1.5 text-sm focus:outline-none'
+  const inputClass = `${inputBase} border-line-strong focus-visible:border-accent`
+  const invalidInputClass = `${inputBase} border-danger`
 
   if (!canEdit) return <Navigate to="/" replace />
 
@@ -475,7 +501,19 @@ export function NewJobPage() {
               <label htmlFor="job-name" className="mb-1 block text-sm font-medium text-ink">
                 Job name
               </label>
-              <input id="job-name" value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+              <input id="job-name" value={name} onChange={(e) => setName(e.target.value)}
+                     aria-invalid={!!nameTaken} aria-describedby={nameTaken ? 'job-name-taken' : undefined}
+                     className={nameTaken ? invalidInputClass : inputClass} />
+              {nameTaken && (
+                <p id="job-name-taken" data-testid="job-name-taken" className="mt-1 text-xs text-danger">
+                  {nameTaken.jobId ? (<>
+                    <Link to={`/jobs/${nameTaken.jobId}`} className="font-medium underline">{nameTaken.holder}</Link>
+                    {' '}already exists. Choose another name, or open it to add these pages there.
+                  </>) : (
+                    <>A dataset called {nameTaken.name} already exists. Choose another name.</>
+                  )}
+                </p>
+              )}
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-ink">

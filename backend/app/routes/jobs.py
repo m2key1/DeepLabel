@@ -708,6 +708,17 @@ def _map_job_payload(conn, job: dict, job_id: str) -> dict:
     return job
 
 
+@router.get('/api/jobs/name-check')
+def check_job_name(name: str, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Whether creating a dataset of this name would be refused, asked before the form's
+    first step lets on. The holder is named only to someone who may open it."""
+    holder = ingest.name_holder(conn, name) if name.strip() else None
+    if holder is None or not can_access_job(conn, holder, user):
+        return {'taken': holder is not None, 'job_id': None, 'name': None}
+    held = conn.execute('SELECT name FROM jobs WHERE id = ?', (holder,)).fetchone()['name']
+    return {'taken': True, 'job_id': holder, 'name': held}
+
+
 @router.get('/api/jobs/{job_id}', responses={200: {'model': schemas.JobDetail}})
 def get_job(job_id: str, pages: bool = True, conn=Depends(get_db),
             user: dict = Depends(current_user)):

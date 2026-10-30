@@ -8,6 +8,28 @@ const uploadFiles = (names: string[]) =>
   names.map((name) => ({ name, mimeType: 'image/png', buffer: scanPng() }))
 
 test.describe('Scenario: creating a dataset', () => {
+  test('a name another dataset already has stops the first step, and a new one lets it through',
+    async ({ page }) => {
+      const name = uniqueName('Taken name')
+      const jobId = await seedCompletedJob(name, 1)
+      await page.goto('/new')
+      // Case and surrounding spaces do not make a different name.
+      await page.getByLabel('Job name').fill(`  ${name.toUpperCase()} `)
+      await page.locator('input[type="file"]').setInputFiles(uploadFiles(['page_a.png']))
+      const taken = page.getByTestId('job-name-taken')
+      await expect(taken).toContainText(`${name} already exists`)
+      await expect(taken.getByRole('link', { name })).toHaveAttribute('href', `/jobs/${jobId}`)
+      await expect(page.getByLabel('Job name')).toHaveAttribute('aria-invalid', 'true')
+      await expect(page.getByTestId('wizard-next')).toBeDisabled()
+      await expect(page.getByTestId('wizard-missing')).toHaveText('Choose a name no other dataset has')
+
+      await page.getByLabel('Job name').fill(`${name} second volume`)
+      await expect(page.getByTestId('job-name-taken')).toHaveCount(0)
+      await expect(page.getByLabel('Job name')).toHaveAttribute('aria-invalid', 'false')
+      await page.getByTestId('wizard-next').click()
+      await expect(page.getByTestId('new-job-step')).not.toHaveAttribute('data-step', 'source')
+    })
+
   test('uploading scans creates a job and the pipeline runs to done', async ({ page }) => {
     const name = uniqueName('Upload flow')
     const builtinOcr = (await listRegistryModels()).find((m) => m.task === 'ocr' && m.source === 'backend')!
@@ -70,19 +92,6 @@ test.describe('Scenario: creating a dataset', () => {
     await page.getByRole('button', { name: 'Save' }).click()
     await expect(card.getByText('shared with 1')).toBeVisible()
     await expect.poll(async () => (await getJob(jobId)).shared_with).toEqual([colleague])
-  })
-
-  test('a duplicate dataset name is rejected with a clear error', async ({ page }) => {
-    const name = uniqueName('Duplicate')
-    await seedCompletedJob(name, 1)
-
-    await page.goto('/new')
-    await page.getByLabel('Job name').fill(name)
-    await page.locator('input[type="file"]').setInputFiles(uploadFiles(['again.png']))
-    await createDataset(page)
-
-    await expect(page.getByText(/already exists/)).toBeVisible()
-    await expect(page).toHaveURL(/\/new$/)
   })
 
   test('each step explains what is missing before it lets you on', async ({ page }) => {
