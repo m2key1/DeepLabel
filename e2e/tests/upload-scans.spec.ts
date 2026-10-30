@@ -30,7 +30,9 @@ test.describe('Scenario: what ingest makes of the scans uploaded', () => {
       .map((p) => [p.filename, p.status])).toEqual([['a.png', 'done'], ['b.png', 'unreadable'], ['c.png', 'done']])
     const job = await getJob(jobId)
     const empty = (job.pages as PageRow[])[1]
-    expect(job.unreadable).toEqual([{ id: empty.id, filename: 'b.png', error: 'b.png could not be read: the file is empty' }])
+    expect(job.unreadable).toEqual([
+      { id: empty.id, filename: 'b.png', error: 'b.png could not be read: the file is empty', iiif: false },
+    ])
     expect(job.pages_live).toBe(2)
 
     await expect(page.getByTestId('unreadable-pages')).toHaveText(
