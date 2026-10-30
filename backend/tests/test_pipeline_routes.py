@@ -382,6 +382,21 @@ class TestRerun:
         assert [row['checked'] for row in rows] == [0, 0]
         assert [row['corrected_text'] for row in rows] == [None, None]
 
+    def test_what_a_re_read_clears_stays_in_the_history(self, client, conn):
+        """A re-read that fails or is cancelled leaves the lines blank. The history must
+        still hold the reading, the correction and the check it cleared."""
+        client.post('/api/jobs/j1/rerun', json={'from_phase': 'ocr', 'keep_checked': False}, headers=ADMIN)
+
+        history = [(row['target_id'], row['author'], row['action'], json.loads(row['snapshot']))
+                   for row in conn.execute("SELECT * FROM revisions WHERE target_type = 'line' ORDER BY id")]
+        before = {line_id: snap for line_id, _, action, snap in history if action == 'origin'}
+        assert (before[1]['text'], before[1]['corrected_text'], before[1]['checked']) == \
+            ('Machine read', 'Corrected by hand', 1)
+        assert before[2]['text'] == 'Second line'
+        cleared = [(line_id, author, snap['text'], snap['checked'])
+                   for line_id, author, action, snap in history if action == 'update']
+        assert cleared == [(1, 'system:rerun@root', None, 0), (2, 'system:rerun@root', None, 0)]
+
     def test_re_running_line_detection_takes_the_lines_out_of_play(self, client, conn):
         client.post('/api/jobs/j1/rerun', json={'from_phase': 'lines'}, headers=ADMIN)
 

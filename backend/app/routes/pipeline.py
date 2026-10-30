@@ -384,9 +384,15 @@ def rerun_one(conn, job_id: str, from_phase: str, force: bool, user: str,
         # A checked line is somebody's settled reading; clearing it is the explicit case,
         # not the default one.
         spare = ' AND checked = 0' if body.keep_checked else ''
+        scope = f'deleted = 0 AND element_id IN (SELECT id FROM elements WHERE page_id IN ({pages})){spare}'
+        author = f'system:rerun@{user}'
+        cleared = [r['id'] for r in conn.execute(f'SELECT id FROM lines WHERE {scope}', (job_id,))]
+        for line_id in cleared:
+            store.ensure_origin(conn, 'line', line_id, author)
         conn.execute('UPDATE lines SET text = NULL, confidence = NULL, conf_profile = NULL, '
-                     'corrected_text = NULL, corrected_by = NULL, checked = 0 WHERE element_id IN '
-                     f'(SELECT id FROM elements WHERE page_id IN ({pages})){spare}', (job_id,))
+                     f'corrected_text = NULL, corrected_by = NULL, checked = 0 WHERE {scope}', (job_id,))
+        for line_id in cleared:
+            store.log_line(conn, line_id, author, 'update')
     elif not realign:
         # Soft-delete rather than DELETE, for the same reason the boxes are: detection
         # that finds fewer lines than it replaced would otherwise take every correction
