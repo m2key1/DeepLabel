@@ -1120,8 +1120,9 @@ height the model reads or a page fitted into `max_side`; `extra` offers the trai
 transform classes under the name a spec carries them by (`module.Class`).
 `deeplabel_backend.rfdetr_augmentation` converts a spec to RF-DETR's `aug_config` and back,
 refusing what RF-DETR would not train as chosen: a `OneOf` or `Sequential` below p 1 (it runs
-them every time), a step that moves the page without moving its boxes or masks, and a step
-that is not albumentations' own. `GET /v1/train/augmentations` answers the catalogue
+them every time), a step that moves the page without moving its boxes or masks, a step
+that is not albumentations' own, and a step chosen twice (its `aug_config` is a dict keyed
+by step name). `GET /v1/train/augmentations` answers the catalogue
 (`library`, `version`, `transforms`) and, as `default`, the stack the trainer applies when
 a run names none, serialised as albumentations does; the training form offers it as "the
 model's own".
