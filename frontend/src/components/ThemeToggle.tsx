@@ -1,6 +1,5 @@
 import { useSyncExternalStore } from 'react'
 import { Button } from './ui/Button'
-import { Segmented } from './ui/Segmented'
 import { ThemeIcon } from './icons'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
@@ -18,8 +17,7 @@ function applyTheme(mode: ThemeMode) {
   document.documentElement.classList.toggle('dark', dark)
 }
 
-// One mode for the whole app, so every switch that shows it - the profile's, the top
-// bar's - and the shortcut that cycles it agree.
+// One mode for the whole app, so the top bar's switch and the shortcut that cycles it agree.
 let current: ThemeMode = 'system'
 const listeners = new Set<() => void>()
 
@@ -61,18 +59,5 @@ export function ThemeToggle() {
             title={`Theme: ${LABELS[mode]} - click for ${LABELS[NEXT[mode]]}`} aria-label="Theme">
       <ThemeIcon mode={mode} />
     </Button>
-  )
-}
-
-export function ThemeChoice() {
-  const mode = useTheme()
-  return (
-    <div data-testid="theme-choice" role="group" aria-label="Theme">
-      <Segmented
-        value={mode}
-        onChange={setTheme}
-        options={(Object.keys(LABELS) as ThemeMode[]).map((value) => ({ value, label: LABELS[value] }))}
-      />
-    </div>
   )
 }

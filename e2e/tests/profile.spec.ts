@@ -172,7 +172,9 @@ test.describe('Scenario: a person\'s profile', () => {
       await theirs.getByTestId('user-menu').click()
       await expect(theirs).toHaveURL(new RegExp(`/people/${colleague}$`))
       await expect(theirs.getByTestId('section-nav')).toBeVisible()
-      await expect(theirs.getByRole('button', { name: 'Log out' })).toBeVisible()
+      // Log out closes the settings rail, not the header.
+      await expect(theirs.getByTestId('section-nav').getByRole('button').last()).toHaveText('Log out')
+      await expect(theirs.getByTestId('profile-header').getByRole('button', { name: 'Log out' })).toHaveCount(0)
       await context.close()
 
       // And an admin reads the email a colleague may not.
@@ -201,7 +203,7 @@ test.describe('Scenario: a person\'s profile', () => {
     await expect(page).toHaveURL(/\/people\/dev\?section=tokens$/)
   })
 
-  test('the top bar button cycles the theme on every page, and the profile switch follows it',
+  test('the top bar button cycles the theme on every page, and is the only theme switch',
     async ({ page }) => {
       await page.goto('/')
       await page.evaluate(() => localStorage.removeItem('deeplabel.theme'))
@@ -216,27 +218,18 @@ test.describe('Scenario: a person\'s profile', () => {
       await expect(page.locator('html')).toHaveClass(/\bdark\b/)
       expect(await page.evaluate(() => localStorage.getItem('deeplabel.theme'))).toBe('dark')
 
+      // The choice is kept across pages, and your profile has no second switch for it.
       await page.getByTestId('user-menu').click()
-      await expect(page.getByTestId('theme-choice').getByRole('button', { name: 'Dark' }))
-        .toHaveAttribute('aria-pressed', 'true')
+      await expect(page.getByTestId('profile-header')).toBeVisible()
+      await expect(page.locator('html')).toHaveClass(/\bdark\b/)
+      await expect(page.getByLabel('Theme', { exact: true })).toHaveCount(1)
+      await expect(page.getByRole('banner').getByLabel('Theme', { exact: true })).toBeVisible()
+      await expect(toggle).toHaveAttribute('data-mode', 'dark')
       await toggle.click()
-      await expect(page.getByTestId('theme-choice').getByRole('button', { name: 'Auto' }))
-        .toHaveAttribute('aria-pressed', 'true')
+      await expect(toggle).toHaveAttribute('data-mode', 'system')
+      expect(await page.evaluate(() => localStorage.getItem('deeplabel.theme'))).toBe('system')
       await page.evaluate(() => localStorage.removeItem('deeplabel.theme'))
     })
-
-  test('the theme switch lives on your profile and its choice is kept', async ({ page }) => {
-    await page.goto('/people/dev')
-    const theme = page.getByTestId('theme-choice')
-    await theme.getByRole('button', { name: 'Dark' }).click()
-    await expect(page.locator('html')).toHaveClass(/\bdark\b/)
-    await expect(theme.getByRole('button', { name: 'Dark' })).toHaveAttribute('aria-pressed', 'true')
-    expect(await page.evaluate(() => localStorage.getItem('deeplabel.theme'))).toBe('dark')
-    await theme.getByRole('button', { name: 'Light' }).click()
-    await expect(page.locator('html')).not.toHaveClass(/\bdark\b/)
-    expect(await page.evaluate(() => localStorage.getItem('deeplabel.theme'))).toBe('light')
-    await page.evaluate(() => localStorage.removeItem('deeplabel.theme'))
-  })
 })
 
 test.describe('Scenario: cropping your picture', () => {

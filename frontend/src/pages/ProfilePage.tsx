@@ -10,16 +10,14 @@ import { useSettings } from '../settings'
 import { formatRelative, parseStamp } from '../util'
 import { profileSummary } from '../components/users/profileSummary'
 import { useCrumb } from '../components/NavBar'
-import { ThemeChoice } from '../components/ThemeToggle'
 import { useSettingsPanels } from '../components/settings/SettingsPanels'
 import { ActivityCalendar } from '../components/users/ActivityCalendar'
 import { ProfilePicture } from '../components/users/ProfilePicture'
 import { Avatar } from '../components/ui/Avatar'
 import { Badge } from '../components/ui/Badge'
-import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { Section } from '../components/ui/Section'
-import { SectionNav } from '../components/ui/SectionNav'
+import { SectionNav, SectionNavAction } from '../components/ui/SectionNav'
 import { StatRow, StatTile } from '../components/ui/StatTile'
 import { pageShell } from '../components/ui/page'
 import { NotFoundPage } from './NotFoundPage'
@@ -97,35 +95,32 @@ function Header({ person, own, groups }: { person: Person; own: boolean; groups:
           </div>
         )}
       </div>
-      {own && <OwnControls />}
+      {own && <PresenceState />}
     </header>
   )
 }
 
-function OwnControls() {
+function PresenceState() {
   const { user, canEdit } = useAuth()
   const { shareActivity } = useSettings()
   // Being seen is the default, so say so where the person looks for themselves.
   const visible = shareActivity && canEdit
-  const onLogout = async () => {
-    await logout().catch(() => undefined)
-    window.location.href = '/api/login'
-  }
   return (
-    <div className="flex flex-col items-end gap-2">
-      <ThemeChoice />
-      <Link
-        to={profilePath(user, 'together')}
-        data-testid="visibility-state"
-        title={canEdit ? 'Change under Working together' : 'A read-only account is never broadcast'}
-        className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-accent-ink"
-      >
-        <span className={`h-1.5 w-1.5 rounded-full ${visible ? 'bg-ok' : 'bg-warn'}`} />
-        {visible ? 'Online' : 'Hidden'}
-      </Link>
-      <Button size="xs" onClick={() => void onLogout()}>Log out</Button>
-    </div>
+    <Link
+      to={profilePath(user, 'together')}
+      data-testid="visibility-state"
+      title={canEdit ? 'Change under Working together' : 'A read-only account is never broadcast'}
+      className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-accent-ink"
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${visible ? 'bg-ok' : 'bg-warn'}`} />
+      {visible ? 'Online' : 'Hidden'}
+    </Link>
   )
+}
+
+async function logOut() {
+  await logout().catch(() => undefined)
+  window.location.href = '/api/login'
 }
 
 // The settings read in groups by what they are about, under the profile itself.
@@ -149,6 +144,7 @@ function OwnTabs({ profile }: { profile: PersonProfile | null }) {
           items={tabs.map(({ id, label }) => ({ id, label, group: SECTION_GROUP[id] }))}
           active={active}
           onSelect={(id) => setParams(id === OVERVIEW ? {} : { section: id }, { replace: true })}
+          footer={<SectionNavAction data-testid="logout" onClick={() => void logOut()}>Log out</SectionNavAction>}
         />
       </div>
       <div className="min-w-0 flex-1">{tabs.find((t) => t.id === active)?.node}</div>
