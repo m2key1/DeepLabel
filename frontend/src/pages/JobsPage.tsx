@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   bulkMove, bulkPreview, bulkRedetect, bulkReocr, bulkRerun, cancelJob, createGroup, deleteGroup,
   deleteJob, downloadMaskSet, getNewerModels, getUserNames, isTileTask, listGroups, listJobs, renameGroup,
-  renameJob, setJobNote,
+  setJobNote,
 } from '../api'
 import type { BulkAction, BulkOutcome, BulkPreview, Group, Job, NewerModelOffer } from '../api'
 import { useAuth } from '../auth'
@@ -16,7 +16,7 @@ import { COLUMNS, DEFAULT_COLUMNS, NAME_MIN, columnWidths, columnsForWidth, load
   phasesOf, saveColumns }
   from '../components/job/columns'
 import { ShareDialog } from '../components/job/ShareDialog'
-import { ProcessingDialog } from '../components/job/ProcessingDialog'
+import { MapSettingsDialog } from '../components/job/MapSettingsDialog'
 import { NewerModelsDialog } from '../components/job/NewerModelsDialog'
 import { GroupSettingsDialog } from '../components/job/GroupSettingsDialog'
 import { MoveToGroupDialog } from '../components/job/MoveToGroupDialog'
@@ -25,7 +25,7 @@ import { sharedPrefix } from '../components/job/sharedPrefix'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
 import { StatusBadge } from '../components/StatusBadge'
 import { Button, GroupButton } from '../components/ui/Button'
-import { Check, Input } from '../components/ui/Field'
+import { Check } from '../components/ui/Field'
 import { NoteTag } from '../components/NoteTag'
 import { TestDataChip } from '../components/TestPage'
 import { CaretIcon, CheckIcon, FilterIcon } from '../components/icons'
@@ -211,8 +211,6 @@ export function JobsPage() {
   useAutoClear(error, setError)
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [infoJob, setInfoJob] = useState<string | null>(null)
-  const [renaming, setRenaming] = useState<string | null>(null)
-  const [draftName, setDraftName] = useState('')
   // Folded sections live with the account, so a list tidied here opens tidy elsewhere -
   // and locally too, so a click folds at once rather than after a round trip.
   const { collapsedGroups, save: saveSettings } = useSettings()
@@ -222,7 +220,7 @@ export function JobsPage() {
   const [groupDraft, setGroupDraft] = useState('')
   const [renamingGroup, setRenamingGroup] = useState<number | null>(null)
   const [moveJob, setMoveJob] = useState<Job | null>(null)
-  const [processingJob, setProcessingJob] = useState<Job | null>(null)
+  const [mapSettingsJob, setMapSettingsJob] = useState<Job | null>(null)
   const [newerFor, setNewerFor] = useState<{ job: Job; offers: NewerModelOffer[] } | null>(null)
   const [shareTarget, setShareTarget] = useState<
     { kind: 'dataset'; job: Job } | { kind: 'group'; group: Group } | null>(null)
@@ -494,24 +492,6 @@ export function JobsPage() {
       return next
     })
 
-  const startRename = (job: Job) => {
-    setError(null)
-    setDraftName(job.name)
-    setRenaming(job.id)
-  }
-
-  const saveRename = async (job: Job) => {
-    const name = draftName.trim()
-    setRenaming(null)
-    if (!name || name === job.name) return
-    try {
-      await renameJob(job.id, name)
-      refresh()
-    } catch (e) {
-      setError((e as Error).message)
-    }
-  }
-
   const onDelete = async (job: Job) => {
     if (!confirm(`Delete dataset "${job.name}" and all its data?`)) return
     try {
@@ -681,31 +661,15 @@ export function JobsPage() {
     onToggleDownload: () => showCardPopover('download', downloadMenu === job.id ? null : job.id),
     onToggleMenu: () => showCardPopover('menu', openMenu === job.id ? null : job.id),
     onMasks: (fused: boolean) => void downloadMasks(job.id, fused),
-    onRename: () => startRename(job),
     onMove: () => setMoveJob(job),
     onShare: () => setShareTarget({ kind: 'dataset', job }),
-    // A map dataset has only its tile size left to change; a text one, everything it was made with.
-    onSettings: () => (isTileTask(job.task) ? setProcessingJob(job) : navigate(`/jobs/${job.id}/settings`)),
+    // A map dataset has only its name and tile size left to change; a text one, everything it was made with.
+    onSettings: () => (isTileTask(job.task) ? setMapSettingsJob(job) : navigate(`/jobs/${job.id}/settings`)),
     onCancel: () => void onCancel(job),
     onDelete: () => void onDelete(job),
   })
 
-  const nameCell = (job: Job, prefix = '') =>
-    renaming === job.id ? (
-      <Input
-        autoFocus
-        size="xs"
-        aria-label="Dataset name"
-        value={draftName}
-        onChange={(e) => setDraftName(e.target.value)}
-        onBlur={() => saveRename(job)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') saveRename(job)
-          else if (e.key === 'Escape') setRenaming(null)
-        }}
-        className="min-w-0 flex-1 font-medium"
-      />
-    ) : (
+  const nameCell = (job: Job, prefix = '') => (
       <Link to={`/jobs/${job.id}`} title={job.name}
             className="min-w-0 truncate font-medium hover:text-accent-ink">
         {prefix && job.name.startsWith(prefix)
@@ -801,7 +765,7 @@ export function JobsPage() {
   const jobRow = (job: Job, prefix = '') => (
     // An explicit background: the name cell pins itself over the scrolled columns and
     // inherits this, and transparent they would show through it.
-    <tr key={job.id} data-testid="job-card" data-status={job.status} {...dragSource(job.id, renaming !== job.id)}
+    <tr key={job.id} data-testid="job-card" data-status={job.status} {...dragSource(job.id)}
         className={`h-9 border-b border-line/60 border-l-4 ${surface(job)} hover:bg-ground ${
           STATUS_ACCENT[STATUS_TONE[job.status]]}`}>
       <td className="w-8 pl-2">{selectBox(job)}</td>
@@ -836,7 +800,7 @@ export function JobsPage() {
   const jobCard = (job: Job) => {
     const active = job.status === 'queued' || job.status === 'running'
     return (
-      <div key={job.id} data-testid="job-card" data-status={job.status} {...dragSource(job.id, renaming !== job.id)}
+      <div key={job.id} data-testid="job-card" data-status={job.status} {...dragSource(job.id)}
            className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-line border-l-4 ${
              surface(job)} px-3 py-2 ${STATUS_ACCENT[STATUS_TONE[job.status]]}`}>
         <div className="flex min-w-40 flex-1 items-center gap-2">
@@ -1388,11 +1352,11 @@ export function JobsPage() {
         <NewerModelsDialog jobId={newerFor.job.id} name={newerFor.job.name} offers={newerFor.offers}
                            onClose={() => setNewerFor(null)} onStarted={refresh} onError={setError} />
       )}
-      {processingJob && (
-        <ProcessingDialog
-          job={processingJob}
-          onClose={() => setProcessingJob(null)}
-          onSaved={() => offerNewer(processingJob)}
+      {mapSettingsJob && (
+        <MapSettingsDialog
+          job={mapSettingsJob}
+          onClose={() => setMapSettingsJob(null)}
+          onSaved={() => offerNewer(mapSettingsJob)}
           onError={setError}
         />
       )}

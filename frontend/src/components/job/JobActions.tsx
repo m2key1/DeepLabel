@@ -26,7 +26,6 @@ interface JobActionsProps {
   onToggleDownload: () => void
   onToggleMenu: () => void
   onMasks: (fused: boolean) => void
-  onRename: () => void
   onMove: () => void
   onShare: () => void
   /** The dataset's creation settings, to change them. */
@@ -145,14 +144,11 @@ export function JobActions(p: JobActionsProps) {
           {p.openMenu && (
             <div ref={menu.ref}
                  className={`${menu.className} right-0 z-10 w-40 overflow-hidden ${popoverChrome} py-1`}>
-              <button onClick={p.onRename} className={menuItem}>Rename</button>
               <button onClick={p.onMove} className={menuItem}>Move to group…</button>
               <button onClick={p.onShare} className={menuItem}>Share…</button>
-              {!active && (!tiles || job.run_tile) && (
-                <button onClick={p.onSettings} data-testid="settings-open" className={menuItem}>
-                  Settings…
-                </button>
-              )}
+              <button onClick={p.onSettings} data-testid="settings-open" className={menuItem}>
+                Settings…
+              </button>
               {active && <button onClick={p.onCancel} className={menuItem}>Cancel run</button>}
               {can('dataset.delete') && (
                 <button onClick={p.onDelete} className={`${menuItem} text-danger hover:text-danger`}>

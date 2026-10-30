@@ -47,10 +47,10 @@ export function useDatasetDrag(
     setOver(null)
   }
 
-  const dragSource = (jobId: string, enabled = true) => ({
-    draggable: canDrag && enabled,
+  const dragSource = (jobId: string) => ({
+    draggable: canDrag,
     onDragStart: (e: DragEvent) => {
-      if (!canDrag || !enabled) return
+      if (!canDrag) return
       const ids = selected.has(jobId) ? [...selected] : [jobId]
       e.dataTransfer.setData(DATASETS_MIME, JSON.stringify(ids))
       e.dataTransfer.effectAllowed = 'move'

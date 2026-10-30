@@ -62,22 +62,57 @@ test.describe('Scenario: changing how a dataset is processed', () => {
     }).toEqual({ lines: false, ocr: false })
   })
 
-  test('a map dataset keeps only its tile size to set, and a text one gets the whole form', async ({ page }) => {
+  test('a map dataset keeps only its name to set, and a text one gets the whole form', async ({ page }) => {
     const textName = uniqueName('Has text phases')
     const mapName = uniqueName('Has no text phases')
     await seedCompletedJob(textName, 1)
-    await seedMapJob(mapName, 1)
+    const mapId = await seedMapJob(mapName, 1)
 
-    await page.goto('/')
-    // A tile dataset has no layout, lines or OCR to arrange, and the server refuses the
-    // patch outright; one uploaded as ready-made tiles has nothing left to set at all.
+    // Uploaded as ready-made tiles, a map dataset has no tile size to change, only its name.
+    await page.goto(`/?q=${encodeURIComponent(mapName)}`)
     const map = page.getByTestId('job-card').filter({ hasText: mapName })
     await map.getByTestId('job-menu').click()
-    await expect(map.getByTestId('settings-open')).toHaveCount(0)
-    await expect(map.getByRole('button', { name: 'Share…' })).toBeVisible()
+    await map.getByTestId('settings-open').click()
+    await expect(page.getByLabel('Name')).toHaveValue(mapName)
+    await expect(page.getByTestId('processing-tile-size')).toHaveCount(0)
+    await page.getByLabel('Name').fill(`${mapName} renamed`)
+    await page.getByTestId('processing-save').click()
+    await expect.poll(async () => (await getJob(mapId)).name).toBe(`${mapName} renamed`)
 
     await openSettings(page, textName)
     await expect(page.getByRole('heading', { name: `Settings of ${textName}` })).toBeVisible()
+    await expect(page.getByTestId('processing-tile-size')).toHaveCount(0)
+    await expect(phaseBox(page, 'layout')).toBeVisible()
+  })
+
+  test('a dataset is renamed in its settings, and not to a name another dataset has', async ({ page }) => {
+    const name = uniqueName('Renamed in settings')
+    const other = uniqueName('Already named')
+    const jobId = await seedCompletedJob(name, 1)
+    const otherId = await seedCompletedJob(other, 1)
+
+    await openSettings(page, name)
+    const field = page.getByLabel('Job name')
+    await expect(field).toHaveValue(name)
+    // Its own name, in other letters, is still its own.
+    await field.fill(name.toUpperCase())
+    await expect(page.getByTestId('wizard-missing')).toHaveCount(0)
+    await expect(page.getByTestId('wizard-next')).toBeEnabled()
+
+    await field.fill(` ${other.toLowerCase()} `)
+    const taken = page.getByTestId('job-name-taken')
+    await expect(taken).toContainText(`${other} already exists. Choose another name.`)
+    await expect(taken.getByRole('link', { name: other })).toHaveAttribute('href', `/jobs/${otherId}`)
+    await expect(page.getByTestId('wizard-missing')).toHaveText('Choose a name no other dataset has')
+    await expect(page.getByTestId('wizard-next')).toBeDisabled()
+
+    await field.fill(`${name} second volume`)
+    await expect(taken).toHaveCount(0)
+    await saveSettings(page)
+    await expect.poll(async () => (await getJob(jobId)).name).toBe(`${name} second volume`)
+    expect((await getJob(otherId)).name).toBe(other)
+    // Nothing but the name changed.
+    expect(await getJob(jobId)).toMatchObject({ line_mode: 'per_crop', run_layout: true, run_ocr: true })
   })
 })
 

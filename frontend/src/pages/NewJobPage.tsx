@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
   ALL_USES, PHASE_CAPABILITY, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromIiif,
   createJobFromPath, iiifThumbnailUrl, ApiError, getEnabledTasks, getLayoutTemplates, getMapModels, importJob, isTileTask, listConventionFlags,
-  checkJobName, listModels, listUsableLlmModels, reocr, reocrPreview, setDataUse as saveDataUse, setJobLlmSettings,
+  checkJobName, listModels, listUsableLlmModels, renameJob, reocr, reocrPreview, setDataUse as saveDataUse, setJobLlmSettings,
   setJobModels, setJobProcessing, setNewPagesTest, uploadJob,
 } from '../api'
 import type {
@@ -109,7 +109,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   } | null>(null)
   useEffect(() => {
     const asked = name.trim()
-    if (asked === '' || edit) return
+    if (asked === '' || asked === edit?.name) return
     let current = true
     const timer = setTimeout(() => {
       checkJobName(asked)
@@ -119,8 +119,9 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
     }, NAME_CHECK_MS)
     return () => { current = false; clearTimeout(timer) }
   }, [name])
-  const nameChecked = !!edit || (nameCheck !== null && nameCheck.name === name.trim())
-  const nameTaken = !edit && nameChecked && nameCheck?.taken ? nameCheck : null
+  const nameChecked = name.trim() === edit?.name || (nameCheck !== null && nameCheck.name === name.trim())
+  const nameTaken = nameCheck?.taken && nameCheck.name === name.trim() && nameCheck.jobId !== edit?.id
+    ? nameCheck : null
   const [task, setTask] = useState<Task>(edit?.task ?? 'text')
   // null until the deployment's enabled set arrives; the picker renders nothing until then
   // rather than flashing options that may turn out to be unavailable.
@@ -333,14 +334,14 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   const previous = at > 0 ? route[at - 1] : null
   const next = at >= 0 && at < route.length - 1 ? route[at + 1] : null
 
+  const nameMissing = name.trim() === ''
+    ? 'Add a job name'
+    : nameTaken
+      ? 'Choose a name no other dataset has'
+      : !nameChecked ? 'Checking the name' : null
   const stepMissing: Record<Step, string | null> = {
-    source: name.trim() === ''
-      ? 'Add a job name'
-      : nameTaken
-        ? 'Choose a name no other dataset has'
-        : !nameChecked
-          ? 'Checking the name'
-          : mode === 'upload' && !archive && imageStems.size === 0 && pdfCount === 0
+    source: nameMissing
+      ?? (mode === 'upload' && !archive && imageStems.size === 0 && pdfCount === 0
         ? isMap
           ? 'Select at least one tile image'
           : 'Select at least one image or PDF'
@@ -348,7 +349,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
           ? 'Enter an absolute server directory path'
           : mode === 'iiif' && manifest === null
             ? 'Load a IIIF manifest'
-            : null,
+            : null),
     pages: !applies.pages
       ? null
       : manifest
@@ -356,7 +357,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
           ? 'Leave at least one page in'
           : canvasesKept.length > manifest.max_pages ? `Choose at most ${manifest.max_pages} pages` : null
         : pageFiles.every((f) => excluded.has(f)) ? 'Leave at least one page in' : null,
-    run: applies.run && isMap && effectivePhases.tile && !tileSizeValid
+    run: edit && nameMissing ? nameMissing : applies.run && isMap && effectivePhases.tile && !tileSizeValid
       ? `Choose a tile size from ${TILE_SIZE_MIN} to ${TILE_SIZE_MAX} px`
       : null,
     models: null,
@@ -370,7 +371,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
     ? 'default'
     : models.find((m) => m.id === Number(picks[key]))?.name ?? 'default'
   const summary: SummaryRow[] = [
-    { label: 'Name', value: name.trim() || '-', step: edit ? undefined : 'source' },
+    { label: 'Name', value: name.trim() || '-', step: edit ? 'run' : 'source' },
     { label: 'Task', value: TASK_LABEL[task], step: edit ? undefined : 'source' },
     ...(edit ? [] : [{
       label: 'Source',
@@ -446,6 +447,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   /** Each changed setting through the endpoint that owns it, and nothing unchanged: what a
    *  run uses cannot be changed while one is going, but data use can. */
   const saveSettings = async (job: JobWithoutPages) => {
+    if (name.trim() !== job.name) await renameJob(job.id, name.trim())
     const processing = {
       ...(phases.layout !== job.run_layout && { run_layout: phases.layout }),
       ...(phases.lines !== job.run_lines && { run_lines: phases.lines }),
@@ -563,6 +565,27 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   const inputClass = `${inputBase} border-line-strong focus-visible:border-accent`
   const invalidInputClass = `${inputBase} border-danger`
 
+  const nameField = (
+    <div>
+      <label htmlFor="job-name" className="mb-1 block text-sm font-medium text-ink">
+        Job name
+      </label>
+      <input id="job-name" value={name} onChange={(e) => setName(e.target.value)}
+             aria-invalid={!!nameTaken} aria-describedby={nameTaken ? 'job-name-taken' : undefined}
+             className={nameTaken ? invalidInputClass : inputClass} />
+      {nameTaken && (
+        <p id="job-name-taken" data-testid="job-name-taken" className="mt-1 text-xs text-danger">
+          {nameTaken.jobId ? (<>
+            <Link to={`/jobs/${nameTaken.jobId}`} className="font-medium underline">{nameTaken.holder}</Link>
+            {' '}already exists. {edit ? 'Choose another name.' : 'Choose another name, or open it to add these pages there.'}
+          </>) : (
+            <>A dataset called {nameTaken.name} already exists. Choose another name.</>
+          )}
+        </p>
+      )}
+    </div>
+  )
+
   if (!canEdit) return <Navigate to={edit ? `/jobs/${edit.id}` : '/'} replace />
 
   return (
@@ -585,24 +608,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <form onSubmit={onSubmit} className="space-y-4" data-testid="new-job-step" data-step={step}>
         {step === 'source' && (<>
-            <div>
-              <label htmlFor="job-name" className="mb-1 block text-sm font-medium text-ink">
-                Job name
-              </label>
-              <input id="job-name" value={name} onChange={(e) => setName(e.target.value)}
-                     aria-invalid={!!nameTaken} aria-describedby={nameTaken ? 'job-name-taken' : undefined}
-                     className={nameTaken ? invalidInputClass : inputClass} />
-              {nameTaken && (
-                <p id="job-name-taken" data-testid="job-name-taken" className="mt-1 text-xs text-danger">
-                  {nameTaken.jobId ? (<>
-                    <Link to={`/jobs/${nameTaken.jobId}`} className="font-medium underline">{nameTaken.holder}</Link>
-                    {' '}already exists. Choose another name, or open it to add these pages there.
-                  </>) : (
-                    <>A dataset called {nameTaken.name} already exists. Choose another name.</>
-                  )}
-                </p>
-              )}
-            </div>
+            {nameField}
             <div>
               <label className="mb-1 block text-sm font-medium text-ink">
                 Annotation task
@@ -919,6 +925,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
                         ? "A PDF's pages are split once it is uploaded, so it is taken whole here." : undefined} />
         ))}
         {step === 'run' && (<>
+            {edit && nameField}
             {!isMap && (
             /* An imported dataset is already segmented and transcribed, so every
                recognition choice below would be meaningless for it. */

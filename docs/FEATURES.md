@@ -171,11 +171,12 @@ Open **Settings** from a dataset's **⋯** menu, on its page or in the dataset l
 how it is processed: the New job steps open filled in as the dataset stands, without the
 source and pages. Changes apply to the next run; nothing already recognised is thrown away.
 
+- Rename the dataset on the first step; a name another dataset has is refused there.
 - Choose the phases, the line detection, whether layout elements are boxes or polygons, the
   page structure used for reading order, the models, decoding and convention flags, the
   language models that read it, and its data use.
 - When the OCR settings change, Review offers to re-read the unchecked lines at once.
-- A map dataset that cut its own tiles keeps a smaller **Settings** with only its tile size.
+- A map dataset keeps a smaller **Settings**: its name, and its tile size if it cut its own tiles.
 - **Re-run** a phase over the dataset (from the **Run** menu on its page), a selection of
   pages, or a single page. The dialog says what will be replaced before it runs.
 - When a step of a dataset was run with a model that has since been replaced (by a new

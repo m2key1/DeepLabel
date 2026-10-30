@@ -470,7 +470,7 @@ test.describe('Scenario: downloading from the list', () => {
     await expect(card.getByTestId('export-menu')).toHaveCount(0)
     await card.getByTestId('job-menu').click()
     await expect(card.getByTestId('job-info')).toHaveCount(0)
-    await expect(card.getByRole('button', { name: 'Rename' })).toBeVisible()
+    await expect(card.getByTestId('settings-open')).toBeVisible()
   })
 })
 

@@ -34,7 +34,7 @@ test.describe('Scenario: a capability the admin page offers is one the backend e
       await memberPage.goto('/')
       const row = memberPage.getByTestId('job-card').filter({ hasText: name })
       await row.getByTestId('job-menu').click()
-      await expect(memberPage.getByRole('button', { name: 'Rename', exact: true })).toBeVisible()
+      await expect(row.getByTestId('settings-open')).toBeVisible()
       await expect(memberPage.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0)
 
       // And asking anyway is refused, and the dataset is still there.
