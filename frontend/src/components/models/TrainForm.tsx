@@ -374,6 +374,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
   const setKnob = (key: string, value: string) => setTuned((prev) => ({ ...prev, [key]: value }))
   const totalPages = [...chosen].reduce((sum, id) => sum + (trainPages[id] ?? 0), 0)
   const testCandidates = (jobs ?? []).filter((j) => (j.test_pages ?? 0) > 0 && j.data_use.test)
+  const allTestsChosen = testCandidates.length > 0 && testCandidates.every((j) => testIds.includes(j.id))
   const leftOutPages = leftOut.reduce((sum, row) => sum + row.pages, 0)
   const nameTaken = takenNames.some((n) => n.trim().toLowerCase() === name.trim().toLowerCase())
   // The stored batch was measured for the hardware that run used, so a rerun on other
@@ -556,8 +557,15 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
         </div>
 
         <div>
-        <fieldset data-testid="training-test-sets">
+        <fieldset data-testid="training-test-sets" className="relative">
         <legend className={labelClass}>Test sets</legend>
+        {testCandidates.length > 1 && (
+          <button type="button" data-testid="test-sets-select-all"
+                  onClick={() => setTestIds(allTestsChosen ? [] : testCandidates.map((j) => j.id))}
+                  className="absolute right-0 top-0 text-xs font-medium text-accent-ink hover:underline">
+            {allTestsChosen ? 'Clear all' : 'Select all'}
+          </button>
+        )}
         <p className="mb-1 text-xs text-ink-muted">
           Optional - the test pages of datasets, never trained on and scored with the base
           and the new model once the training finishes.

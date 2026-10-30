@@ -53,6 +53,9 @@ export function DatasetPicker({ jobs, groups, counts, chosen, onToggle, onSetMan
   const matches = (job: Job) => usable(job) && (!needle || job.name.toLowerCase().includes(needle))
   const hidden = (jobs ?? []).filter((job) => !usable(job)).length
   const picks = (jobs ?? []).filter((job) => chosen.has(job.id))
+  // What a search shows is what Select all means, so a filtered list can be taken whole.
+  const selectable = (jobs ?? []).filter((job) => matches(job) && counts[job.id] !== undefined)
+  const allChosen = selectable.length > 0 && selectable.every((job) => chosen.has(job.id))
 
   return (
     <div className="mb-3">
@@ -66,6 +69,13 @@ export function DatasetPicker({ jobs, groups, counts, chosen, onToggle, onSetMan
           onChange={(e) => setQuery(e.target.value)}
           className="min-w-0 flex-1"
         />
+        {selectable.length > 1 && (
+          <button type="button" data-testid="datasets-select-all"
+                  onClick={() => onSetMany(selectable.map((j) => j.id), !allChosen)}
+                  className="shrink-0 text-xs font-medium text-accent-ink hover:underline">
+            {allChosen ? 'Clear all' : needle ? `Select all ${selectable.length}` : 'Select all'}
+          </button>
+        )}
         {hidden > 0 && (
           <span data-testid="datasets-hidden" className="shrink-0 text-[11px] text-ink-subtle">
             {hidden} hidden: nothing to use
