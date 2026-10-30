@@ -43,24 +43,37 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
     }
   }
 
-  const form = (
-    <div data-testid="convention-form" className="space-y-1.5">
-      {draft?.adding ? (
-        <Input size="xs" aria-label="Flag name" placeholder="name_as_models_use_it" value={draft.name}
-               onChange={(e) => setDraft({ ...draft, name: e.target.value })} className="font-mono" />
+  const fieldLabel = 'mb-1 block text-xs font-medium text-ink'
+  const form = draft && (
+    <div data-testid="convention-form" className={`max-w-2xl space-y-3 ${draft.adding ? '' : 'py-1'}`}>
+      {draft.adding ? (
+        <label className="block">
+          <span className={fieldLabel}>Name</span>
+          <Input aria-label="Flag name" placeholder="name_as_models_use_it" value={draft.name} autoFocus
+                 onChange={(e) => setDraft({ ...draft, name: e.target.value })} className="w-full font-mono" />
+          <span className="mt-1 block text-xs text-ink-subtle">Exactly as the models name it - it cannot be changed later.</span>
+        </label>
       ) : (
-        <div className="font-mono text-[11px] text-ink-subtle">{draft?.name}</div>
+        <div className="text-xs text-ink-muted">Editing <code className="font-mono text-ink">{draft.name}</code></div>
       )}
-      <Input size="xs" aria-label="Label" placeholder="Keep long s" value={draft?.label ?? ''}
-             onChange={(e) => draft && setDraft({ ...draft, label: e.target.value })} />
-      <Textarea size="xs" aria-label="Description" rows={2}
-                placeholder="What the rule asks for, with an example: ſ is transcribed as ſ, not s."
-                value={draft?.description ?? ''}
-                onChange={(e) => draft && setDraft({ ...draft, description: e.target.value })} />
-      <div className="flex gap-1.5">
-        <Button size="xs" variant="primary" disabled={saving || !draft?.label.trim() || !draft?.name}
+      <label className="block">
+        <span className={fieldLabel}>Label</span>
+        <Input aria-label="Label" placeholder="Keep long s" value={draft.label} autoFocus={!draft.adding}
+               onChange={(e) => setDraft({ ...draft, label: e.target.value })} className="w-full" />
+      </label>
+      <label className="block">
+        <span className={fieldLabel}>Description</span>
+        <Textarea aria-label="Description" rows={3}
+                  placeholder="What the rule asks for, with an example: ſ is transcribed as ſ, not s."
+                  value={draft.description}
+                  onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                  className="w-full resize-y" />
+        <span className="mt-1 block text-xs text-ink-subtle">Shown wherever the flag can be picked.</span>
+      </label>
+      <div className="flex gap-2">
+        <Button variant="primary" disabled={saving || !draft.label.trim() || !draft.name}
                 onClick={() => void save()}>Save</Button>
-        <Button size="xs" onClick={() => setDraft(null)}>Cancel</Button>
+        <Button onClick={() => setDraft(null)}>Cancel</Button>
       </div>
     </div>
   )
@@ -82,8 +95,8 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
           </thead>
           <tbody>
             {flags.map((flag) => draft && !draft.adding && draft.name === flag.name ? (
-              <tr key={flag.name} className="border-b border-line/60 bg-ground">
-                <td colSpan={4} className={`${tableCell} py-2`}>{form}</td>
+              <tr key={flag.name} className="border-b border-line/60 bg-raised">
+                <td colSpan={4} className={`${tableCell} py-3`}>{form}</td>
               </tr>
             ) : (
               <tr key={flag.name} data-testid="convention-row" data-flag={flag.name}
@@ -118,7 +131,7 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
         </table>
       )}
       {canManage && (draft?.adding ? (
-        <div className="mt-3 max-w-xl">{form}</div>
+        <div className="mt-3 rounded-md border border-line bg-raised p-4">{form}</div>
       ) : (
         <Button size="xs" className="mt-3" data-testid="convention-add"
                 onClick={() => setDraft({ name: '', label: '', description: '', adding: true })}>
