@@ -294,11 +294,24 @@ class TestPipelines:
 class TestPreview:
     def test_the_sample_is_seeded_and_spans_the_datasets(self, client):
         conn = app.dependency_overrides[get_db]()
-        first = [s['id'] for s in augmentations.sample_lines(conn, ['j1'], seed=1)]
-        assert len(first) == augmentations.SAMPLE_COUNT
-        assert first == [s['id'] for s in augmentations.sample_lines(conn, ['j1'], seed=1)]
-        assert first != [s['id'] for s in augmentations.sample_lines(conn, ['j1'], seed=2)]
+        assert len(augmentations.sample_lines(conn, ['j1'], seed=1)) == 1, 'one line, so the preview stays one look'
+        first = [s['id'] for s in augmentations.sample_lines(conn, ['j1'], seed=1, count=4)]
+        assert len(first) == 4
+        assert first == [s['id'] for s in augmentations.sample_lines(conn, ['j1'], seed=1, count=4)]
+        assert first != [s['id'] for s in augmentations.sample_lines(conn, ['j1'], seed=2, count=4)]
         assert augmentations.sample_lines(conn, [], seed=1) == []
+
+    def test_each_next_seed_shows_a_line_not_yet_seen(self, client):
+        """Change lines steps the seed by one: every checked line comes up once before any
+        comes back, so a click never shows the same line again."""
+        conn = app.dependency_overrides[get_db]()
+        checked = {row[0] for row in conn.execute(
+            "SELECT l.id FROM lines l JOIN elements e ON l.element_id = e.id JOIN pages p ON e.page_id = p.id "
+            "WHERE p.job_id = 'j1' AND l.checked = 1 AND l.deleted = 0")}
+        shown = [augmentations.sample_lines(conn, ['j1'], seed=seed)[0]['id'] for seed in range(1, len(checked) + 2)]
+        assert len(checked) > 1
+        assert set(shown[:-1]) == checked
+        assert shown[-1] == shown[0]
 
     def test_renders_each_sampled_line_before_and_after_at_the_models_height(self, client, monkeypatch):
         conn = app.dependency_overrides[get_db]()
@@ -317,7 +330,7 @@ class TestPreview:
         body = res.json()
         assert body['ok'] is True and body['height'] == 64
         assert (body['line_seed'], body['render_seed']) == (5, 3)
-        assert len(body['samples']) == 4
+        assert len(body['samples']) == 1
         sample = body['samples'][0]
         assert sample['dataset'] == 'Letters' and sample['text'].startswith('line ')
         assert sample['original'].startswith('data:image/png;base64,')
@@ -326,7 +339,7 @@ class TestPreview:
         assert sample['harshest'] == f'data:image/png;base64,draws-{augmentations.HARSHEST_DRAWS}'
         assert body['draws'] == augmentations.HARSHEST_DRAWS
         # Only the render seed reaches the backend; the line seed chose the crops here.
-        assert calls == [(SPEC, [64] * 4, 3, 1), (SPEC, [64] * 4, 3, augmentations.HARSHEST_DRAWS)]
+        assert calls == [(SPEC, [64], 3, 1), (SPEC, [64], 3, augmentations.HARSHEST_DRAWS)]
 
     def test_a_spec_the_backend_refuses_names_the_step(self, client, monkeypatch):
         def refused(spec, images, seed, draws):

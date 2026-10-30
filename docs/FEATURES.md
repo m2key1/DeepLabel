@@ -385,7 +385,7 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   drawn per metric, with smoothing, log scale, zoom and a shared crosshair.
 - **Rerun**, in a run's **⋯** menu, opens a finished run's settings in a new form.
 - **Augmentations** (under Models) builds augmentation pipelines from the trainer's
-  catalogue, with groups and a live preview on real line crops. Pipelines are private; an
+  catalogue, with groups and a live preview on one real line crop (Change lines draws another). Pipelines are private; an
   admin can make one a task's default.
 - If the cluster asks for a second factor, an admin unlocks it from the training form.
   Admins grant training per person and per target (local or cluster).

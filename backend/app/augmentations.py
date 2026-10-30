@@ -26,7 +26,7 @@ from app.caches import counted_page
 # A failed catalog read is retried this often, so a backend that comes up is noticed
 # without a restart.
 CATALOG_RETRY_SECONDS = 60
-SAMPLE_COUNT = 4
+SAMPLE_COUNT = 1
 # Draws taken per crop so the preview can show the harshest one. Steps fire at p 0.3 or
 # so, which makes the damaging draw rare, and rare is what a single sample hides.
 HARSHEST_DRAWS = 12
@@ -240,7 +240,8 @@ def builtin_spec(task: str) -> dict:
 
 def sample_lines(conn, job_ids: list[str], seed: int, count: int = SAMPLE_COUNT) -> list[dict]:
     """A seeded, dataset-spanning pick of checked lines: the same seed picks the same
-    lines again, a new one draws fresh ones."""
+    lines again, and each next seed the lines after them in one fixed shuffle, so no line
+    comes back before every other one has been shown."""
     if not job_ids:
         return []
     marks = ','.join('?' * len(job_ids))
@@ -248,10 +249,11 @@ def sample_lines(conn, job_ids: list[str], seed: int, count: int = SAMPLE_COUNT)
         f'SELECT l.id FROM lines l JOIN elements e ON l.element_id = e.id '
         f"JOIN pages p ON e.page_id = p.id WHERE p.job_id IN ({marks}) AND {counted_page('p')} "
         'AND l.checked = 1 AND l.deleted = 0 AND e.deleted = 0', job_ids)]
-    ranked = sorted(ids, key=lambda line_id: hashlib.sha256(f'{seed}:{line_id}'.encode()).digest())
-    chosen = ranked[:count]
-    if not chosen:
+    if not ids:
         return []
+    shuffled = sorted(ids, key=lambda line_id: hashlib.sha256(str(line_id).encode()).digest())
+    start = (seed - 1) * count % len(shuffled)
+    chosen = (shuffled[start:] + shuffled[:start])[:count]
     marks = ','.join('?' * len(chosen))
     rows = conn.execute(
         f'SELECT l.id, l.polygon, l.orientation, l.text, l.corrected_text, p.source_file, j.name AS dataset '
@@ -290,7 +292,7 @@ def crop_samples(samples: list[dict], out_dir: Path) -> tuple[list[tuple[dict, P
 
 
 def preview(conn, task: str, spec: dict, job_ids: list[str], line_seed: int, render_seed: int) -> dict:
-    """What the stack does to a few of the chosen datasets' checked lines: each crop
+    """What the stack does to one of the chosen datasets' checked lines: the crop
     before and after, at the height the model reads.
 
     The two seeds move independently: line_seed picks which lines are shown, render_seed

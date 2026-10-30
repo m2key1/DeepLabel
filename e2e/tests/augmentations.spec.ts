@@ -53,10 +53,10 @@ test.describe('Scenario: augmentation pipelines', () => {
     await page.getByLabel('Name').fill(pipelineName)
     await page.getByLabel('Preview on').selectOption({ label: `${datasetName} (12)` })
 
-    // Four crops render: as scanned, one draw, and the harshest of the draws taken.
-    await expect(page.getByTestId('preview-sample')).toHaveCount(4, { timeout: 30_000 })
-    await expect(page.getByTestId('preview-augmented').first()).toBeVisible()
-    await expect(page.getByTestId('preview-harshest')).toHaveCount(4)
+    // One crop renders, three ways: as scanned, one draw, and the harshest of the draws taken.
+    await expect(page.getByTestId('preview-sample')).toHaveCount(1, { timeout: 30_000 })
+    await expect(page.getByTestId('preview-augmented')).toHaveCount(1)
+    await expect(page.getByTestId('preview-harshest')).toHaveCount(1)
     await expect(page.getByTestId('preview-sample').first()).toContainText('Harshest of 12')
     await expect(page.getByTestId('preview-sample').first()).toContainText(datasetName)
 

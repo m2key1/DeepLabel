@@ -8,12 +8,12 @@ import { cardChrome } from '../ui/Card'
 
 const DEBOUNCE_MS = 400
 
-/** What the stack does to real checked lines: a band across the top, each crop before the
+/** What the stack does to a real checked line: a band across the top, the crop before the
  *  augmentation, one draw at the stack's own probabilities, and the harshest of the
  *  several draws taken. Steps fire at p 0.3 or so, so the damaging draw is rare - showing
- *  only a typical one would hide exactly what hurts training. Each spans the full width it
- *  is given, and it scrolls with the page like everything else. Re-renders as the pipeline
- *  is edited, one render per settled edit. */
+ *  only a typical one would hide exactly what hurts training. Each keeps its proportions
+ *  and stays no taller than a few lines of text. Re-renders as the pipeline is edited, one
+ *  render per settled edit. */
 export function PipelinePreview({ task, spec, jobIds }: {
   task: ModelTask
   spec: AugmentSpec
@@ -76,7 +76,7 @@ export function PipelinePreview({ task, spec, jobIds }: {
         <span className="text-xs text-ink-muted">
           {datasets === ''
             ? 'pick a dataset to see it on real lines'
-            : `checked lines at the model's ${preview?.height ?? '…'} px input height`}
+            : `one checked line at the model's ${preview?.height ?? '…'} px input height`}
         </span>
         <span className="ml-auto flex items-center gap-2">
           {busy && <span className="text-xs text-ink-muted">Rendering…</span>}
@@ -121,7 +121,7 @@ export function PipelinePreview({ task, spec, jobIds }: {
                 Before
               </p>
               <img src={sample.original} alt={`line ${sample.line_id} before augmentation`}
-                   className="block w-full" />
+                   className="block h-auto max-h-24 w-auto max-w-full" />
               <p className="mt-1.5 text-[11px] font-medium uppercase tracking-wide text-accent-ink">
                 After
               </p>
@@ -129,7 +129,7 @@ export function PipelinePreview({ task, spec, jobIds }: {
                 src={sample.augmented}
                 alt={`line ${sample.line_id} after augmentation`}
                 data-testid="preview-augmented"
-                className="block w-full"
+                className="block h-auto max-h-24 w-auto max-w-full"
               />
               {sample.harshest && (
                 <>
@@ -144,7 +144,7 @@ export function PipelinePreview({ task, spec, jobIds }: {
                     src={sample.harshest}
                     alt={`line ${sample.line_id} on its harshest draw`}
                     data-testid="preview-harshest"
-                    className="block w-full"
+                    className="block h-auto max-h-24 w-auto max-w-full"
                   />
                 </>
               )}
