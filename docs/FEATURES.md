@@ -276,9 +276,10 @@ Press `e` to edit the page.
 - Export a dataset as PAGE XML, ALTO, hOCR or TEI with its scans, as JSON, Markdown, plain
   text or DeepLabel's own zip, either complete or only what was reviewed. Lines inside
   tables and other containers are included.
-- A dataset imported from IIIF also exports as **IIIF Web Annotations**: one annotation page
-  per canvas, each line with its text placed on the original canvas, so an archive can show
-  the transcription in its own viewer (Mirador, Universal Viewer).
+- A dataset imported from IIIF also exports as **Web Annotations** (under IIIF in the
+  Export menu): one annotation page per canvas, each line with its text placed on the
+  original canvas, so an archive can show the transcription in its own viewer (Mirador,
+  Universal Viewer).
 - A DeepLabel zip export can be uploaded to another instance and arrives with its classes,
   text, corrections and review state intact.
 

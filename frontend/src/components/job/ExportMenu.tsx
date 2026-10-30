@@ -37,8 +37,8 @@ const GROUPS: { title: string; formats: { format: ExportFormat; label: string; h
 ]
 
 const IIIF_GROUP = {
-  title: 'Back to the archive',
-  formats: [{ format: 'iiif' as const, label: 'IIIF Web Annotations', hint: 'lines and text on the canvases' }],
+  title: 'IIIF',
+  formats: [{ format: 'iiif' as const, label: 'Web Annotations', hint: "lines on the manifest's pages" }],
 }
 
 /** The download formats of a dataset, the standard ones first, with the choice of taking
