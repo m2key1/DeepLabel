@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { getJobExport, renditionUrl, tilesUrl } from '../api'
 import { useImageSurface } from '../hooks/useImageSurface'
 import type { TranscriptLine, TranscriptPage as TranscriptPageData } from '../api'
 import { useCrumb } from '../components/NavBar'
+import { DatasetViews } from '../components/job/DatasetViews'
 import { ChevronIcon, ExpandIcon, PagesIcon } from '../components/icons'
 import { Check, Input } from '../components/ui/Field'
 import { Segmented } from '../components/ui/Segmented'
@@ -447,6 +448,7 @@ export function TranscriptPage() {
       {!bare && (
       <header className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2">
         <h1 className="text-base font-semibold">{name}</h1>
+        <DatasetViews jobId={jobId} active="transcript" />
         <span className="text-sm text-ink-muted" data-testid="transcript-counts">
           {checkedCount}/{allLines.length} lines reviewed
         </span>
@@ -530,9 +532,6 @@ export function TranscriptPage() {
         >
           <ExpandIcon shrink={false} />
         </button>
-        <Link to={`/jobs/${jobId}`} className="text-sm text-accent-ink hover:underline">
-          back to dataset
-        </Link>
       </header>
       )}
 

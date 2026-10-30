@@ -375,6 +375,8 @@ const CONF_FILL: Record<Tone, string> = {
   ok: 'bg-ok/15 text-ok',
   warn: 'bg-warn/15 text-warn',
   danger: 'bg-danger/15 text-danger',
+  test: 'bg-test-wash text-test',
+  note: 'bg-note-wash text-note',
 }
 
 export function confBadgeClass(c: number | null): string {
@@ -387,6 +389,8 @@ const CONF_OUTLINE: Record<Tone, string> = {
   ok: 'border-ok/50 text-ok',
   warn: 'border-warn/50 text-warn',
   danger: 'border-danger/50 text-danger',
+  test: 'border-test/50 text-test',
+  note: 'border-note/50 text-note',
 }
 
 /** The same reading, outlined rather than filled. For a figure shown beside a filled badge

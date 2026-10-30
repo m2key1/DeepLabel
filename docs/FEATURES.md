@@ -96,11 +96,14 @@ another of your datasets already has stops the Source step, with a link to that 
 
 A dataset opens on a table of its pages with a preview of the selected scan beside it.
 
+- The header has one row per kind: the actions (Review, Run, Export, **⋯**); a line of
+  facts (owner, pages, the IIIF manifest it came from, its note); its state as chips
+  (pipeline steps, pages checked, test pages, data-use limits, Complete); and the three
+  views **Pages**, **Transcript** and **Corpus** as tabs, which the other two views show too.
 - Filter chips narrow the table to pages that still need work, are reviewed, have no
   layout, and so on. The arrow keys move the preview through the list.
 - Long datasets load a screenful at a time; **Show more** loads the next.
-- The pipeline steps sit under the title. When a run fails, its step turns red; click it
-  for the reason.
+- When a run fails, its pipeline step turns red; click it for the reason.
 - The **Run** menu holds everything that runs models on the whole dataset. Work your edits
   left behind, such as lines to read again or boxes whose lines need detecting again, is
   counted on the menu and listed first. Rarer actions (layout classes, language model

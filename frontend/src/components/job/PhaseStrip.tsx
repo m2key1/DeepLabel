@@ -97,11 +97,11 @@ export function PhaseStrip({ job }: { job: Phased }) {
   return (
     <div className="relative inline-block max-w-full">
     <div data-testid="phase-strip" data-status={job.status} role="list" aria-label="Pipeline"
-         className="inline-flex max-w-full flex-wrap items-center divide-x divide-line overflow-hidden rounded-full border border-line text-[11px]">
+         className="inline-flex max-w-full flex-wrap items-center divide-x divide-line overflow-hidden rounded border border-line-strong bg-surface text-[11px]">
       {showStatus && (
         <span role="listitem" className="flex items-center px-1.5">
           {errorButton('Failed')
-            ? <button {...errorButton('Failed')!} data-testid="phase-error-open" className="rounded-full hover:opacity-80"><StatusBadge status={job.status} /></button>
+            ? <button {...errorButton('Failed')!} data-testid="phase-error-open" className="rounded hover:opacity-80"><StatusBadge status={job.status} /></button>
             : <StatusBadge status={job.status} />}
         </span>
       )}

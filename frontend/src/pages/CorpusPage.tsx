@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import type { ApiError } from '../api'
 import { CorpusDocuments } from '../components/corpus/CorpusDocuments'
 import { CorpusPrompt } from '../components/corpus/CorpusPrompt'
@@ -7,7 +7,7 @@ import { DiplomaticRead } from '../components/corpus/DiplomaticRead'
 import { Note } from '../components/corpus/Note'
 import { ReferenceReview } from '../components/corpus/ReferenceReview'
 import { useCrumb } from '../components/NavBar'
-import { buttonClass } from '../components/ui/Button'
+import { DatasetViews } from '../components/job/DatasetViews'
 import { PageHeader } from '../components/ui/PageHeader'
 import { pageShell } from '../components/ui/page'
 import {
@@ -50,18 +50,8 @@ export function CorpusPage() {
 
   return (
     <div className={pageShell}>
-      <PageHeader
-        title="Corpus and diplomatic reading"
-        actions={
-          <Link
-            to={`/jobs/${jobId}`}
-            data-testid="corpus-back"
-            className={buttonClass({ variant: 'outline', size: 'sm' })}
-          >
-            Back to the dataset
-          </Link>
-        }
-      >
+      <DatasetViews jobId={jobId} active="corpus" className="mb-4 border-b border-line" />
+      <PageHeader title="Corpus and diplomatic reading">
         A transcribed corpus arrives as whole documents while the unit of work is the
         scanned leaf. Cutting it gives every page the part it is answerable for, and a model
         that can also see the scan turns that into the page's ground truth - machine-made,

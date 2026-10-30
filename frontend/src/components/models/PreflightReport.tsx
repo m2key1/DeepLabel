@@ -57,7 +57,7 @@ function flagText(flag: PreflightCharFlag): string {
 }
 
 function FlagBadge({ flag }: { flag: PreflightCharFlag }) {
-  return <Badge variant="chip" tone={FLAGS[flag].tone} data-flag={flag}>{flagText(flag)}</Badge>
+  return <Badge tone={FLAGS[flag].tone} data-flag={flag}>{flagText(flag)}</Badge>
 }
 
 type CharView = 'all' | 'flagged' | PreflightCharFlag
@@ -617,7 +617,7 @@ export function PreflightReport({ preflight }: { preflight: Preflight }) {
             {result.findings.map((f, i) => (
               <li key={`${f.code}-${i}`} data-testid="preflight-finding" data-code={f.code} data-level={f.level}
                   className="flex items-start gap-2 text-xs text-ink">
-                <Badge variant="chip" tone={f.level === 'warn' ? 'warn' : 'neutral'}>
+                <Badge tone={f.level === 'warn' ? 'warn' : 'neutral'}>
                   {f.level === 'warn' ? 'warning' : 'note'}
                 </Badge>
                 <span>{f.message}</span>
@@ -704,7 +704,7 @@ export function PreflightReport({ preflight }: { preflight: Preflight }) {
                     ))}
                     <td className={tableCell}>
                       {row.flags.map((flag) => (
-                        <Badge key={flag} variant="chip" tone={flag === 'split_only' ? 'warn' : 'neutral'}>
+                        <Badge key={flag} tone={flag === 'split_only' ? 'warn' : 'neutral'}>
                           {flag === 'split_only' ? 'not in train' : 'not validated'}
                         </Badge>
                       ))}

@@ -97,7 +97,7 @@ export function LayoutTemplatesPage() {
                   template.id === selectedId ? 'bg-accent-wash' : 'hover:bg-raised'}`}
               >
                 <span className="min-w-0 flex-1 truncate">{template.name}</span>
-                {template.is_default && <Badge tone="accent" variant="chip" className="uppercase">default</Badge>}
+                {template.is_default && <Badge tone="accent">Default</Badge>}
                 {template.builtin
                   ? <span className="text-[10px] uppercase text-ink-subtle">built in</span>
                   : <span className="text-[10px] uppercase text-ink-subtle">{template.owner}</span>}

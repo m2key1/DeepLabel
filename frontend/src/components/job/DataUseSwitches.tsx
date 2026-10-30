@@ -7,12 +7,12 @@ import { SwitchKnob } from '../ui/SwitchKnob'
 type Use = keyof DataUse
 
 export const USES: { use: Use; label: string; hint: string; off: string }[] = [
-  { use: 'training', label: 'Training', hint: 'May be used to train or validate a model.', off: 'no training' },
-  { use: 'test', label: 'Test set', hint: 'May be used to score models.', off: 'no scoring' },
+  { use: 'training', label: 'Training', hint: 'May be used to train or validate a model.', off: 'No training' },
+  { use: 'test', label: 'Test set', hint: 'May be used to score models.', off: 'No scoring' },
   { use: 'external_llm', label: 'External LLM providers',
-    hint: "Pages may be sent to LLM providers an admin hasn't marked as self-hosted.", off: 'no external LLMs' },
+    hint: "Pages may be sent to LLM providers an admin hasn't marked as self-hosted.", off: 'No external LLMs' },
   { use: 'export', label: 'Export by others', hint: 'People it is shared with may export it. The owner always can.',
-    off: 'no export' },
+    off: 'No export' },
 ]
 
 /** The owner's switches for what a dataset may be used for, each with what it means and,
@@ -57,7 +57,7 @@ export function DataUseChips({ value }: { value: DataUse | undefined }) {
 }
 
 export function dataUseSummary(value: DataUse): string {
-  const off = USES.filter(({ use }) => !value[use]).map(({ off }) => off)
+  const off = USES.filter(({ use }) => !value[use]).map(({ off }) => off[0].toLowerCase() + off.slice(1))
   return off.length ? off.join(', ') : 'everything allowed'
 }
 

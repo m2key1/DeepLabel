@@ -4,6 +4,7 @@ import type { Evaluation } from '../../api'
 import { formatDate } from '../../util'
 import { popoverChrome } from '../ui/Card'
 import { TestDataChip } from '../TestPage'
+import { Badge } from '../ui/Badge'
 import { useDismiss } from '../ui/menu'
 import { percent } from './format'
 import { buildRulers, scaleMax, scaleTicks, type ModelMark, type Ruler } from './rulers'
@@ -86,13 +87,12 @@ export function EvaluationRulers({ evaluations, modelNames }: {
                className="grid grid-cols-[12.5rem_minmax(0,1fr)] items-start gap-2 border-b border-line py-3">
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold" title={ruler.label}>{ruler.label}</div>
-              {ruler.kind === 'test' && <TestDataChip data-testid="ruler-kind" data-kind="test" className="mt-0.5">test pages</TestDataChip>}
+              {ruler.kind === 'test' && <TestDataChip data-testid="ruler-kind" data-kind="test" className="mt-0.5">Test pages</TestDataChip>}
               {ruler.kind === 'validation' && (
-                <span data-testid="ruler-kind" data-kind="validation"
-                      title="The split that picked this run's checkpoint, so its score reads optimistic. Test pages are the fair measure."
-                      className="mt-0.5 inline-flex rounded-full border border-warn/40 px-2 py-0.5 text-[11px] font-medium text-warn">
-                  validation split
-                </span>
+                <Badge data-testid="ruler-kind" data-kind="validation" tone="warn" className="mt-0.5"
+                       title="The split that picked this run's checkpoint, so its score reads optimistic. Test pages are the fair measure.">
+                  Validation split
+                </Badge>
               )}
               <div className="text-xs text-ink-subtle">
                 {lines != null ? `${lines.toLocaleString()} checked lines` : 'not scored yet'}

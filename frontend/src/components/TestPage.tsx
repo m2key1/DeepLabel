@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react'
 import { FlaskIcon } from './icons'
+import { Badge, chipClass } from './ui/Badge'
 import { SwitchKnob } from './ui/SwitchKnob'
 
 export const TEST_PAGE_MEANING = 'Test data - no training uses it, nor pages with the same scan'
@@ -17,27 +18,20 @@ export function TestPageSwitch({ on, compact = false, className = '', ...props }
       aria-checked={on}
       title={TEST_PAGE_MEANING}
       {...props}
-      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-        on ? 'border-test/40 bg-test-wash text-test' : 'border-line-strong text-ink-muted hover:text-ink'
-      } ${className}`}
+      className={`${chipClass()} hover:border-ink-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${className}`}
     >
-      <FlaskIcon />
+      <span aria-hidden="true" className={`flex ${on ? 'text-test' : 'text-ink-subtle'}`}><FlaskIcon /></span>
       {!compact && 'Test page'}
       <SwitchKnob on={on} onColor="bg-test" />
-      {on && !compact && <span className="font-normal opacity-80">kept out of training</span>}
+      {on && !compact && <span className="font-normal text-ink-subtle">kept out of training</span>}
     </button>
   )
 }
 
 /** Test data shown to someone who cannot change it, or summed up for a dataset. */
-export function TestDataChip({ children, className = '', ...props }: {
+export function TestDataChip({ children, value, ...props }: {
   children: ReactNode
+  value?: ReactNode
 } & HTMLAttributes<HTMLSpanElement>) {
-  return (
-    <span title={TEST_PAGE_MEANING} {...props}
-          className={`inline-flex shrink-0 items-center gap-1 rounded-full bg-test-wash px-2 py-0.5 text-[11px] font-medium text-test ${className}`}>
-      <FlaskIcon />
-      {children}
-    </span>
-  )
+  return <Badge tone="test" icon={<FlaskIcon />} value={value} title={TEST_PAGE_MEANING} {...props}>{children}</Badge>
 }

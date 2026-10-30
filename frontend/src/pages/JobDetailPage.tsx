@@ -47,7 +47,8 @@ import { Modal, modalBtn, modalPrimaryBtn } from '../components/Modal'
 import { NoteTag } from '../components/NoteTag'
 import { CaretIcon, CheckIcon, DownloadIcon, FlaskIcon, KebabIcon, PlayIcon } from '../components/icons'
 import { TEST_PAGE_MEANING, TestDataChip, TestPageSwitch } from '../components/TestPage'
-import { Badge } from '../components/ui/Badge'
+import { Badge, ChipButton } from '../components/ui/Badge'
+import { DatasetViews } from '../components/job/DatasetViews'
 import { PhaseStrip } from '../components/job/PhaseStrip'
 import { Avatar } from '../components/ui/Avatar'
 import { loadHiddenColumns, pageStatusLabel, saveHiddenColumns } from '../components/job/pageColumns'
@@ -75,7 +76,7 @@ function withinTime<T>(promise: Promise<T>, ms: number): Promise<T> {
       (error) => { window.clearTimeout(timer); reject(error) })
   })
 }
-import { BarDivider, Button, ButtonGroup, buttonClass, groupButtonClass } from '../components/ui/Button'
+import { BarDivider, Button, buttonClass } from '../components/ui/Button'
 import { ActionMenu } from '../components/job/ActionMenu'
 import { SwitchKnob } from '../components/ui/SwitchKnob'
 import { AddPagesDialog } from '../components/job/AddPagesDialog'
@@ -893,7 +894,7 @@ export function JobDetailPage() {
             }}
           />
         ) : page.is_test ? (
-          <TestDataChip data-testid="page-test">test</TestDataChip>
+          <TestDataChip data-testid="page-test">Test</TestDataChip>
         ) : null
       case 'llm': {
         const models = page.llm_models ?? 0
@@ -945,54 +946,41 @@ export function JobDetailPage() {
           </div>
         </div>
       )}
-      <header className="mb-3 border-b border-line pb-2">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-          <h1 className="mr-1 font-serif text-lg font-semibold">{job.name}</h1>
-          <ReviewProgress done={job.pages_checked ?? 0} total={(isMap ? job.tiles_total : job.pages_live) ?? 0}
-                          unit={isMap ? 'tiles reviewed' : 'pages with every line checked'} />
-          {!isMap && (
-            <TestDataControls
-              testPages={chipCounts['test-pages'] ?? 0}
-              pages={job.pages_live ?? 0}
-              newPagesTest={job.new_pages_test ?? false}
-              canOwn={canOwn}
-              onSwitch={(on) => {
-                setJob((p) => (p ? { ...p, new_pages_test: on } : p))
-                setNewPagesTest(jobId, on).catch((err: Error) => setError(err.message))
-              }}
-              onMarkAll={(test) => markTest(null, test)}
-            />
-          )}
-          <NoteTag note={job.note} title={job.name} canEdit={canEdit} addable onSave={async (text) => {
-            const note = await setJobNote(jobId, text)
-            setJob((p) => (p ? { ...p, note } : p))
-            return note
-          }} />
-          <CompleteSwitch on={job.checked} onChange={(checked) => {
-            setJob((p) => (p ? { ...p, checked } : p))
-            setJobChecked(jobId, checked).catch((err: Error) => setError(err.message))
-          }} />
-          <div className="ml-auto flex items-center gap-1.5">
-            {!isMap && (
-              <ButtonGroup aria-label="Read">
-                <Link to={`/jobs/${jobId}/transcript`} className={groupButtonClass()}
-                      title="Read the recognized text in order - reviewed lines in full ink">
-                  Transcript
-                </Link>
-                <Link to={`/jobs/${jobId}/corpus`} data-testid="corpus-open" className={groupButtonClass()}
-                      title="Cut a transcribed corpus across the pages and read them against it">
-                  Corpus
-                </Link>
-              </ButtonGroup>
-            )}
+      {/* One row per kind: what can be done, what the dataset is, where it stands, and
+          the ways into it. */}
+      <header className={`mb-3 border-b border-line ${isMap ? 'pb-2' : ''}`}>
+        <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+          <div className="min-w-0 flex-1">
+            <h1 className="font-serif text-xl font-semibold">{job.name}</h1>
+            <p data-testid="job-meta" className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-ink-muted">
+              <Avatar name={job.owner} size="xs" />
+              <span title="Owner">{job.owner}</span>
+              <MetaDot />
+              <span>{plural(job.pages_live ?? 0, isMap ? 'map tile' : 'page')}</span>
+              {job.iiif_source && <><MetaDot /><IiifSourceFacts source={job.iiif_source} /></>}
+              {(job.counters.gt_total ?? 0) > 0 && (<>
+                <MetaDot />
+                <span title="Transcription lines matched to recognized lines">
+                  transcriptions {job.counters.gt_matched ?? 0}/{job.counters.gt_total}
+                </span>
+              </>)}
+              {(job.note || canEdit) && <MetaDot />}
+              <NoteTag note={job.note} title={job.name} canEdit={canEdit} addable inline onSave={async (text) => {
+                const note = await setJobNote(jobId, text)
+                setJob((p) => (p ? { ...p, note } : p))
+                return note
+              }} />
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
             {!isMap && (
               <div role="group" aria-label="Review"
-                   className="flex shrink-0 items-center overflow-hidden rounded border border-warn/40">
+                   className={`flex shrink-0 items-center overflow-hidden rounded border ${review?.total ? 'border-accent' : 'border-line-strong'}`}>
                 <button
                   onClick={startReview}
                   disabled={!review?.total}
                   title="Walk every unchecked line below the confidence threshold"
-                  className="px-2 py-1 text-xs font-medium text-warn hover:bg-warn/10 disabled:cursor-default disabled:text-ink-subtle disabled:hover:bg-transparent"
+                  className="bg-accent px-2.5 py-1 text-xs font-medium text-on-accent hover:brightness-110 disabled:cursor-default disabled:bg-surface disabled:text-ink-subtle disabled:hover:brightness-100"
                 >
                   {review ? `Review ${review.total} flagged` : 'Review…'}
                 </button>
@@ -1004,7 +992,7 @@ export function JobDetailPage() {
                     setReviewConf(next)
                   }}
                   title="Confidence threshold"
-                  className="cursor-pointer self-stretch border-l border-warn/40 bg-transparent pl-1.5 pr-0.5 text-xs text-warn"
+                  className="cursor-pointer self-stretch border-l border-line-strong bg-surface pl-1.5 pr-0.5 text-xs text-ink-muted"
                 >
                   {REVIEW_THRESHOLDS.map((t) => (
                     <option key={t} value={t}>
@@ -1208,19 +1196,28 @@ export function JobDetailPage() {
             />
           </div>
         </div>
-        <p data-testid="job-meta" className="mt-1 flex items-center gap-1.5 text-xs text-ink-muted">
-          <Avatar name={job.owner} size="xs" />
-          <span title="Owner">{job.owner}</span>
-          <DataUseChips value={job.data_use} />
-          {(job.counters.gt_total ?? 0) > 0 && (
-            <span title="Transcription lines matched to recognized lines">
-              {' · '}transcriptions {job.counters.gt_matched ?? 0}/{job.counters.gt_total}
-            </span>
-          )}
-        </p>
-        {job.iiif_source && <IiifSourceLine source={job.iiif_source} />}
-        <div className="mt-1.5">
+        <div data-testid="job-state" className="mt-2.5 flex flex-wrap items-center gap-1.5">
           <PhaseStrip job={job} />
+          <ReviewProgress done={job.pages_checked ?? 0} total={(isMap ? job.tiles_total : job.pages_live) ?? 0}
+                          unit={isMap ? 'tiles reviewed' : 'pages with every line checked'} />
+          {!isMap && (
+            <TestDataControls
+              testPages={chipCounts['test-pages'] ?? 0}
+              pages={job.pages_live ?? 0}
+              newPagesTest={job.new_pages_test ?? false}
+              canOwn={canOwn}
+              onSwitch={(on) => {
+                setJob((p) => (p ? { ...p, new_pages_test: on } : p))
+                setNewPagesTest(jobId, on).catch((err: Error) => setError(err.message))
+              }}
+              onMarkAll={(test) => markTest(null, test)}
+            />
+          )}
+          <DataUseChips value={job.data_use} />
+          <CompleteSwitch on={job.checked} onChange={(checked) => {
+            setJob((p) => (p ? { ...p, checked } : p))
+            setJobChecked(jobId, checked).catch((err: Error) => setError(err.message))
+          }} />
         </div>
         {!!job.unreadable?.length && (
           <UnreadablePages pages={job.unreadable} onRetry={canOwn && !active ? async () => {
@@ -1238,6 +1235,7 @@ export function JobDetailPage() {
             {notice}
           </p>
         )}
+        {!isMap && <DatasetViews jobId={jobId} active="pages" className="mt-2" />}
       </header>
       {rerunOpen && (
         <RerunDialog jobId={jobId} jobName={job.name} layoutOn={job.run_layout} onClose={() => setRerunOpen(false)}
@@ -1708,20 +1706,27 @@ function UnreadablePages({ pages, onRetry }: { pages: UnreadablePage[]; onRetry?
   )
 }
 
-/** Where a IIIF dataset came from, as the archive asks to be credited. */
-function IiifSourceLine({ source }: { source: IiifSource }) {
+/** Where a IIIF dataset came from, as the archive asks to be credited: a part of the
+ *  dataset's line of facts. */
+function IiifSourceFacts({ source }: { source: IiifSource }) {
   const rightsLink = /^https?:\/\//.test(source.rights)
   return (
-    <p data-testid="iiif-source-line" className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-muted">
-      <Badge tone="accent" className="shrink-0">IIIF</Badge>
-      {source.attribution && <span data-testid="iiif-source-attribution">{source.attribution}</span>}
-      {source.rights && (rightsLink
-        ? <a href={source.rights} target="_blank" rel="noreferrer" className="text-accent-ink hover:underline">{source.rights}</a>
-        : <span>{source.rights}</span>)}
-      <a data-testid="iiif-source-manifest" href={source.manifest} target="_blank" rel="noreferrer"
-         className="text-accent-ink hover:underline">manifest ↗</a>
-    </p>
+    <span data-testid="iiif-source-line" className="inline-flex flex-wrap items-center gap-x-1.5">
+      <span>from a <a data-testid="iiif-source-manifest" href={source.manifest} target="_blank" rel="noreferrer"
+                      className="text-accent-ink hover:underline">IIIF manifest ↗</a></span>
+      {source.attribution && <><MetaDot /><span data-testid="iiif-source-attribution">{source.attribution}</span></>}
+      {source.rights && (<>
+        <MetaDot />
+        {rightsLink
+          ? <a href={source.rights} target="_blank" rel="noreferrer" className="text-accent-ink hover:underline">{source.rights}</a>
+          : <span>{source.rights}</span>}
+      </>)}
+    </span>
   )
+}
+
+function MetaDot() {
+  return <span aria-hidden="true" className="text-line-strong">·</span>
 }
 
 
@@ -1730,28 +1735,37 @@ function IiifSourceLine({ source }: { source: IiifSource }) {
 /** How much of the dataset a person has checked, as a chip with a bar; the title says in
  *  what unit. */
 function ReviewProgress({ done, total, unit }: { done: number; total: number; unit: string }) {
+  const finished = total > 0 && done >= total
   return (
-    <span data-testid="job-review-count" title={`${done} of ${total} ${unit}`}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-ok/30 px-2 py-0.5 text-[11px] font-medium text-ok">
-      {total > 0 && done >= total && <CheckIcon />}
-      {unit.startsWith('tiles') ? `Reviewed ${done}/${total} tiles` : `Checked ${done}/${total} pages`}
-      <span aria-hidden="true" className="h-1 w-10 overflow-hidden rounded-full bg-ok/15">
-        <span className="block h-full bg-ok" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
-      </span>
-    </span>
+    <Badge data-testid="job-review-count" title={`${done} of ${total} ${unit}`} tone={finished ? 'ok' : 'neutral'}
+           icon={finished ? <CheckIcon /> : <ProgressRing share={total ? done / total : 0} />} value={`${done}/${total}`}>
+      {unit.startsWith('tiles') ? 'Tiles reviewed' : 'Pages checked'}
+    </Badge>
+  )
+}
+
+/** A share as a ring filling clockwise, small enough to sit at a chip's front. */
+function ProgressRing({ share }: { share: number }) {
+  const r = 4.5
+  const around = 2 * Math.PI * r
+  return (
+    <svg viewBox="0 0 12 12" className="size-3 -rotate-90 text-ok">
+      <circle cx="6" cy="6" r={r} fill="none" stroke="var(--color-line-strong)" strokeWidth="1.5" />
+      <circle cx="6" cy="6" r={r} fill="none" stroke="currentColor" strokeWidth="1.5"
+              strokeDasharray={`${share * around} ${around}`} />
+    </svg>
   )
 }
 
 /** The dataset marked as needing no more work, which the dataset list shows and filters by. */
 function CompleteSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
   return (
-    <button type="button" role="switch" aria-checked={on} data-testid="job-complete"
-            title="Mark the dataset complete: nothing more to do on it" onClick={() => onChange(!on)}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-              on ? 'border-ok/40 bg-ok/10 text-ok' : 'border-line-strong text-ink-muted hover:text-ink'}`}>
+    <ChipButton role="switch" aria-checked={on} data-testid="job-complete" tone={on ? 'ok' : 'neutral'}
+                icon={on ? <CheckIcon /> : undefined}
+                title="Mark the dataset complete: nothing more to do on it" onClick={() => onChange(!on)}>
       Complete
       <SwitchKnob on={on} onColor="bg-ok" />
-    </button>
+    </ChipButton>
   )
 }
 
@@ -1765,19 +1779,17 @@ function TestDataControls({ testPages, pages, newPagesTest, canOwn, onSwitch, on
 }) {
   const [open, setOpen] = useState(false)
   const state = testPages === 0 ? 'none' : testPages === pages && newPagesTest ? 'whole' : 'some'
-  const summary = state === 'none' ? 'none' : state === 'whole' ? 'whole dataset' : `${testPages} of ${pages} pages`
+  const label = state === 'none' ? 'No test pages' : state === 'whole' ? 'Test set' : 'Test pages'
+  const value = state === 'some' ? `${testPages}/${pages}` : undefined
   if (!canOwn) {
-    return state !== 'none' && <TestDataChip data-testid="job-test-pages">Test data: {summary}</TestDataChip>
+    return state !== 'none' && <TestDataChip data-testid="job-test-pages" value={value}>{label}</TestDataChip>
   }
   return (
     <>
-      <button type="button" data-testid="job-test-pages" onClick={() => setOpen(true)} title={TEST_PAGE_MEANING}
-              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-                state === 'none' ? 'border-line-strong text-ink-muted hover:text-ink' : 'border-test/40 bg-test-wash text-test'
-              }`}>
-        <FlaskIcon />
-        Test data: {summary}
-      </button>
+      <ChipButton data-testid="job-test-pages" onClick={() => setOpen(true)} title={TEST_PAGE_MEANING}
+                  tone={state === 'none' ? 'neutral' : 'test'} icon={<FlaskIcon />} value={value} caret>
+        {label}
+      </ChipButton>
       {open && (
         <TestDataDialog
           state={state}

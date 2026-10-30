@@ -111,7 +111,7 @@ export function LayoutClassesDialog({ jobId, canEdit, onClose, onChanged }: {
             <RoleSelect role={c.role} reads={c.reads} disabled={!canEdit || c.builtin || busy}
                         label={`Role of ${c.name}`} onChange={(role, reads) => change(c, { role, reads })} />
             <span className="w-20 text-xs text-ink-muted" data-testid="class-elements">{plural(c.elements, 'box', 'boxes')}</span>
-            {c.builtin && <Badge variant="chip" className="uppercase">Schematismus</Badge>}
+            {c.builtin && <Badge>Schematismus</Badge>}
             {canEdit && (
               <span className="ml-auto flex gap-0.5">
                 <Button variant="ghost" size="xs" aria-label={`Move ${c.name} up`} disabled={busy || i === 0}

@@ -72,7 +72,7 @@ test.describe('Scenario: a volume uploaded in parts by the client', () => {
     await backendFetch(`/api/jobs/${jobId}/pages/upload`, { method: 'POST', body: more })
 
     await page.goto(`/jobs/${jobId}`)
-    await expect(page.getByTestId('status-badge')).toHaveText('uploading')
+    await expect(page.getByTestId('status-badge')).toHaveText('Uploading')
     // Re-running would start it on part of its pages: only the start is offered.
     const run = await openDatasetMenu(page, 'dataset-run')
     await expect(run.getByTestId('llm-read-open')).toBeVisible()

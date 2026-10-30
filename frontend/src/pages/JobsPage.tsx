@@ -33,6 +33,7 @@ import { CaretIcon, CheckIcon, FilterIcon } from '../components/icons'
 import { useDropPlacement } from '../components/ui/dropPlacement'
 import { menuTrigger, useDismiss } from '../components/ui/menu'
 import { Modal } from '../components/Modal'
+import { Badge } from '../components/ui/Badge'
 import type { Tone } from '../components/ui/Badge'
 import { usePresence } from '../presence'
 import { STATUS_TONE, compactCount, overallProgress } from '../util'
@@ -68,6 +69,8 @@ const STATUS_ACCENT: Record<Tone, string> = {
   ok: 'border-l-ok',
   warn: 'border-l-warn',
   danger: 'border-l-danger',
+  test: 'border-l-test',
+  note: 'border-l-note',
 }
 
 // Each stage progresses in its natural unit: layout review happens per page, text review
@@ -727,18 +730,18 @@ export function JobsPage() {
     const test = job.test_pages ?? 0
     if (!test) return null
     return (
-      <TestDataChip data-testid="test-pages-label">
-        {test === job.pages_total ? 'test set' : `${compactCount(test)} of ${compactCount(job.pages_total ?? 0)} test pages`}
-      </TestDataChip>
+      test === job.pages_total
+        ? <TestDataChip data-testid="test-pages-label">Test set</TestDataChip>
+        : <TestDataChip data-testid="test-pages-label" value={`${compactCount(test)}/${compactCount(job.pages_total ?? 0)}`}>
+            Test pages
+          </TestDataChip>
     )
   }
 
   const completeLabel = (job: Job) => job.checked && (
-    <span data-testid="complete-label" title="Marked complete: nothing more to do"
-          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[11px] font-medium text-ok">
-      <CheckIcon />
+    <Badge data-testid="complete-label" title="Marked complete: nothing more to do" tone="ok" icon={<CheckIcon />}>
       Complete
-    </span>
+    </Badge>
   )
 
   const noteTag = (job: Job) => (

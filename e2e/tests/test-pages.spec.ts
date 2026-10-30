@@ -20,14 +20,14 @@ test.describe('Scenario: marking test data on a dataset', () => {
 
     const rows = page.locator('[data-page-row]')
     await expect(rows).toHaveCount(3)
-    await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: none')
+    await expect(page.getByTestId('job-test-pages')).toHaveText('No test pages')
     await page.getByRole('checkbox', { name: 'Select scan_1.png' }).click()
     await page.getByRole('checkbox', { name: 'Select scan_2.png' }).click()
     await page.getByTestId('bulk-test-pages').click()
 
     await expect.poll(() => testFlags(jobId)).toEqual([true, true, false])
     expect(await switchOf(jobId)).toBe(false)
-    await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: 2 of 3 pages')
+    await expect(page.getByTestId('job-test-pages')).toHaveText('Test pages 2/3')
     await expect(rows.locator('[data-testid="page-test"][aria-checked="true"]')).toHaveCount(2)
     await expect(rows.locator('[data-testid="page-test"][aria-checked="false"]')).toHaveCount(1)
     await expect(page.getByTestId('page-filter-test-pages')).toHaveText('Test pages · 2')
@@ -36,7 +36,7 @@ test.describe('Scenario: marking test data on a dataset', () => {
     await expect(page.getByTestId('bulk-test-pages')).toHaveText('Unmark test pages')
     await page.getByTestId('bulk-test-pages').click()
     await expect.poll(() => testFlags(jobId)).toEqual([false, false, false])
-    await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: none')
+    await expect(page.getByTestId('job-test-pages')).toHaveText('No test pages')
   })
 
   test("a row's Test cell marks that one page", async ({ page }) => {
@@ -50,7 +50,7 @@ test.describe('Scenario: marking test data on a dataset', () => {
     await expect.poll(() => testFlags(jobId)).toEqual([false, true])
     await expect(cell).toHaveAttribute('aria-checked', 'true')
     await expect(page).toHaveURL(new RegExp(`/jobs/${jobId}$`))
-    await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: 1 of 2 pages')
+    await expect(page.getByTestId('job-test-pages')).toHaveText('Test pages 1/2')
   })
 
   test('the whole dataset is test data, and an upload can still add pages that are not',
@@ -65,14 +65,14 @@ test.describe('Scenario: marking test data on a dataset', () => {
 
       await expect.poll(() => testFlags(jobId)).toEqual([true, true])
       expect(await switchOf(jobId)).toBe(true)
-      await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: whole dataset')
+      await expect(page.getByTestId('job-test-pages')).toHaveText('Test set')
       await expect(page.getByTestId('add-as-test')).toBeChecked()
 
       await page.getByTestId('add-as-test').uncheck()
       await page.locator('input[type="file"]').setInputFiles(
         [{ name: 'extra.png', mimeType: 'image/png', buffer: scanPng(TEST_SCAN_WIDTH, 800, 13) }])
       await expect.poll(() => testFlags(jobId)).toEqual([true, true, false])
-      await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: 2 of 3 pages')
+      await expect(page.getByTestId('job-test-pages')).toHaveText('Test pages 2/3')
     })
 
   test('No test pages unmarks every page and warns first', async ({ page }) => {
@@ -84,7 +84,7 @@ test.describe('Scenario: marking test data on a dataset', () => {
     await page.getByTestId('job-test-pages').click()
     const dialog = page.getByRole('dialog', { name: 'Test data' })
     await expect(dialog.getByRole('radio', { name: 'The whole dataset, including pages added later' })).toBeChecked()
-    await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: whole dataset')
+    await expect(page.getByTestId('job-test-pages')).toHaveText('Test set')
     await expect(dialog.getByTestId('test-data-unmark-warning')).toHaveCount(0)
     await dialog.getByRole('radio', { name: 'No test pages' }).check()
     await expect(dialog.getByTestId('test-data-unmark-warning')).toHaveText(
@@ -93,7 +93,7 @@ test.describe('Scenario: marking test data on a dataset', () => {
 
     await expect.poll(() => testFlags(jobId)).toEqual([false, false])
     expect(await switchOf(jobId)).toBe(false)
-    await expect(page.getByTestId('job-test-pages')).toHaveText('Test data: none')
+    await expect(page.getByTestId('job-test-pages')).toHaveText('No test pages')
   })
 
   test('the page viewer marks the page it shows', async ({ page }) => {
@@ -139,8 +139,8 @@ test.describe('Scenario: the dataset list', () => {
 
     await page.goto(`/?q=${encodeURIComponent('List ')}`)
     const row = (name: string) => page.getByTestId('job-card').filter({ hasText: name })
-    await expect(row(whole).getByTestId('test-pages-label')).toHaveText('test set')
-    await expect(row(part).getByTestId('test-pages-label')).toHaveText('1 of 2 test pages')
+    await expect(row(whole).getByTestId('test-pages-label')).toHaveText('Test set')
+    await expect(row(part).getByTestId('test-pages-label')).toHaveText('Test pages 1/2')
     await expect(row(none)).toBeVisible()
     await expect(row(none).getByTestId('test-pages-label')).toHaveCount(0)
 

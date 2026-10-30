@@ -42,7 +42,7 @@ export function AccessPanel({ access, isAdmin }: AccessPanelProps) {
                   {d.name}
                 </Link>
                 {isTileTask(d.task) && (
-                  <Badge variant="chip" className="uppercase">map</Badge>
+                  <Badge>Map</Badge>
                 )}
               </li>
             ))}

@@ -294,10 +294,12 @@ test.describe('Scenario: reading the page table at a glance', () => {
     const jobId = await seedCompletedJob(uniqueName('Top bar'), 1)
 
     await page.goto(`/jobs/${jobId}`)
-    const transcript = await page.getByRole('group', { name: 'Read' }).boundingBox()
+    const review = await page.getByRole('group', { name: 'Review' }).boundingBox()
     const run = await page.getByTestId('dataset-run').boundingBox()
-    // Transcript was a size smaller than everything beside it.
-    expect(transcript!.height).toBe(run!.height)
+    const exporting = await page.getByRole('button', { name: /^Export/ }).boundingBox()
+    // Transcript, when it sat here, was a size smaller than everything beside it.
+    expect(review!.height).toBe(run!.height)
+    expect(exporting!.height).toBe(run!.height)
   })
 
   test('Complete marks a dataset finished, and the dataset list shows and filters by it', async ({ page }) => {

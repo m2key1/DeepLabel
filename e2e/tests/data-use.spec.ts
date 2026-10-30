@@ -30,14 +30,14 @@ test.describe('Scenario: an owner decides what a dataset may be used for', () =>
       await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
       const jobId = page.url().split('/').pop()!
       expect((await getJob(jobId)).data_use).toEqual({ ...ALL_ON, training: false })
-      await expect(page.getByTestId('data-use-chip')).toHaveText(['no training'])
+      await expect(page.getByTestId('data-use-chip')).toHaveText(['No training'])
 
       await (await openDatasetMenu(page, 'dataset-more')).getByTestId('data-use-open').click()
       await page.getByText('Export by others', { exact: true }).click()
       await expect(page.getByRole('switch', { name: /^Export by others/ })).not.toBeChecked()
       await page.getByTestId('data-use-save').click()
       await expect.poll(async () => (await getJob(jobId)).data_use).toEqual({ ...ALL_ON, training: false, export: false })
-      await expect(page.getByTestId('data-use-chip')).toHaveText(['no training', 'no export'])
+      await expect(page.getByTestId('data-use-chip')).toHaveText(['No training', 'No export'])
 
       await page.goto('/models/train?task=ocr')
       await expect(await datasetOption(page, trainable)).toBeVisible()
@@ -53,7 +53,7 @@ test.describe('Scenario: an owner decides what a dataset may be used for', () =>
 
       // The browser is the dev admin; the dataset belongs to the seeding account.
       await page.goto(`/jobs/${jobId}`)
-      await expect(page.getByTestId('data-use-chip')).toHaveText(['no export'])
+      await expect(page.getByTestId('data-use-chip')).toHaveText(['No export'])
       await page.getByRole('button', { name: /^Export/ }).click()
       await expect(page.getByTestId('export-blocked')).toContainText('Ask e2e-seeder for a copy')
       await expect(page.getByTestId('export-format')).toHaveCount(0)

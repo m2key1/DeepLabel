@@ -91,7 +91,7 @@ function Header({ person, own, groups }: { person: Person; own: boolean; groups:
         {groups.length > 0 && (
           <div data-testid="profile-groups" className="flex flex-wrap items-center gap-1 text-xs text-ink-subtle">
             Groups:
-            {groups.map((g) => <Badge key={g.id} variant="chip" data-testid="profile-group">{g.name}</Badge>)}
+            {groups.map((g) => <Badge key={g.id} data-testid="profile-group">{g.name}</Badge>)}
           </div>
         )}
       </div>

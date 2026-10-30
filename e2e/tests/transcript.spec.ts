@@ -176,14 +176,17 @@ test.describe('Scenario: reading a volume one page at a time', () => {
     await expect(lines(page)).toHaveCount(6)
   })
 
-  test('it links back to the dataset it came from', async ({ page }) => {
+  test('its Pages tab leads back to the dataset it came from', async ({ page }) => {
     const jobId = await seedCompletedJob(uniqueName('Back'), 1)
 
     await openTranscript(page, jobId)
+    const views = page.getByTestId('dataset-views')
+    await expect(views.getByRole('link', { name: 'Transcript' })).toHaveAttribute('aria-current', 'page')
 
-    await page.getByRole('link', { name: 'back to dataset' }).click()
+    await views.getByRole('link', { name: 'Pages' }).click()
 
     await expect(page).toHaveURL(new RegExp(`/jobs/${jobId}$`))
+    await expect(page.getByTestId('dataset-views').getByRole('link', { name: 'Pages' })).toHaveAttribute('aria-current', 'page')
   })
 
   test('a dataset that cannot be read says why instead of showing an empty document',

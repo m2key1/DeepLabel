@@ -161,7 +161,7 @@ export function AugmentationsPage() {
               >
                 <span className="min-w-0 flex-1 truncate">{pipeline.name}</span>
                 {pipeline.is_default && (
-                  <Badge tone="accent" variant="chip" className="uppercase">default</Badge>
+                  <Badge tone="accent">Default</Badge>
                 )}
                 {!pipeline.editable && (
                   <span className="text-[10px] uppercase text-ink-subtle">{pipeline.owner}</span>
