@@ -686,7 +686,7 @@ DeepLabel  GET /v1/train/{id}/progress                 rsync progress.jsonl + lo
     {"key": "learning_rate", "role": "learning_rate", "label": "Learning rate", "group": "Schedule",
      "kind": "float", "help": "...", "above": 0, "default": 0.0003, "env": "TRAIN_LR"}
   ],
-  "augmentation": {"library": "albumentations", "version": "1.4.24", "targets": ["image"]},
+  "augmentation": {"library": "albumentations", "version": "2.0.8", "targets": ["image"]},
   "metrics": [{"key": "cer", "label": "CER", "unit": "fraction", "better": "lower", "headline": true}],
   "default_epochs": 20,
   "outputs": ["weights", "lm", "lm_dict"],
@@ -807,7 +807,7 @@ POST /v1/train
   "params": {
     "epochs": 30, "batch_size": 8, "gpus": 1,
     "hyperparams": {"learning_rate": 0.0002},
-    "augmentation": {"__version__": "1.4.24", "transform": {"...": "albumentations dict"}},
+    "augmentation": {"__version__": "2.0.8", "transform": {"...": "albumentations dict"}},
     "build_lm": true
   }
 }
