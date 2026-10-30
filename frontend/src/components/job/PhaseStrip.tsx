@@ -1,7 +1,10 @@
+import { useState } from 'react'
 import type { JobDetail, JobWithoutPages } from '../../api'
 import { isTileTask } from '../../api'
 import { CheckIcon } from '../icons'
 import { StatusBadge } from '../StatusBadge'
+import { popoverChrome } from '../ui/Card'
+import { useDismiss } from '../ui/menu'
 
 /** Everything this reads. The page list is not part of it, so a dataset fetched
  *  without one is still enough to say where the pipeline got to. */
@@ -73,23 +76,44 @@ function StepMark({ state }: { state: StepState }) {
 /** The pipeline as one joined row of steps: a check once a step is through, a pulsing dot
  *  and a bar while it works, and a dashed ring for a step this dataset does not run. The
  *  dataset's status leads the row only when the steps cannot say it - queued, uploading,
- *  failed or cancelled. */
+ *  cancelled, or failed outside any step. Why a run failed is one click on the step that
+ *  failed, rather than a line of red that stays on the page. */
 export function PhaseStrip({ job }: { job: Phased }) {
   const phases = isTileTask(job.task) ? tilePhases(job) : textPhases(job)
+  const [errorOpen, setErrorOpen] = useState(false)
+  useDismiss(errorOpen, () => setErrorOpen(false))
+  const stateOf = (p: Phase): StepState => p.skipped ? 'skipped'
+    : job.phase === p.key && job.status === 'running' ? 'running'
+    : job.phase === p.key && job.status === 'error' ? 'failed'
+    : p.total > 0 && p.done >= p.total ? 'done' : 'waiting'
+  const failed = phases.find((p) => stateOf(p) === 'failed')
+  const showStatus = job.status !== 'done' && job.status !== 'running' && !failed
+  const errorButton = (label: string) => job.error ? {
+    type: 'button' as const,
+    'aria-expanded': errorOpen,
+    title: `${label} - click for why`,
+    onClick: (e: React.MouseEvent) => { e.stopPropagation(); setErrorOpen(!errorOpen) },
+  } : null
   return (
+    <div className="relative inline-block max-w-full">
     <div data-testid="phase-strip" data-status={job.status} role="list" aria-label="Pipeline"
          className="inline-flex max-w-full flex-wrap items-center divide-x divide-line overflow-hidden rounded-full border border-line text-[11px]">
-      {job.status !== 'done' && job.status !== 'running' && (
-        <span role="listitem" className="flex items-center px-1.5"><StatusBadge status={job.status} /></span>
+      {showStatus && (
+        <span role="listitem" className="flex items-center px-1.5">
+          {errorButton('Failed')
+            ? <button {...errorButton('Failed')!} data-testid="phase-error-open" className="rounded-full hover:opacity-80"><StatusBadge status={job.status} /></button>
+            : <StatusBadge status={job.status} />}
+        </span>
       )}
       {phases.map((p) => {
-        const state: StepState = p.skipped ? 'skipped'
-          : job.phase === p.key && job.status === 'running' ? 'running'
-          : job.phase === p.key && job.status === 'error' ? 'failed'
-          : p.total > 0 && p.done >= p.total ? 'done' : 'waiting'
+        const state = stateOf(p)
+        const opener = state === 'failed' ? errorButton(`${p.label} failed`) : null
+        const Step = opener ? 'button' : 'span'
         return (
-          <span key={p.key} role="listitem" data-phase={p.key} data-state={state}
-                className={`flex items-center gap-1.5 px-2.5 py-0.5 ${STEP_LOOK[state]}`}>
+          <span key={p.key} role="listitem" data-phase={p.key} data-state={state} className="flex">
+          <Step {...(opener ? { ...opener, 'data-testid': 'phase-error-open' } : {})}
+                className={`flex items-center gap-1.5 px-2.5 py-0.5 ${STEP_LOOK[state]} ${
+                  opener ? 'cursor-pointer hover:bg-danger/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-danger' : ''}`}>
             <StepMark state={state} />
             <span className="font-medium">{p.label}</span>
             {state === 'skipped' ? (
@@ -105,9 +129,20 @@ export function PhaseStrip({ job }: { job: Phased }) {
                 <span className="font-mono tabular-nums">{p.done}/{p.total}</span>
               </>
             )}
+          </Step>
           </span>
         )
       })}
+    </div>
+      {errorOpen && job.error && (
+        <div data-testid="phase-error" role="dialog" aria-label="Why the run failed"
+             onClick={(e) => e.stopPropagation()}
+             className={`absolute left-0 top-full z-20 mt-1.5 w-[28rem] max-w-[calc(100vw-2rem)] ${popoverChrome} p-3`}>
+          <p className="text-xs font-medium text-danger">{failed ? `${failed.label} failed` : 'The run failed'}</p>
+          <p className="mt-1 break-words font-mono text-xs text-ink">{job.error}</p>
+          <p className="mt-2 text-xs text-ink-muted">Fix the cause, then start it again from Run.</p>
+        </div>
+      )}
     </div>
   )
 }

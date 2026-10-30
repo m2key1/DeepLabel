@@ -1222,7 +1222,6 @@ export function JobDetailPage() {
         <div className="mt-1.5">
           <PhaseStrip job={job} />
         </div>
-        {job.error && <p className="mt-2 text-sm text-danger">{job.error}</p>}
         {!!job.unreadable?.length && (
           <UnreadablePages pages={job.unreadable} onRetry={canOwn && !active ? async () => {
             try {
