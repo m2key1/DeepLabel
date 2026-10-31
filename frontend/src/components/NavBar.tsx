@@ -37,11 +37,14 @@ export function Shell() {
   const [crumbs, setCrumbs] = useState<Crumb[]>([])
   const inPageEditor = !!useMatch('/jobs/:id/pages/:pageId')
   const inTileEditor = !!useMatch('/jobs/:id/tiles/:pageId')
-  const inEditor = inPageEditor || inTileEditor
+  const inTranscript = !!useMatch('/jobs/:id/transcript')
+  const fullHeight = inPageEditor || inTileEditor || inTranscript
   // The shell owns the viewport and the page scrolls inside it, rather than the document
-  // scrolling around a nav bar of its own height. A full-height page (the editors) can then
-  // ask for h-full and get exactly the space left under the nav — as the document, it would
-  // overflow by the nav's height and raise a window scrollbar over the canvas edge.
+  // scrolling around a nav bar of its own height. A full-height page (the editors, the
+  // transcript) can then ask for h-full and get exactly the space left under the nav - as the
+  // document, it would overflow by the nav's height and raise a window scrollbar over the
+  // canvas edge. Under the footer's wrapper h-full has no height to fill, so its panes grow
+  // with their content instead of scrolling.
   return (
     <CrumbContext.Provider value={setCrumbs}>
       <div className="flex h-screen flex-col">
@@ -49,7 +52,7 @@ export function Shell() {
           <NavBar crumbs={crumbs} />
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
-          {inEditor ? <Outlet /> : (
+          {fullHeight ? <Outlet /> : (
             <div className="flex min-h-full flex-col">
               <div className="flex-1"><Outlet /></div>
               <AppFooter />

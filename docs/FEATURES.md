@@ -490,8 +490,9 @@ Sign-in is handled by Authentik.
   tokens and language models. Log out sits at the foot of that list.
 - The theme (Auto, Light, Dark) is the button in the top bar, on every page.
 - Settings are stored with your account and follow you to every device.
-- Every page except the two editors ends with a footer naming the running version and
-  commit, with links to the documentation, the source and a new issue.
+- Every page except the two editors and the transcript, which fill the window, ends with a
+  footer naming the running version and commit, with links to the documentation, the source
+  and a new issue.
 
 ## Keyboard shortcuts
 

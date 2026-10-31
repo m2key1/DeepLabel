@@ -52,7 +52,7 @@ test.describe('Scenario: following a link to nowhere', () => {
 })
 
 test.describe('Scenario: finding out which release this is and where to report a problem', () => {
-  test('every page but the editors ends with the version and the project links', async ({ page }) => {
+  test('every page but the editors and the transcript ends with the version and the project links', async ({ page }) => {
     expect(await backendFetch('/api/meta')).toEqual({ version: '0.1.0', commit: null })
     const jobId = await seedCompletedJob(uniqueName('Footer'), 1, LANDSCAPE)
     const [first] = await jobPageIds(jobId)
@@ -73,6 +73,9 @@ test.describe('Scenario: finding out which release this is and where to report a
     await expect(footer).toHaveCount(0)
     await page.goto(`/jobs/${jobId}/tiles/${first}`)
     await expect(page.getByTestId('tile-canvas')).toBeVisible()
+    await expect(footer).toHaveCount(0)
+    await page.goto(`/jobs/${jobId}/transcript`)
+    await expect(page.getByTestId('transcript-text')).toBeVisible()
     await expect(footer).toHaveCount(0)
   })
 })

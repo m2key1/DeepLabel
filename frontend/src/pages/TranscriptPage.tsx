@@ -734,22 +734,26 @@ export function TranscriptPage() {
           }}
           className="relative w-4 shrink-0 cursor-pointer border-l border-line bg-surface focus:outline-none"
         >
-          {shown.map((p, i) => (
-            <span
-              key={p.idx}
-              data-testid="transcript-tick"
-              data-hit={hitPages.has(p.idx) ? 'true' : 'false'}
-              data-at={i === at ? 'true' : 'false'}
-              style={{ top: `${shown.length > 1 ? (i / (shown.length - 1)) * 100 : 0}%` }}
-              className={`pointer-events-none absolute -translate-y-1/2 rounded-full ${
-                i === at
-                  ? 'inset-x-0.5 h-1.5 bg-accent'
-                  : hitPages.has(p.idx)
-                    ? 'inset-x-1 h-1 bg-warn'
-                    : 'inset-x-1.5 h-0.5 bg-line-strong'
-              }`}
-            />
-          ))}
+          {/* Inset by half the largest tick, so the first and last pages' ticks stay inside
+              the window rather than hanging over its edges. */}
+          <div className="pointer-events-none absolute inset-x-0 inset-y-1">
+            {shown.map((p, i) => (
+              <span
+                key={p.idx}
+                data-testid="transcript-tick"
+                data-hit={hitPages.has(p.idx) ? 'true' : 'false'}
+                data-at={i === at ? 'true' : 'false'}
+                style={{ top: `${shown.length > 1 ? (i / (shown.length - 1)) * 100 : 0}%` }}
+                className={`pointer-events-none absolute -translate-y-1/2 rounded-full ${
+                  i === at
+                    ? 'inset-x-0.5 h-1.5 bg-accent'
+                    : hitPages.has(p.idx)
+                      ? 'inset-x-1 h-1 bg-warn'
+                      : 'inset-x-1.5 h-0.5 bg-line-strong'
+                }`}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </div>
