@@ -5,6 +5,7 @@ import threading
 from email.parser import BytesParser
 from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import ClassVar
 
 import pytest
 from PIL import Image
@@ -19,15 +20,15 @@ SHA = 'ab' * 32
 
 class FakeBackend(BaseHTTPRequestHandler):
     """Records what it was sent; answers as the stub backend would."""
-    calls: list = []
-    script: dict = {}
+    calls: ClassVar[list] = []
+    script: ClassVar[dict] = {}
     builtin = False
 
     def log_message(self, *args):
         pass
 
-    def answer(self, status: int, body: dict):
-        data = json.dumps(body).encode()
+    def answer(self, status: int, body: dict | bytes):
+        data = body if isinstance(body, bytes) else json.dumps(body).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
@@ -123,7 +124,7 @@ def test_loading_sends_the_files_with_their_urls_and_waits_until_loaded(conn, ba
 
 class Neighbour(BaseHTTPRequestHandler):
     """Another backend on the same machine: records only which calls reached it."""
-    calls: list = []
+    calls: ClassVar[list] = []
 
     def log_message(self, *args):
         pass
@@ -224,6 +225,15 @@ def test_an_unreachable_backend_is_named_in_the_error():
         BackendClient(gone).info()
     assert raised.value.code == 'unreachable'
     assert 'model backend "ocr"' in raised.value.message
+
+
+@pytest.mark.parametrize('body', [b'<html>proxy error</html>', b'["not", "an", "object"]'])
+def test_an_answer_that_is_not_a_json_object_is_a_backend_error(backend, body):
+    FakeBackend.script['/v1/info'] = [(200, body)]
+    with pytest.raises(BackendError) as raised:
+        BackendClient(backend).info()
+    assert (raised.value.code, raised.value.message) == \
+        ('bad_answer', 'model backend "ocr" answered GET /v1/info with something other than a JSON object')
 
 
 def test_the_engine_batches_by_the_backends_limit_and_records_what_ran(conn, backend):

@@ -5,6 +5,7 @@ import threading
 from email.parser import BytesParser
 from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import ClassVar
 
 import pytest
 from PIL import Image
@@ -17,7 +18,7 @@ DRAWN = 'data:image/png;base64,ZHJhd24='
 
 
 class Trainer(BaseHTTPRequestHandler):
-    previews: list = []
+    previews: ClassVar[list] = []
     refuse = False
 
     def log_message(self, *args):

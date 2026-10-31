@@ -79,7 +79,7 @@ class BackendClient:
         request = urllib.request.Request(f'{self.backend.url}{path}', data=body, method=method, headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                return json.loads(response.read() or b'{}')
+                answer = json.loads(response.read() or b'{}')
         except urllib.error.HTTPError as error:
             try:
                 detail = json.loads(error.read()).get('error') or {}
@@ -91,6 +91,12 @@ class BackendClient:
             reason = getattr(error, 'reason', error)
             raise BackendError('unreachable', f'model backend "{self.backend.name}" at {self.backend.url}: {reason}',
                                retryable=True) from None
+        except ValueError:
+            answer = None
+        if not isinstance(answer, dict):
+            raise BackendError('bad_answer', f'model backend "{self.backend.name}" answered {method} {path} '
+                               'with something other than a JSON object')
+        return answer
 
     def info(self) -> dict:
         if self._info is None:
