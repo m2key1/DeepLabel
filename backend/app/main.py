@@ -9,7 +9,7 @@ from app import (augmentations, caches, config, dataset_sync, geometry, jobs, ll
                  llm_queue, store, trainer, training, weights)
 from app.routes import (augmentations as augmentation_routes, backend_api, bulk, contributors, conventions, elements,
                         evaluations, exports, groups, lines, llm, maps, models, pages, people, pipeline, presence,
-                        reference as reference_routes, trainings)
+                        reference as reference_routes, trainings, transcript)
 from app.routes import jobs as job_routes
 from app.routes import layout_templates as layout_template_routes
 
@@ -107,6 +107,7 @@ app.include_router(pages.router)
 app.include_router(elements.router)
 app.include_router(lines.router)
 app.include_router(exports.router)
+app.include_router(transcript.router)
 app.include_router(pipeline.router)
 app.include_router(maps.router)
 app.include_router(groups.router)

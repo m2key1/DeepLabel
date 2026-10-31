@@ -115,6 +115,15 @@ def require_job_access(conn, job_id: str, user: dict) -> None:
         raise HTTPException(404)
 
 
+def accessible_job(conn, job_id: str, user: dict) -> dict:
+    """The dataset, once the caller has been shown to be allowed at it."""
+    require_job_access(conn, job_id, user)
+    job = store.get_job(conn, job_id)
+    if job is None:
+        raise HTTPException(404)
+    return job
+
+
 def require_job_owner(conn, job_id: str, user: dict) -> None:
     """Admins pass; everyone else must own the dataset. 404 keeps hidden datasets hidden."""
     require_job_access(conn, job_id, user)

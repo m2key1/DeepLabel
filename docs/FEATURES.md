@@ -139,7 +139,7 @@ turns one off, apply to everyone, the owner and admins included:
   **Self-hosted** (Settings, on the connection). Switched off, only self-hosted models can
   read it, and a reading queued earlier is not sent.
 - **Export by others:** the people it is shared with, admins included, may export it. The
-  owner always can. Viewing and editing are not affected.
+  owner always can. Viewing and editing, reading it in Transcript included, are not affected.
 
 The switches are set on the wizard's Review step and changed later on the same step of the
 dataset's **Settings**. There it also lists the models already trained, validated or scored
@@ -278,9 +278,12 @@ Press `e` to edit the page.
 ## Transcripts and exports
 
 - **Transcript** reads a dataset as a volume: the scan on one side, its text on the other,
-  page by page. Turn pages with the arrows or `j`/`k`.
+  page by page. Turn pages with the arrows or `j`/`k`. Each page's text is fetched as it is
+  reached, so a volume of any size opens at once.
 - Search fuzzily, exactly, case-sensitively or by regular expression. `n` and `p` step
-  through the hits, and a strip along the edge shows which pages hold them.
+  through the hits, and a strip along the edge shows which pages hold them. The search runs
+  on the server over the whole volume; a pattern that takes longer than two seconds is
+  stopped and asked to be more specific.
 - `f` opens a distraction-free reading view.
 - Export a dataset as PAGE XML, ALTO, hOCR or TEI with its scans, as JSON, Markdown, plain
   text or DeepLabel's own zip, either complete or only what was reviewed. Lines inside

@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 from app import config, corpus, data_use, ingest, llm, llm_gt, store
 from app.caches import counted_page
-from app.deps import current_user, get_db, require_job_access, require_job_owner
+from app.deps import accessible_job, current_user, get_db, require_job_access, require_job_owner
 from app.routes.selection import selected_pages
 
 router = APIRouter(tags=['reference'])
@@ -19,20 +19,11 @@ def require_enabled() -> None:
         raise HTTPException(403, 'LLM pre-annotation is disabled on this deployment')
 
 
-def _accessible_job(conn, job_id: str, user: dict) -> dict:
-    """The dataset, once the caller has been shown to be allowed at it."""
-    require_job_access(conn, job_id, user)
-    job = store.get_job(conn, job_id)
-    if job is None:
-        raise HTTPException(404)
-    return job
-
-
 @router.get('/api/jobs/{job_id}/documents')
 def list_documents(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
     """The corpus this dataset was uploaded with, in reading order, with how many pages
     each document was cut onto."""
-    _accessible_job(conn, job_id, user)
+    accessible_job(conn, job_id, user)
     placed = {row['reference_document']: row['c'] for row in conn.execute(
         'SELECT reference_document, COUNT(*) c FROM pages WHERE job_id = ? AND deleted = 0 '
         'AND reference_document IS NOT NULL GROUP BY reference_document', (job_id,))}
@@ -49,7 +40,7 @@ def list_documents(job_id: str, conn=Depends(get_db), user: dict = Depends(curre
 def read_document(job_id: str, name: str, conn=Depends(get_db),
                   user: dict = Depends(current_user)):
     """One corpus document, whole, as it was uploaded."""
-    _accessible_job(conn, job_id, user)
+    accessible_job(conn, job_id, user)
     row = conn.execute('SELECT name, text FROM job_documents WHERE job_id = ? AND name = ?',
                        (job_id, name)).fetchone()
     if row is None:
@@ -114,7 +105,7 @@ def list_reference(job_id: str, limit: int = Query(default=200, ge=1, le=2000),
     """What each page is answerable for, in reading order. A page with few anchors and a
     low score is where a cut goes wrong quietly, so both travel with the text. Duplicate
     scans are left out, as the cut leaves them out."""
-    _accessible_job(conn, job_id, user)
+    accessible_job(conn, job_id, user)
     cut_pages = f'FROM pages WHERE job_id = ? AND {counted_page()}'
     rows = conn.execute(
         'SELECT id, idx, filename, reference_document, reference_anchors, reference_score, '
@@ -177,7 +168,7 @@ def groundtruth_prompt(job_id: str, conn=Depends(get_db), user: dict = Depends(c
     and which of the two is actually in force. An editor that could not show the shipped
     wording would leave a dataset with none of its own looking as if it had no wording at
     all, and the names it may fill in undiscoverable."""
-    job = _accessible_job(conn, job_id, user)
+    job = accessible_job(conn, job_id, user)
     return {'prompt': job['gt_prompt'], 'default': llm.DEFAULT_GT_PROMPT,
             'in_force': llm.effective_gt_prompt(job['gt_prompt']),
             'variables': list(llm.PAGE_VARIABLES)}
@@ -190,7 +181,7 @@ def groundtruth_preview(job_id: str, model_ids: list[int] = Query(default=[]),
                         conn=Depends(get_db), user: dict = Depends(current_user)):
     """What a diplomatic run would cost, per model, the pages whose answer still matches
     the wording and reference they were read under, and how many a person transcribed."""
-    _accessible_job(conn, job_id, user)
+    accessible_job(conn, job_id, user)
     chosen = model_ids or _models(conn, job_id, None)
     return llm_gt.preview(conn, job_id, chosen, user, selected_pages(conn, job_id, page_ids),
                           include_transcribed=include_transcribed)
@@ -230,7 +221,7 @@ def groundtruth_read(job_id: str, body: GroundTruthRequest | None = None,
 def groundtruth_status(job_id: str, page_ids: list[int] | None = Query(default=None),
                        conn=Depends(get_db), user: dict = Depends(current_user)):
     """How far the diplomatic readings have got, with the first few failures."""
-    _accessible_job(conn, job_id, user)
+    accessible_job(conn, job_id, user)
     return llm_gt.status(conn, job_id, selected_pages(conn, job_id, page_ids))
 
 

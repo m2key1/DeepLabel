@@ -192,7 +192,7 @@ test.describe('Scenario: reading a volume one page at a time', () => {
   test('a dataset that cannot be read says why instead of showing an empty document',
     async ({ page }) => {
       const jobId = await seedCompletedJob(uniqueName('Broken'), 1)
-      await page.route(`**/api/jobs/${jobId}/export*`, (route) =>
+      await page.route(`**/api/jobs/${jobId}/transcript`, (route) =>
         route.fulfill({ status: 500, json: { detail: 'the dataset could not be read' } }))
 
       await page.goto(`/jobs/${jobId}/transcript`)
@@ -203,6 +203,28 @@ test.describe('Scenario: reading a volume one page at a time', () => {
 })
 
 test.describe('Scenario: turning the pages', () => {
+  // A volume used to arrive as one download of every page's text and outlines - 66 MB on
+  // a 78k-line volume, which came cut off after 37 seconds and showed nothing at all.
+  test('only the open page and its neighbours are fetched, and a turn fetches the next',
+    async ({ page }) => {
+      const jobId = await seedCompletedJob(uniqueName('Fetched'), 6)
+      const fetched: string[] = []
+      page.on('request', (request) => {
+        const path = new URL(request.url()).pathname
+        if (path.startsWith(`/api/jobs/${jobId}/`)) fetched.push(path)
+      })
+      await openTranscript(page, jobId)
+      await expect(lines(page).first()).toBeVisible()
+      await expect.poll(() => fetched.filter((p) => p.includes('/transcript/pages/')).sort())
+        .toEqual([`/api/jobs/${jobId}/transcript/pages/0`, `/api/jobs/${jobId}/transcript/pages/1`])
+
+      await page.getByTestId('transcript-page-next').click()
+      await expect(at(page)).toHaveText(/^2 \/ 6 /)
+      await expect.poll(() => fetched.filter((p) => p.includes('/transcript/pages/')).sort())
+        .toEqual([0, 1, 2].map((i) => `/api/jobs/${jobId}/transcript/pages/${i}`))
+      expect(fetched.filter((p) => p.includes('/export'))).toEqual([])
+    })
+
   test('the arrows, the keys and the spine all turn both panes together', async ({ page }) => {
     const jobId = await seedCompletedJob(uniqueName('Turning'), 8)
     const pageIds = await jobPageIds(jobId)

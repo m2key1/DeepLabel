@@ -2808,11 +2808,45 @@ export interface TranscriptPage {
   elements: TranscriptElement[]
 }
 
-export function getJobExport(jobId: string): Promise<{
+/** A page as the transcript turns to it: no text, which comes a page at a time. */
+export interface TranscriptIndexPage {
+  id: number
+  idx: number
+  filename: string
+  width: number | null
+  height: number | null
+  rotation: number
+  /** Lines outside tables and other containers, and how many of them are reviewed. */
+  lines: number
+  checked: number
+  /** Of those, the ones that carry text - a page without any is skipped. */
+  with_text: number
+  checked_with_text: number
+}
+
+export function getTranscript(jobId: string): Promise<{
   job: { id: string; name: string }
-  pages: TranscriptPage[]
+  pages: TranscriptIndexPage[]
 }> {
-  return request(exportUrl(jobId, 'json'))
+  return request(`/api/jobs/${jobId}/transcript`)
+}
+
+export function getTranscriptPage(jobId: string, idx: number): Promise<TranscriptPage> {
+  return request(`/api/jobs/${jobId}/transcript/pages/${idx}`)
+}
+
+export interface TranscriptHit {
+  idx: number
+  line: number
+  /** The words that answered, to be marked in the line. */
+  words: string[]
+}
+
+/** `usable` is false for a pattern not finished yet, which finds nothing rather than failing. */
+export function searchTranscript(jobId: string, q: string, mode: string, reviewed: boolean,
+  signal?: AbortSignal): Promise<{ usable: boolean; hits: TranscriptHit[] }> {
+  const params = new URLSearchParams({ q, mode, reviewed: String(reviewed) })
+  return request(`/api/jobs/${jobId}/transcript/search?${params}`, { signal })
 }
 
 export function jobEventsUrl(jobId: string): string {

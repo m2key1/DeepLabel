@@ -1,4 +1,3 @@
-import io
 import json
 import zipfile
 from pathlib import Path
@@ -29,41 +28,47 @@ def collect_job(conn, job_id: str, checked_only: bool = False) -> dict:
     for page in conn.execute(
             f'SELECT * FROM pages WHERE job_id = ? AND {counted_page()} '
             'ORDER BY idx', (job_id,)):
-        elements = []
-        for element in conn.execute(
-                'SELECT * FROM elements WHERE page_id = ? AND deleted = 0 ORDER BY order_idx', (page['id'],)):
-            lines = [
-                {'id': l['id'], 'order_idx': l['order_idx'],
-                 'polygon': _rounded(json.loads(l['polygon'])),
-                 'text': l['text'], 'corrected_text': l['corrected_text'],
-                 'confidence': l['confidence'], 'checked': bool(l['checked'])}
-                for l in conn.execute(
-                    'SELECT * FROM lines WHERE element_id = ? AND deleted = 0 ORDER BY order_idx', (element['id'],))
-                if not checked_only or l['checked']
-            ]
-            elements.append({'order_idx': element['order_idx'], 'class_name': element['class_name'],
-                             'bbox': [round(v, PLACES) for v in json.loads(element['bbox'])],
-                             'conf': element['conf'],
-                             'kind': element['kind'], 'lines': lines,
-                             **({'polygon': _rounded(json.loads(element['polygon']))}
-                                if outlines and element['polygon'] else {})})
-        if checked_only and not any(element['lines'] for element in elements):
+        entry = page_entry(conn, page, outlines, checked_only)
+        if checked_only and not any(element['lines'] for element in entry['elements']):
             continue
-        pages.append({'id': page['id'], 'idx': page['idx'], 'filename': page['filename'],
-                      'width': page['width'], 'height': page['height'],
-                      # The way up, because the reader draws the scan from its tiles and
-                      # those are rewritten when a page is turned - without it the browser
-                      # would keep handing back the ones from before the turn.
-                      'rotation': page['rotation'],
-                      # Which pages were reviewed whole, so an import elsewhere keeps them ground truth.
-                      'layout_checked': bool(page['layout_checked']), 'lines_checked': bool(page['lines_checked']),
-                      'elements': elements,
-                      **({'iiif': {k: v for k, v in json.loads(page['iiif']).items() if k != 'image'}}
-                         if page['iiif'] else {})})
+        pages.append(entry)
     described = {k: job[k] for k in ('id', 'name', 'owner', 'created_at')} if job else {}
     if job and job['iiif_source']:
         described['iiif_source'] = json.loads(job['iiif_source'])
     return {'job': described, 'pages': pages}
+
+
+def page_entry(conn, page, outlines: bool, checked_only: bool = False) -> dict:
+    """One page of an export, its elements and lines in reading order."""
+    elements = []
+    for element in conn.execute(
+            'SELECT * FROM elements WHERE page_id = ? AND deleted = 0 ORDER BY order_idx', (page['id'],)):
+        lines = [
+            {'id': l['id'], 'order_idx': l['order_idx'],
+             'polygon': _rounded(json.loads(l['polygon'])),
+             'text': l['text'], 'corrected_text': l['corrected_text'],
+             'confidence': l['confidence'], 'checked': bool(l['checked'])}
+            for l in conn.execute(
+                'SELECT * FROM lines WHERE element_id = ? AND deleted = 0 ORDER BY order_idx', (element['id'],))
+            if not checked_only or l['checked']
+        ]
+        elements.append({'order_idx': element['order_idx'], 'class_name': element['class_name'],
+                         'bbox': [round(v, PLACES) for v in json.loads(element['bbox'])],
+                         'conf': element['conf'],
+                         'kind': element['kind'], 'lines': lines,
+                         **({'polygon': _rounded(json.loads(element['polygon']))}
+                            if outlines and element['polygon'] else {})})
+    return {'id': page['id'], 'idx': page['idx'], 'filename': page['filename'],
+            'width': page['width'], 'height': page['height'],
+            # The way up, because the reader draws the scan from its tiles and
+            # those are rewritten when a page is turned - without it the browser
+            # would keep handing back the ones from before the turn.
+            'rotation': page['rotation'],
+            # Which pages were reviewed whole, so an import elsewhere keeps them ground truth.
+            'layout_checked': bool(page['layout_checked']), 'lines_checked': bool(page['lines_checked']),
+            'elements': elements,
+            **({'iiif': {k: v for k, v in json.loads(page['iiif']).items() if k != 'image'}}
+               if page['iiif'] else {})}
 
 
 def page_markdown(page: dict) -> str:

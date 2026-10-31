@@ -20,7 +20,7 @@ ACCESS_CHECKS = {
     'require_job_access', 'require_page_access', 'require_element_access',
     'require_line_access', 'require_region_access', 'can_access_job', 'require_job_owner',
     '_require_map_job', '_require_manager', '_own_reference', '_reference_scope',
-    '_pipeline_or_404', '_owned_training', 'get_training', '_accessible_job',
+    '_pipeline_or_404', '_owned_training', 'get_training', 'accessible_job',
     # The layout class routes' check: require_job_access, then a role that may edit.
     '_editing',
     # Shared with the bulk router so one dataset and a whole selection are gated by the

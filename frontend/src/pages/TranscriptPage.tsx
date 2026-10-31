@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { getJobExport, renditionUrl, tilesUrl } from '../api'
+import { getTranscript, getTranscriptPage, renditionUrl, searchTranscript, tilesUrl } from '../api'
 import { useImageSurface } from '../hooks/useImageSurface'
-import type { TranscriptLine, TranscriptPage as TranscriptPageData } from '../api'
+import type {
+  TranscriptHit, TranscriptIndexPage, TranscriptLine, TranscriptPage as TranscriptPageData,
+} from '../api'
 import { useCrumb } from '../components/NavBar'
 import { DatasetViews } from '../components/job/DatasetViews'
 import { ChevronIcon, ExpandIcon, PagesIcon } from '../components/icons'
 import { Check, Input } from '../components/ui/Field'
 import { Segmented } from '../components/ui/Segmented'
-import { matcher, searchForm } from '../lib/fuzzy'
+import { searchForm } from '../lib/fuzzy'
 import { displayed } from '../lib/text'
 import { useSettings } from '../settings'
 import type { SearchMode } from '../lib/fuzzy'
@@ -144,11 +146,20 @@ function Ink({ size, polygon }: { size: [number, number]; polygon: number[][] })
   )
 }
 
+/** Keyed by the dataset, so going from one volume's transcript to another's starts afresh:
+ *  the router keeps the component when only the id changes, and with it the pages already
+ *  fetched for the first volume. */
 export function TranscriptPage() {
   const { id } = useParams<{ id: string }>()
-  const jobId = id!
+  return <Transcript key={id} jobId={id!} />
+}
+
+function Transcript({ jobId }: { jobId: string }) {
   const [name, setName] = useState('')
-  const [pages, setPages] = useState<TranscriptPageData[] | null>(null)
+  const [pages, setPages] = useState<TranscriptIndexPage[] | null>(null)
+  // Each page's text and outlines, fetched when it is opened or is next to the open one.
+  const [loaded, setLoaded] = useState<ReadonlyMap<number, TranscriptPageData>>(new Map())
+  const asked = useRef(new Set<number>())
   const [reviewedOnly, setReviewedOnly] = useState(false)
   const [hitsOnly, setHitsOnly] = useState(false)
   const [query, setQuery] = useState('')
@@ -177,7 +188,7 @@ export function TranscriptPage() {
   useCrumb(name ? `${name} · Transcript` : 'Transcript')
 
   useEffect(() => {
-    getJobExport(jobId)
+    getTranscript(jobId)
       .then((data) => {
         setName(data.job.name)
         setPages(data.pages)
@@ -185,53 +196,45 @@ export function TranscriptPage() {
       .catch((e: Error) => setError(e.message))
   }, [jobId])
 
-  // Typing runs the search down the whole volume, so it waits for a pause in the typing.
+  // Typing searches the whole volume on the server, so it waits for a pause in the typing.
   useEffect(() => {
     const t = window.setTimeout(() => setNeedle(query.trim()), 200)
     return () => window.clearTimeout(t)
   }, [query])
 
-  const test = useMemo(() => matcher(needle, mode), [needle, mode])
+  // Which question an answer is to: one arriving for an earlier query is not this one's,
+  // and acting on it would take the reader to the old query's first hit.
+  const asking = `${mode} ${reviewedOnly} ${needle}`
+  const [answer, setAnswer] = useState<{
+    asking: string; usable: boolean; hits: TranscriptHit[]; error?: string
+  } | null>(null)
+  useEffect(() => {
+    if (!needle) return
+    const abort = new AbortController()
+    searchTranscript(jobId, needle, mode, reviewedOnly, abort.signal)
+      .then((found) => setAnswer({ asking, ...found }))
+      .catch((e: Error) => {
+        if (!abort.signal.aborted) setAnswer({ asking, usable: true, hits: [], error: e.message })
+      })
+    return () => abort.abort()
+  }, [jobId, needle, mode, reviewedOnly, asking])
+  const current = needle !== '' && answer?.asking === asking ? answer : null
+  const searching = needle !== '' && current === null
   // A pattern that will not compile is a search that finds nothing, not an absent one -
   // otherwise half-typing a bracket puts the whole volume back on screen.
-  const unusable = needle !== '' && !test
+  const unusable = current !== null && !current.usable
+  const hits = useMemo(() => current?.hits ?? [], [current])
+  const hitPages = useMemo(() => new Set(hits.map((h) => h.idx)), [hits])
+  const hitHere = useMemo(() => new Map(hits.map((h) => [h.line, h.words])), [hits])
+  const hitAt = hits.length ? Math.min(hitCursor, hits.length - 1) : 0
 
   // A search marks and navigates rather than filtering: a page read as a page has to be the
   // whole page, and a document with the unmatched lines cut out of it is not one. Somebody
   // who does want the sieve asks for it with "pages with hits".
-  const shown = useMemo(() => {
-    if (!pages) return []
-    return pages
-      .map((page) => ({
-        ...page,
-        elements: page.elements
-          .filter((e) => e.kind !== 'container')
-          .map((element) => ({
-            ...element,
-            lines: element.lines
-              .filter((l) => (!reviewedOnly || l.checked) && lineText(l) !== '')
-              .map((l) => ({ line: l, hit: test ? test(lineText(l)) : null })),
-          }))
-          .filter((e) => e.lines.length > 0),
-      }))
-      .filter((p) => p.elements.length > 0)
-      .filter((p) => !hitsOnly || needle === ''
-        || p.elements.some((e) => e.lines.some((row) => row.hit)))
-  }, [pages, reviewedOnly, hitsOnly, needle, test])
-
-  const hits = useMemo(() => {
-    const found: { idx: number; lineId: number }[] = []
-    for (const page of shown) {
-      for (const element of page.elements) {
-        for (const row of element.lines) {
-          if (row.hit) found.push({ idx: page.idx, lineId: row.line.id })
-        }
-      }
-    }
-    return found
-  }, [shown])
-  const hitPages = useMemo(() => new Set(hits.map((h) => h.idx)), [hits])
-  const hitAt = hits.length ? Math.min(hitCursor, hits.length - 1) : 0
+  const shown = useMemo(() => (pages ?? [])
+    .filter((p) => (reviewedOnly ? p.checked_with_text : p.with_text) > 0)
+    .filter((p) => !hitsOnly || !needle || hitPages.has(p.idx)),
+  [pages, reviewedOnly, hitsOnly, needle, hitPages])
 
   const at = useMemo(() => {
     if (shown.length === 0) return 0
@@ -239,6 +242,31 @@ export function TranscriptPage() {
     return i === -1 ? shown.length - 1 : i
   }, [shown, open])
   const page = shown[at]
+  const content = page ? loaded.get(page.idx) : undefined
+  const elements = useMemo(() => (content?.elements ?? [])
+    .filter((e) => e.kind !== 'container')
+    .map((element) => ({
+      ...element,
+      lines: element.lines
+        .filter((l) => (!reviewedOnly || l.checked) && lineText(l) !== '')
+        .map((l) => ({ line: l, words: hitHere.get(l.id) })),
+    }))
+    .filter((e) => e.lines.length > 0),
+  [content, reviewedOnly, hitHere])
+
+  // The open page and the ones either side of it, so a turn finds its text already here.
+  useEffect(() => {
+    for (const near of shown.slice(Math.max(0, at - 1), at + 2)) {
+      if (asked.current.has(near.idx)) continue
+      asked.current.add(near.idx)
+      getTranscriptPage(jobId, near.idx)
+        .then((data) => setLoaded((was) => new Map(was).set(near.idx, data)))
+        .catch((e: Error) => {
+          asked.current.delete(near.idx)
+          setError(e.message)
+        })
+    }
+  }, [jobId, shown, at])
 
   const textPane = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLDivElement>(null)
@@ -267,39 +295,45 @@ export function TranscriptPage() {
     setHitCursor(next)
     landing.current = 'head'
     setOpen(hits[next].idx)
-    setFocus({ line: hits[next].lineId, n: ++turns.current })
+    setFocus({ line: hits[next].line, n: ++turns.current })
   }, [hits, hitAt])
 
   // A fresh search takes the reader to its first answer. Recomputing the hits for another
   // reason - a filter toggled - is not a fresh search and moves nobody.
   const jumped = useRef('')
   useEffect(() => {
-    const asked = `${mode} ${needle}`
-    if (jumped.current === asked) return
-    jumped.current = asked
+    if (!current) return
+    const fresh = `${mode} ${needle}`
+    if (jumped.current === fresh) return
+    jumped.current = fresh
     setHitCursor(0)
-    const first = hits[0]
+    const first = current.hits[0]
     if (!first) return
     landing.current = 'head'
     setOpen(first.idx)
-    setFocus({ line: first.lineId, n: ++turns.current })
-  }, [needle, mode, hits])
+    setFocus({ line: first.line, n: ++turns.current })
+  }, [needle, mode, current])
 
   useEffect(() => {
     // The polygon belongs to the page it was read on, and nothing else would take it off
     // the one that replaces it.
     setHover(null)
+  }, [at])
+
+  // Once the page's text is here to land in: a page still on its way has no foot yet.
+  const arrived = content !== undefined
+  useEffect(() => {
     const el = textPane.current
-    if (!el) return
+    if (!el || !arrived) return
     el.scrollTop = landing.current === 'foot' ? el.scrollHeight : 0
     landing.current = 'head'
-  }, [at])
+  }, [at, arrived])
 
   // After the landing above, so that a line asked for by name wins over the page's default.
   useEffect(() => {
-    if (!focus) return
+    if (!focus || !arrived) return
     lineAt.current.get(focus.line)?.scrollIntoView({ block: 'center' })
-  }, [focus])
+  }, [focus, arrived, at])
 
   // By index, not by the page object: that is rebuilt on every keystroke of a search, and
   // bringing the strip back into line forces a layout each time it is.
@@ -310,10 +344,8 @@ export function TranscriptPage() {
       ?.scrollIntoView({ inline: 'center', block: 'nearest' })
   }, [strip, openIdx])
 
-  // The neighbours used to be fetched ahead, because a whole scan was half a megabyte and
-  // arrived long after it was asked for. The viewer reads the page from its pyramid now:
-  // what it needs to paint a page is a handful of kilobytes, so there is nothing left to
-  // hold in hand.
+  // Scans are not fetched ahead the way the text is: the viewer reads a page from its tile
+  // pyramid, and what it needs to paint one is a handful of kilobytes.
 
   const [textWheel] = useState(() => turner(SEAM_PX))
 
@@ -410,13 +442,13 @@ export function TranscriptPage() {
   if (error) return <p className="p-6 text-sm text-danger">{error}</p>
   if (pages === null) return <p className="p-6 text-sm text-ink-subtle">Loading</p>
 
-  const allLines = pages.flatMap((p) => p.elements.flatMap((e) => e.lines))
-  const checkedCount = allLines.filter((l) => l.checked).length
+  const lineCount = pages.reduce((sum, p) => sum + p.lines, 0)
+  const checkedCount = pages.reduce((sum, p) => sum + p.checked, 0)
   const found = hits.length
   const currentHit = hits[hitAt]
   const ink = hover ?? (currentHit && page && currentHit.idx === page.idx
-    ? page.elements.flatMap((e) => e.lines)
-      .find((row) => row.line.id === currentHit.lineId)?.line.polygon ?? null
+    ? elements.flatMap((e) => e.lines)
+      .find((row) => row.line.id === currentHit.line)?.line.polygon ?? null
     : null)
 
   const pageSize: [number, number] = [page?.width || 2000, page?.height || 3000]
@@ -450,7 +482,7 @@ export function TranscriptPage() {
         <h1 className="text-base font-semibold">{name}</h1>
         <DatasetViews jobId={jobId} active="transcript" />
         <span className="text-sm text-ink-muted" data-testid="transcript-counts">
-          {checkedCount}/{allLines.length} lines reviewed
+          {checkedCount}/{lineCount} lines reviewed
         </span>
         <Input
           ref={search}
@@ -476,7 +508,9 @@ export function TranscriptPage() {
           <>
             <span data-testid="transcript-found" aria-live="polite"
                   className="text-sm text-ink-muted">
-              {unusable ? 'not a pattern yet' : `${found} line${found === 1 ? '' : 's'}`}
+              {current?.error
+                ?? (searching ? 'searching'
+                  : unusable ? 'not a pattern yet' : `${found} line${found === 1 ? '' : 's'}`)}
             </span>
             {found > 0 && (
               <span className="flex items-center gap-0.5">
@@ -656,12 +690,14 @@ export function TranscriptPage() {
           onWheel={onTextWheel}
           className="min-h-0 min-w-0 flex-1 overflow-y-auto"
         >
-          {page ? (
+          {page && !content ? (
+            <p data-testid="transcript-page-loading" className="p-8 text-sm text-ink-subtle">Loading the page</p>
+          ) : page ? (
             <article className="mx-auto max-w-[74ch] px-8 pb-28 pt-8 font-serif">
               <h2 className="mb-6 font-sans text-xs font-medium uppercase tracking-widest text-ink-subtle">
                 Page {page.idx + 1}
               </h2>
-              {page.elements.map((element) => (
+              {elements.map((element) => (
                 <section
                   key={element.order_idx}
                   className="mb-6 grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-5 max-sm:grid-cols-1 max-sm:gap-y-1"
@@ -670,7 +706,7 @@ export function TranscriptPage() {
                     {element.class_name}
                   </p>
                   <div>
-                    {element.lines.map(({ line, hit }) => (
+                    {element.lines.map(({ line, words }) => (
                       <p
                         key={line.id}
                         ref={(n) => {
@@ -679,8 +715,8 @@ export function TranscriptPage() {
                         }}
                         data-testid="transcript-line"
                         data-checked={line.checked}
-                        data-hit={hit ? 'true' : 'false'}
-                        data-at={currentHit?.lineId === line.id ? 'true' : 'false'}
+                        data-hit={words ? 'true' : 'false'}
+                        data-at={currentHit?.line === line.id ? 'true' : 'false'}
                         onMouseEnter={() => setHover(line.polygon)}
                         title={line.checked ? 'reviewed' : 'not reviewed yet'}
                         className={`-mx-2 rounded px-2 text-[15px] leading-7 ${
@@ -688,10 +724,10 @@ export function TranscriptPage() {
                             ? 'text-ink'
                             : 'text-ink-subtle'
                         } ${
-                          currentHit?.lineId === line.id ? 'bg-accent-wash' : ''
+                          currentHit?.line === line.id ? 'bg-accent-wash' : ''
                         } hover:bg-accent-wash`}
                       >
-                        {marked(lineText(line), hit?.words ?? [])}
+                        {marked(lineText(line), words ?? [])}
                       </p>
                     ))}
                   </div>
