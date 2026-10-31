@@ -537,7 +537,7 @@ test.describe('Scenario: finding a name the scan spells differently', () => {
 
       // 'Paragraf' is one edit from 'Paragraph', which is what the page actually says.
       await page.getByTestId('transcript-search').fill('Paragraf')
-      await expect(page.getByTestId('transcript-found')).toHaveText('3 lines')
+      await expect(page.getByTestId('transcript-found')).toHaveText('1 of 3')
 
       // A search marks and steps; it does not cut the page down to the lines that answered.
       await expect(lines(page)).toHaveCount(6)
@@ -578,7 +578,6 @@ test.describe('Scenario: finding a name the scan spells differently', () => {
 
       // Searching opens the page the first answer is on, rather than reporting a count for
       // a page the reader would then have to go and find.
-      await expect(page.getByTestId('transcript-found')).toHaveText('2 lines')
       await expect(page.getByTestId('transcript-hit-at')).toHaveText('1 of 2')
       await expect(at(page)).toHaveText(/^2 \/ 3 /)
       await showing(page, pageIds[1])
@@ -626,22 +625,22 @@ test.describe('Scenario: searching a transcript the way you mean it', () => {
 
     // Fuzzy forgives the spelling; exact does not.
     await search.fill('Paragraf')
-    await expect(found).toHaveText('3 lines')
+    await expect(found).toHaveText('1 of 3')
     await page.getByRole('button', { name: 'Exact', exact: true }).click()
     await expect(found).toHaveText('0 lines')
 
     // Exact ignores case until told not to.
     await search.fill('paragraph')
-    await expect(found).toHaveText('3 lines')
+    await expect(found).toHaveText('1 of 3')
     await page.getByRole('button', { name: 'Aa', exact: true }).click()
     await expect(found).toHaveText('0 lines')
     await search.fill('Paragraph')
-    await expect(found).toHaveText('3 lines')
+    await expect(found).toHaveText('1 of 3')
 
     // A pattern is the user's own, and an unfinished one says so rather than throwing.
     await page.getByRole('button', { name: '.*', exact: true }).click()
     await search.fill('line [13]$')
-    await expect(found).toHaveText('4 lines')
+    await expect(found).toHaveText('1 of 4')
     await search.fill('line (')
     await expect(found).toHaveText('not a pattern yet')
     await expect(page.getByTestId('transcript-match')).toHaveCount(0)
@@ -766,7 +765,7 @@ test.describe('Scenario: an exact search for a phrase', () => {
     await page.getByRole('button', { name: 'Exact', exact: true }).click()
     await page.getByTestId('transcript-search').fill('Paragraph line 2')
 
-    await expect(page.getByTestId('transcript-found')).toHaveText('1 line')
+    await expect(page.getByTestId('transcript-found')).toHaveText('1 of 1')
     await expect(page.getByTestId('transcript-match')).toHaveText(['Paragraph', 'line', '2'])
   })
 })

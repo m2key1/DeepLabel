@@ -135,7 +135,7 @@ class TestSearch:
         conn.commit()
         response = search(client, '(a|aa)+$', mode='regex')
         assert (response.status_code, response.json()['detail']) == \
-            (400, 'the pattern took too long - make it more specific')
+            (400, 'pattern too slow - make it more specific')
 
     def test_an_unknown_mode_is_refused(self, client):
         assert search(client, 'Huber', mode='soundex').status_code == 400

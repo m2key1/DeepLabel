@@ -36,4 +36,4 @@ def transcript_search(job_id: str, q: str, mode: str = 'fuzzy', reviewed: bool =
     try:
         return transcript.search(conn, job_id, q, mode, reviewed)
     except PatternTooSlow:
-        raise HTTPException(400, 'the pattern took too long - make it more specific') from None
+        raise HTTPException(400, 'pattern too slow - make it more specific') from None

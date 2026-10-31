@@ -149,6 +149,8 @@ function Ink({ size, polygon }: { size: [number, number]; polygon: number[][] })
 /** Keyed by the dataset, so going from one volume's transcript to another's starts afresh:
  *  the router keeps the component when only the id changes, and with it the pages already
  *  fetched for the first volume. */
+const LOADING_LINES = ['82%', '64%', '90%', '71%', '58%', '86%', '67%', '79%']
+
 export function TranscriptPage() {
   const { id } = useParams<{ id: string }>()
   return <Transcript key={id} jobId={id!} />
@@ -478,10 +480,10 @@ function Transcript({ jobId }: { jobId: string }) {
         </button>
       )}
       {!bare && (
-      <header className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2">
-        <h1 className="text-base font-semibold">{name}</h1>
-        <DatasetViews jobId={jobId} active="transcript" />
-        <span className="text-sm text-ink-muted" data-testid="transcript-counts">
+      <header className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2 xl:flex-nowrap">
+        <h1 className="min-w-0 truncate text-base font-semibold" title={name}>{name}</h1>
+        <DatasetViews jobId={jobId} active="transcript" className="shrink-0" />
+        <span className="shrink-0 text-sm text-ink-muted" data-testid="transcript-counts">
           {checkedCount}/{lineCount} lines reviewed
         </span>
         <Input
@@ -492,9 +494,10 @@ function Transcript({ jobId }: { jobId: string }) {
           data-testid="transcript-search"
           placeholder="Search - near spellings count"
           title="Finds lines that read like this, so a name the scan spells differently is still found. Press / to come back here"
-          className="w-56"
+          className="w-56 shrink-0"
         />
         <Segmented
+          className="shrink-0"
           value={mode}
           onChange={setMode}
           options={[
@@ -506,20 +509,13 @@ function Transcript({ jobId }: { jobId: string }) {
         />
         {needle && (
           <>
-            <span data-testid="transcript-found" aria-live="polite"
-                  className="text-sm text-ink-muted">
-              {current?.error
-                ?? (searching ? 'searching'
-                  : unusable ? 'not a pattern yet' : `${found} line${found === 1 ? '' : 's'}`)}
-            </span>
-            {found > 0 && (
-              <span className="flex items-center gap-0.5">
+            {found > 0 ? (
+              <span data-testid="transcript-found" aria-live="polite" className="flex shrink-0 items-center gap-0.5">
                 <button type="button" aria-label="Previous result" data-testid="transcript-hit-prev"
                         onClick={() => goToHit(-1)} className={stepBtn}>
                   <ChevronIcon dir="left" />
                 </button>
-                <span data-testid="transcript-hit-at"
-                      className="text-xs tabular-nums text-ink-muted">
+                <span data-testid="transcript-hit-at" className="text-sm tabular-nums text-ink-muted">
                   {hitAt + 1} of {found}
                 </span>
                 <button type="button" aria-label="Next result" data-testid="transcript-hit-next"
@@ -527,8 +523,14 @@ function Transcript({ jobId }: { jobId: string }) {
                   <ChevronIcon dir="right" />
                 </button>
               </span>
+            ) : (
+              <span data-testid="transcript-found" aria-live="polite" title={current?.error}
+                    className={`max-w-72 shrink-0 truncate text-sm ${current?.error ? 'text-danger' : 'text-ink-muted'}`}>
+                {current?.error
+                  ?? (searching ? 'searching' : unusable ? 'not a pattern yet' : '0 lines')}
+              </span>
             )}
-            <label className="flex items-center gap-1.5 text-sm text-ink-muted">
+            <label className="flex shrink-0 items-center gap-1.5 text-sm text-ink-muted">
               <Check
                 checked={hitsOnly}
                 onChange={(e) => setHitsOnly(e.target.checked)}
@@ -537,7 +539,7 @@ function Transcript({ jobId }: { jobId: string }) {
             </label>
           </>
         )}
-        <label className="ml-auto flex items-center gap-1.5 text-sm text-ink-muted">
+        <label className="ml-auto flex shrink-0 items-center gap-1.5 text-sm text-ink-muted">
           <Check
             checked={reviewedOnly}
             onChange={(e) => setReviewedOnly(e.target.checked)}
@@ -691,7 +693,13 @@ function Transcript({ jobId }: { jobId: string }) {
           className="min-h-0 min-w-0 flex-1 overflow-y-auto"
         >
           {page && !content ? (
-            <p data-testid="transcript-page-loading" className="p-8 text-sm text-ink-subtle">Loading the page</p>
+            <div data-testid="transcript-page-loading" role="status" aria-label="Loading the page"
+                 className="mx-auto max-w-[74ch] animate-pulse px-8 pt-8">
+              <div className="mb-8 h-3 w-16 rounded bg-raised" />
+              {LOADING_LINES.map((width, i) => (
+                <div key={i} className="mb-5 h-4 rounded bg-raised" style={{ width }} />
+              ))}
+            </div>
           ) : page ? (
             <article className="mx-auto max-w-[74ch] px-8 pb-28 pt-8 font-serif">
               <h2 className="mb-6 font-sans text-xs font-medium uppercase tracking-widest text-ink-subtle">
