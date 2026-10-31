@@ -546,7 +546,7 @@ class TestPagePreview:
 
 
 class TestCatalog:
-    def test_is_read_once_and_kept(self, fresh_catalog, monkeypatch):
+    def test_is_kept_between_reads(self, fresh_catalog, monkeypatch):
         trains_with(monkeypatch, {'version': '2.3.1', 'transforms': [{'name': 'Affine'}]})
         first = augmentations.catalog()
         assert first.error is None and first.version == '2.3.1' and first.transforms == [{'name': 'Affine'}]
@@ -554,13 +554,20 @@ class TestCatalog:
         trains_with(monkeypatch, BackendError('unavailable', 're-read'))
         assert augmentations.catalog() is first
 
+    def test_an_updated_backend_is_read_again_after_a_pause(self, fresh_catalog, monkeypatch):
+        trains_with(monkeypatch, {'version': '2.3.1', 'transforms': []})
+        first = augmentations.catalog()
+        trains_with(monkeypatch, {'version': '2.3.1', 'transforms': [{'name': 'Affine'}]})
+        first.checked_at -= augmentations.CATALOG_REFRESH_SECONDS + 1
+        assert augmentations.catalog().transforms == [{'name': 'Affine'}]
+
     def test_a_failure_is_reported_and_retried_after_a_pause(self, fresh_catalog, monkeypatch):
         monkeypatch.setattr(augmentations, 'trainer_backend', lambda task: None)
         failed = augmentations.catalog()
         assert failed.transforms == [] and failed.error == 'no configured model backend trains ocr'
         assert augmentations.catalog().payload()['error'] == failed.error
         trains_with(monkeypatch, {'version': 'x', 'transforms': []})
-        failed.checked_at -= augmentations.CATALOG_RETRY_SECONDS + 1
+        failed.checked_at -= augmentations.CATALOG_REFRESH_SECONDS + 1
         assert augmentations.catalog().error is None
 
     def test_the_route_serves_it(self, client, fresh_catalog, monkeypatch):

@@ -24,9 +24,9 @@ from app import backend_client, config, linecrop, registry, weights
 from app.backend_client import BackendClient, BackendError
 from app.caches import counted_page
 
-# A failed catalog read is retried this often, so a backend that comes up is noticed
-# without a restart.
-CATALOG_RETRY_SECONDS = 60
+# A catalog is read again after this long, so a backend that comes up or is updated is
+# noticed without a restart.
+CATALOG_REFRESH_SECONDS = 60
 SAMPLE_COUNT = 1
 # Draws taken per crop so the preview can show the harshest one. Steps fire at p 0.3 or
 # so, which makes the damaging draw rare, and rare is what a single sample hides.
@@ -102,13 +102,11 @@ _catalog_lock = threading.Lock()
 
 
 def catalog(task: str = 'ocr') -> Catalog:
-    """The task's catalog, read once from the backend that trains it and kept - each
-    trainer offers what it can build, its own transforms among them; a failed read is
-    retried after a pause."""
+    """The task's catalog, read from the backend that trains it and kept for a while - each
+    trainer offers what it can build, its own transforms among them."""
     with _catalog_lock:
         known = _catalogs.get(task)
-        if known is not None and (known.error is None
-                                  or time.monotonic() - known.checked_at < CATALOG_RETRY_SECONDS):
+        if known is not None and time.monotonic() - known.checked_at < CATALOG_REFRESH_SECONDS:
             return known
         try:
             result = _trainer(task)._call('GET', '/v1/train/augmentations')
@@ -123,10 +121,7 @@ def catalog(task: str = 'ocr') -> Catalog:
 def warm_up() -> None:
     def run():
         for task in ('ocr', *PAGE_TASKS):
-            try:
-                catalog(task)
-            except Exception as exc:
-                print(f'augmentation catalog for {task}: {exc}', flush=True)
+            catalog(task)
     threading.Thread(target=run, daemon=True).start()
 
 
