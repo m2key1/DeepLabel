@@ -1,7 +1,7 @@
 import { test, expect } from '../helpers/test'
 import type { Page } from '@playwright/test'
 import {
-  backendFetch, correctLine, identity, jobPageIds, pageLines, seedCompletedJob,
+  backendFetch, correctLine, getPageDetail, identity, jobPageIds, pageLines, seedCompletedJob,
   setTranscriptView, uniqueName,
 } from '../helpers/api'
 
@@ -159,6 +159,30 @@ test.describe('Scenario: reading a volume one page at a time', () => {
       await page.getByRole('checkbox', { name: 'reviewed only' }).uncheck()
       await expect(lines(page)).toHaveCount(6)
     })
+
+  test('regions of one class that follow each other read as one block', async ({ page }) => {
+    const jobId = await seedCompletedJob(uniqueName('One block'), 1)
+    const [pageId] = await jobPageIds(jobId)
+    type Region = { id: number; class_name: string; bbox: number[]; lines: unknown[] }
+    const regions = async () => (await getPageDetail(jobId, pageId)).elements as Region[]
+    const paragraph = (await regions()).find((e) => e.class_name === 'Paragraph')!
+    await backendFetch(`/api/elements/${paragraph.id}/split`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...DEV },
+      body: JSON.stringify({ cut_y: (paragraph.bbox[1] + paragraph.bbox[3]) / 2 }),
+    })
+    expect((await regions()).map((e) => [e.class_name, e.lines.length]))
+      .toEqual([['Header', 3], ['Paragraph', 1], ['Paragraph', 2]])
+
+    await openTranscript(page, jobId)
+
+    const blocks = page.getByTestId('transcript-block')
+    await expect(blocks).toHaveCount(2)
+    await expect(blocks.nth(0).getByTestId('transcript-line')).toHaveCount(3)
+    await expect(blocks.nth(1).getByTestId('transcript-line')).toHaveText(
+      ['Sample Paragraph line 1', 'Sample Paragraph line 2', 'Sample Paragraph line 3'])
+    await expect(page.getByText('Paragraph', { exact: true })).toHaveCount(1)
+  })
 
   test('a box that only holds other boxes is not a block of text', async ({ page }) => {
     const jobId = await seedCompletedJob(uniqueName('With a container'), 1)

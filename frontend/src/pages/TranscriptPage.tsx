@@ -149,6 +149,12 @@ function Ink({ size, polygon }: { size: [number, number]; polygon: number[][] })
 /** Keyed by the dataset, so going from one volume's transcript to another's starts afresh:
  *  the router keeps the component when only the id changes, and with it the pages already
  *  fetched for the first volume. */
+interface Block {
+  key: number
+  label: string
+  lines: { line: TranscriptLine; words?: string[] }[]
+}
+
 const LOADING_LINES = ['82%', '64%', '90%', '71%', '58%', '86%', '67%', '79%']
 
 export function TranscriptPage() {
@@ -245,7 +251,7 @@ function Transcript({ jobId }: { jobId: string }) {
   }, [shown, open])
   const page = shown[at]
   const content = page ? loaded.get(page.idx) : undefined
-  const elements = useMemo(() => (content?.elements ?? [])
+  const blocks = useMemo(() => (content?.elements ?? [])
     .filter((e) => e.kind !== 'container')
     .map((element) => ({
       ...element,
@@ -253,7 +259,16 @@ function Transcript({ jobId }: { jobId: string }) {
         .filter((l) => (!reviewedOnly || l.checked) && lineText(l) !== '')
         .map((l) => ({ line: l, words: hitHere.get(l.id) })),
     }))
-    .filter((e) => e.lines.length > 0),
+    .filter((e) => e.lines.length > 0)
+    // A register reads every entry as its own one-line region, so a run of one class is
+    // the block a reader sees, not each region in it.
+    .reduce<Block[]>(
+      (blocks, element) => {
+        const last = blocks.at(-1)
+        if (last?.label === element.class_name) last.lines.push(...element.lines)
+        else blocks.push({ key: element.order_idx, label: element.class_name, lines: [...element.lines] })
+        return blocks
+      }, []),
   [content, reviewedOnly, hitHere])
 
   // The open page and the ones either side of it, so a turn finds its text already here.
@@ -449,7 +464,7 @@ function Transcript({ jobId }: { jobId: string }) {
   const found = hits.length
   const currentHit = hits[hitAt]
   const ink = hover ?? (currentHit && page && currentHit.idx === page.idx
-    ? elements.flatMap((e) => e.lines)
+    ? blocks.flatMap((b) => b.lines)
       .find((row) => row.line.id === currentHit.line)?.line.polygon ?? null
     : null)
 
@@ -701,20 +716,21 @@ function Transcript({ jobId }: { jobId: string }) {
               ))}
             </div>
           ) : page ? (
-            <article className="mx-auto max-w-[74ch] px-8 pb-28 pt-8 font-serif">
+            <article className="mx-auto max-w-[calc(80ch+10rem)] px-8 pb-28 pt-8 font-serif">
               <h2 className="mb-6 font-sans text-xs font-medium uppercase tracking-widest text-ink-subtle">
                 Page {page.idx + 1}
               </h2>
-              {elements.map((element) => (
+              {blocks.map((block) => (
                 <section
-                  key={element.order_idx}
-                  className="mb-6 grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-5 max-sm:grid-cols-1 max-sm:gap-y-1"
+                  key={block.key}
+                  data-testid="transcript-block"
+                  className="mb-7 grid grid-cols-[5rem_minmax(0,80ch)] gap-x-4 max-sm:grid-cols-1 max-sm:gap-y-1"
                 >
-                  <p className="pt-1 text-right font-sans text-[11px] font-medium uppercase tracking-wide text-ink-subtle max-sm:text-left">
-                    {element.class_name}
+                  <p className="sticky top-3 self-start pt-2 text-right font-sans text-[10px] font-medium uppercase tracking-wider text-ink-subtle max-sm:static max-sm:text-left">
+                    {block.label}
                   </p>
-                  <div>
-                    {element.lines.map(({ line, words }) => (
+                  <div className="border-l border-line pl-3">
+                    {block.lines.map(({ line, words }) => (
                       <p
                         key={line.id}
                         ref={(n) => {
@@ -727,7 +743,7 @@ function Transcript({ jobId }: { jobId: string }) {
                         data-at={currentHit?.line === line.id ? 'true' : 'false'}
                         onMouseEnter={() => setHover(line.polygon)}
                         title={line.checked ? 'reviewed' : 'not reviewed yet'}
-                        className={`-mx-2 rounded px-2 text-[15px] leading-7 ${
+                        className={`-ml-1.5 rounded pl-5 pr-1.5 -indent-3.5 text-[15px] leading-7 ${
                           line.checked
                             ? 'text-ink'
                             : 'text-ink-subtle'

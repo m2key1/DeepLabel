@@ -279,7 +279,8 @@ Press `e` to edit the page.
 
 - **Transcript** reads a dataset as a volume: the scan on one side, its text on the other,
   page by page. Turn pages with the arrows or `j`/`k`. Each page's text is fetched as it is
-  reached, so a volume of any size opens at once.
+  reached, so a volume of any size opens at once. Regions of one class that follow each other
+  read as one block, labelled once in the margin; lines not reviewed yet are lighter.
 - Search fuzzily, exactly, case-sensitively or by regular expression. `n` and `p` step
   through the hits, and a strip along the edge shows which pages hold them. The search runs
   on the server over the whole volume; a pattern that takes longer than two seconds is
