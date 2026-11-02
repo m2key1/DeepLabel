@@ -635,6 +635,14 @@ class TestConventions:
                                       f'{trained} training lines - fewer than 200 is too few for it to be learned '
                                       'reliably'}
 
+    def test_a_flag_the_base_knows_but_that_is_not_offered_is_not_listed(self, flagged):
+        flagged.execute("UPDATE models SET conventions = '[\"oblique_hyphen\", \"abbreviations\"]' WHERE id = 1")
+        flagged.execute("INSERT INTO convention_flags (name, label, offered) VALUES ('abbreviations', 'Abbreviations', 0)")
+        result = preflight.compute(flagged, {**HOLDOUT, 'base_model_id': 1})
+
+        assert (result['conventions']['names'], result['conventions']['base'], list(result['conventions']['labels'])) \
+            == (['oblique_hyphen', 'long_s'], ['oblique_hyphen'], ['oblique_hyphen', 'long_s'])
+
     def test_a_backend_that_cannot_learn_them_says_they_are_left_out(self, flagged, monkeypatch):
         monkeypatch.setattr(preflight.trainer, 'trains_conventions', lambda conn, task, base: False)
         result = preflight.compute(flagged, {**HOLDOUT, 'base_model_id': 1})

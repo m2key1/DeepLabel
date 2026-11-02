@@ -34,6 +34,9 @@ export interface ConventionFlag {
   description: string
   /** The model it was first seen on, when a model brought it. */
   added_from: string | null
+  /** False once an admin stops offering it: it leaves every flag list, and reads send it
+   *  as off, while datasets that set it keep it. */
+  offered: boolean
   models: number
   datasets: number
 }
@@ -46,7 +49,9 @@ export function addConventionFlag(body: { name: string; label: string; descripti
   return request('/api/convention-flags', json('POST', body))
 }
 
-export function updateConventionFlag(name: string, body: { label: string; description: string }): Promise<ConventionFlag> {
+export function updateConventionFlag(
+  name: string, body: Partial<Pick<ConventionFlag, 'label' | 'description' | 'offered'>>,
+): Promise<ConventionFlag> {
   return request(`/api/convention-flags/${encodeURIComponent(name)}`, json('PATCH', body))
 }
 

@@ -283,7 +283,8 @@ CREATE TABLE IF NOT EXISTS convention_flags (
     label TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     added_from TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    offered INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS models (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -745,6 +746,7 @@ PROVENANCE_BACKFILL = 3
 TEXT_COMPOSED = 4
 CONVENTION_CATALOG = 5
 MODEL_DATASETS_BACKFILL = 6
+ABBREVIATIONS_NOT_OFFERED = 7
 
 # The dataset fields behind each data use a dataset's owner can switch off.
 DATA_USE_COLUMNS = {'training': 'use_training', 'test': 'use_test',
@@ -929,6 +931,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
     for _col in DATA_USE_COLUMNS.values():
         if _col not in job_cols:
             conn.execute(f'ALTER TABLE jobs ADD COLUMN {_col} INTEGER NOT NULL DEFAULT 1')
+    if 'offered' not in {row[1] for row in conn.execute('PRAGMA table_info(convention_flags)')}:
+        conn.execute('ALTER TABLE convention_flags ADD COLUMN offered INTEGER NOT NULL DEFAULT 1')
     if 'self_hosted' not in {row[1] for row in conn.execute('PRAGMA table_info(llm_connections)')}:
         conn.execute('ALTER TABLE llm_connections ADD COLUMN self_hosted INTEGER NOT NULL DEFAULT 0')
     model_cols = {row[1] for row in conn.execute('PRAGMA table_info(llm_models)')}
@@ -1199,6 +1203,11 @@ def connect(db_path: Path) -> sqlite3.Connection:
         for training in conn.execute('SELECT * FROM trainings WHERE model_id IN (SELECT id FROM models)').fetchall():
             record_model_datasets(conn, training['model_id'], training)
         conn.execute(f'PRAGMA user_version = {MODEL_DATASETS_BACKFILL}')
+    # DeepOCR declares abbreviations but does not read them yet. Once only, so an admin
+    # who offers them again is not overruled on the next open.
+    if conn.execute('PRAGMA user_version').fetchone()[0] < ABBREVIATIONS_NOT_OFFERED:
+        conn.execute("UPDATE convention_flags SET offered = 0 WHERE name = 'abbreviations'")
+        conn.execute(f'PRAGMA user_version = {ABBREVIATIONS_NOT_OFFERED}')
     conn.commit()
     return conn
 

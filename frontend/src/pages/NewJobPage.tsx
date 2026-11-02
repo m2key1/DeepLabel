@@ -12,7 +12,7 @@ import type {
 } from '../api'
 import { useAuth } from '../auth'
 import { conventionLabel } from '../components/conventionLabel'
-import { ConventionFlags, flagsOn, toggledFlag } from '../components/job/ConventionFlags'
+import { ConventionFlags, flagsOn, offeredFlags, toggledFlag } from '../components/job/ConventionFlags'
 import { DataUseSwitches, USES, dataUseSummary, keptOut } from '../components/job/DataUseSwitches'
 import { DataUseEditor } from '../components/job/DataUseEditor'
 import { LabelMapping } from '../components/job/LabelMapping'
@@ -417,7 +417,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
         value: (['layout', 'lines', 'ocr'] as const).filter(ran).map((key) => `${key} ${modelName(key)}`).join(', ') },
       ...(ran('ocr') ? [{
         label: 'Convention', step: 'models' as Step,
-        value: flagsOn(convention).map((flag) => conventionLabel(flag, catalog).toLowerCase()).join(', ') || 'normalized',
+        value: offeredFlags(flagsOn(convention), catalog).map((flag) => conventionLabel(flag, catalog).toLowerCase()).join(', ') || 'normalized',
       }] : []),
     ] : []),
     { label: 'Data use', value: dataUseSummary(dataUse), step: 'review' },

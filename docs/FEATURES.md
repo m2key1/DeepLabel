@@ -83,6 +83,11 @@ another of your datasets already has stops the Source step, with a link to that 
   flags, lists every flag with how many models read it and how many datasets ask for it. A
   flag a model declares is added by itself; admins write its label and description, and can
   add a flag ahead of any model that reads it.
+- An admin can switch off **Offered** for a flag, for one a model declares but does not
+  honour yet (abbreviations starts that way). The flag then leaves the New job wizard,
+  dataset Settings, the training pre-flight and, for everyone else, the Conventions page,
+  and every read and training run sends it as off. A dataset that set it keeps it, so
+  offering it again brings the setting back.
 - Pick a layout template; it decides the dataset's layout classes.
 - Pages are sorted in natural order (`scan_2` before `scan_10`).
 - Photos are turned upright from their EXIF data, 16-bit scans are converted to 8-bit and

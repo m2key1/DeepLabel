@@ -255,6 +255,19 @@ def test_the_engine_batches_by_the_backends_limit_and_records_what_ran(conn, bac
     assert tuple(row) == (128, 4096, '["long_s", "oblique_hyphen"]')
 
 
+def test_the_engine_sends_a_flag_that_is_not_offered_as_off(conn, backend):
+    conn.execute("INSERT INTO convention_flags (name, label, offered) VALUES ('long_s', 'Keep long s', 0)")
+    engine = RemoteOcrEngine(conn, BackendClient(backend), 1, 'beam', {'long_s': True, 'ligatures': True})
+
+    engine.predict_batch([Image.new('RGB', (10, 8), 'white')])
+
+    assert engine.honoured == []
+    sent = [json.loads(BytesParser(policy=default).parsebytes(
+        b'Content-Type: ' + b'multipart/form-data; boundary=' + c[3].split(b'\r\n')[0][2:] + b'\r\n\r\n' + c[3])
+        .get_payload()[0].get_content()) for c in FakeBackend.calls if c[1] == '/v1/predict/ocr']
+    assert sent[0]['params']['convention'] == {'ligatures': True}
+
+
 def test_the_engine_keeps_text_composed_whatever_form_the_backend_returns(conn, backend):
     FakeBackend.script = {'/v1/predict/ocr': [(200, {'results': [{'id': '0', 'text': 'März', 'confidence': 0.9}]})]}
     engine = RemoteOcrEngine(conn, BackendClient(backend), 1, 'beam', {})

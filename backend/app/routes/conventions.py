@@ -16,6 +16,7 @@ class FlagBody(BaseModel):
 class FlagPatch(BaseModel):
     label: str | None = None
     description: str | None = None
+    offered: bool | None = None
 
 
 def _flag(conn, name: str) -> dict:
@@ -49,7 +50,8 @@ def add_flag(body: FlagBody, conn=Depends(get_db), user: dict = Depends(require_
 
 @router.patch('/api/convention-flags/{name}')
 def update_flag(name: str, body: FlagPatch, conn=Depends(get_db), user: dict = Depends(require_role('admin'))):
-    """The label and description; the name is what models and datasets store, so it stays."""
+    """The label, the description and whether the flag is offered; the name is what models
+    and datasets store, so it stays."""
     _flag(conn, name)
     if body.label is not None:
         if not body.label.strip():
@@ -57,5 +59,7 @@ def update_flag(name: str, body: FlagPatch, conn=Depends(get_db), user: dict = D
         conn.execute('UPDATE convention_flags SET label = ? WHERE name = ?', (body.label.strip(), name))
     if body.description is not None:
         conn.execute('UPDATE convention_flags SET description = ? WHERE name = ?', (body.description.strip(), name))
+    if body.offered is not None:
+        conn.execute('UPDATE convention_flags SET offered = ? WHERE name = ?', (int(body.offered), name))
     conn.commit()
     return _flag(conn, name)

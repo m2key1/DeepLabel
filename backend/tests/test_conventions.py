@@ -141,6 +141,50 @@ class TestCatalog:
                            json={'name': 'long_s', 'label': 'x'}).status_code == 409
         assert client.patch('/api/convention-flags/nope', headers=root, json={'label': 'x'}).status_code == 404
 
+    def test_an_admin_stops_offering_a_flag_and_offers_it_again(self, conn, client):
+        conventions.note(conn, ['long_s'])
+        conn.commit()
+        root = self.headers('root', 'admin')
+
+        assert self.flags(client)['long_s']['offered'] is True
+        assert client.patch('/api/convention-flags/long_s', headers=root,
+                            json={'offered': False}).json()['offered'] is False
+        assert self.flags(client)['long_s']['offered'] is False
+        assert client.patch('/api/convention-flags/long_s', headers=self.headers('bob', 'member'),
+                            json={'offered': True}).status_code == 403
+        assert client.patch('/api/convention-flags/long_s', headers=root,
+                            json={'offered': True}).json()['offered'] is True
+
+    def test_a_dataset_keeps_a_flag_that_is_not_offered_but_reads_send_it_off(self, conn, client):
+        conn.execute("INSERT INTO jobs (id, name, owner, ocr_convention) VALUES ('j1', 'Briefe', 'bob', ?)",
+                     ('{"long_s": true, "keep_hyphens": true}',))
+        conventions.note(conn, ['long_s', 'keep_hyphens'])
+        conn.commit()
+        client.patch('/api/convention-flags/long_s', headers=self.headers('root', 'admin'), json={'offered': False})
+
+        stored = conventions.parse(conn.execute("SELECT ocr_convention FROM jobs WHERE id = 'j1'").fetchone()[0])
+        assert stored == {'long_s': True, 'keep_hyphens': True}
+        assert conventions.offered(conn, stored) == {'keep_hyphens': True}
+
+
+def test_abbreviations_are_not_offered_once_and_an_admin_can_offer_them_again(tmp_path):
+    db = tmp_path / 'app.db'
+    conn = store.connect(db)
+    conventions.note(conn, ['abbreviations', 'long_s'])
+    conn.execute(f'PRAGMA user_version = {store.ABBREVIATIONS_NOT_OFFERED - 1}')
+    conn.commit()
+    conn.close()
+
+    conn = store.connect(db)
+    assert dict(conn.execute('SELECT name, offered FROM convention_flags').fetchall()) == {'abbreviations': 0, 'long_s': 1}
+    conn.execute("UPDATE convention_flags SET offered = 1 WHERE name = 'abbreviations'")
+    conn.commit()
+    conn.close()
+
+    conn = store.connect(db)
+    assert conn.execute("SELECT offered FROM convention_flags WHERE name = 'abbreviations'").fetchone()[0] == 1
+    conn.close()
+
 
 def test_an_existing_database_starts_its_catalog_from_its_models_and_datasets(tmp_path):
     db = tmp_path / 'app.db'
@@ -248,6 +292,16 @@ class TestForTraining:
     def test_a_base_whose_flags_are_not_known_yet_teaches_whatever_the_datasets_set(self, conn):
         plan = conventions.for_training(conn, 2, ['j1'])
         assert (plan['names'], plan['new']) == (['keep_hyphens', 'long_s'], ['keep_hyphens', 'long_s'])
+
+    def test_a_flag_that_is_not_offered_is_neither_taught_nor_set(self, conn):
+        conn.execute("UPDATE jobs SET ocr_convention = ? WHERE id = 'j1'",
+                     ('{"long_s": true, "keep_hyphens": true, "abbreviations": true}',))
+        conventions.note(conn, ['long_s', 'keep_hyphens', 'abbreviations'])
+        conn.execute("UPDATE convention_flags SET offered = 0 WHERE name IN ('long_s', 'abbreviations')")
+
+        plan = conventions.for_training(conn, 1, ['j1'])
+        assert (plan['names'], plan['new'], plan['by_dataset']) == (
+            ['oblique_hyphen', 'long_s', 'keep_hyphens'], ['keep_hyphens'], {'j1': [0.0, 0.0, 1.0]})
 
     def test_nothing_to_condition_on_is_no_plan(self, conn):
         assert conventions.for_training(conn, 2, ['j2', 'j3']) is None

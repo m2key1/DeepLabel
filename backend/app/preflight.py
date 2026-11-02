@@ -394,8 +394,10 @@ def _conventions(conn, request: dict, split: dict) -> tuple[dict | None, list[di
     lines = {name: sum(trained.get(job_id, 0) for job_id, row in plan['by_dataset'].items() if row[i])
              for i, name in enumerate(plan['names'])}
     supported = trainer.trains_conventions(conn, 'ocr', request.get('base_model_id'))
-    section = {'names': plan['names'], 'base': plan['base'], 'new': plan['new'], 'lines': lines,
-               'supported': supported, 'labels': {name: conventions.label(conn, name) for name in plan['names']}}
+    shown = conventions.offered(conn, dict.fromkeys(plan['names'], True))
+    section = {'names': [name for name in plan['names'] if name in shown],
+               'base': [name for name in plan['base'] if name in shown], 'new': plan['new'], 'lines': lines,
+               'supported': supported, 'labels': {name: conventions.label(conn, name) for name in shown}}
     if not supported:
         return section, [{'code': 'conventions_ignored', 'level': 'info',
                           'message': "The base model's backend cannot be taught convention flags, so the "

@@ -109,7 +109,7 @@ class RemoteOcrEngine:
         self.weights, self.facts = client.load(conn, model_id)
         self.convention_names = list(self.facts.get('conventions')
                                      or client.info().get('tasks_detail', {}).get('ocr', {}).get('conventions') or [])
-        asked = convention or {}
+        asked = conventions.offered(conn, convention or {})
         self.honoured = conventions.honoured(asked, self.convention_names)
         self.decode = decode
         self.params = {'decode': decode, 'convention': {name: True for name, on in asked.items() if on}}

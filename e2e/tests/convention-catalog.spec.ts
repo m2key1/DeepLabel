@@ -2,7 +2,7 @@ import { test, expect } from '../helpers/test'
 import { openSettings } from '../helpers/dataset-settings'
 import { backendFetch, listRegistryModels, seedCompletedJob, setOcrConvention, uniqueName } from '../helpers/api'
 
-interface Flag { name: string; label: string; description: string; models: number; datasets: number }
+interface Flag { name: string; label: string; description: string; offered: boolean; models: number; datasets: number }
 
 const catalogFlag = async (name: string): Promise<Flag | undefined> =>
   ((await backendFetch('/api/convention-flags')).flags as Flag[]).find((f) => f.name === name)
@@ -54,5 +54,41 @@ test.describe('Scenario: describing the transcription conventions', () => {
     await expect(longS).toHaveAttribute('data-supported', 'true')
     await expect(longS.getByTestId('convention-ignored')).toHaveCount(0)
     await expect(page.getByTestId('conventions-link')).toHaveAttribute('href', '/conventions')
+  })
+})
+
+test.describe('Scenario: an admin stops offering a flag', () => {
+  test('the flag leaves Settings, the dataset keeps it, and one click brings it back', async ({ page }) => {
+    const name = `held_${Date.now()}`
+    await backendFetch('/api/convention-flags', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, label: 'Held back rule' }),
+    })
+    const datasetName = uniqueName('Held back')
+    const jobId = await seedCompletedJob(datasetName, 1)
+    await setOcrConvention(jobId, { [name]: true })
+    const storedConvention = async () => (await backendFetch(`/api/jobs/${jobId}`)).ocr_convention
+
+    await page.goto('/conventions')
+    const row = page.locator(`[data-testid="convention-row"][data-flag="${name}"]`)
+    const offer = row.getByTestId('convention-offered')
+    await expect(offer).toBeChecked()
+    await row.getByTestId('convention-offer').click()
+    await expect.poll(async () => (await catalogFlag(name))?.offered).toBe(false)
+    await expect(offer).not.toBeChecked()
+
+    await openSettings(page, datasetName, 'models')
+    const builtinOcr = (await listRegistryModels()).find((m) => m.task === 'ocr' && m.source === 'backend')!
+    await page.getByTestId('new-model-ocr').selectOption(String(builtinOcr.id))
+    await expect(page.locator('[data-testid="convention-flag"][data-flag="long_s"]')).toBeVisible()
+    await expect(page.locator(`[data-testid="convention-flag"][data-flag="${name}"]`)).toHaveCount(0)
+    expect(await storedConvention()).toEqual({ [name]: true })
+
+    await page.goto('/conventions')
+    await row.getByTestId('convention-offer').click()
+    await expect.poll(async () => (await catalogFlag(name))?.offered).toBe(true)
+    await openSettings(page, datasetName, 'models')
+    await page.getByTestId('new-model-ocr').selectOption(String(builtinOcr.id))
+    await expect(page.locator(`[data-testid="convention-flag"][data-flag="${name}"]`).getByRole('checkbox')).toBeChecked()
   })
 })

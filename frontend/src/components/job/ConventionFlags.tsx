@@ -5,6 +5,11 @@ import { conventionLabel } from '../conventionLabel'
 export const flagsOn = (convention: OcrConvention) =>
   Object.keys(convention).filter((name) => convention[name]).sort()
 
+/** The flags that may be picked: an admin can stop offering one, and it is then left out
+ *  of every list, even where a dataset still has it stored. */
+export const offeredFlags = (names: string[], catalog: ConventionFlag[] | null) =>
+  names.filter((name) => catalog?.find((f) => f.name === name)?.offered !== false)
+
 /** The convention with one flag switched, keeping only the flags that are on. */
 export const toggledFlag = (convention: OcrConvention, name: string): OcrConvention =>
   Object.fromEntries(flagsOn({ ...convention, [name]: !convention[name] }).map((on) => [on, true]))
@@ -20,9 +25,10 @@ export function ConventionFlags({ catalog, model, convention, onToggle, children
   /** Below the list, such as what the dataset was last read with. */
   children?: ReactNode
 }) {
-  const knownFlags = model?.conventions ?? null
-  const otherFlags = [...new Set([...(catalog ?? []).map((f) => f.name), ...flagsOn(convention)])]
-    .filter((name) => !(knownFlags ?? []).includes(name))
+  const modelFlags = model?.conventions ?? null
+  const knownFlags = modelFlags && offeredFlags(modelFlags, catalog)
+  const otherFlags = offeredFlags([...new Set([...(catalog ?? []).map((f) => f.name), ...flagsOn(convention)])], catalog)
+    .filter((name) => !(modelFlags ?? []).includes(name))
   const description = (name: string) => catalog?.find((f) => f.name === name)?.description ?? ''
 
   return (

@@ -4,6 +4,7 @@ import type { ConventionFlag } from '../../api'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Input, Textarea } from '../ui/Field'
+import { SwitchKnob } from '../ui/SwitchKnob'
 import { tableCell, tableHeadRow } from '../ui/Table'
 
 interface Draft {
@@ -14,8 +15,9 @@ interface Draft {
   adding: boolean
 }
 
-/** The transcription-convention flags with what they mean: everyone reads them, an admin
- *  writes the labels and descriptions every flag list in the app shows. */
+/** The transcription-convention flags with what they mean: everyone reads the ones on offer,
+ *  an admin writes the labels and descriptions every flag list in the app shows, and decides
+ *  which flags are offered at all. */
 export function ConventionCatalog({ canManage, onError }: { canManage: boolean; onError: (message: string) => void }) {
   const [flags, setFlags] = useState<ConventionFlag[] | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -25,6 +27,13 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
     listConventionFlags().then((r) => setFlags(r.flags)).catch((e: Error) => onError(e.message))
   }, [onError])
 
+  const replaced = (saved: ConventionFlag) =>
+    setFlags((all) => [...(all ?? []).filter((f) => f.name !== saved.name), saved]
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })))
+
+  const setOffered = (name: string, offered: boolean) =>
+    updateConventionFlag(name, { offered }).then(replaced).catch((e: Error) => onError(e.message))
+
   const save = async () => {
     if (!draft) return
     setSaving(true)
@@ -33,8 +42,7 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
       const saved = draft.adding
         ? await addConventionFlag({ name: draft.name, ...body })
         : await updateConventionFlag(draft.name, body)
-      setFlags((all) => [...(all ?? []).filter((f) => f.name !== saved.name), saved]
-        .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })))
+      replaced(saved)
       setDraft(null)
     } catch (e) {
       onError((e as Error).message)
@@ -43,6 +51,7 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
     }
   }
 
+  const shown = canManage ? flags : flags?.filter((f) => f.offered) ?? null
   const fieldLabel = 'mb-1 block text-xs font-medium text-ink'
   const form = draft && (
     <div data-testid="convention-form" className={`max-w-2xl space-y-3 ${draft.adding ? '' : 'py-1'}`}>
@@ -80,29 +89,30 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
 
   return (
     <div data-testid="convention-catalog">
-      {flags !== null && flags.length === 0 && !draft && (
+      {shown !== null && shown.length === 0 && !draft && (
         <p className="mb-3 text-xs text-ink-subtle">No convention flags yet.</p>
       )}
-      {flags !== null && flags.length > 0 && (
+      {shown !== null && shown.length > 0 && (
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className={tableHeadRow}>
               <th className={`${tableCell} py-1.5`}>Flag</th>
               <th className={`${tableCell} text-right`}>Models that read it</th>
               <th className={`${tableCell} text-right`}>Datasets that ask for it</th>
+              {canManage && <th className={`${tableCell} text-center`}>Offered</th>}
               {canManage && <th className={tableCell} />}
             </tr>
           </thead>
           <tbody>
-            {flags.map((flag) => draft && !draft.adding && draft.name === flag.name ? (
+            {shown.map((flag) => draft && !draft.adding && draft.name === flag.name ? (
               <tr key={flag.name} className="border-b border-line/60 bg-raised">
-                <td colSpan={4} className={`${tableCell} py-3`}>{form}</td>
+                <td colSpan={5} className={`${tableCell} py-3`}>{form}</td>
               </tr>
             ) : (
-              <tr key={flag.name} data-testid="convention-row" data-flag={flag.name}
+              <tr key={flag.name} data-testid="convention-row" data-flag={flag.name} data-offered={flag.offered}
                   className="border-b border-line/60 align-top">
                 <td className={`${tableCell} py-2`}>
-                  <span className="font-medium text-ink">{flag.label}</span>
+                  <span className={`font-medium ${flag.offered ? 'text-ink' : 'text-ink-muted'}`}>{flag.label}</span>
                   {flag.label !== flag.name && (
                     <span className="ml-1.5 font-mono text-[11px] text-ink-subtle">{flag.name}</span>
                   )}
@@ -115,6 +125,19 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
                 </td>
                 <td className={`${tableCell} py-2 text-right tabular-nums text-ink-muted`}>{flag.models}</td>
                 <td className={`${tableCell} py-2 text-right tabular-nums text-ink-muted`}>{flag.datasets}</td>
+                {canManage && (
+                  <td className={`${tableCell} py-2 text-center`}>
+                    <label data-testid="convention-offer" className="inline-flex cursor-pointer"
+                           title={flag.offered ? 'Offered wherever a flag can be picked' : 'Not offered: reads send it as off'}>
+                      <input type="checkbox" role="switch" data-testid="convention-offered" className="peer sr-only"
+                             aria-label={`Offer ${flag.label}`} checked={flag.offered}
+                             onChange={(e) => void setOffered(flag.name, e.target.checked)} />
+                      <span className="mt-1 flex rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-accent">
+                        <SwitchKnob on={flag.offered} onColor="bg-accent" />
+                      </span>
+                    </label>
+                  </td>
+                )}
                 {canManage && (
                   <td className={`${tableCell} py-2 text-right`}>
                     <button type="button" data-testid="convention-edit"

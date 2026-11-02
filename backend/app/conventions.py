@@ -30,6 +30,13 @@ def model_row(requested: dict[str, bool], known: list[str]) -> list[float]:
     return [1.0 if requested.get(name) else 0.0 for name in known]
 
 
+def offered(conn: sqlite3.Connection, requested: dict[str, bool]) -> dict[str, bool]:
+    """The flags a read or a run may ask for: an admin can stop offering one, and a dataset
+    that set it keeps it stored but has it sent as off."""
+    held_back = {row[0] for row in conn.execute('SELECT name FROM convention_flags WHERE NOT offered')}
+    return {name: on for name, on in requested.items() if name not in held_back}
+
+
 def note(conn: sqlite3.Connection, names: list[str], added_from: str | None = None) -> None:
     """Put flags the catalog does not have yet into it, named as they were given, so they
     can be described afterwards. A flag already there is left as it is."""
@@ -49,7 +56,7 @@ def catalog(conn: sqlite3.Connection) -> list[dict]:
             if on:
                 datasets[name] = datasets.get(name, 0) + 1
     return [{'name': row['name'], 'label': row['label'], 'description': row['description'],
-             'added_from': row['added_from'], 'models': models.get(row['name'], 0),
+             'added_from': row['added_from'], 'offered': bool(row['offered']), 'models': models.get(row['name'], 0),
              'datasets': datasets.get(row['name'], 0)}
             for row in conn.execute('SELECT * FROM convention_flags ORDER BY label COLLATE NOCASE')]
 
@@ -62,7 +69,7 @@ def for_training(conn: sqlite3.Connection, base_model_id: int | None, job_ids: l
     base = conn.execute('SELECT conventions FROM models WHERE id = ?', (base_model_id,)).fetchone() \
         if base_model_id else None
     known = json.loads(base['conventions']) if base is not None and base['conventions'] else []
-    asked = {row['id']: parse(row['ocr_convention']) for row in conn.execute(
+    asked = {row['id']: offered(conn, parse(row['ocr_convention'])) for row in conn.execute(
         f"SELECT id, ocr_convention FROM jobs WHERE id IN ({','.join('?' * len(job_ids))})", job_ids)}
     new = sorted({name for flags in asked.values() for name, on in flags.items() if on} - set(known))
     names = known + new
