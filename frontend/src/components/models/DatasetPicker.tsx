@@ -11,6 +11,27 @@ interface DatasetPickerProps {
   chosen: Set<string>
   onToggle: (jobId: string) => void
   onSetMany: (jobIds: string[], on: boolean) => void
+  /** What is being picked: datasets to train or score on, or the test pages of datasets. */
+  kind?: PickerKind
+}
+
+type PickerKind = 'datasets' | 'testSets'
+
+// The same picker twice on one form, told apart by what it says and by its test ids.
+const WORDING: Record<PickerKind, {
+  search: string; option: string; pick: string; selectAll: string; group: string
+  none: string; noMatch: string; count: (n: number) => string
+}> = {
+  datasets: {
+    search: 'Search datasets', option: 'dataset-option', pick: 'dataset-pick', selectAll: 'datasets-select-all',
+    group: 'dataset-group', none: 'No dataset has anything to use.', noMatch: 'No dataset matches.',
+    count: (n) => String(n),
+  },
+  testSets: {
+    search: 'Search test sets', option: 'test-set-option', pick: 'test-set-pick', selectAll: 'test-sets-select-all',
+    group: 'test-set-group', none: 'No dataset has test pages yet.', noMatch: 'No test set matches.',
+    count: (n) => `${n} test page${n === 1 ? '' : 's'}`,
+  },
 }
 
 export interface DatasetSection {
@@ -19,10 +40,8 @@ export interface DatasetSection {
   jobs: Job[]
 }
 
-/** Datasets in the sections the Jobs page shows, so a dataset is where its project put it.
- *  One definition, because the training form groups its test-set dropdown the same way and
- *  two rules that are meant to agree eventually stop agreeing. */
-export function datasetSections(jobs: Job[] | null, groups: Group[]): DatasetSection[] {
+/** Datasets in the sections the Jobs page shows, so a dataset is where its project put it. */
+function datasetSections(jobs: Job[] | null, groups: Group[]): DatasetSection[] {
   const byGroup = new Map<number | null, Job[]>()
   for (const job of jobs ?? []) {
     const key = job.group_id ?? null
@@ -42,7 +61,8 @@ export function datasetSections(jobs: Job[] | null, groups: Group[]): DatasetSec
  *  different sets of datasets. A dataset with nothing to use is left out rather than listed
  *  dimmed, a group folds until it holds a pick or a search reaches into it, and the picks
  *  stand above the list so a long one never hides what was chosen. */
-export function DatasetPicker({ jobs, groups, counts, chosen, onToggle, onSetMany }: DatasetPickerProps) {
+export function DatasetPicker({ jobs, groups, counts, chosen, onToggle, onSetMany, kind = 'datasets' }: DatasetPickerProps) {
+  const words = WORDING[kind]
   const sections = useMemo(() => datasetSections(jobs, groups), [jobs, groups])
   const [query, setQuery] = useState('')
   const [folded, setFolded] = useState<Partial<Record<DatasetSection['key'], boolean>>>({})
@@ -59,18 +79,18 @@ export function DatasetPicker({ jobs, groups, counts, chosen, onToggle, onSetMan
 
   return (
     <div className="mb-3">
-      <div className="mb-1 flex items-center gap-2">
+      <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1">
         <Input
           size="sm"
           type="search"
-          aria-label="Search datasets"
-          placeholder="Search datasets"
+          aria-label={words.search}
+          placeholder={words.search}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="min-w-0 flex-1"
+          className="min-w-40 flex-1"
         />
         {selectable.length > 1 && (
-          <button type="button" data-testid="datasets-select-all"
+          <button type="button" data-testid={words.selectAll}
                   onClick={() => onSetMany(selectable.map((j) => j.id), !allChosen)}
                   className="shrink-0 text-xs font-medium text-accent-ink hover:underline">
             {allChosen ? 'Clear all' : needle ? `Select all ${selectable.length}` : 'Select all'}
@@ -85,7 +105,7 @@ export function DatasetPicker({ jobs, groups, counts, chosen, onToggle, onSetMan
       {picks.length > 0 && (
         <div data-testid="dataset-picks" className="mb-1 flex flex-wrap gap-1">
           {picks.map((job) => (
-            <Badge key={job.id} tone="accent" data-testid="dataset-pick" className="inline-flex items-center gap-1">
+            <Badge key={job.id} tone="accent" data-testid={words.pick} className="inline-flex items-center gap-1">
               <span className="max-w-48 truncate">{job.name}</span>
               <button type="button" aria-label={`Remove ${job.name}`} onClick={() => onToggle(job.id)}
                       className="hover:text-ink">
@@ -105,7 +125,7 @@ export function DatasetPicker({ jobs, groups, counts, chosen, onToggle, onSetMan
           const pickedHere = listed.filter((j) => chosen.has(j.id)).length
           const open = !section.label || !!needle || !(folded[section.key] ?? picked === 0)
           return (
-            <div key={section.key} data-testid="dataset-group" data-group={section.label || undefined}>
+            <div key={section.key} data-testid={words.group} data-group={section.label || undefined}>
               {section.label && (
                 <div className="flex items-baseline gap-2 px-1 pt-1">
                   <button
@@ -132,7 +152,7 @@ export function DatasetPicker({ jobs, groups, counts, chosen, onToggle, onSetMan
               {open && listed.map((job) => (
                 <label
                   key={job.id}
-                  data-testid="dataset-option"
+                  data-testid={words.option}
                   className={`flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-raised ${
                     section.label ? 'pl-3' : ''
                   }`}
@@ -145,15 +165,15 @@ export function DatasetPicker({ jobs, groups, counts, chosen, onToggle, onSetMan
                     className="cursor-pointer accent-accent"
                   />
                   <span className="min-w-0 flex-1 truncate">{job.name}</span>
-                  <span className="text-xs text-ink-muted">{counts[job.id] ?? ''}</span>
+                  <span className="text-xs text-ink-muted">{counts[job.id] === undefined ? '' : words.count(counts[job.id])}</span>
                 </label>
               ))}
             </div>
           )
         })}
-        {jobs?.length === 0 && <p className="text-sm text-ink-muted">No datasets.</p>}
+        {jobs?.length === 0 && <p className="text-sm text-ink-muted">{kind === 'datasets' ? 'No datasets.' : words.none}</p>}
         {jobs !== null && jobs.length > 0 && !jobs.some(matches) && (
-          <p className="text-sm text-ink-muted">{needle ? 'No dataset matches.' : 'No dataset has anything to use.'}</p>
+          <p className="text-sm text-ink-muted">{needle ? words.noMatch : words.none}</p>
         )}
       </div>
     </div>

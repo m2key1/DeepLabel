@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { test, expect } from '../helpers/test'
 import { OCR_READER, backendFetch, createGroup, createJob, createTraining, getTrainingProgress, identity, importStubModel, listEvaluations, listRegistryModels, listTrainings, markLinesChecked, markTestPages, moveJobToGroup, seedCompletedJob, seedDistinctPagesJob, TEST_SCAN_WIDTH, uniqueName, waitForJobStatus } from '../helpers/api'
 import { seedSession, useSession } from '../helpers/session'
-import { cancelledRun, datasetOption, pickDataset, startTraining, taskSection, versionRow } from '../helpers/training'
+import { cancelledRun, datasetOption, pickDataset, startTraining, taskSection, testSetOption, versionRow } from '../helpers/training'
 
 test.describe('Scenario: the model registry', () => {
   test("each stage's backend brings its builtin model as the default", async ({ page }) => {
@@ -446,7 +446,7 @@ test.describe('Scenario: the model registry', () => {
 
     await page.getByLabel('Model name').fill(modelName)
     await pickDataset(page, trainName)
-    await page.getByTestId('training-test-sets').getByRole('checkbox', { name: testName }).check()
+    await (await testSetOption(page, testName)).getByRole('checkbox').check()
     await page.getByTestId('advanced-toggle').click()
     await page.getByLabel('Epochs', { exact: true }).fill('1')
     // The summary names what will actually run, hidden defaults included.
@@ -551,13 +551,12 @@ test.describe('Scenario: the model registry', () => {
     await page.goto('/models/train?task=ocr')
     await page.getByLabel('Model name').fill(modelName)
     await pickDataset(page, trainName)
-    const testSets = page.getByTestId('training-test-sets')
-    for (const name of names) await testSets.getByRole('checkbox', { name }).check()
+    for (const name of names) await (await testSetOption(page, name)).getByRole('checkbox').check()
     await expect(page.getByTestId('submit-summary')).toContainText(`test: ${names[0]}, ${names[1]}`)
     // Unticking one takes it off again.
-    await testSets.getByRole('checkbox', { name: names[1] }).uncheck()
+    await (await testSetOption(page, names[1])).getByRole('checkbox').uncheck()
     await expect(page.getByTestId('submit-summary')).not.toContainText(names[1])
-    await testSets.getByRole('checkbox', { name: names[1] }).check()
+    await (await testSetOption(page, names[1])).getByRole('checkbox').check()
     await startTraining(page)
 
     // Backend oracle: the run holds both, in the order they were ticked.

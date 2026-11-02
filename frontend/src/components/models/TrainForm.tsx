@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../auth'
 import {
   createTraining, getTrainingOptions, LINE_SHAPES, listAugmentPipelines, listGroups, listJobs, trainingPreview,
@@ -8,7 +8,7 @@ import type {
   LeftOut, SplitStrategy, Training, TrainingOptions, TrainingTargets, Tunable, TunableValue,
 } from '../../api'
 import { modalBtn, modalPrimaryBtn } from '../Modal'
-import { DatasetPicker, datasetSections } from './DatasetPicker'
+import { DatasetPicker } from './DatasetPicker'
 import { LeftOutNote } from '../ui/LeftOutNote'
 import { Button } from '../ui/Button'
 import { Hint } from '../ui/Hint'
@@ -308,7 +308,6 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
   }, [task, from])
 
   // The test-set dropdown groups by the same rule the picker does.
-  const sections = useMemo(() => datasetSections(jobs, groups), [jobs, groups])
   // A dataset whose owner switched training off is not offered; the backend refuses it too.
   const trainable = useMemo(() => jobs?.filter((j) => j.data_use.training) ?? null, [jobs])
   const notTrainable = (jobs ?? []).filter((j) => !j.data_use.training).map((j) => j.name)
@@ -374,7 +373,8 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
   const setKnob = (key: string, value: string) => setTuned((prev) => ({ ...prev, [key]: value }))
   const totalPages = [...chosen].reduce((sum, id) => sum + (trainPages[id] ?? 0), 0)
   const testCandidates = (jobs ?? []).filter((j) => (j.test_pages ?? 0) > 0 && j.data_use.test)
-  const allTestsChosen = testCandidates.length > 0 && testCandidates.every((j) => testIds.includes(j.id))
+  const testPageCounts = Object.fromEntries(testCandidates.map((j) => [j.id, j.test_pages ?? 0]))
+  const chosenTests = new Set(testIds)
   const leftOutPages = leftOut.reduce((sum, row) => sum + row.pages, 0)
   const nameTaken = takenNames.some((n) => n.trim().toLowerCase() === name.trim().toLowerCase())
   // The stored batch was measured for the hardware that run used, so a rerun on other
@@ -557,49 +557,23 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
         </div>
 
         <div>
-        <fieldset data-testid="training-test-sets" className="relative">
-        <legend className={labelClass}>Test sets</legend>
-        {testCandidates.length > 1 && (
-          <button type="button" data-testid="test-sets-select-all"
-                  onClick={() => setTestIds(allTestsChosen ? [] : testCandidates.map((j) => j.id))}
-                  className="absolute right-0 top-0 text-xs font-medium text-accent-ink hover:underline">
-            {allTestsChosen ? 'Clear all' : 'Select all'}
-          </button>
-        )}
+        <div data-testid="training-test-sets">
+        <div className="mb-1 text-sm font-medium text-ink">Test sets</div>
         <p className="mb-1 text-xs text-ink-muted">
           Optional - the test pages of datasets, never trained on and scored with the base
           and the new model once the training finishes.
         </p>
-        {testCandidates.length === 0 ? (
-          <p className="mb-3 text-xs text-ink-subtle">No dataset has test pages yet.</p>
-        ) : (
-          <div className={`mb-3 max-h-48 overflow-y-auto rounded border border-line-strong py-1`}>
-            {sections.map((section) => {
-              const options = section.jobs.filter((j) => testCandidates.includes(j))
-              if (options.length === 0) return null
-              return (
-                <Fragment key={section.key}>
-                  {section.label && (
-                    <div className="px-2 pt-1 text-[10px] uppercase tracking-wide text-ink-subtle">{section.label}</div>
-                  )}
-                  {options.map((job) => (
-                    <label key={job.id} className="flex cursor-pointer items-center gap-2 px-2 py-0.5 text-sm hover:bg-raised">
-                      <input type="checkbox" className="accent-accent"
-                             checked={testIds.includes(job.id)}
-                             onChange={(e) => setTestIds((ids) =>
-                               e.target.checked ? [...ids, job.id] : ids.filter((id) => id !== job.id))} />
-                      <span className="min-w-0 flex-1 truncate">{job.name}</span>
-                      <span className="shrink-0 text-xs text-ink-muted">
-                        {job.test_pages} test page{job.test_pages === 1 ? '' : 's'}
-                      </span>
-                    </label>
-                  ))}
-                </Fragment>
-              )
-            })}
-          </div>
-        )}
-        </fieldset>
+        <DatasetPicker
+          kind="testSets"
+          jobs={testCandidates}
+          groups={groups}
+          counts={testPageCounts}
+          chosen={chosenTests}
+          onToggle={(id) => setTestIds((ids) => ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id])}
+          onSetMany={(ids, on) => setTestIds((current) =>
+            on ? [...new Set([...current, ...ids])] : current.filter((id) => !ids.includes(id)))}
+        />
+        </div>
         {settledInChosen > 0 && (
           <label className="mb-3 flex items-start gap-1.5 text-xs text-ink-muted">
             <input

@@ -21,6 +21,12 @@ export async function pickDataset(page: Page, name: string) {
   await (await datasetOption(page, name)).getByRole('checkbox').check()
 }
 
+/** A test set's row, found the same way in the picker below the datasets. */
+export async function testSetOption(page: Page, name: string) {
+  await page.getByRole('searchbox', { name: 'Search test sets' }).fill(name)
+  return page.getByTestId('test-set-option').filter({ hasText: name }).first()
+}
+
 /** One task's block on the models page: its models, its archive and its Train button. */
 export function taskSection(page: Page, task: 'layout' | 'lines' | 'ocr') {
   return page.locator(`[data-testid="task-section"][data-task="${task}"]`)

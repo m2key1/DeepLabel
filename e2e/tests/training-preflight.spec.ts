@@ -4,7 +4,7 @@ import {
   setOcrConvention, uniqueName,
 } from '../helpers/api'
 import { JSON_HEADERS } from '../helpers/map'
-import { pickDataset } from '../helpers/training'
+import { pickDataset, testSetOption } from '../helpers/training'
 
 const CYRILLIC_A = 'а'
 const SHARP_S = 'ß'
@@ -61,7 +61,7 @@ test.describe('Scenario: the training pre-flight', () => {
     await page.goto('/models/train?task=ocr')
     await page.getByLabel('Model name').fill(runName)
     await pickDataset(page, trainName)
-    await page.getByTestId('training-test-sets').getByRole('checkbox', { name: testName }).check()
+    await (await testSetOption(page, testName)).getByRole('checkbox').check()
     await page.getByTestId('advanced-toggle').click()
     await page.getByLabel('Epochs', { exact: true }).fill('2')
 

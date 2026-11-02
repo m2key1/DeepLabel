@@ -385,8 +385,8 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
 
 - Pick the base model, the datasets (by project, with search), the validation split and
   optionally one or more test sets: the test pages of datasets, scored with the base and the
-  new model once the run is trained. **Select all** takes every dataset the search shows,
-  or every test set.
+  new model once the run is trained. Datasets and test sets each have a search, and
+  **Select all** takes everything the search shows.
 - Train only on lines a person verified, or include lines settled by language-model
   agreement.
 - Tune epochs, batch size, learning rate, early stopping and every other setting the
