@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { displayed } from '../../lib/text'
 import { lineShapeLabel } from '../../api'
@@ -46,6 +47,11 @@ const MARK_INK: Record<FlagTone, string> = {
   neutral: 'text-ink-subtle',
   warn: 'text-warn',
   danger: 'text-danger',
+}
+
+/** A pre-flight section's title, ruled off from the one before it. */
+function SectionHeading({ children }: { children: ReactNode }) {
+  return <h3 className="mb-3 border-b border-line pb-1.5 text-sm font-semibold text-ink">{children}</h3>
 }
 
 function worstTone(flags: PreflightCharFlag[]): FlagTone {
@@ -113,7 +119,7 @@ function DistributionRow({ label, metric, dist, unit, focus, pinned, linked, onH
     <figure data-testid="preflight-histogram" data-metric={label}
             className="grid min-w-0 grid-cols-[8rem_minmax(0,1fr)] items-end gap-x-3 gap-y-0.5 sm:grid-cols-[8rem_minmax(0,1fr)_18rem]">
       <figcaption className="self-center text-xs text-ink-muted">{label}</figcaption>
-      <div className="flex h-12 items-end gap-0.5">
+      <div className="flex h-8 items-end gap-0.5">
         {dist.bins.map((bin, index) => {
           const lit = shown === bin
           const isPinned = sameBar(pinned, metric, index)
@@ -222,8 +228,8 @@ function Distributions({ items, joint, datasets }: {
   }
   return (
     <div>
-      <SubHeading>Distributions</SubHeading>
-      <div data-testid="preflight-distributions" className={`${cardChrome} space-y-3 p-3`}
+      <SectionHeading>Distributions</SectionHeading>
+      <div data-testid="preflight-distributions" className={`${cardChrome} max-w-5xl space-y-3 p-3`}
            onMouseLeave={() => setHovered(null)}>
         {shown.map((d) => (
           <DistributionRow key={d.label} {...d} focus={focus} pinned={pinned} linked={linkedFor(d.metric)}
@@ -545,7 +551,7 @@ function Conventions({ flags }: { flags: NonNullable<PreflightResult['convention
   ))
   return (
     <div data-testid="preflight-conventions">
-      <SubHeading>Transcription conventions</SubHeading>
+      <SectionHeading>Transcription conventions</SectionHeading>
       {!flags.supported ? (
         <p className="text-xs text-ink-muted">
           The datasets set {flags.names.map(label).join(', ')}, but this model's backend cannot be taught
@@ -609,20 +615,20 @@ export function PreflightReport({ preflight }: { preflight: Preflight }) {
   const hasTest = result.settings.test_datasets > 0
   const warnings = result.findings.filter((f) => f.level === 'warn')
   return (
-    <div data-testid="preflight-report" className="space-y-5">
+    <div data-testid="preflight-report" className="space-y-8">
       <div>
-        <SubHeading>
+        <SectionHeading>
           {warnings.length === 0 ? 'Nothing stood out' : `${warnings.length} thing${warnings.length === 1 ? '' : 's'} worth a look`}
-        </SubHeading>
+        </SectionHeading>
         {result.findings.length > 0 && (
-          <ul className="space-y-1">
+          <ul className="space-y-1.5">
             {result.findings.map((f, i) => (
               <li key={`${f.code}-${i}`} data-testid="preflight-finding" data-code={f.code} data-level={f.level}
                   className="flex items-start gap-2 text-xs text-ink">
-                <Badge tone={f.level === 'warn' ? 'warn' : 'neutral'}>
+                <Badge tone={f.level === 'warn' ? 'warn' : 'neutral'} className="w-[5.25rem]">
                   {f.level === 'warn' ? 'warning' : 'note'}
                 </Badge>
-                <span>{f.message}</span>
+                <span className="py-[3px] leading-4">{f.message}</span>
               </li>
             ))}
           </ul>
@@ -630,7 +636,7 @@ export function PreflightReport({ preflight }: { preflight: Preflight }) {
       </div>
 
       <div>
-        <SubHeading>The split</SubHeading>
+        <SectionHeading>The split</SectionHeading>
         <SplitTable result={result} datasets={datasets} />
       </div>
 
@@ -645,7 +651,7 @@ export function PreflightReport({ preflight }: { preflight: Preflight }) {
 
       {result.crops && (
         <div>
-          <SubHeading>Crops</SubHeading>
+          <SectionHeading>Crops</SectionHeading>
           <div className="flex flex-wrap gap-4">
             <FlaggedTile label="tiny crops" testid="preflight-tiny" flagged={result.crops.tiny} datasets={datasets} />
             <FlaggedTile label="no crop possible" testid="preflight-degenerate" flagged={result.crops.degenerate} datasets={datasets} />
@@ -657,7 +663,7 @@ export function PreflightReport({ preflight }: { preflight: Preflight }) {
 
       {result.text && (
         <div>
-          <SubHeading>Text and characters</SubHeading>
+          <SectionHeading>Text and characters</SectionHeading>
           <div>
             <StatRow>
               <StatTile label="verified by a person" data-testid="preflight-source-person"
@@ -687,7 +693,7 @@ export function PreflightReport({ preflight }: { preflight: Preflight }) {
 
       {result.classes && (
         <div>
-          <SubHeading>Classes per split</SubHeading>
+          <SectionHeading>Classes per split</SectionHeading>
           <div className="overflow-x-auto">
             <table data-testid="preflight-classes" className="w-full border-collapse text-sm">
               <thead>
@@ -720,7 +726,7 @@ export function PreflightReport({ preflight }: { preflight: Preflight }) {
       )}
 
       <div>
-        <SubHeading>Settings</SubHeading>
+        <SectionHeading>Settings</SectionHeading>
         <Settings result={result} />
       </div>
     </div>
