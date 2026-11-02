@@ -68,6 +68,72 @@ class TestDatasets:
         assert queue_eta.dataset(conn, 'w', NOW) == {'seconds': None, 'basis': 'unknown'}
 
 
+def read_by(conn, job_id, model_id):
+    """One line on the dataset's first page, read by the given OCR model."""
+    page = conn.execute('SELECT id FROM pages WHERE job_id = ? ORDER BY idx LIMIT 1', (job_id,)).fetchone()[0]
+    element = conn.execute("INSERT INTO elements (page_id, order_idx, class_name, bbox) VALUES (?, 0, 'Text', '[0,0,1,1]')",
+                           (page,)).lastrowid
+    conn.execute("INSERT INTO lines (element_id, order_idx, polygon, text, ocr_model_id) VALUES (?, 0, '[]', 'x', ?)",
+                 (element, model_id))
+
+
+class TestPacePerKindOfRun:
+    """A waiting dataset takes the pace of recent ones that ran the same way: the same OCR
+    model, no OCR at all, or the same map task."""
+
+    @pytest.fixture
+    def history(self, conn):
+        conn.execute("INSERT INTO models (id, task, name, checkpoint) VALUES (2, 'ocr', 'Slow reader', '/slow')")
+        conn.execute("UPDATE models SET is_default = 1 WHERE id = 1")
+        add_job(conn, 'fast', 'done', 10, '2026-01-01 10:00:00', '2026-01-01 10:01:40')
+        read_by(conn, 'fast', 1)
+        add_job(conn, 'slow', 'done', 10, '2026-01-01 10:00:00', '2026-01-01 10:16:40')
+        read_by(conn, 'slow', 2)
+        return conn
+
+    def test_a_dataset_for_the_slow_model_takes_the_slow_pace(self, history):
+        add_job(history, 'w', 'queued', 5)
+        history.execute("UPDATE jobs SET model_ocr_id = 2 WHERE id = 'w'")
+
+        assert queue_eta.dataset(history, 'w', NOW) == {'seconds': 500, 'basis': 'history'}
+
+    def test_one_left_to_the_default_takes_the_default_model_s_pace(self, history):
+        add_job(history, 'w', 'queued', 5)
+
+        assert queue_eta.dataset(history, 'w', NOW) == {'seconds': 50, 'basis': 'history'}
+
+    def test_a_finished_dataset_counts_for_the_model_that_read_it(self, history):
+        history.execute("UPDATE jobs SET model_ocr_id = 1 WHERE id = 'slow'")
+        add_job(history, 'w', 'queued', 5)
+        history.execute("UPDATE jobs SET model_ocr_id = 2 WHERE id = 'w'")
+
+        assert queue_eta.dataset(history, 'w', NOW)['seconds'] == 500
+
+    def test_a_model_with_no_history_falls_back_to_every_recent_dataset(self, history):
+        history.execute("INSERT INTO models (id, task, name, checkpoint) VALUES (3, 'ocr', 'New', '/new')")
+        add_job(history, 'w', 'queued', 5)
+        history.execute("UPDATE jobs SET model_ocr_id = 3 WHERE id = 'w'")
+
+        # The median of 10 s and 100 s a page.
+        assert queue_eta.dataset(history, 'w', NOW)['seconds'] == 275
+
+    def test_without_ocr_it_takes_the_pace_of_datasets_without_ocr(self, history):
+        add_job(history, 'lines', 'done', 10, '2026-01-01 10:00:00', '2026-01-01 10:00:20')
+        history.execute("UPDATE jobs SET run_ocr = 0 WHERE id IN ('lines')")
+        add_job(history, 'w', 'queued', 5)
+        history.execute("UPDATE jobs SET run_ocr = 0 WHERE id = 'w'")
+
+        assert queue_eta.dataset(history, 'w', NOW)['seconds'] == 10
+
+    def test_a_map_dataset_takes_the_pace_of_map_datasets(self, history):
+        add_job(history, 'map', 'done', 10, '2026-01-01 10:00:00', '2026-01-01 10:00:30')
+        history.execute("UPDATE jobs SET task = 'map_segmentation' WHERE id = 'map'")
+        add_job(history, 'w', 'queued', 5)
+        history.execute("UPDATE jobs SET task = 'map_segmentation' WHERE id = 'w'")
+
+        assert queue_eta.dataset(history, 'w', NOW)['seconds'] == 15
+
+
 class TestTrainings:
     def test_a_running_training_takes_as_long_per_epoch_as_its_epochs_so_far(self, conn):
         run = add_training(conn, 'running', 10, started='2026-01-01 11:56:40')

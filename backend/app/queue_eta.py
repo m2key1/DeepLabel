@@ -5,6 +5,8 @@ from statistics import median
 # How many finished runs a pace is taken from: recent enough to follow a new model or
 # card, enough that one odd run does not decide it.
 HISTORY = 20
+# How far back a dataset's own kind of run is looked for before falling back to all of them.
+LOOKBACK = 200
 # Below this much progress a running item's own pace says little yet.
 MIN_FRACTION = 0.05
 
@@ -50,19 +52,58 @@ def _dataset_fraction(job) -> float:
     return sum(shares) / len(shares)
 
 
-def dataset(conn, job_id: str, now: datetime) -> dict:
+def _pages(conn, job_id: str) -> int:
+    return conn.execute('SELECT COUNT(*) FROM pages WHERE job_id = ? AND deleted = 0', (job_id,)).fetchone()[0]
+
+
+def _default_ocr(conn) -> int | None:
+    row = conn.execute("SELECT id FROM models WHERE task = 'ocr' AND is_default = 1 AND archived = 0").fetchone()
+    return row['id'] if row else None
+
+
+def _read_by(conn, job_id: str) -> int | None:
+    """The OCR model that read a finished dataset, from its lines: the dataset's own column
+    may have changed since, or be empty for whatever the default was then."""
+    row = conn.execute('SELECT l.ocr_model_id FROM pages p JOIN elements e ON e.page_id = p.id '
+                       'JOIN lines l ON l.element_id = e.id WHERE p.job_id = ? AND l.ocr_model_id IS NOT NULL '
+                       'LIMIT 1', (job_id,)).fetchone()
+    return row[0] if row else None
+
+
+def _kind(job, ocr_model: int | None) -> tuple:
+    """What a dataset's run does, as far as its pace goes."""
+    if job['task'] != 'text':
+        return ('tiles', job['task'])
+    return ('ocr', ocr_model) if job['run_ocr'] else ('no_ocr',)
+
+
+def dataset_history(conn) -> list[tuple[tuple, float]]:
+    """Recent finished datasets, newest first, as the kind of run and its seconds per page.
+    Read once for a whole queue rather than once for each dataset in it."""
+    recent = conn.execute(
+        "SELECT * FROM jobs WHERE status = 'done' AND started_at IS NOT NULL AND finished_at IS NOT NULL "
+        'ORDER BY finished_at DESC LIMIT ?', (LOOKBACK,)).fetchall()
+    default = _default_ocr(conn)
+    history = []
+    for job in recent:
+        paces = _paces([job], lambda row: _pages(conn, row['id']))
+        if paces:
+            ocr_model = _read_by(conn, job['id']) or job['model_ocr_id'] or default
+            history.append((_kind(job, ocr_model), paces[0]))
+    return history
+
+
+def dataset(conn, job_id: str, now: datetime, history: list[tuple[tuple, float]] | None = None) -> dict:
     job = conn.execute('SELECT * FROM jobs WHERE id = ?', (job_id,)).fetchone()
     if job['status'] == 'running':
         measured = _from_progress(job['started_at'], _dataset_fraction(job), now)
         if measured:
             return measured
-    pages = lambda row: conn.execute('SELECT COUNT(*) FROM pages WHERE job_id = ? AND deleted = 0',
-                                     (row['id'],)).fetchone()[0]
-    recent = conn.execute(
-        "SELECT * FROM jobs WHERE status = 'done' AND started_at IS NOT NULL AND finished_at IS NOT NULL "
-        'ORDER BY finished_at DESC LIMIT ?', (HISTORY,)).fetchall()
-    paces = _paces(recent, pages)
-    return _estimate(median(paces) * pages(job), 'history') if paces and pages(job) else UNKNOWN
+    history = dataset_history(conn) if history is None else history
+    kind = _kind(job, job['model_ocr_id'] or _default_ocr(conn))
+    paces = [pace for k, pace in history if k == kind][:HISTORY] or [pace for _, pace in history][:HISTORY]
+    pages = _pages(conn, job_id)
+    return _estimate(median(paces) * pages, 'history') if paces and pages else UNKNOWN
 
 
 def training(conn, training_id: int, progress: dict | None, now: datetime) -> dict:

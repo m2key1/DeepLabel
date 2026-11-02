@@ -203,8 +203,10 @@ source and pages. Changes apply to the next run; nothing already recognised is t
 - The **Queue** page shows everything running or waiting - datasets, trainings,
   evaluations - on a timeline per GPU and on the cluster, each item as long as it is
   expected to take, with the time it should start. Estimates come from the item's own
-  progress, else from how long the same kind of work took recently. Their owner, or an
-  admin, can cancel them there.
+  progress, else from how long the same kind of work took recently: a dataset is measured
+  against recent datasets read by the same OCR model (or, without OCR, against others
+  without it, and a map dataset against map datasets), and against all recent ones when
+  there are none yet. Their owner, or an admin, can cancel them there.
 
 ## Reading order
 

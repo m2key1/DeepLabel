@@ -1433,9 +1433,11 @@ def queue(conn=Depends(get_db), user: dict = Depends(current_user)):
 
     # How long each will take, so the page can lay the lanes out over time.
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    for entry in [*running, *queued, *cluster]:
+    entries = [*running, *queued, *cluster]
+    history = queue_eta.dataset_history(conn) if any(e['kind'] == 'dataset' for e in entries) else []
+    for entry in entries:
         if entry['kind'] == 'dataset':
-            entry['eta'] = queue_eta.dataset(conn, entry['id'], now)
+            entry['eta'] = queue_eta.dataset(conn, entry['id'], now, history)
         elif entry['kind'] == 'training':
             entry['eta'] = queue_eta.training(conn, entry['id'], entry['training']['progress_last'], now)
         else:
