@@ -90,6 +90,30 @@ def _polygon(points: list[tuple[float, float]], width: int, height: int) -> list
 # lines in table cells and in regions nested inside regions as well as directly under
 # the Page, so every one of them is read wherever it sits, in document order.
 LINE_CONTAINERS = {'TextRegion', 'TableCell'}
+# What another tool's file says is a table or a separator, the structures read from anyone's
+# files; their other boxes without lines are left out.
+TABLE_TYPES = {'tableregion', 'table', 'ocr_table'}
+SEPARATOR_TYPES = {'separatorregion', 'separator', 'ocr_separator'}
+
+
+def _structure(name: str) -> dict | None:
+    """Another tool's table or separator, as the class and kind it becomes."""
+    if name.lower() in TABLE_TYPES:
+        return {'class_name': 'Table', 'raw_type': name, 'kind': 'container'}
+    if name.lower() in SEPARATOR_TYPES:
+        return {'class_name': 'Divider', 'raw_type': name, 'kind': 'container'}
+    return None
+
+
+def _in_reading_order(regions: list[dict]) -> list[dict]:
+    """Our own export nests a container's boxes inside it, so its file order is not the
+    reading order; each box carries its place, which puts them back."""
+    return sorted(regions, key=lambda region: region.pop('order'))
+
+
+def _order_from_id(value: str | None) -> int:
+    match = re.search(r'r(\d+)$|block_(\d+)$', value or '')
+    return int(match.group(1) or match.group(2)) if match else 0
 
 
 def _region_type(region) -> str:
@@ -141,7 +165,10 @@ def parse_page_xml(data: bytes) -> dict:
     ours = _written_by_deeplabel(root)
     regions = []
     for region in page.iter():
-        if _local(region.tag) not in LINE_CONTAINERS:
+        tag = _local(region.tag)
+        own_class = _custom(region, 'structure', 'type') if ours else None
+        structure = None if own_class else _structure(tag)
+        if tag not in LINE_CONTAINERS and not own_class and not structure:
             continue
         lines, region_points = [], None
         for child in region:
@@ -153,16 +180,24 @@ def parse_page_xml(data: bytes) -> dict:
                     line['checked'] = _custom(child, 'deeplabel', 'checked') == 'true'
                 if line:
                     lines.append(line)
-        if not lines:
+        if not lines and not region_points:
             continue
-        rtype = _region_type(region)
+        if not lines and not own_class and not structure:
+            continue
         bbox = (_bbox(region_points, width, height) if region_points
                 else _region_bbox_from_lines(lines))
-        own_class = _custom(region, 'structure', 'type') if ours else None
-        regions.append({'class_name': own_class or REGION_CLASSES.get(rtype.lower(), 'Paragraph'),
-                        'raw_type': own_class or rtype or 'paragraph', 'bbox': bbox, 'lines': lines})
+        if own_class:
+            entry = {'class_name': own_class, 'raw_type': own_class,
+                     'kind': _custom(region, 'deeplabel', 'kind') or 'content',
+                     'order': int(_custom(region, 'readingOrder', 'index') or 0)}
+        elif structure:
+            entry = structure
+        else:
+            rtype = _region_type(region)
+            entry = {'class_name': REGION_CLASSES.get(rtype.lower(), 'Paragraph'), 'raw_type': rtype or 'paragraph'}
+        regions.append({**entry, 'bbox': bbox, 'lines': lines})
     return {'image': page.get('imageFilename') or '', 'width': width, 'height': height,
-            'regions': regions}
+            'regions': _in_reading_order(regions) if ours else regions}
 
 
 def parse_alto(data: bytes) -> dict:
@@ -177,7 +212,13 @@ def parse_alto(data: bytes) -> dict:
     ours = _written_by_deeplabel(root)
     labels = {el.get('ID'): el.get('LABEL') for el in root.iter() if _local(el.tag) == 'LayoutTag'} if ours else {}
     regions = []
-    for block in (el for el in page.iter() if _local(el.tag) == 'TextBlock'):
+    for block in page.iter():
+        tag = _local(block.tag)
+        refs = (block.get('TAGREFS') or '').split()
+        label = next((labels[ref] for ref in refs if ref in labels), None)
+        structure = _structure(block.get('TYPE') or '') if tag == 'ComposedBlock' and not label else None
+        if not (tag == 'TextBlock' or (label and tag in ('ComposedBlock', 'GraphicalElement')) or structure):
+            continue
         lines = []
         for line in (el for el in block if _local(el.tag) == 'TextLine'):
             words = _alto_words(line)
@@ -191,15 +232,21 @@ def parse_alto(data: bytes) -> dict:
             if ours:
                 entry['checked'] = 'checked' in (line.get('TAGREFS') or '').split()
             lines.append(entry)
-        if not lines:
+        if not lines and not label and not structure:
             continue
         x, y, w, h = _alto_box(block)
+        if not lines and not (w and h):
+            continue
         bbox = (_bbox([(x, y), (x + w, y + h)], width, height) if w and h
                 else _region_bbox_from_lines(lines))
-        label = next((labels[ref] for ref in (block.get('TAGREFS') or '').split() if ref in labels), None)
-        regions.append({'class_name': label or 'Paragraph', 'raw_type': label or 'TextBlock',
-                        'bbox': bbox, 'lines': lines})
-    return {'image': image, 'width': width, 'height': height, 'regions': regions}
+        if label:
+            entry = {'class_name': label, 'raw_type': label, 'kind': 'container' if 'container' in refs else 'content',
+                     'order': _order_from_id(block.get('ID'))}
+        else:
+            entry = structure or {'class_name': 'Paragraph', 'raw_type': 'TextBlock'}
+        regions.append({**entry, 'bbox': bbox, 'lines': lines})
+    return {'image': image, 'width': width, 'height': height,
+            'regions': _in_reading_order(regions) if ours else regions}
 
 
 def _hocr_props(el) -> dict[str, str]:
@@ -237,17 +284,24 @@ def parse_hocr(data: bytes) -> dict:
     if width <= 0 or height <= 0:
         raise UnreadableXml('the ocr_page has no size')
     ours = any(el.get('content') == 'DeepLabel' for el in root.iter() if _local(el.tag) == 'meta')
-    # Areas hold paragraphs; a page written without areas has only paragraphs. Each line is
-    # taken once, by the first area that holds it.
-    areas = [el for el in page.iter() if 'ocr_carea' in _hocr_classes(el)] \
-        or [el for el in page.iter() if 'ocr_par' in _hocr_classes(el)]
-    seen, regions = set(), []
-    for area in areas:
+    # Areas hold paragraphs; a page written without areas has only paragraphs. A line belongs
+    # to the innermost area around it; one that only a table holds becomes a box of its own,
+    # since a table is a container and containers are not read.
+    area_class = 'ocr_carea' if any('ocr_carea' in _hocr_classes(el) for el in page.iter()) else 'ocr_par'
+    structures = {'ocr_table', 'ocr_separator'}
+    parent = {child: el for el in page.iter() for child in el}
+    boxes = [el for el in page.iter() if _hocr_classes(el) & ({area_class} | structures)]
+    held: dict[int, list] = {id(box): [] for box in boxes}
+    for line in (el for el in page.iter() if _hocr_classes(el) & {'ocr_line', 'ocr_textfloat', 'ocr_header', 'ocr_caption'}):
+        holder = parent.get(line)
+        while holder is not None and id(holder) not in held:
+            holder = parent.get(holder)
+        if holder is not None:
+            held[id(holder)].append(line)
+    regions = []
+    for box in boxes:
         lines = []
-        for line in (el for el in area.iter() if _hocr_classes(el) & {'ocr_line', 'ocr_textfloat', 'ocr_header', 'ocr_caption'}):
-            if id(line) in seen:
-                continue
-            seen.add(id(line))
+        for line in held[id(box)]:
             line_props = _hocr_props(line)
             x0, y0, x1, y1 = _hocr_bbox(line_props, 'an ocr_line')
             words = [''.join(w.itertext()).strip() for w in line.iter() if 'ocrx_word' in _hocr_classes(w)]
@@ -256,14 +310,24 @@ def parse_hocr(data: bytes) -> dict:
             if ours:
                 entry['checked'] = line_props.get('x_checked') == '1'
             lines.append(entry)
-        if not lines:
+        box_props = _hocr_props(box)
+        x0, y0, x1, y1 = _hocr_bbox(box_props, 'an ocr_carea')
+        bbox = _bbox([(x0, y0), (x1, y1)], width, height)
+        label = box_props.get('x_class') if ours else None
+        if label:
+            regions.append({'class_name': label, 'raw_type': label, 'bbox': bbox, 'lines': lines,
+                            'kind': 'container' if box_props.get('x_container') == '1' else 'content',
+                            'order': _order_from_id(box.get('id'))})
             continue
-        area_props = _hocr_props(area)
-        x0, y0, x1, y1 = _hocr_bbox(area_props, 'an ocr_carea')
-        label = area_props.get('x_class') if ours else None
-        regions.append({'class_name': label or 'Paragraph', 'raw_type': label or 'ocr_carea',
-                        'bbox': _bbox([(x0, y0), (x1, y1)], width, height), 'lines': lines})
-    return {'image': props.get('image') or '', 'width': width, 'height': height, 'regions': regions}
+        structure = next((_structure(c) for c in _hocr_classes(box) & structures), None)
+        if structure:
+            regions.append({**structure, 'bbox': bbox, 'lines': []})
+            if lines:
+                regions.append({'class_name': 'Paragraph', 'raw_type': 'ocr_table', 'bbox': bbox, 'lines': lines})
+        elif lines:
+            regions.append({'class_name': 'Paragraph', 'raw_type': 'ocr_carea', 'bbox': bbox, 'lines': lines})
+    return {'image': props.get('image') or '', 'width': width, 'height': height,
+            'regions': _in_reading_order(regions) if ours else regions}
 
 
 XML_ID = '{http://www.w3.org/XML/1998/namespace}id'
@@ -309,9 +373,9 @@ def parse_tei(data: bytes) -> list[dict]:
         if width <= 0 or height <= 0:
             raise UnreadableXml('a surface has no size')
         regions = []
-        for zone in (el for el in surface if _local(el.tag) == 'zone'):
-            lines = []
-            for line_zone in (el for el in zone if _local(el.tag) == 'zone'):
+        for zone, lines in _tei_regions(surface):
+            line_entries = []
+            for line_zone in lines:
                 points = _points(line_zone.get('points') or '')
                 if not points:
                     continue
@@ -320,19 +384,47 @@ def parse_tei(data: bytes) -> list[dict]:
                 entry = {'polygon': polygon, 'text': texts.get(line_zone.get(XML_ID), '')}
                 if ours:
                     entry['checked'] = line_zone.get('subtype') == 'checked'
-                lines.append(entry)
-            if not lines:
-                continue
+                line_entries.append(entry)
             points = _points(zone.get('points') or '')
-            label = zone.get('type') if ours else None
-            regions.append({'class_name': label or 'Paragraph', 'raw_type': zone.get('type') or 'zone',
-                            'bbox': _bbox(points, width, height) if points else _region_bbox_from_lines(lines),
-                            'lines': lines})
+            zone_type = zone.get('type') or ''
+            structure = None if ours else _structure(zone_type)
+            if not points and not line_entries:
+                continue
+            if not line_entries and not ours and not structure:
+                continue
+            bbox = _bbox(points, width, height) if points else _region_bbox_from_lines(line_entries)
+            if ours:
+                entry = {'class_name': zone_type or 'Paragraph', 'raw_type': zone_type or 'zone',
+                         'kind': 'container' if zone.get('subtype') == 'container' else 'content',
+                         'order': _order_from_id(zone.get(XML_ID))}
+            else:
+                entry = structure or {'class_name': 'Paragraph', 'raw_type': zone_type or 'zone'}
+            regions.append({**entry, 'bbox': bbox, 'lines': line_entries})
+        if ours:
+            regions = _in_reading_order(regions)
         url = graphic.get('url') if graphic is not None else ''
         pages.append({'image': PurePosixPath(url or '').name, 'width': width, 'height': height, 'regions': regions})
     if not pages:
         raise UnreadableXml('it has no facsimile surface')
     return pages
+
+
+def _tei_regions(surface):
+    """Each region zone with its line zones, at any depth: zones nest as regions hold one
+    another. A zone is a line when it says so, or when it is untyped and holds no zones."""
+    def is_line(zone) -> bool:
+        holds_zones = any(_local(el.tag) == 'zone' for el in zone)
+        return zone.get('type') == 'line' or (not zone.get('type') and not holds_zones)
+
+    def walk(zone):
+        children = [el for el in zone if _local(el.tag) == 'zone']
+        yield zone, [c for c in children if is_line(c)]
+        for child in children:
+            if not is_line(child):
+                yield from walk(child)
+
+    for zone in (el for el in surface if _local(el.tag) == 'zone'):
+        yield from walk(zone)
 
 
 def _alto_box(el) -> tuple[float, float, float, float]:

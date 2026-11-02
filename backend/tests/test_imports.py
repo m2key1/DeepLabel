@@ -168,14 +168,16 @@ def test_page_xml_reads_lines_in_table_cells_and_nested_regions_in_document_orde
     assert [(r['class_name'], r['raw_type'], [l['text'] for l in r['lines']])
             for r in regions] == [
         ('Header', 'heading', ['Schematismus 1837']),
+        ('Table', 'TableRegion', []),
         ('Paragraph', 'table-cell', ['Pfarre Wien']),
         ('Paragraph', 'table-cell', ['Kaplan Huber']),
         ('Paragraph', 'paragraph', ['Dechantei']),
         ('Footnote', 'footnote', ['Cooperator Leopold Mayr']),
     ]
     # Each cell keeps its own box, not the table's.
-    assert regions[1]['bbox'] == [0.1, 0.2, 0.5, 0.3]
-    assert regions[2]['lines'][0]['polygon'] == [[0.5, 0.2], [0.9, 0.2], [0.9, 0.25], [0.5, 0.25]]
+    assert (regions[1]['kind'], regions[1]['bbox']) == ('container', [0.1, 0.2, 0.9, 0.4])
+    assert regions[2]['bbox'] == [0.1, 0.2, 0.5, 0.3]
+    assert regions[3]['lines'][0]['polygon'] == [[0.5, 0.2], [0.9, 0.2], [0.9, 0.25], [0.5, 0.25]]
 
 
 HYPHENATED_ALTO_XML = """<?xml version="1.0" encoding="UTF-8"?>

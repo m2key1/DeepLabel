@@ -300,9 +300,12 @@ Press `e` to edit the page.
   stopped and asked to be more specific.
 - `f` opens a distraction-free reading view.
 - Export a dataset as PAGE XML, ALTO, hOCR or TEI with its scans, as JSON, Markdown, plain
-  text or DeepLabel's own zip, either complete or only what was reviewed. Lines inside
-  tables and other containers are included. Each standard format marks which lines were
-  checked, so importing it back into DeepLabel keeps them checked and the rest not.
+  text or DeepLabel's own zip, either complete or only what was reviewed. Each standard
+  format writes the whole layout as far as it can: tables, columns and other containers
+  hold their boxes (PAGE TableRegion and nested regions, ALTO ComposedBlock, hOCR nested
+  areas, TEI nested zones), a divider is a separator, and a box without lines is kept as
+  one. It also marks which lines were checked, so importing it back into DeepLabel
+  restores every box in its class and reading order, with the checked lines checked.
 - A dataset imported from IIIF also exports as **Web Annotations** (under IIIF in the
   Export menu): one annotation page per canvas, each line with its text placed on the
   original canvas, so an archive can show the transcription in its own viewer (Mirador,
@@ -324,6 +327,8 @@ Bring the ground truth you already have.
 - **Transkribus, eScriptorium and other tools:** upload a PAGE XML, ALTO, hOCR or TEI
   export zipped with its images.
   Pages, regions, line polygons and text are imported as they are, with no recognition run.
+  Their tables come in as Table and their separators as Divider; other boxes without
+  lines are left out.
 - Change the alignment settings under Processing and re-run **Alignment** to match again.
   Lines a person checked or corrected are kept; the aligned text is offered as a reading.
 

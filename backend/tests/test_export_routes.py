@@ -285,6 +285,32 @@ class TestRoundTrip:
         page = conn.execute('SELECT filename, width, height FROM pages WHERE job_id = ?', (job_id,)).fetchone()
         assert tuple(page) == ('p1.png', 120, 60)
 
+    @pytest.mark.parametrize('fmt', ['zip', 'page', 'alto', 'hocr', 'tei'])
+    def test_tables_dividers_and_empty_boxes_come_back_too(self, client, conn, tmp_path, monkeypatch, fmt):
+        monkeypatch.setattr('app.config.JOBS_DIR', tmp_path / 'jobs')
+        conn.executescript("""
+            UPDATE elements SET bbox = '[0.1,0.1,0.4,0.4]' WHERE id = 1;
+            INSERT INTO elements (id, page_id, order_idx, class_name, bbox, kind) VALUES
+                (2, 1, 1, 'Table', '[0,0,0.5,1]', 'container'),
+                (3, 1, 2, 'Divider', '[0.5,0,0.55,1]', 'container'),
+                (4, 1, 3, 'Paragraph', '[0.6,0.1,0.9,0.4]', 'content');
+        """)
+        conn.commit()
+        exported = download(client, fmt)
+
+        imported = client.post('/api/jobs/import', data={'name': f'Structure from {fmt}', 'reviewed': 'false'},
+                               files={'file': (f'volume.{fmt}.zip', exported.content, 'application/zip')},
+                               headers=ALICE)
+
+        assert imported.status_code == 200, imported.text
+        rows = conn.execute(
+            'SELECT e.class_name, e.kind, e.bbox, (SELECT COUNT(*) FROM lines l WHERE l.element_id = e.id) n '
+            'FROM elements e JOIN pages p ON e.page_id = p.id WHERE p.job_id = ? ORDER BY e.order_idx',
+            (imported.json()['job_id'],)).fetchall()
+        assert [(r['class_name'], r['kind'], [round(v, 2) for v in json.loads(r['bbox'])], r['n']) for r in rows] == [
+            ('Paragraph', 'content', [0.1, 0.1, 0.4, 0.4], 2), ('Table', 'container', [0.0, 0.0, 0.5, 1.0], 0),
+            ('Divider', 'container', [0.5, 0.0, 0.55, 1.0], 0), ('Paragraph', 'content', [0.6, 0.1, 0.9, 0.4], 0)]
+
     def test_a_zip_of_scans_alone_is_told_to_go_up_as_pages(self, client, tmp_path, monkeypatch, scan):
         monkeypatch.setattr('app.config.JOBS_DIR', tmp_path / 'jobs')
         archive = io.BytesIO()
