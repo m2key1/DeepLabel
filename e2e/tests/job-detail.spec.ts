@@ -1,6 +1,6 @@
 import { test, expect } from '../helpers/test'
 import {
-  backendFetch, correctLine, getJob, getPageDetail, identity, jobPageIds, pageDeletedFlags, pageLines,
+  backendFetch, correctLine, createJobWithoutLayout, getJob, importStubModel, importUnservedModel, getPageDetail, identity, jobPageIds, pageDeletedFlags, pageLines,
   seedCompletedJob, uniqueName, waitForJobStatus,
 } from '../helpers/api'
 import { scanPng } from '../helpers/image'
@@ -42,6 +42,41 @@ test.describe('Scenario: working with a dataset', () => {
     const cell = page.locator('tbody tr').first().locator('td[data-col="status"]')
     await expect(cell.locator('[data-status="done"]')).toHaveText('Read')
   })
+
+  test('a dataset that skips layout never says a layout was found', async ({ page }) => {
+    const slowLines = importStubModel('lines', uniqueName('Slow lines'), 'stub-slow')
+    const jobId = await createJobWithoutLayout(uniqueName('No layout'), slowLines, 1)
+    // Backend oracle: the page has been moved past layout while lines are being detected.
+    await expect.poll(async () => {
+      const job = await getJob(jobId)
+      return `${job.status}/${job.phase}/${job.pages[0]?.status}`
+    }, { timeout: 30_000 }).toBe('running/lines/layout_done')
+
+    await page.goto(`/jobs/${jobId}`)
+    const cell = page.locator('tbody tr').first().locator('td[data-col="status"]')
+    await expect(cell.locator('[data-status="layout_done"]')).toHaveText('Uploaded')
+  })
+
+  test('pages a run failed on name the step it failed in, with the reason one click away',
+    async ({ page }) => {
+      const unserved = importUnservedModel('lines', uniqueName('Unserved lines'))
+      const jobId = await createJobWithoutLayout(uniqueName('Lines fail'), unserved, 2)
+      await waitForJobStatus(jobId, 'error', 60_000)
+      const job = await getJob(jobId)
+      expect({ phase: job.phase, pages: job.pages.map((p: { status: string }) => p.status) })
+        .toEqual({ phase: 'lines', pages: ['layout_done', 'layout_done'] })
+      expect(job.error).toContain(`the lines model (${unserved}) is not on a configured model backend`)
+
+      await page.goto(`/jobs/${jobId}`)
+      const failed = page.locator('tbody td[data-col="status"]').getByTestId('page-status-failed')
+      await expect(failed).toHaveText(['Lines failed', 'Lines failed'])
+      await expect(page.locator('tbody td[data-col="status"]').getByText('Layout found')).toHaveCount(0)
+      await expect(page.locator('tbody td[data-col="status"]')).toHaveCount(2)
+      await failed.first().click()
+      await expect(page.getByTestId('phase-error')).toContainText('not on a configured model backend')
+      // The click opens the reason, not the page the row leads to.
+      await expect(page).toHaveURL(new RegExp(`/jobs/${jobId}$`))
+    })
 
   test('the review column counts lines, and says how the regions stand on hover',
     async ({ page }) => {

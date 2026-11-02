@@ -51,7 +51,8 @@ import { Badge, ChipButton } from '../components/ui/Badge'
 import { DatasetViews } from '../components/job/DatasetViews'
 import { PhaseStrip } from '../components/job/PhaseStrip'
 import { Avatar } from '../components/ui/Avatar'
-import { loadHiddenColumns, pageStatusLabel, saveHiddenColumns } from '../components/job/pageColumns'
+import { loadHiddenColumns, pageStatus, saveHiddenColumns } from '../components/job/pageColumns'
+import { FailedPageStatus } from '../components/job/RunError'
 import { appendRows, fetchWindow } from '../components/job/pageWindow'
 
 /** A screenful. Large enough that a volume is scrolled rather than paged through,
@@ -801,6 +802,13 @@ export function JobDetailPage() {
 
   const pageHref = (page: PageSummary) => `/jobs/${jobId}/${isMap ? 'tiles' : 'pages'}/${page.id}`
 
+  const statusCell = (status: string) => {
+    if (!job) return null
+    const { label, failed } = pageStatus(status, job)
+    return failed ? <FailedPageStatus label={label} error={job.error} />
+      : <span data-status={status} className="text-ink-muted">{label}</span>
+  }
+
   const renderCell = (key: SortKey, page: PageSummary) => {
     switch (key) {
       case 'idx':
@@ -845,7 +853,7 @@ export function JobDetailPage() {
             deleted
           </span>
         ) : (
-          <span data-status={page.status} className="text-ink-muted">{pageStatusLabel(page.status, isMap)}</span>
+          statusCell(page.status)
         )
       case 'layout':
         return page.layout_checked ? badge(isMap ? 'reviewed' : 'complete') : null

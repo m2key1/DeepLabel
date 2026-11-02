@@ -1,4 +1,5 @@
-import type { PageSort } from '../../api'
+import type { Job, PageSort } from '../../api'
+import { isTileTask } from '../../api'
 import type { ColumnDef } from './columns'
 import { loadColumnsFor, saveColumnsFor } from './columns'
 
@@ -33,9 +34,26 @@ const PAGE_STATUS: Record<string, string> = {
   unreadable: 'Unreadable',
 }
 
-export function pageStatusLabel(status: string, isMap: boolean): string {
-  if (status === 'done' && isMap) return 'Processed'
-  return PAGE_STATUS[status] ?? status
+// Each step of a text dataset's run, the page status that means a page is through it, and
+// what a page that did not get through it reads when the run failed there.
+const STEP_PASSED: Record<string, { through: string; failed: string }> = {
+  ingest: { through: 'ingested', failed: 'Upload failed' },
+  layout: { through: 'layout_done', failed: 'Layout failed' },
+  lines: { through: 'lines_done', failed: 'Lines failed' },
+  ocr: { through: 'done', failed: 'Reading failed' },
+}
+const PROGRESS = ['pending', 'ingested', 'layout_done', 'lines_done', 'done']
+
+type StatusOf = Pick<Job, 'task' | 'run_layout' | 'status' | 'phase'>
+
+export function pageStatus(status: string, job: StatusOf): { label: string; failed: boolean } {
+  if (isTileTask(job.task)) return { label: status === 'done' ? 'Processed' : PAGE_STATUS[status] ?? status, failed: false }
+  const step = job.status === 'error' && job.phase ? STEP_PASSED[job.phase] : undefined
+  const reached = PROGRESS.indexOf(status)
+  if (step && reached >= 0 && reached < PROGRESS.indexOf(step.through)) return { label: step.failed, failed: true }
+  // A dataset without layout moves its pages past the step untouched, so none was found.
+  if (status === 'layout_done' && !job.run_layout) return { label: PAGE_STATUS.ingested, failed: false }
+  return { label: PAGE_STATUS[status] ?? status, failed: false }
 }
 
 export const DEFAULT_PAGE_COLUMNS = ['thumb', 'idx', 'reviewed', 'confidence', 'llm']

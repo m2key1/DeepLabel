@@ -242,6 +242,28 @@ export function importStubModel(task: 'layout' | 'lines' | 'ocr', name: string,
   return JSON.parse(out.toString()).model_id
 }
 
+/** A model registered on a backend this deployment does not configure, so the step that
+ *  needs it fails the run with a reason - the only failure a scenario can cause at will. */
+export function importUnservedModel(task: 'layout' | 'lines' | 'ocr', name: string): number {
+  const script = `printf %s unserved > /tmp/unserved-weights && ` +
+    `python -m app.weights import /tmp/unserved-weights --task ${task} --name '${name}' --backend nowhere`
+  const out = execSync(`docker compose -f ../compose.e2e.yml exec -T backend sh -c "${script}"`)
+  return JSON.parse(out.toString()).model_id
+}
+
+/** A dataset that skips layout and detects its lines with the given model. */
+export async function createJobWithoutLayout(name: string, linesModelId: number, pageCount = 2): Promise<string> {
+  const form = new FormData()
+  form.append('name', name)
+  form.append('run_layout', 'false')
+  form.append('model_lines_id', String(linesModelId))
+  for (let i = 0; i < pageCount; i++) {
+    form.append('files', new Blob([new Uint8Array(scanPng(undefined, undefined, i))], { type: 'image/png' }),
+                `scan_${i + 1}.png`)
+  }
+  return (await backendFetch('/api/jobs', { method: 'POST', body: form })).job_id
+}
+
 let slowOcrModel: number | null = null
 
 /** An OCR model that takes 15 s over every request, which keeps a dataset reading it on the

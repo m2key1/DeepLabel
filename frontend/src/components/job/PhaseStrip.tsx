@@ -3,8 +3,8 @@ import type { JobDetail, JobWithoutPages } from '../../api'
 import { isTileTask } from '../../api'
 import { CheckIcon } from '../icons'
 import { StatusBadge } from '../StatusBadge'
-import { popoverChrome } from '../ui/Card'
 import { useDismiss } from '../ui/menu'
+import { RunErrorCard } from './RunError'
 
 /** Everything this reads. The page list is not part of it, so a dataset fetched
  *  without one is still enough to say where the pipeline got to. */
@@ -135,13 +135,8 @@ export function PhaseStrip({ job }: { job: Phased }) {
       })}
     </div>
       {errorOpen && job.error && (
-        <div data-testid="phase-error" role="dialog" aria-label="Why the run failed"
-             onClick={(e) => e.stopPropagation()}
-             className={`absolute left-0 top-full z-20 mt-1.5 w-[28rem] max-w-[calc(100vw-2rem)] ${popoverChrome} p-3`}>
-          <p className="text-xs font-medium text-danger">{failed ? `${failed.label} failed` : 'The run failed'}</p>
-          <p className="mt-1 break-words font-mono text-xs text-ink">{job.error}</p>
-          <p className="mt-2 text-xs text-ink-muted">Fix the cause, then start it again from Run.</p>
-        </div>
+        <RunErrorCard title={failed ? `${failed.label} failed` : 'The run failed'} error={job.error}
+                      className="left-0 top-full" />
       )}
     </div>
   )
