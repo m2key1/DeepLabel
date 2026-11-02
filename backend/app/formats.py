@@ -83,14 +83,17 @@ def alto(page: dict) -> str:
             words = []
             for w, word in enumerate(line_text(line).split()):
                 words.append(('<SP/>' if w else '') + f'<String CONTENT={quoteattr(word)}/>')
+            # ALTO has no word for reviewed, so a checked line points at a tag that says it.
+            checked = ' TAGREFS="checked"' if line['checked'] else ''
             lines.append(
-                f'<TextLine ID="r{r + 1}l{l + 1}" HPOS="{x0}" VPOS="{y0}" WIDTH="{x1 - x0}" HEIGHT="{y1 - y0}">'
+                f'<TextLine ID="r{r + 1}l{l + 1}" HPOS="{x0}" VPOS="{y0}" WIDTH="{x1 - x0}" HEIGHT="{y1 - y0}"{checked}>'
                 f'<Shape><Polygon POINTS="{_points_attr(points)}"/></Shape>{"".join(words)}</TextLine>')
         x0, y0, x1, y1 = _box(_region_points(page, element))
         blocks.append(
             f'<TextBlock ID="r{r + 1}" HPOS="{x0}" VPOS="{y0}" WIDTH="{x1 - x0}" HEIGHT="{y1 - y0}" '
             f'TAGREFS="{tag_id[element["class_name"]]}">{"".join(lines)}</TextBlock>')
-    tags = ''.join(f'<LayoutTag ID="{tag_id[name]}" LABEL={quoteattr(name)}/>' for name in classes)
+    tags = ''.join(f'<LayoutTag ID="{tag_id[name]}" LABEL={quoteattr(name)}/>' for name in classes) \
+        + '<OtherTag ID="checked" LABEL="checked" DESCRIPTION="The line was reviewed by a person"/>'
     return (
         f'<?xml version="1.0" encoding="UTF-8"?>\n<alto xmlns="{ALTO_NS}">'
         f'<Description><MeasurementUnit>pixel</MeasurementUnit>'

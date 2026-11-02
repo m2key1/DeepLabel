@@ -64,6 +64,20 @@ class TestAlto:
             [(name, [text for text, _ in lines]) for name, lines in EXPECTED]
         assert corners(parsed)[1] == SLANTED
 
+    def test_reads_back_which_lines_were_checked(self):
+        parsed = imports.parse_alto(formats.alto(PAGE).encode())
+        assert regions(parsed) == EXPECTED
+
+    def test_marks_checked_lines_with_a_standard_tag(self):
+        xml = formats.alto(PAGE)
+        assert '<OtherTag ID="checked" LABEL="checked"' in xml
+        assert xml.count('TAGREFS="checked"') == 2
+
+    def test_someone_else_s_alto_says_nothing_about_checks(self):
+        xml = formats.alto(PAGE).replace('<softwareName>DeepLabel</softwareName>', '<softwareName>Tesseract</softwareName>')
+        parsed = imports.parse_alto(xml.encode())
+        assert all('checked' not in l for r in parsed['regions'] for l in r['lines'])
+
 
 class TestHocr:
     def test_reads_back_classes_text_boxes_and_checks(self):

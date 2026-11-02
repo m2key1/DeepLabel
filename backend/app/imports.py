@@ -174,8 +174,8 @@ def parse_alto(data: bytes) -> dict:
         if _local(el.tag) == 'fileName' and el.text:
             image = el.text.strip()
     # A block's class, where our own export named it in a layout tag.
-    labels = ({el.get('ID'): el.get('LABEL') for el in root.iter() if _local(el.tag) == 'LayoutTag'}
-              if _written_by_deeplabel(root) else {})
+    ours = _written_by_deeplabel(root)
+    labels = {el.get('ID'): el.get('LABEL') for el in root.iter() if _local(el.tag) == 'LayoutTag'} if ours else {}
     regions = []
     for block in (el for el in page.iter() if _local(el.tag) == 'TextBlock'):
         lines = []
@@ -186,7 +186,11 @@ def parse_alto(data: bytes) -> dict:
             points = _points(outline) if outline else []
             polygon = (_polygon(points, width, height) if len(points) >= 3
                        else _quad(_bbox([(x, y), (x + w, y + h)], width, height)))
-            lines.append({'polygon': polygon, 'text': ' '.join(w for w in words if w).strip()})
+            entry = {'polygon': polygon, 'text': ' '.join(w for w in words if w).strip()}
+            # Our own export says which lines were checked; anyone else's leaves it to the text.
+            if ours:
+                entry['checked'] = 'checked' in (line.get('TAGREFS') or '').split()
+            lines.append(entry)
         if not lines:
             continue
         x, y, w, h = _alto_box(block)

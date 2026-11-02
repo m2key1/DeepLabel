@@ -292,7 +292,8 @@ Press `e` to edit the page.
 - `f` opens a distraction-free reading view.
 - Export a dataset as PAGE XML, ALTO, hOCR or TEI with its scans, as JSON, Markdown, plain
   text or DeepLabel's own zip, either complete or only what was reviewed. Lines inside
-  tables and other containers are included.
+  tables and other containers are included. Each standard format marks which lines were
+  checked, so importing it back into DeepLabel keeps them checked and the rest not.
 - A dataset imported from IIIF also exports as **Web Annotations** (under IIIF in the
   Export menu): one annotation page per canvas, each line with its text placed on the
   original canvas, so an archive can show the transcription in its own viewer (Mirador,

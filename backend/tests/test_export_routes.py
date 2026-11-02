@@ -280,9 +280,8 @@ class TestRoundTrip:
         texts = [r['corrected_text'] or r['text'] for r in rows]
         assert texts == ['Reviewed line', 'Unreviewed line']
         assert {r['class_name'] for r in rows} == {'Kopfzeile'}
-        # ALTO has no place to say a line was checked; the others carry it.
-        expected = [False, False] if fmt == 'alto' else [True, False]
-        assert [bool(r['checked']) for r in rows] == expected
+        # Every format carries which lines were checked, ALTO through a tag of its own.
+        assert [bool(r['checked']) for r in rows] == [True, False]
         page = conn.execute('SELECT filename, width, height FROM pages WHERE job_id = ?', (job_id,)).fetchone()
         assert tuple(page) == ('p1.png', 120, 60)
 
