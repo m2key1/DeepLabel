@@ -56,9 +56,11 @@ interface SummaryRow {
 }
 
 /** What the dataset will be, as chosen so far; each row leads back to the step it was set on. */
-function NewJobSummary({ rows, onEdit, full = false }: {
+function NewJobSummary({ rows, onEdit, canEdit, full = false }: {
   rows: SummaryRow[]
   onEdit: (step: Step) => void
+  /** A row leads only to a step the steps before it let you reach. */
+  canEdit: (step: Step) => boolean
   /** The Review step's own copy, which the steps beside it no longer need to repeat. */
   full?: boolean
 }) {
@@ -72,7 +74,7 @@ function NewJobSummary({ rows, onEdit, full = false }: {
             <dt className="text-ink-subtle">{row.label}</dt>
             <dd className="min-w-0 break-words text-ink">{row.value}</dd>
             {/* On the Review step its own rows are set right above, so there is nothing to go to. */}
-            {!row.step || (full && row.step === 'review') ? <span /> : (
+            {!row.step || (full && row.step === 'review') || !canEdit(row.step) ? <span /> : (
               <button type="button" onClick={() => onEdit(row.step!)}
                       className="justify-self-end text-accent-ink hover:underline">edit</button>
             )}
@@ -364,6 +366,16 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
     review: null,
   }
   const missing = route.map((s) => stepMissing[s]).find((m) => m !== null) ?? null
+  // A step can be clicked once it has been reached and everything before it holds, so going
+  // ahead always runs through Next and the checks it makes. Settings open on a dataset whose
+  // steps are all filled in already.
+  const [furthest, setFurthest] = useState(edit ? STEPS.length - 1 : 0)
+  useEffect(() => setFurthest((at) => Math.max(at, STEPS.indexOf(step))), [step])
+  const reachable = (target: Step) => applies[target] && STEPS.indexOf(target) <= furthest
+    && route.slice(0, route.indexOf(target)).every((s) => stepMissing[s] === null)
+  const goTo = (target: Step) => {
+    if (reachable(target)) setStep(target)
+  }
   const canSubmit = missing === null && !busy && madeWithSkips === null
 
   const ran = (key: 'layout' | 'lines' | 'ocr') => (key === 'ocr' ? phases.lines && phases.ocr : phases[key])
@@ -413,6 +425,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
 
   // The side summary's Data use row leads to the switches, which sit on the Review step.
   const editRow = (target: Step) => {
+    if (!reachable(target)) return
     if (target === 'review') setToDataUse(true)
     setStep(target)
   }
@@ -604,7 +617,8 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
       )}
       <Stepper steps={(edit ? route : STEPS).map((s) => ({
         id: s, label: STEP_LABEL[s], skipped: !applies[s], done: route.indexOf(s) < at,
-      }))} current={step} onSelect={setStep} />
+        ahead: applies[s] && s !== step && !reachable(s),
+      }))} current={step} onSelect={goTo} />
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <form onSubmit={onSubmit} className="space-y-4" data-testid="new-job-step" data-step={step}>
         {step === 'source' && (<>
@@ -1361,7 +1375,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
               </span>
             </label>
           )}
-          <NewJobSummary rows={summary} onEdit={setStep} full />
+          <NewJobSummary rows={summary} onEdit={goTo} canEdit={(target) => target !== step && reachable(target)} full />
         </>)}
         {progress && <UploadProgress progress={progress} />}
         {error && <p className="text-sm text-danger">{error}</p>}
@@ -1407,7 +1421,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
       </form>
       {step !== 'review' && (
         <aside className="hidden lg:block">
-          <NewJobSummary rows={summary} onEdit={editRow} />
+          <NewJobSummary rows={summary} onEdit={editRow} canEdit={(target) => target !== step && reachable(target)} />
         </aside>
       )}
       </div>

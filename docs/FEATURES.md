@@ -53,7 +53,8 @@ The start page lists every dataset you can open, as a table or as cards.
 
 Choose **New job** and go through five steps: **Source**, **Pages**, **What to run**,
 **Models and conventions** and **Review**. A summary beside them fills in as you go and leads
-back to any step; going back keeps everything chosen. A step with nothing to choose for the
+back to any step already reached; going back keeps everything chosen. Steps ahead are reached
+with Next, which checks each one on the way. A step with nothing to choose for the
 dataset at hand, such as models for a map or a transcribed import, is skipped. A name
 another of your datasets already has stops the Source step, with a link to that dataset.
 

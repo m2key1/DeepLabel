@@ -34,11 +34,11 @@ test.describe('Scenario: creating a dataset', () => {
     const name = uniqueName('Upload flow')
     const builtinOcr = (await listRegistryModels()).find((m) => m.task === 'ocr' && m.source === 'backend')!
     await page.goto('/new')
-    await withLayoutPerCrop(page)
     await page.getByLabel('Job name').fill(name)
     await page.locator('input[type="file"]').setInputFiles(uploadFiles(['page_a.png', 'page_b.png']))
     await expect(page.getByText('page_a.png')).toBeVisible()
     await expect(page.getByText('page_b.png')).toBeVisible()
+    await withLayoutPerCrop(page)
     await wizardStep(page, 'models')
     await page.getByTestId('new-model-ocr').selectOption(String(builtinOcr.id))
     await page.getByTestId('ocr-decode-greedy').click()
@@ -103,16 +103,32 @@ test.describe('Scenario: creating a dataset', () => {
     await page.getByLabel('Job name').fill(uniqueName('Incomplete'))
     await expect(page.getByTestId('wizard-missing')).toHaveText('Select at least one image or PDF')
     await expect(next).toBeDisabled()
-    // Looking ahead is allowed; creating is not, and Review says why.
-    await wizardStep(page, 'review')
-    await expect(page.getByRole('button', { name: 'Create job' })).toBeDisabled()
-    await expect(page.getByTestId('wizard-missing')).toHaveText('Select at least one image or PDF')
+    // No step ahead can be clicked past the check, and the summary leads to none of them.
+    await expect(page.getByTestId('wizard-step-pages')).toBeDisabled()
+    await expect(page.getByTestId('wizard-step-review')).toBeDisabled()
+    await expect(page.getByTestId('wizard-step-review')).toHaveAttribute('data-ahead', 'true')
+    await expect(page.getByTestId('new-job-summary').getByRole('button', { name: 'edit' })).toHaveCount(0)
 
-    await wizardStep(page, 'source')
     await page.locator('input[type="file"]').setInputFiles(uploadFiles(['ready.png']))
     await expect(next).toBeEnabled()
+    // A valid step still does not open the ones after it: they are reached with Next.
+    await expect(page.getByTestId('wizard-step-run')).toBeDisabled()
     await next.click()
     await expect(page.getByTestId('new-job-step')).toHaveAttribute('data-step', 'pages')
+    await next.click()
+    await expect(page.getByTestId('new-job-step')).toHaveAttribute('data-step', 'run')
+
+    // Back on the first step, the reached ones stay a click away while it holds...
+    await page.getByTestId('wizard-step-source').click()
+    await expect(page.getByTestId('wizard-step-run')).toBeEnabled()
+    await expect(page.getByTestId('wizard-step-models')).toBeDisabled()
+    // ...and close again once it no longer does.
+    await page.getByLabel('Job name').fill('')
+    await expect(page.getByTestId('wizard-step-pages')).toBeDisabled()
+    await expect(page.getByTestId('wizard-step-run')).toBeDisabled()
+    await page.getByLabel('Job name').fill(uniqueName('Complete again'))
+    await page.getByTestId('wizard-step-run').click()
+    await expect(page.getByTestId('new-job-step')).toHaveAttribute('data-step', 'run')
   })
 })
 

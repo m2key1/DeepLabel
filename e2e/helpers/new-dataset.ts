@@ -12,10 +12,16 @@ export async function withLayoutPerCrop(page: Page) {
 
 export type WizardStep = 'source' | 'pages' | 'run' | 'models' | 'review'
 
-/** The New dataset form is a row of steps; a scenario goes straight to the one it fills. */
+/** The New dataset form is a row of steps: one already reached is clicked, one ahead is
+ *  walked to with Next, through the checks of every step on the way. */
 export async function wizardStep(page: Page, step: WizardStep) {
-  await page.getByTestId(`wizard-step-${step}`).click()
-  await expect(page.getByTestId('new-job-step')).toHaveAttribute('data-step', step)
+  const target = page.getByTestId(`wizard-step-${step}`)
+  const form = page.getByTestId('new-job-step')
+  if (await target.isEnabled()) await target.click()
+  for (let left = 5; left > 0 && (await form.getAttribute('data-step')) !== step; left--) {
+    await page.getByTestId('wizard-next').click()
+  }
+  await expect(form).toHaveAttribute('data-step', step)
 }
 
 /** Creating happens on the last step, after a look at everything chosen. */

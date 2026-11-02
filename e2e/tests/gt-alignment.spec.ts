@@ -27,7 +27,6 @@ test.describe('Scenario: ingesting pages with existing transcriptions', () => {
   test('page texts are aligned to the recognized lines, best match first', async ({ page }) => {
     const name = uniqueName('With transcript')
     await page.goto('/new')
-    await withLayoutPerCrop(page)
     await page.getByLabel('Job name').fill(name)
     await page.locator('input[type="file"]').setInputFiles([
       { name: 'folio_1.png', mimeType: 'image/png', buffer: scanPng() },
@@ -35,6 +34,7 @@ test.describe('Scenario: ingesting pages with existing transcriptions', () => {
     ])
     await expect(page.getByTestId('gt-pairing')).toContainText('Transcriptions found for 1 of 1 page')
     await page.getByTestId('gt-autocheck').check()
+    await withLayoutPerCrop(page)
     await createDataset(page)
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!
@@ -111,7 +111,6 @@ test.describe('Scenario: ingesting pages with existing transcriptions', () => {
   test('an ordered transcription also checks off the lines the model read badly', async ({ page }) => {
     const name = uniqueName('Ordered transcript')
     await page.goto('/new')
-    await withLayoutPerCrop(page)
     await page.getByLabel('Job name').fill(name)
     await page.locator('input[type="file"]').setInputFiles([
       { name: 'folio_1.png', mimeType: 'image/png', buffer: scanPng() },
@@ -121,6 +120,7 @@ test.describe('Scenario: ingesting pages with existing transcriptions', () => {
     await expect(page.getByTestId('gt-ordered')).toHaveCount(0)
     await page.getByTestId('gt-autocheck').check()
     await page.getByTestId('gt-ordered').check()
+    await withLayoutPerCrop(page)
     await createDataset(page)
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const jobId = page.url().split('/').pop()!
@@ -156,7 +156,6 @@ test.describe("Scenario: ingesting a PDF that carries its own text layer", () =>
   test('the text layer is offered only for PDFs, and once accepted it aligns like a sidecar', async ({ page }) => {
     const name = uniqueName('PDF transcript')
     await page.goto('/new')
-    await withLayoutPerCrop(page)
     await page.getByLabel('Job name').fill(name)
 
     // An image on its own carries no text layer, so nothing may be offered...
@@ -171,6 +170,7 @@ test.describe("Scenario: ingesting a PDF that carries its own text layer", () =>
     ])
     await expect(page.getByTestId('gt-from-pdf')).toHaveCount(1)
     await page.getByTestId('gt-from-pdf').check()
+    await withLayoutPerCrop(page)
     await createDataset(page)
 
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
@@ -201,7 +201,6 @@ test.describe("Scenario: ingesting a PDF that carries its own text layer", () =>
     // explain a difference in `checked` is where the transcription came from.
     const name = uniqueName('PDF vs sidecar')
     await page.goto('/new')
-    await withLayoutPerCrop(page)
     await page.getByLabel('Job name').fill(name)
     await page.locator('input[type="file"]').setInputFiles([
       { name: 'folio_1.png', mimeType: 'image/png', buffer: scanPng() },
@@ -210,6 +209,7 @@ test.describe("Scenario: ingesting a PDF that carries its own text layer", () =>
     ])
     await page.getByTestId('gt-autocheck').check()
     await page.getByTestId('gt-from-pdf').check()
+    await withLayoutPerCrop(page)
     await createDataset(page)
 
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
