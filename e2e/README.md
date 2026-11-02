@@ -26,6 +26,14 @@ remapping its ports, and three variables carry that: `E2E_FRONTEND_URL`,
 session cookie has to go through the frontend, so a stale `E2E_FRONTEND_URL` makes
 those specs fail against whatever is on 8090 instead of the stack under test.
 
+## A recreated backend under a running frontend
+
+`./recreate-check.sh` brings the stack up, recreates the backend and then the auth service on
+new addresses while the frontend keeps running, and requires the API back through the
+frontend within 15 seconds. Run it before a release and after touching
+`frontend/nginx.conf.template`; it is not part of the Playwright suite, because it pulls
+containers out from under every spec. The same three variables remap its ports.
+
 ## How the pipeline runs without a GPU
 
 Every model runs on the stub model backend from the `deeplabel-backends` repository
