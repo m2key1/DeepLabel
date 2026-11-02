@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 
-import { calendarWeeks, shadeByQuantile, WEEKS } from './activityCalendar'
+import { calendarWeeks, monthStarts, shadeByQuantile, WEEKS } from './activityCalendar'
 import type { CalendarDay } from './activityCalendar'
 
 const SHADES = ['bg-line', 'bg-accent/25', 'bg-accent/50', 'bg-accent/75', 'bg-accent']
@@ -38,31 +38,29 @@ export function ActivityCalendar({ activity }: { activity: CalendarDay[] }) {
   }
 
   const total = activity.reduce((sum, a) => sum + a.edits, 0)
-  const months = weeks.map((week, i) => {
-    const first = week[0]
-    if (!first) return ''
-    const month = at(first.day).getUTCMonth()
-    const before = i > 0 ? weeks[i - 1][0] : null
-    return !before || at(before.day).getUTCMonth() !== month ? MONTH.format(at(first.day)) : ''
-  })
+  const months = monthStarts(weeks)
 
   return (
     <div data-testid="activity-calendar" data-total={total}>
       <div className="overflow-x-auto pb-1">
-        <div className="inline-grid grid-cols-[auto_1fr] gap-x-1.5 text-[10px] text-ink-subtle">
-          <span />
-          <div className="flex gap-[3px]" aria-hidden="true">
-            {months.map((label, i) => (
-              <span key={i} className="w-2.5 overflow-visible whitespace-nowrap">{label}</span>
-            ))}
-          </div>
-          <div className="flex flex-col gap-[3px]" aria-hidden="true">
-            {WEEKDAYS.map((label, i) => <span key={i} className="h-2.5 leading-[10px]">{label}</span>)}
-          </div>
-          <div ref={grid} role="grid" aria-label="Edits per day over the last year"
-               className="flex gap-[3px]" onMouseLeave={() => setShown(null)}>
+        {/* One grid for the labels and the days: a column per week after the weekday names,
+            stretched to the panel, so a day is as wide as the year allows. */}
+        <div className="grid min-w-[36rem] gap-[3px] text-[10px] text-ink-subtle"
+             style={{ gridTemplateColumns: `auto repeat(${WEEKS}, minmax(0, 1fr))` }}>
+          {months.map(({ week, month }) => (
+            <span key={week} aria-hidden="true" data-testid="activity-month" data-week={week}
+                  style={{ gridRow: 1, gridColumn: week + 2 }} className="overflow-visible whitespace-nowrap leading-4">
+              {MONTH.format(new Date(Date.UTC(2000, month, 1)))}
+            </span>
+          ))}
+          {WEEKDAYS.map((label, i) => (
+            <span key={i} aria-hidden="true" style={{ gridRow: i + 2, gridColumn: 1 }}
+                  className="self-center pr-1 leading-none">{label}</span>
+          ))}
+          <div ref={grid} role="grid" aria-label="Edits per day over the last year" className="contents"
+               onMouseLeave={() => setShown(null)}>
             {weeks.map((week, w) => (
-              <div key={w} role="row" className="flex flex-col gap-[3px]">
+              <div key={w} role="row" className="contents">
                 {week.map((day, d) => day ? (
                   <span
                     key={d}
@@ -81,9 +79,10 @@ export function ActivityCalendar({ activity }: { activity: CalendarDay[] }) {
                     }}
                     onBlur={() => setShown(null)}
                     onKeyDown={(e) => move(e, w, d)}
-                    className={`h-2.5 w-2.5 rounded-[2px] ${SHADES[shade(day.edits)]} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
+                    style={{ gridRow: d + 2, gridColumn: w + 2 }}
+                    className={`aspect-square rounded-[2px] ${SHADES[shade(day.edits)]} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
                   />
-                ) : <span key={d} className="h-2.5 w-2.5" />)}
+                ) : <span key={d} style={{ gridRow: d + 2, gridColumn: w + 2 }} />)}
               </div>
             ))}
           </div>

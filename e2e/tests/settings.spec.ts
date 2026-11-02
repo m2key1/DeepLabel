@@ -432,7 +432,7 @@ test.describe('Scenario: putting keys on the buttons', () => {
     await expect(free).not.toHaveAttribute('data-command')
 
     await free.click()
-    await map.locator('[data-testid="keyboard-key-command"][data-command="toolHand"]').click()
+    await page.getByTestId('keyboard-key-commands').locator('[data-testid="keyboard-key-command"][data-command="toolHand"]').click()
     await expect.poll(bindings(page)).toMatchObject({ toolHand: 'b' })
     await expect(free).toHaveAttribute('data-command', 'toolHand')
     await expect(row(page, 'toolHand').getByTestId('hotkey-bind')).toHaveText('B')
@@ -443,6 +443,34 @@ test.describe('Scenario: putting keys on the buttons', () => {
 
     await row(page, 'toolHand').getByTestId('hotkey-clear').click()
     await expect.poll(async () => (await bindings(page)()).toolHand ?? '').toBe('')
+  })
+
+  test('every command a key can take is in reach, and a bound key names it in full', async ({ page }) => {
+    await page.goto('/settings?section=keys')
+    const map = page.getByTestId('keyboard-map')
+    await map.getByRole('button', { name: 'Both editors' }).click()
+    // H turns to the previous page by default; its key says so without cutting it off.
+    const h = map.locator('[data-testid="keyboard-key"][data-key="h"]')
+    await expect(h).toHaveAttribute('data-command', 'prevPage')
+    await expect(h).toContainText('Prev. page')
+
+    // The last of the editors' commands, at the foot of the list a key opens.
+    const free = map.locator('[data-testid="keyboard-key"][data-key="b"]')
+    await free.click()
+    const list = page.getByTestId('keyboard-key-commands')
+    await expect(list.getByTestId('keyboard-key-command')).toHaveCount(10)
+    const last = list.locator('[data-testid="keyboard-key-command"][data-command="nextPage"]')
+    await last.scrollIntoViewIfNeeded()
+    await expect(last).toBeInViewport()
+    await last.click()
+    await expect.poll(bindings(page)).toMatchObject({ nextPage: 'b' })
+    await expect(free).toHaveAttribute('data-command', 'nextPage')
+    await expect(list).toHaveCount(0)
+
+    // Back on L, where the other scenarios turn pages with it.
+    await map.locator('[data-testid="keyboard-key"][data-key="l"]').click()
+    await list.locator('[data-testid="keyboard-key-command"][data-command="nextPage"]').click()
+    await expect.poll(bindings(page)).toMatchObject({ nextPage: 'l' })
   })
 
   test('a key bound to a button runs it, and only where the button is', async ({ page }) => {

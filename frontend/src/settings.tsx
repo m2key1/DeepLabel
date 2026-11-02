@@ -20,6 +20,8 @@ export interface HotkeyAction {
   id: string
   label: string
   scope: HotkeyScope
+  /** What the key itself says on the keyboard map, where the label does not fit in two lines. */
+  short?: string
   /** Bound out of the box. Most commands have none: a shortcut nobody asked for is a
    *  key taken away from the person who wanted it for something else. */
   default?: string
@@ -34,38 +36,38 @@ export interface HotkeyAction {
 // useCommand (see commands.tsx). Adding a command is one entry here plus one
 // useCommand call next to the button it presses.
 export const HOTKEY_ACTIONS: HotkeyAction[] = [
-  { id: 'goJobs', label: 'Go to datasets', scope: 'global' },
-  { id: 'goQueue', label: 'Go to the queue', scope: 'global' },
-  { id: 'goModels', label: 'Go to models', scope: 'global' },
-  { id: 'goSettings', label: 'Go to your profile and settings', scope: 'global' },
-  { id: 'goAdmin', label: 'Go to admin', scope: 'global' },
+  { id: 'goJobs', label: 'Go to datasets', short: 'Datasets', scope: 'global' },
+  { id: 'goQueue', label: 'Go to the queue', short: 'Queue', scope: 'global' },
+  { id: 'goModels', label: 'Go to models', short: 'Models', scope: 'global' },
+  { id: 'goSettings', label: 'Go to your profile and settings', short: 'Profile', scope: 'global' },
+  { id: 'goAdmin', label: 'Go to admin', short: 'Admin', scope: 'global' },
   { id: 'newJob', label: 'New dataset', scope: 'global' },
-  { id: 'toggleTheme', label: 'Switch light/dark', scope: 'global' },
-  { id: 'toolSelect', label: 'Select tool', scope: 'editor', default: 'v' },
-  { id: 'toolHand', label: 'Hand tool', scope: 'editor' },
-  { id: 'toolDraw', label: 'Draw tool', scope: 'editor', default: 'd' },
-  { id: 'toolErase', label: 'Erase tool', scope: 'editor', default: 'shift+e' },
-  { id: 'toolDetect', label: 'Detect tool', scope: 'editor', default: 't' },
-  { id: 'split', label: 'Split (arm/flip)', scope: 'editor', default: 's' },
-  { id: 'merge', label: 'Merge selection', scope: 'editor', default: 'm' },
-  { id: 'hole', label: 'Cut hole in region', scope: 'editor', default: 'g' },
-  { id: 'prevPage', label: 'Previous page', scope: 'editor', default: 'h' },
+  { id: 'toggleTheme', label: 'Switch light/dark', short: 'Light / dark', scope: 'global' },
+  { id: 'toolSelect', label: 'Select tool', short: 'Select', scope: 'editor', default: 'v' },
+  { id: 'toolHand', label: 'Hand tool', short: 'Hand', scope: 'editor' },
+  { id: 'toolDraw', label: 'Draw tool', short: 'Draw', scope: 'editor', default: 'd' },
+  { id: 'toolErase', label: 'Erase tool', short: 'Erase', scope: 'editor', default: 'shift+e' },
+  { id: 'toolDetect', label: 'Detect tool', short: 'Detect', scope: 'editor', default: 't' },
+  { id: 'split', label: 'Split (arm/flip)', short: 'Split', scope: 'editor', default: 's' },
+  { id: 'merge', label: 'Merge selection', short: 'Merge', scope: 'editor', default: 'm' },
+  { id: 'hole', label: 'Cut hole in region', short: 'Cut hole', scope: 'editor', default: 'g' },
+  { id: 'prevPage', label: 'Previous page', short: 'Prev. page', scope: 'editor', default: 'h' },
   { id: 'nextPage', label: 'Next page', scope: 'editor', default: 'l' },
-  { id: 'edit', label: 'Toggle edit mode', scope: 'viewer', default: 'e' },
-  { id: 'rotateCw', label: 'Rotate line clockwise', scope: 'viewer', default: 'r' },
-  { id: 'rotateCcw', label: 'Rotate line counter-clockwise', scope: 'viewer', default: 'shift+r' },
-  { id: 'reocr', label: 'Re-OCR focused line', scope: 'viewer', default: 'o' },
-  { id: 'verify', label: 'Verify page layout', scope: 'viewer', default: 'shift+v' },
-  { id: 'lineTurnCw', label: 'Turn selected line clockwise (1 degree)', scope: 'viewer', default: '.' },
-  { id: 'lineTurnCcw', label: 'Turn selected line counter-clockwise (1 degree)', scope: 'viewer', default: ',' },
+  { id: 'edit', label: 'Toggle edit mode', short: 'Edit mode', scope: 'viewer', default: 'e' },
+  { id: 'rotateCw', label: 'Rotate line clockwise', short: 'Rotate ↻', scope: 'viewer', default: 'r' },
+  { id: 'rotateCcw', label: 'Rotate line counter-clockwise', short: 'Rotate ↺', scope: 'viewer', default: 'shift+r' },
+  { id: 'reocr', label: 'Re-OCR focused line', short: 'Re-OCR line', scope: 'viewer', default: 'o' },
+  { id: 'verify', label: 'Verify page layout', short: 'Verify layout', scope: 'viewer', default: 'shift+v' },
+  { id: 'lineTurnCw', label: 'Turn selected line clockwise (1 degree)', short: 'Turn 1° ↻', scope: 'viewer', default: '.' },
+  { id: 'lineTurnCcw', label: 'Turn selected line counter-clockwise (1 degree)', short: 'Turn 1° ↺', scope: 'viewer', default: ',' },
   { id: 'lineDown', label: 'Next line', scope: 'viewer', default: 'j' },
-  { id: 'lineUp', label: 'Previous line', scope: 'viewer', default: 'k' },
-  { id: 'readings', label: 'Step into the line\'s readings', scope: 'viewer', default: 'i' },
-  { id: 'keyboardMode', label: 'Cycle the character keyboard', scope: 'viewer' },
+  { id: 'lineUp', label: 'Previous line', short: 'Prev. line', scope: 'viewer', default: 'k' },
+  { id: 'readings', label: 'Step into the line\'s readings', short: 'Readings', scope: 'viewer', default: 'i' },
+  { id: 'keyboardMode', label: 'Cycle the character keyboard', short: 'Character keyboard', scope: 'viewer' },
   { id: 'mapReduce', label: 'Reduce polygons', scope: 'map', default: 'p' },
   { id: 'mapResolve', label: 'Resolve overlaps', scope: 'map', default: 'x' },
-  { id: 'transcript', label: 'Open the transcript', scope: 'dataset' },
-  { id: 'review', label: 'Review the flagged lines', scope: 'dataset' },
+  { id: 'transcript', label: 'Open the transcript', short: 'Transcript', scope: 'dataset' },
+  { id: 'review', label: 'Review the flagged lines', short: 'Review flagged', scope: 'dataset' },
 ]
 
 // Bindings stored under the ids the map editor's tools used to have.

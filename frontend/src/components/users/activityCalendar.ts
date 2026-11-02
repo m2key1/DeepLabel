@@ -34,3 +34,21 @@ export function shadeByQuantile(counts: number[]): (edits: number) => number {
     return Math.max(1, Math.ceil((4 * atOrBelow) / active.length))
   }
 }
+
+// A month's name takes about two columns, so a month that gives way to the next sooner
+// goes unnamed rather than printed over its neighbour.
+const LABEL_WEEKS = 2
+
+/** The weeks a month's name stands over: where the month is first seen on a Monday, unless
+ *  the next month, or the end of the year, comes before there is room for the name. */
+export function monthStarts(weeks: (CalendarDay | null)[][]): { week: number; month: number }[] {
+  const starts: { week: number; month: number }[] = []
+  weeks.forEach((week, i) => {
+    const first = week[0]
+    if (!first) return
+    const month = new Date(`${first.day}T00:00:00Z`).getUTCMonth()
+    if (starts.at(-1)?.month !== month) starts.push({ week: i, month })
+  })
+  const ends = [...starts.slice(1).map((next) => next.week), weeks.length]
+  return starts.filter((start, i) => ends[i] - start.week >= LABEL_WEEKS)
+}
