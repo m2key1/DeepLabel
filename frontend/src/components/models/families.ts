@@ -37,7 +37,7 @@ export interface Version {
 export interface Family {
   root: RegistryModel
   name: string
-  /** Newest first, as the graph draws them. */
+  /** Newest first with each version above its parent, as the graph draws them. */
   versions: Version[]
   /** The version a folded row stands for: the default, else the best-scoring one. */
   lead: Version
@@ -85,6 +85,29 @@ const shortHash = (model: RegistryModel) => model.files.find((f) => f.role === '
 // Registered in the same second, the later id is the newer.
 const byNewest = (a: { createdAt: string; key: string }, b: { createdAt: string; key: string }) =>
   b.createdAt.localeCompare(a.createdAt) || Number(b.key.slice(1)) - Number(a.key.slice(1))
+
+/** Newest first, except that a version always sits above the one it descends from: a model
+ *  can be named the new version of a newer one, and the line between them has to run
+ *  downwards like every other. Each version ranks by the newest date on its way back to the
+ *  root, and of two with the same rank the one further down the line comes first. */
+function aboveParents(versions: Version[]): Version[] {
+  const byKey = new Map(versions.map((v) => [v.key, v]))
+  const rank = new Map<string, { at: string; depth: number }>()
+  const rankOf = (v: Version, seen = new Set<string>()): { at: string; depth: number } => {
+    const known = rank.get(v.key)
+    if (known) return known
+    const parent = v.parentKey ? byKey.get(v.parentKey) : undefined
+    seen.add(v.key)
+    const above = parent && !seen.has(parent.key) ? rankOf(parent, seen) : null
+    const own = { at: above && above.at > v.createdAt ? above.at : v.createdAt, depth: above ? above.depth + 1 : 0 }
+    rank.set(v.key, own)
+    return own
+  }
+  return versions.slice().sort(byNewest).sort((a, b) => {
+    const [x, y] = [rankOf(a), rankOf(b)]
+    return y.at.localeCompare(x.at) || y.depth - x.depth
+  })
+}
 
 /** Lanes as in git log --graph: the lead's line - its ancestors, then its newest child on
  *  down - runs straight; every other child starts a branch along its own newest children,
@@ -226,8 +249,7 @@ export function buildFamilies(models: RegistryModel[], trainings: Training[], ev
 
   const families = [...groups.entries()].map(([rootId, all]): Family => {
     const retired = retiredLeaves(all)
-    const versions = hideArchived && retired.size < all.length ? all.filter((v) => !retired.has(v.key)) : all
-    versions.sort(byNewest)
+    const versions = aboveParents(hideArchived && retired.size < all.length ? all.filter((v) => !retired.has(v.key)) : all)
     const modelsOnly = versions.filter((v) => v.state === 'model')
     const best = modelsOnly.reduce<Version | null>((top, v) => (better(v.score, top?.score ?? null) ? v : top), null)
     const lead = modelsOnly.find((v) => v.isDefault) ?? best ?? modelsOnly[0]
@@ -239,7 +261,7 @@ export function buildFamilies(models: RegistryModel[], trainings: Training[], ev
       versions,
       lead,
       best: best?.score ?? null,
-      newest: versions[0].createdAt,
+      newest: versions.reduce((latest, v) => (v.createdAt > latest ? v.createdAt : latest), versions[0].createdAt),
       archived: all.every((v) => v.state !== 'model' || v.archived),
       holdsDefault: modelsOnly.some((v) => v.isDefault),
     }

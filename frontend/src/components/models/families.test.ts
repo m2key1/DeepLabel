@@ -46,6 +46,19 @@ describe('model families', () => {
     expect(lineage(families[0].versions, 'm3').map((v) => v.key)).toEqual(['m3', 'm2', 'm1'])
   })
 
+  it('draws a new version above the model it replaces even when it is the older of the two', () => {
+    // The demo's DeepOCR (#3, the 3rd) is the new version of DeepOCR grouped (#19, the 19th),
+    // and a fine-tune of #19 came on the 20th.
+    const models = [model(19), model(3, { supersedes: 19 }), model(20, { trained_from: 19 })]
+    const [family] = buildFamilies(models, [], [])
+
+    const order = family.versions.map((v) => v.key)
+    expect(order).toEqual(['m20', 'm3', 'm19'])
+    expect(family.versions.every((v) => !v.parentKey || order.indexOf(v.key) < order.indexOf(v.parentKey)))
+      .toBe(true)
+    expect(lanes(family)).toEqual({ m20: 0, m3: 1, m19: 0 })
+  })
+
   it('keeps the versions on the main line when a fine-tune came later', () => {
     const models = [model(1), model(2, { supersedes: 1, is_default: true }), model(3, { supersedes: 2 }),
                     model(4, { trained_from: 2 })]
