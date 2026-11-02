@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { ConventionFlag, OcrConvention, RegistryModel } from '../../api'
+import { ConventionExample } from '../ConventionExample'
 import { conventionLabel } from '../conventionLabel'
 
 export const flagsOn = (convention: OcrConvention) =>
@@ -29,7 +30,8 @@ export function ConventionFlags({ catalog, model, convention, onToggle, children
   const knownFlags = modelFlags && offeredFlags(modelFlags, catalog)
   const otherFlags = offeredFlags([...new Set([...(catalog ?? []).map((f) => f.name), ...flagsOn(convention)])], catalog)
     .filter((name) => !(modelFlags ?? []).includes(name))
-  const description = (name: string) => catalog?.find((f) => f.name === name)?.description ?? ''
+  const flagOf = (name: string) => catalog?.find((f) => f.name === name)
+  const description = (name: string) => flagOf(name)?.description ?? ''
 
   return (
     <fieldset className="mb-4" data-testid="ocr-convention">
@@ -63,7 +65,10 @@ export function ConventionFlags({ catalog, model, convention, onToggle, children
                 className="mt-1 cursor-pointer accent-accent"
               />
               <span className="min-w-0">
-                <span className="block">{conventionLabel(name, catalog)}</span>
+                <span className="flex flex-wrap items-baseline gap-x-2">
+                  {conventionLabel(name, catalog)}
+                  <ConventionExample on={flagOf(name)?.example_on ?? ''} off={flagOf(name)?.example_off ?? ''} />
+                </span>
                 {description(name) && (
                   <span data-testid="convention-description" className="block text-xs text-ink-muted">
                     {description(name)}

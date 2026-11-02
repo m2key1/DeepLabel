@@ -37,6 +37,9 @@ export interface ConventionFlag {
   /** False once an admin stops offering it: it leaves every flag list, and reads send it
    *  as off, while datasets that set it keep it. */
   offered: boolean
+  /** One word as it reads with the flag, and without it. */
+  example_on: string
+  example_off: string
   models: number
   datasets: number
 }
@@ -45,12 +48,14 @@ export function listConventionFlags(): Promise<{ flags: ConventionFlag[] }> {
   return request('/api/convention-flags')
 }
 
-export function addConventionFlag(body: { name: string; label: string; description: string }): Promise<ConventionFlag> {
+export function addConventionFlag(
+  body: Pick<ConventionFlag, 'name' | 'label' | 'description' | 'example_on' | 'example_off'>,
+): Promise<ConventionFlag> {
   return request('/api/convention-flags', json('POST', body))
 }
 
 export function updateConventionFlag(
-  name: string, body: Partial<Pick<ConventionFlag, 'label' | 'description' | 'offered'>>,
+  name: string, body: Partial<Pick<ConventionFlag, 'label' | 'description' | 'offered' | 'example_on' | 'example_off'>>,
 ): Promise<ConventionFlag> {
   return request(`/api/convention-flags/${encodeURIComponent(name)}`, json('PATCH', body))
 }
@@ -2193,6 +2198,8 @@ export interface PreflightResult {
     /** Training lines carrying each flag. */
     lines: Record<string, number>
     labels: Record<string, string>
+    /** Each flag's example, with it and without it, for the flags that have one. */
+    examples?: Record<string, [string, string]>
     /** Whether the run's backend can learn flags at all; when not, they are left out. */
     supported: boolean
   } | null

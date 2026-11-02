@@ -4,7 +4,7 @@ import unicodedata
 from contextvars import ContextVar
 from pathlib import Path
 
-from app import caches
+from app import caches, conventions
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -284,7 +284,9 @@ CREATE TABLE IF NOT EXISTS convention_flags (
     description TEXT NOT NULL DEFAULT '',
     added_from TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    offered INTEGER NOT NULL DEFAULT 1
+    offered INTEGER NOT NULL DEFAULT 1,
+    example_on TEXT NOT NULL DEFAULT '',
+    example_off TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS models (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -747,6 +749,7 @@ TEXT_COMPOSED = 4
 CONVENTION_CATALOG = 5
 MODEL_DATASETS_BACKFILL = 6
 ABBREVIATIONS_NOT_OFFERED = 7
+CONVENTION_EXAMPLES = 8
 
 # The dataset fields behind each data use a dataset's owner can switch off.
 DATA_USE_COLUMNS = {'training': 'use_training', 'test': 'use_test',
@@ -931,8 +934,12 @@ def connect(db_path: Path) -> sqlite3.Connection:
     for _col in DATA_USE_COLUMNS.values():
         if _col not in job_cols:
             conn.execute(f'ALTER TABLE jobs ADD COLUMN {_col} INTEGER NOT NULL DEFAULT 1')
-    if 'offered' not in {row[1] for row in conn.execute('PRAGMA table_info(convention_flags)')}:
+    flag_cols = {row[1] for row in conn.execute('PRAGMA table_info(convention_flags)')}
+    if 'offered' not in flag_cols:
         conn.execute('ALTER TABLE convention_flags ADD COLUMN offered INTEGER NOT NULL DEFAULT 1')
+    for column in ('example_on', 'example_off'):
+        if column not in flag_cols:
+            conn.execute(f"ALTER TABLE convention_flags ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
     if 'self_hosted' not in {row[1] for row in conn.execute('PRAGMA table_info(llm_connections)')}:
         conn.execute('ALTER TABLE llm_connections ADD COLUMN self_hosted INTEGER NOT NULL DEFAULT 0')
     model_cols = {row[1] for row in conn.execute('PRAGMA table_info(llm_models)')}
@@ -1208,6 +1215,11 @@ def connect(db_path: Path) -> sqlite3.Connection:
     if conn.execute('PRAGMA user_version').fetchone()[0] < ABBREVIATIONS_NOT_OFFERED:
         conn.execute("UPDATE convention_flags SET offered = 0 WHERE name = 'abbreviations'")
         conn.execute(f'PRAGMA user_version = {ABBREVIATIONS_NOT_OFFERED}')
+    if conn.execute('PRAGMA user_version').fetchone()[0] < CONVENTION_EXAMPLES:
+        conn.executemany("UPDATE convention_flags SET example_on = ?, example_off = ? "
+                         "WHERE name = ? AND example_on = '' AND example_off = ''",
+                         [(on, off, name) for name, (on, off) in conventions.DEFAULT_EXAMPLES.items()])
+        conn.execute(f'PRAGMA user_version = {CONVENTION_EXAMPLES}')
     conn.commit()
     return conn
 

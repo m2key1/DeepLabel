@@ -4,6 +4,13 @@ import sqlite3
 
 MAX_FLAGS = 32
 FLAG_NAME = re.compile(r'^[a-z][a-z0-9_]{0,63}$')
+# What the known flags look like, with the flag and without it, until an admin writes otherwise.
+DEFAULT_EXAMPLES = {
+    'long_s': ('Waſſer', 'Wasser'),
+    'oblique_hyphen': ('Haus⸗', 'Haus-'),
+    'typographic_punctuation': ('„Text“', '"Text"'),
+    'abbreviations': ('u.', 'und'),
+}
 
 
 def parse(raw: str | None) -> dict[str, bool]:
@@ -40,8 +47,9 @@ def offered(conn: sqlite3.Connection, requested: dict[str, bool]) -> dict[str, b
 def note(conn: sqlite3.Connection, names: list[str], added_from: str | None = None) -> None:
     """Put flags the catalog does not have yet into it, named as they were given, so they
     can be described afterwards. A flag already there is left as it is."""
-    conn.executemany('INSERT OR IGNORE INTO convention_flags (name, label, added_from) VALUES (?, ?, ?)',
-                     [(name, name, added_from) for name in names])
+    conn.executemany('INSERT OR IGNORE INTO convention_flags (name, label, added_from, example_on, example_off) '
+                     'VALUES (?, ?, ?, ?, ?)',
+                     [(name, name, added_from, *DEFAULT_EXAMPLES.get(name, ('', ''))) for name in names])
 
 
 def catalog(conn: sqlite3.Connection) -> list[dict]:
@@ -56,7 +64,8 @@ def catalog(conn: sqlite3.Connection) -> list[dict]:
             if on:
                 datasets[name] = datasets.get(name, 0) + 1
     return [{'name': row['name'], 'label': row['label'], 'description': row['description'],
-             'added_from': row['added_from'], 'offered': bool(row['offered']), 'models': models.get(row['name'], 0),
+             'added_from': row['added_from'], 'offered': bool(row['offered']),
+             'example_on': row['example_on'], 'example_off': row['example_off'], 'models': models.get(row['name'], 0),
              'datasets': datasets.get(row['name'], 0)}
             for row in conn.execute('SELECT * FROM convention_flags ORDER BY label COLLATE NOCASE')]
 
@@ -77,6 +86,13 @@ def for_training(conn: sqlite3.Connection, base_model_id: int | None, job_ids: l
         return None
     return {'names': names, 'new': new, 'base': known,
             'by_dataset': {job_id: model_row(asked.get(job_id, {}), names) for job_id in job_ids}}
+
+
+def examples(conn: sqlite3.Connection, names: list[str]) -> dict[str, list[str]]:
+    """Each flag's example, with the flag and without it, for the flags that have one."""
+    rows = conn.execute(f"SELECT name, example_on, example_off FROM convention_flags WHERE name IN "
+                        f"({','.join('?' * len(names))}) AND (example_on != '' OR example_off != '')", names)
+    return {row['name']: [row['example_on'], row['example_off']] for row in rows}
 
 
 def label(conn: sqlite3.Connection, name: str) -> str:

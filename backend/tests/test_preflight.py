@@ -628,7 +628,7 @@ class TestConventions:
         assert result['conventions'] == {
             'names': ['oblique_hyphen', 'long_s'], 'base': ['oblique_hyphen'], 'new': ['long_s'],
             'lines': {'oblique_hyphen': 0, 'long_s': trained}, 'supported': True,
-            'labels': {'oblique_hyphen': 'Oblique hyphen', 'long_s': 'Keep long s'}}
+            'labels': {'oblique_hyphen': 'Oblique hyphen', 'long_s': 'Keep long s'}, 'examples': {}}
         warning = next(f for f in result['findings'] if f['code'] == 'convention_few_lines')
         assert warning == {'code': 'convention_few_lines', 'level': 'warn',
                            'message': f'Keep long s is new to the base model, but it is set on only '
@@ -642,6 +642,12 @@ class TestConventions:
 
         assert (result['conventions']['names'], result['conventions']['base'], list(result['conventions']['labels'])) \
             == (['oblique_hyphen', 'long_s'], ['oblique_hyphen'], ['oblique_hyphen', 'long_s'])
+
+    def test_each_flag_comes_with_its_example(self, flagged):
+        flagged.execute("UPDATE convention_flags SET example_on = 'Waſſer', example_off = 'Wasser' WHERE name = 'long_s'")
+        result = preflight.compute(flagged, {**HOLDOUT, 'base_model_id': 1})
+
+        assert result['conventions']['examples'] == {'long_s': ['Waſſer', 'Wasser']}
 
     def test_a_backend_that_cannot_learn_them_says_they_are_left_out(self, flagged, monkeypatch):
         monkeypatch.setattr(preflight.trainer, 'trains_conventions', lambda conn, task, base: False)

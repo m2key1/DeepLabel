@@ -13,6 +13,7 @@ import { cardChrome } from '../ui/Card'
 import { StatRow, StatTile } from '../ui/StatTile'
 import { SubHeading } from '../ui/Section'
 import { tableCell, tableHeadRow, tableRow } from '../ui/Table'
+import { ConventionExample } from '../ConventionExample'
 import { count } from '../evaluation/format'
 import { linkedCounts } from './preflightLinks'
 import type { ShownPreflight } from './usePreflight'
@@ -538,6 +539,7 @@ function Conventions({ flags }: { flags: NonNullable<PreflightResult['convention
     <span key={name} data-testid="preflight-convention" data-flag={name}
           className="mr-3 inline-flex items-baseline gap-1 whitespace-nowrap">
       <span className="text-ink">{label(name)}</span>
+      {flags.examples?.[name] && <ConventionExample on={flags.examples[name][0]} off={flags.examples[name][1]} />}
       <span className="font-mono text-[11px] tabular-nums text-ink-subtle">{count(flags.lines[name] ?? 0)} lines</span>
     </span>
   ))

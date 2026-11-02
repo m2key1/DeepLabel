@@ -11,12 +11,16 @@ class FlagBody(BaseModel):
     name: str
     label: str
     description: str = ''
+    example_on: str = ''
+    example_off: str = ''
 
 
 class FlagPatch(BaseModel):
     label: str | None = None
     description: str | None = None
     offered: bool | None = None
+    example_on: str | None = None
+    example_off: str | None = None
 
 
 def _flag(conn, name: str) -> dict:
@@ -42,16 +46,17 @@ def add_flag(body: FlagBody, conn=Depends(get_db), user: dict = Depends(require_
         raise HTTPException(400, 'a flag needs a label')
     if conn.execute('SELECT 1 FROM convention_flags WHERE name = ?', (body.name,)).fetchone():
         raise HTTPException(409, f'there is already a flag named {body.name}')
-    conn.execute('INSERT INTO convention_flags (name, label, description) VALUES (?, ?, ?)',
-                 (body.name, body.label.strip(), body.description.strip()))
+    conn.execute('INSERT INTO convention_flags (name, label, description, example_on, example_off) '
+                 'VALUES (?, ?, ?, ?, ?)', (body.name, body.label.strip(), body.description.strip(),
+                                            body.example_on.strip(), body.example_off.strip()))
     conn.commit()
     return _flag(conn, body.name)
 
 
 @router.patch('/api/convention-flags/{name}')
 def update_flag(name: str, body: FlagPatch, conn=Depends(get_db), user: dict = Depends(require_role('admin'))):
-    """The label, the description and whether the flag is offered; the name is what models
-    and datasets store, so it stays."""
+    """The label, the description, the example and whether the flag is offered; the name is
+    what models and datasets store, so it stays."""
     _flag(conn, name)
     if body.label is not None:
         if not body.label.strip():
@@ -59,6 +64,9 @@ def update_flag(name: str, body: FlagPatch, conn=Depends(get_db), user: dict = D
         conn.execute('UPDATE convention_flags SET label = ? WHERE name = ?', (body.label.strip(), name))
     if body.description is not None:
         conn.execute('UPDATE convention_flags SET description = ? WHERE name = ?', (body.description.strip(), name))
+    for column in ('example_on', 'example_off'):
+        if getattr(body, column) is not None:
+            conn.execute(f'UPDATE convention_flags SET {column} = ? WHERE name = ?', (getattr(body, column).strip(), name))
     if body.offered is not None:
         conn.execute('UPDATE convention_flags SET offered = ? WHERE name = ?', (int(body.offered), name))
     conn.commit()

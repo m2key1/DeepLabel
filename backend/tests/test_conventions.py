@@ -141,6 +141,18 @@ class TestCatalog:
                            json={'name': 'long_s', 'label': 'x'}).status_code == 409
         assert client.patch('/api/convention-flags/nope', headers=root, json={'label': 'x'}).status_code == 404
 
+    def test_an_admin_writes_an_example_with_the_flag_and_without_it(self, conn, client):
+        conventions.note(conn, ['keep_hyphens'])
+        conn.commit()
+
+        r = client.patch('/api/convention-flags/keep_hyphens', headers=self.headers('root', 'admin'),
+                         json={'example_on': ' Haus= ', 'example_off': 'Haus-'})
+        assert (r.json()['example_on'], r.json()['example_off']) == ('Haus=', 'Haus-')
+        assert client.patch('/api/convention-flags/keep_hyphens', headers=self.headers('bob', 'member'),
+                            json={'example_on': 'x'}).status_code == 403
+        flag = self.flags(client)['keep_hyphens']
+        assert (flag['example_on'], flag['example_off']) == ('Haus=', 'Haus-')
+
     def test_an_admin_stops_offering_a_flag_and_offers_it_again(self, conn, client):
         conventions.note(conn, ['long_s'])
         conn.commit()
@@ -183,6 +195,41 @@ def test_abbreviations_are_not_offered_once_and_an_admin_can_offer_them_again(tm
 
     conn = store.connect(db)
     assert conn.execute("SELECT offered FROM convention_flags WHERE name = 'abbreviations'").fetchone()[0] == 1
+    conn.close()
+
+
+def test_a_known_flag_joins_with_its_default_example_and_an_unknown_one_without(tmp_path):
+    conn = store.connect(tmp_path / 'app.db')
+    conventions.note(conn, ['long_s', 'abbreviations', 'superscript_e'])
+
+    examples = {row['name']: (row['example_on'], row['example_off'])
+                for row in conn.execute('SELECT * FROM convention_flags')}
+    assert examples == {'long_s': ('Waſſer', 'Wasser'), 'abbreviations': ('u.', 'und'), 'superscript_e': ('', '')}
+    conn.close()
+
+
+def test_flags_already_there_get_their_default_examples_once(tmp_path):
+    db = tmp_path / 'app.db'
+    conn = store.connect(db)
+    conn.executemany("INSERT INTO convention_flags (name, label) VALUES (?, ?)",
+                     [('typographic_punctuation', 'x'), ('oblique_hyphen', 'x'), ('long_s', 'x')])
+    conn.execute("UPDATE convention_flags SET example_on = 'ſ', example_off = 's' WHERE name = 'long_s'")
+    conn.execute(f'PRAGMA user_version = {store.CONVENTION_EXAMPLES - 1}')
+    conn.commit()
+    conn.close()
+
+    conn = store.connect(db)
+    examples = {row['name']: (row['example_on'], row['example_off'])
+                for row in conn.execute('SELECT * FROM convention_flags')}
+    assert examples == {'typographic_punctuation': ('„Text“', '"Text"'), 'oblique_hyphen': ('Haus⸗', 'Haus-'),
+                        'long_s': ('ſ', 's')}
+    conn.execute("UPDATE convention_flags SET example_on = '', example_off = '' WHERE name = 'oblique_hyphen'")
+    conn.commit()
+    conn.close()
+
+    conn = store.connect(db)
+    assert tuple(conn.execute("SELECT example_on, example_off FROM convention_flags WHERE name = 'oblique_hyphen'")
+                 .fetchone()) == ('', '')
     conn.close()
 
 

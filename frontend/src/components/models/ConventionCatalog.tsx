@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { addConventionFlag, listConventionFlags, updateConventionFlag } from '../../api'
 import type { ConventionFlag } from '../../api'
+import { ConventionExample } from '../ConventionExample'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Input, Textarea } from '../ui/Field'
@@ -11,6 +12,8 @@ interface Draft {
   name: string
   label: string
   description: string
+  example_on: string
+  example_off: string
   /** A flag being added, whose name is still being typed. */
   adding: boolean
 }
@@ -38,7 +41,8 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
     if (!draft) return
     setSaving(true)
     try {
-      const body = { label: draft.label, description: draft.description }
+      const body = { label: draft.label, description: draft.description,
+                     example_on: draft.example_on, example_off: draft.example_off }
       const saved = draft.adding
         ? await addConventionFlag({ name: draft.name, ...body })
         : await updateConventionFlag(draft.name, body)
@@ -79,6 +83,22 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
                   className="w-full resize-y" />
         <span className="mt-1 block text-xs text-ink-subtle">Shown wherever the flag can be picked.</span>
       </label>
+      <fieldset>
+        <legend className={fieldLabel}>Example</legend>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="mb-1 block text-xs text-ink-muted">With the flag</span>
+            <Input aria-label="Example with the flag" placeholder="Waſſer" value={draft.example_on}
+                   onChange={(e) => setDraft({ ...draft, example_on: e.target.value })} className="w-full" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-ink-muted">Without it</span>
+            <Input aria-label="Example without the flag" placeholder="Wasser" value={draft.example_off}
+                   onChange={(e) => setDraft({ ...draft, example_off: e.target.value })} className="w-full" />
+          </label>
+        </div>
+        <span className="mt-1 block text-xs text-ink-subtle">One word as it is transcribed with the flag on, and with it off.</span>
+      </fieldset>
       <div className="flex gap-2">
         <Button variant="primary" disabled={saving || !draft.label.trim() || !draft.name}
                 onClick={() => void save()}>Save</Button>
@@ -116,6 +136,7 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
                   {flag.label !== flag.name && (
                     <span className="ml-1.5 font-mono text-[11px] text-ink-subtle">{flag.name}</span>
                   )}
+                  <span className="ml-2"><ConventionExample on={flag.example_on} off={flag.example_off} /></span>
                   {!flag.description && <Badge tone="warn" className="ml-1.5">not described yet</Badge>}
                   {flag.description ? (
                     <p className="mt-0.5 text-xs text-ink-muted">{flag.description}</p>
@@ -141,8 +162,9 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
                 {canManage && (
                   <td className={`${tableCell} py-2 text-right`}>
                     <button type="button" data-testid="convention-edit"
-                            onClick={() => setDraft({ name: flag.name, label: flag.label,
-                                                      description: flag.description, adding: false })}
+                            onClick={() => setDraft({ name: flag.name, label: flag.label, description: flag.description,
+                                                      example_on: flag.example_on, example_off: flag.example_off,
+                                                      adding: false })}
                             className="text-xs text-ink-subtle hover:text-accent-ink">
                       Edit
                     </button>
@@ -157,7 +179,8 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
         <div className="mt-3 rounded-md border border-line bg-raised p-4">{form}</div>
       ) : (
         <Button size="xs" className="mt-3" data-testid="convention-add"
-                onClick={() => setDraft({ name: '', label: '', description: '', adding: true })}>
+                onClick={() => setDraft({ name: '', label: '', description: '', example_on: '', example_off: '',
+                                          adding: true })}>
           + Add flag
         </Button>
       ))}

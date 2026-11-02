@@ -397,7 +397,8 @@ def _conventions(conn, request: dict, split: dict) -> tuple[dict | None, list[di
     shown = conventions.offered(conn, dict.fromkeys(plan['names'], True))
     section = {'names': [name for name in plan['names'] if name in shown],
                'base': [name for name in plan['base'] if name in shown], 'new': plan['new'], 'lines': lines,
-               'supported': supported, 'labels': {name: conventions.label(conn, name) for name in shown}}
+               'supported': supported, 'labels': {name: conventions.label(conn, name) for name in shown},
+               'examples': conventions.examples(conn, list(shown))}
     if not supported:
         return section, [{'code': 'conventions_ignored', 'level': 'info',
                           'message': "The base model's backend cannot be taught convention flags, so the "

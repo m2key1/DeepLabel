@@ -2,7 +2,7 @@ import { test, expect } from '../helpers/test'
 import { openSettings } from '../helpers/dataset-settings'
 import { backendFetch, listRegistryModels, seedCompletedJob, setOcrConvention, uniqueName } from '../helpers/api'
 
-interface Flag { name: string; label: string; description: string; offered: boolean; models: number; datasets: number }
+interface Flag { name: string; label: string; description: string; offered: boolean; example_on: string; example_off: string; models: number; datasets: number }
 
 const catalogFlag = async (name: string): Promise<Flag | undefined> =>
   ((await backendFetch('/api/convention-flags')).flags as Flag[]).find((f) => f.name === name)
@@ -28,10 +28,14 @@ test.describe('Scenario: describing the transcription conventions', () => {
 
     await row.getByTestId('convention-edit').click()
     await catalog.getByLabel('Description').fill('A word broken at the line end keeps its "=" as written.')
+    await catalog.getByLabel('Example with the flag').fill('Haus=')
+    await catalog.getByLabel('Example without the flag').fill('Haus-')
     await catalog.getByRole('button', { name: 'Save' }).click()
     await expect.poll(async () => (await catalogFlag(name))?.description)
       .toBe('A word broken at the line end keeps its "=" as written.')
+    expect(await catalogFlag(name)).toMatchObject({ example_on: 'Haus=', example_off: 'Haus-' })
     await expect(row).not.toContainText('not described yet')
+    await expect(row.getByTestId('convention-example')).toHaveText('Haus=/Haus-')
 
     // A dataset asks for it, read by a model that does not know it.
     const datasetName = uniqueName('Described rule')
@@ -49,8 +53,10 @@ test.describe('Scenario: describing the transcription conventions', () => {
       .toHaveText('A word broken at the line end keeps its "=" as written.')
     await expect(flag.getByTestId('convention-ignored')).toHaveText(`${builtinOcr.name} ignores this`)
     await expect(flag.getByRole('checkbox')).toBeChecked()
-    // Paired with a flag the model does read, which carries no such mark.
+    await expect(flag.getByTestId('convention-example')).toHaveText('Haus=/Haus-')
+    // Paired with a flag the model does read, which carries no such mark, and its default example.
     const longS = page.locator('[data-testid="convention-flag"][data-flag="long_s"]')
+    await expect(longS.getByTestId('convention-example')).toHaveText('Waſſer/Wasser')
     await expect(longS).toHaveAttribute('data-supported', 'true')
     await expect(longS.getByTestId('convention-ignored')).toHaveCount(0)
     await expect(page.getByTestId('conventions-link')).toHaveAttribute('href', '/conventions')
