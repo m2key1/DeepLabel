@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import OpenSeadragon from 'openseadragon'
 
 // Wheel deltas as d3-zoom normalizes them, so a notch means the same on every engine and
@@ -107,6 +107,8 @@ export interface ImageSurface {
   onPanStart: (e: React.PointerEvent<HTMLElement>) => void
   onPanMove: (e: React.PointerEvent<HTMLElement>) => void
   onPanEnd: (e: React.PointerEvent<HTMLElement>) => void
+  /** The mouse wheel button is down over a scan and panning it, whatever tool is in hand. */
+  wheelHeld: boolean
 }
 
 export interface PaneRefs {
@@ -722,6 +724,7 @@ export function useImageSurface(
   // once, and the scan follows all three. Every touch device reaches this - the viewer's
   // own gesture handling is off, because the overlay is what the fingers land on and the
   // viewer never sees them.
+  const [wheelHeld, setWheelHeld] = useState(false)
   const onPanStart = useCallback((e: React.PointerEvent<HTMLElement>) => {
     const handed = e.pointerType !== 'mouse'
     if (!handed && e.button !== 1 && !e.altKey && !(opts.current.grab && e.button === 0)) return
@@ -743,7 +746,22 @@ export function useImageSurface(
     // gesture is spent working out where it began.
     const two = [...down.current.values()].filter((d) => d.id === p.id).slice(0, 2)
     pinch.current = two.length === 2 ? spanOf(two[0], two[1]) : null
+    if (!handed && e.button === 1) setWheelHeld(true)
   }, [])
+
+  // Let go wherever the button comes up, or when the window loses it, so it cannot stick.
+  useEffect(() => {
+    if (!wheelHeld) return
+    const release = () => setWheelHeld(false)
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
+    window.addEventListener('blur', release)
+    return () => {
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', release)
+      window.removeEventListener('blur', release)
+    }
+  }, [wheelHeld])
 
   const onPanMove = useCallback((e: React.PointerEvent<HTMLElement>) => {
     const held = down.current.get(e.pointerId)
@@ -901,8 +919,8 @@ export function useImageSurface(
 
   return useMemo(
     () => ({ setZoom, setScale, setRotation, centerOn, toPage, screenDistance, register,
-             onPanStart, onPanMove, onPanEnd }),
+             onPanStart, onPanMove, onPanEnd, wheelHeld }),
     [setZoom, setScale, setRotation, centerOn, toPage, screenDistance, register,
-     onPanStart, onPanMove, onPanEnd],
+     onPanStart, onPanMove, onPanEnd, wheelHeld],
   )
 }

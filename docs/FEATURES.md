@@ -259,7 +259,8 @@ Press `e` to edit the page.
 - `s` splits along a stroke drawn across a box or line; `m` merges the selection.
 - **Erase** (Shift+E): sweep away line corners with a brush. Lines you or others have
   checked are skipped unless you hold Shift.
-- Hold Space or Alt for the hand tool.
+- Hold Space, Alt or the mouse wheel button for the hand tool; a drawing in progress waits
+  and carries on after.
 - In edit mode, Layout and Lines hide the boxes or the lines while you edit; editing always
   starts with both shown, and the view keeps its own setting.
 - Delete a line straight from the text list with its trash can, without entering edit mode.
@@ -546,7 +547,7 @@ below it. Some commands (navigation, theme) start unbound.
 | Page viewer | `.` / `,` | Turn selected line by one degree |
 | Page viewer | Shift+V | Mark page layout complete |
 | Editors | `v` / `d` / Shift+E | Select / draw / erase tool |
-| Editors | Space or Alt (held) | Hand tool |
+| Editors | Space, Alt or the wheel button (held) | Hand tool |
 | Editors | `s` / `m` | Split / merge |
 | Editors | `h` / `l` | Previous / next page |
 | Editors | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |

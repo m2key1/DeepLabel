@@ -157,8 +157,7 @@ export function TileEditorPage() {
   // the real tool back and a keyup that goes missing cannot strand the editor.
   const [spaceHeld, setSpaceHeld] = useState(false)
   const [altHeld, setAltHeld] = useState(false)
-  const handHeld = spaceHeld || altHeld
-  const panning = tool === 'hand' || handHeld
+  const keyHeld = spaceHeld || altHeld
   const [activeClassId, setActiveClassId] = useState(1)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [hoveredId, setHoveredId] = useState<number | null>(null)
@@ -238,14 +237,17 @@ export function TileEditorPage() {
   // Shift+wheel over the tile sizes the eraser's brush, so the hand never has to leave the
   // tile for the slider. With any other tool in hand the turn stays the surface's.
   const onShiftWheel = (notch: 1 | -1) => {
-    if (tool !== 'erase' || handHeld) return false
+    if (tool !== 'erase' || keyHeld) return false
     setBrushRadius((px) => stepBrush(px, notch))
     return true
   }
   // The whole tile, to start: a map tile is square and small, and every corner of it has
   // to be reachable without panning to it first.
-  const { setScale, toPage, register, onPanStart, onPanMove, onPanEnd } =
-    useImageSurface(scan, { min: 0.25, max: 12, frame: 'whole', onSize, grab: panning, onShiftWheel })
+  const { setScale, toPage, register, onPanStart, onPanMove, onPanEnd, wheelHeld } =
+    useImageSurface(scan, { min: 0.25, max: 12, frame: 'whole', onSize, grab: tool === 'hand' || keyHeld, onShiftWheel })
+  // The wheel button pans whatever tool is in hand, so while it is down the hand is held.
+  const handHeld = keyHeld || wheelHeld
+  const panning = tool === 'hand' || handHeld
   const tileRefs = register('tile')
   const svgRef = useRef<SVGSVGElement>(null)
   // Every drag on the canvas - a vertex, an eraser stroke, a detect box - goes through
@@ -1009,7 +1011,8 @@ export function TileEditorPage() {
       if (near && near.distPx <= INSERT_HIT_PX) return
       setSelectedId(null)
     },
-    [tool, regions, selectedId, draft, cutArmed, mergeSet, picks, toNorm, placeVertex, cutSelectedAt, edgeHitOf, scheduleDeselect],
+    [tool, panning, regions, selectedId, draft, cutArmed, mergeSet, picks, toNorm, placeVertex, cutSelectedAt, edgeHitOf,
+     scheduleDeselect],
   )
 
   const onSvgMove = useCallback(
@@ -1916,8 +1919,10 @@ export function TileEditorPage() {
   const brushDash = Math.min(10, Math.max(2.5, (Math.PI * brushPx) / 14))
 
   // Near enough to the first point that a click, or letting go of a stroke, closes there.
-  const closeArmed = !!draft && canClose(draft) && !!cursor &&
-    Math.hypot((draft.pts[0][0] - cursor[0]) * displayW, (draft.pts[0][1] - cursor[1]) * displayH) < CLOSE_SNAP_PX
+  // While the hand is held a shape waits: nothing runs on to the pointer.
+  const aim = handHeld ? null : cursor
+  const closeArmed = !!draft && canClose(draft) && !!aim &&
+    Math.hypot((draft.pts[0][0] - aim[0]) * displayW, (draft.pts[0][1] - aim[1]) * displayH) < CLOSE_SNAP_PX
 
   // A shape in progress wears the class it will be filed under: the region it belongs to
   // for a hole or a redraw, the active class for anything new.
@@ -2381,7 +2386,7 @@ export function TileEditorPage() {
                 // in a drawing tool must draw rather than scroll the pane; in select mode the
                 // handles carry that rule themselves, so touch can still pan the tile.
                 style={{
-                  cursor: panning ? 'grab'
+                  cursor: wheelHeld ? 'grabbing' : panning ? 'grab'
                     : tool === 'draw' || tool === 'detect' ? 'crosshair'
                     : tool === 'erase' ? 'none' : 'default',
                   touchAction: tool === 'select' || panning ? 'auto' : 'none',
@@ -2510,7 +2515,7 @@ export function TileEditorPage() {
                   <>
                     <polyline
                       data-testid="draft-line"
-                      points={[...(draftAnchor ? [draftAnchor] : []), ...draft.pts, ...(cursor ? [cursor] : [])]
+                      points={[...(draftAnchor ? [draftAnchor] : []), ...draft.pts, ...(aim ? [aim] : [])]
                         .map(px).join(' ')}
                       fill="none"
                       stroke={draftColor}
@@ -2551,11 +2556,11 @@ export function TileEditorPage() {
                 {/* The cursor is on an existing outline: the next click joins it there.
                     Shown before the first vertex too, so a line starts attached as
                     deliberately as it ends. */}
-                {snapped && cursor && tool === 'draw' && (
+                {snapped && aim && tool === 'draw' && (
                   <circle
                     data-testid="snap-marker"
-                    cx={cursor[0] * displayW}
-                    cy={cursor[1] * displayH}
+                    cx={aim[0] * displayW}
+                    cy={aim[1] * displayH}
                     r={6}
                     fill="none"
                     stroke="var(--ui-ok)"
@@ -2569,7 +2574,7 @@ export function TileEditorPage() {
                 {areaDraft && areaDraft.length > 0 && (
                   <>
                     <polygon
-                      points={[...areaDraft, ...(cursor ? [cursor] : [])].map(px).join(' ')}
+                      points={[...areaDraft, ...(aim ? [aim] : [])].map(px).join(' ')}
                       fill="color-mix(in srgb, var(--ui-warn) 10%, transparent)"
                       stroke="var(--ui-warn)"
                       strokeWidth={2}

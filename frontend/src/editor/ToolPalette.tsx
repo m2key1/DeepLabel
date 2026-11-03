@@ -45,8 +45,8 @@ export function ToolPalette({ tool, onTool, capabilities, bindings, detectDisabl
             title={disabled
               ? 'Edge detection is not configured on this server'
               : key ? `${label} (${comboLabel(key)})`
-              // Unbound, the hand is still in reach: both editors take a held Space or Alt.
-              : t === 'hand' ? `${label} (hold Space or Alt)` : label}
+              // Unbound, the hand is still in reach: both editors take a held Space, Alt or wheel button.
+              : t === 'hand' ? `${label} (hold Space, Alt or the wheel button)` : label}
             className="flex-1"
           >
             <Icon />

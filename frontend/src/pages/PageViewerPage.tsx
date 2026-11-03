@@ -310,7 +310,7 @@ export function PageViewerPage() {
   // the real tool back and a keyup that goes missing cannot strand the editor.
   const [spaceHeld, setSpaceHeld] = useState(false)
   const [altHeld, setAltHeld] = useState(false)
-  const handTool = tool === 'hand' || spaceHeld || altHeld
+  const handKey = tool === 'hand' || spaceHeld || altHeld
   // The corners clicked so far, first one first. Closed by clicking that first corner again.
   const [polyDraft, setPolyDraft] = useState<Ring | null>(null)
   // How many corners were clicked before a freehand stroke began: those keep their dots
@@ -424,13 +424,15 @@ export function PageViewerPage() {
   // Shift+wheel over the scan sizes the eraser's brush, so the hand never has to leave the
   // page for the slider. With any other tool in hand the turn stays the surface's.
   const onShiftWheel = (notch: 1 | -1) => {
-    if (tool !== 'erase' || handTool) return false
+    if (tool !== 'erase' || handKey) return false
     setBrushRadius((px) => stepBrush(px, notch))
     return true
   }
   const { setZoom, setScale, setRotation, centerOn, toPage, screenDistance: pageDistance, register,
-          onPanStart, onPanMove, onPanEnd } =
-    useImageSurface(scan, { min: 0.25, max: 8, grab: handTool, rotate: true, onSize, onShiftWheel })
+          onPanStart, onPanMove, onPanEnd, wheelHeld } =
+    useImageSurface(scan, { min: 0.25, max: 8, grab: handKey, rotate: true, onSize, onShiftWheel })
+  // The wheel button pans whatever tool is in hand, so while it is down the hand is held.
+  const handTool = handKey || wheelHeld
   // Back to the scan at the pane's width, the right way up: the way out of a turn nobody
   // meant to make, and of a zoom they are done with.
   const resetView = useCallback(() => {
@@ -2516,8 +2518,10 @@ export function PageViewerPage() {
       : null
     const outlineTarget = (extra: { vi?: number; ei?: number; rotate?: boolean } = {}) =>
       ({ kind: 'line' as const, of: edited!.of, id: edited!.id, poly: poly!, ...extra })
+    // While the hand is held a drawing waits: nothing runs on to the pointer.
+    const aim = handTool ? null : drawCursor
     const drawBox = dragView?.mode === 'new' ? dragView.bbox
-      : boxDraft && drawCursor ? orderBbox(boxDraft[0], boxDraft[1], drawCursor[0], drawCursor[1])
+      : boxDraft && aim ? orderBbox(boxDraft[0], boxDraft[1], aim[0], aim[1])
       : null
     const lassoBox = dragView?.mode === 'lasso'
       ? orderBbox(dragView.from[0], dragView.from[1], dragView.to[0], dragView.to[1])
@@ -2526,14 +2530,14 @@ export function PageViewerPage() {
     // following the pointer until the height is clicked.
     const draftSide: [Pt, Pt] | null =
       dragView?.mode === 'lside' ? [dragView.from, dragView.to]
-      : lineDraft ? [lineDraft.a, lineDraft.b ?? drawCursor ?? lineDraft.a]
+      : lineDraft ? [lineDraft.a, lineDraft.b ?? aim ?? lineDraft.a]
       : null
-    const draftQuad = lineDraft?.b && drawCursor ? angledQuad(lineDraft.a, lineDraft.b, drawCursor, aspect) : null
+    const draftQuad = lineDraft?.b && aim ? angledQuad(lineDraft.a, lineDraft.b, aim, aspect) : null
     // The polygon pen: what has been clicked, the band to the cursor, and whether that
     // cursor is near enough to the first corner to close on it.
-    const draftPoly = polyDraft && drawCursor ? [...polyDraft, drawCursor] : polyDraft
-    const closing = !!polyDraft && polyDraft.length >= 3 && !!drawCursor
-      && screenDistance(polyDraft[0], drawCursor) <= CLOSE_SLOP_PX
+    const draftPoly = polyDraft && aim ? [...polyDraft, aim] : polyDraft
+    const closing = !!polyDraft && polyDraft.length >= 3 && !!aim
+      && screenDistance(polyDraft[0], aim) <= CLOSE_SLOP_PX
     const rotateHandle = poly ? rotateHandleAnchor(poly, aspect) : null
     const turning = dragView?.mode === 'lrotate' ? dragView : null
     // The scissors' preview: the stroke being drawn, and the cut it will make - across
@@ -2556,7 +2560,7 @@ export function PageViewerPage() {
       <div
         className="absolute inset-0"
         style={{
-          cursor: handTool ? 'grab'
+          cursor: wheelHeld ? 'grabbing' : handTool ? 'grab'
             // The brush circle is the cursor while erasing; a second one beside it only
             // makes the aim harder to read.
             : tool === 'erase' ? 'none'
@@ -3695,7 +3699,7 @@ export function PageViewerPage() {
       [`${comboLabel(hk.rotateCw)} ${comboLabel(hk.rotateCcw)}`, 'turn the loupe crop a quarter'],
     ] as [string, string][] },
     { title: 'View', rows: [
-      ['hand', 'drag to move the page · Alt-drag anywhere'], ['Ctrl+wheel', 'zoom'],
+      ['hand', 'drag to move the page · Alt-drag or middle-drag anywhere'], ['Ctrl+wheel', 'zoom'],
       ['Shift+wheel', 'scroll left and right; with the eraser, size its brush'],
       ['Ctrl+Z · Ctrl+Shift+Z', 'undo · redo'], [comboLabel(hk.edit), 'edit mode'],
       [`${comboLabel(hk.prevPage)} · ${comboLabel(hk.nextPage)}`, 'previous · next page'],
@@ -4262,7 +4266,7 @@ export function PageViewerPage() {
           }}
           sentence={sentence}
           notice={erasedNotice}
-          keys="Ctrl+Z undo · Ctrl+Shift+Z redo · Alt-drag pans · Ctrl+wheel zooms · Shift+wheel scrolls left/right"
+          keys="Ctrl+Z undo · Ctrl+Shift+Z redo · Alt/middle-drag pans · Ctrl+wheel zooms · Shift+wheel scrolls left/right"
           onShortcuts={() => setSheetOpen(true)}
           provenance={page?.provenance && <ModelProvenance provenance={page.provenance} />}
         />

@@ -66,6 +66,44 @@ test.describe('Scenario: annotating a map tile', () => {
     await expect(drawn).toHaveAttribute('data-class-id', String(region.class_id))
   })
 
+  test('holding the wheel button is the hand while it is down: the shape waits and carries on after',
+    async ({ page }) => {
+      const jobId = await seedMapJob(uniqueName('Tile wheel hand'))
+      const [tileId] = await tileIds(jobId)
+      await openTileEditor(page, jobId, tileId)
+      const draw = page.getByTestId('tool-draw')
+      const hand = page.getByTestId('tool-hand')
+      await expect(draw).toHaveAttribute('aria-pressed', 'true')
+      for (const point of SQUARE.slice(0, 3)) await clickTile(page, point)
+      await expect(page.getByTestId('draft-dot')).toHaveCount(3)
+      const band = page.getByTestId('draft-line')
+      const bandPoints = async () => (await band.getAttribute('points'))!.trim().split(/\s+/).length
+      // The rubber band runs on to the pointer, which rests on the last corner.
+      await expect.poll(bandPoints).toBe(4)
+
+      const from = await canvasBox(page)
+      const at = { x: from.x + from.width * 0.4, y: from.y + from.height * 0.8 }
+      await page.mouse.move(at.x, at.y)
+      await page.mouse.down({ button: 'middle' })
+      await expect(hand).toHaveAttribute('aria-pressed', 'true')
+      await expect(draw).toHaveAttribute('aria-pressed', 'false')
+      await expect.poll(bandPoints).toBe(3)
+      await page.mouse.move(at.x - 60, at.y - 40, { steps: 8 })
+      await page.mouse.up({ button: 'middle' })
+
+      await expect(draw).toHaveAttribute('aria-pressed', 'true')
+      await expect(hand).toHaveAttribute('aria-pressed', 'false')
+      const moved = await canvasBox(page)
+      expect([Math.round(moved.x - from.x), Math.round(moved.y - from.y)]).toEqual([-60, -40])
+      // The press placed nothing; the shape is finished from where it was left.
+      await expect(page.getByTestId('draft-dot')).toHaveCount(3)
+      await clickTile(page, SQUARE[3])
+      await expect(page.getByTestId('draft-dot')).toHaveCount(4)
+      await page.keyboard.press('Enter')
+      await expect.poll(async () => (await tileRegions(jobId, tileId)).length).toBe(1)
+      expect(roundPoints((await tileRegions(jobId, tileId))[0].points)).toEqual(SQUARE)
+    })
+
   test('Alt is the hand for as long as it is held, and gives the tool back after',
     async ({ page }) => {
       const jobId = await seedMapJob(uniqueName('Tile alt hand'))

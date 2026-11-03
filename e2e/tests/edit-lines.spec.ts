@@ -445,7 +445,7 @@ test.describe('Scenario: rubbing lines out with the eraser', () => {
     await expect(eraser).toHaveAttribute('title', 'Erase (Shift+E)')
 
     // The hand has no key of its own until one is bound; it is the held Space or Alt.
-    await expect(page.getByTestId('tool-hand')).toHaveAttribute('title', 'Hand (hold Space or Alt)')
+    await expect(page.getByTestId('tool-hand')).toHaveAttribute('title', 'Hand (hold Space, Alt or the wheel button)')
   })
 
   test('holding Alt with the eraser in hand puts the brush away until it is let go', async ({ page }) => {
@@ -707,6 +707,47 @@ test.describe('Scenario: a line that is not a straight box', () => {
     // They go when the line does, rather than being left behind on the scan.
     await page.keyboard.press('Escape')
     await expect(dots).toHaveCount(0)
+  })
+
+  test('holding the wheel button is the hand while it is down: the line waits and carries on after',
+       async ({ page }) => {
+    const { jobId, pageId } = await seedEditor(page)
+    const before = (await elements(jobId, pageId)).flatMap((e) => e.lines).length
+    await page.getByRole('button', { name: 'Line', exact: true }).click()
+    await page.getByTestId('line-pen-polygon').click()
+    const corners: NormPoint[] = [[0.03, 0.3], [0.08, 0.3], [0.08, 0.36], [0.03, 0.36]]
+    for (const corner of corners.slice(0, 3)) await clickAt(page, corner)
+    const placed = page.getByTestId('line-poly-corner')
+    await expect(placed).toHaveCount(3)
+    const draft = page.getByTestId('line-poly-draft')
+    const draftPoints = async () => (await draft.getAttribute('points'))!.trim().split(/\s+/).length
+    await hoverAt(page, [0.05, 0.4])
+    // The rubber band runs from the last corner to the pointer.
+    await expect.poll(draftPoints).toBe(4)
+    const hand = page.getByTestId('tool-hand')
+    await expect(hand).toHaveAttribute('aria-pressed', 'false')
+
+    const from = await scanRect(page)
+    const at = await toPixels(page, [0.5, 0.5])
+    await page.mouse.move(at.x, at.y)
+    await page.mouse.down({ button: 'middle' })
+    await expect(hand).toHaveAttribute('aria-pressed', 'true')
+    await expect.poll(draftPoints).toBe(3)
+    // Towards the right, so the corners on the left margin stay clear of the rail.
+    await page.mouse.move(at.x + 60, at.y + 40, { steps: 8 })
+    await page.mouse.up({ button: 'middle' })
+
+    await expect(hand).toHaveAttribute('aria-pressed', 'false')
+    expect(Math.round((await scanRect(page)).left - from.left)).toBe(60)
+    expect(Math.round((await scanRect(page)).top - from.top)).toBe(40)
+    // Nothing the press did was a corner; the line carries on where it was left.
+    await expect(placed).toHaveCount(3)
+    await clickAt(page, corners[3])
+    await expect(placed).toHaveCount(4)
+    await clickAt(page, corners[0])
+    await expect
+      .poll(async () => (await elements(jobId, pageId)).flatMap((e) => e.lines).length)
+      .toBe(before + 1)
   })
 
   test('the polygon pen traces a line freehand while the button is held', async ({ page }) => {
