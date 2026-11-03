@@ -14,9 +14,9 @@ export const LINE_MODE_CHOICES: readonly (readonly [LineMode, string, string])[]
 ]
 
 export const LAYOUT_SHAPE_CHOICES: readonly (readonly [LayoutShape, string, string])[] = [
-  ['box', 'Aligned', 'Upright boxes only'],
-  ['rotated', 'Rotated', 'Upright boxes, and boxes turned to follow a slanted block'],
-  ['polygon', 'Polygons', 'Boxes, turned boxes and free outlines; lines are found inside each'],
+  ['box', 'Aligned', 'Straight boxes with edges parallel to the page. Simplest; right for upright scans.'],
+  ['rotated', 'Rotated', 'Straight boxes, or boxes turned to match a slanted block on a skewed or tilted scan.'],
+  ['polygon', 'Polygons', 'Boxes, turned boxes or an outline of any shape, for blocks that are not rectangles.'],
 ]
 
 const SHAPE_LEVEL: Record<LayoutShape, number> = { box: 0, rotated: 1, polygon: 2 }

@@ -184,7 +184,7 @@ source and pages. Changes apply to the next run; nothing already recognised is t
   structure used for reading order, the models, decoding and convention flags, the
   language models that read it, and its data use.
 - **Layout element shapes** is a ceiling, set when the dataset is created, in its Settings
-  or for a whole group: **Aligned** (upright boxes, the default), **Rotated** (also boxes
+  or for a whole group: **Aligned** (straight boxes parallel to the page, the default), **Rotated** (also boxes
   turned to follow a slanted block) or **Polygons** (also free outlines). Lowering it says
   first how many elements go beyond the new level and asks before saving; each becomes the
   tightest allowed shape around it, and the revision history keeps the old shape.

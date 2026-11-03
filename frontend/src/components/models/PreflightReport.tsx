@@ -15,7 +15,7 @@ import { StatRow, StatTile } from '../ui/StatTile'
 import { SubHeading } from '../ui/Section'
 import { tableCell, tableHeadRow, tableRow } from '../ui/Table'
 import { ConventionExample } from '../ConventionExample'
-import { count } from '../evaluation/format'
+import { count, share } from '../evaluation/format'
 import { linkedCounts } from './preflightLinks'
 import type { ShownPreflight } from './usePreflight'
 
@@ -91,10 +91,6 @@ function binLabel(lo: number, hi: number | null): string {
 type Distribution = { label: string; metric: PreflightMetric; dist: PreflightDistribution; unit?: string }
 
 type BarFocus = { metric: PreflightMetric; index: number }
-
-function share(n: number, total: number): string {
-  return total ? `${((n / total) * 100).toFixed(1)}%` : '-'
-}
 
 function sameBar(a: BarFocus | null, metric: PreflightMetric, index: number): boolean {
   return a !== null && a.metric === metric && a.index === index
@@ -447,6 +443,7 @@ function CharacterTable({ rows, view, hasTest, hovered, onHover }: {
   const visible = rows.filter((r) => inView(r, view))
   const shown = showAll ? visible : visible.slice(0, CHARS_SHOWN)
   const peak = Math.max(...rows.map((r) => r.total), 1)
+  const all = rows.reduce((sum, r) => sum + r.total, 0)
   const splits = hasTest ? SPLITS : SPLITS.slice(0, 2)
   return (
     <div>
@@ -457,7 +454,7 @@ function CharacterTable({ rows, view, hasTest, hovered, onHover }: {
             <tr className={tableHeadRow}>
               <th className="px-2 py-1.5 font-semibold">Char</th>
               <th className="px-2 py-1.5 font-semibold">Codepoint</th>
-              <th className="w-1/4 px-2 py-1.5 font-semibold">Count</th>
+              <th className="w-1/4 px-2 py-1.5 font-semibold">Count · share of all</th>
               {splits.map((s) => (
                 <th key={s} className="px-2 py-1.5 text-right font-semibold">{SPLIT_LABEL[s]}</th>
               ))}
@@ -482,6 +479,10 @@ function CharacterTable({ rows, view, hasTest, hovered, onHover }: {
                       <div className="h-full rounded-sm bg-accent" style={{ width: `${(row.total / peak) * 100}%` }} />
                     </div>
                     <span className="w-12 text-right font-mono text-xs tabular-nums">{count(row.total)}</span>
+                    <span data-testid="preflight-char-share"
+                          className="w-12 text-right font-mono text-[11px] tabular-nums text-ink-muted">
+                      {share(row.total, all)}
+                    </span>
                   </div>
                 </td>
                 {splits.map((s) => (
