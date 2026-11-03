@@ -330,7 +330,12 @@ export function JobDetailPage() {
     return () => window.clearInterval(timer)
   }, [llmStatus?.active, pollLlm])
 
+  // Which look for a run is the latest. A reload supersedes any look still under way, and
+  // a look that answers after a newer one would compare old counters with newer ones.
+  const latestLook = useRef(0)
+
   const refetch = useCallback(() => {
+    latestLook.current += 1
     getJob(jobId, { pages: false }).then(setJob).catch((e: Error) => setError(e.message))
     loadRowsRef.current()
     getReviewQueue(jobId, maxConf).then(setReview).catch((e: Error) => setError(e.message))
@@ -436,8 +441,9 @@ export function JobDetailPage() {
     idleStateRef.current = idleState
   }, [idleState])
   const lookForRun = useCallback(() => {
+    const look = ++latestLook.current
     getJob(jobId, { pages: false })
-      .then((next) => { if (runState(next) !== idleStateRef.current) refetch() })
+      .then((next) => { if (look === latestLook.current && runState(next) !== idleStateRef.current) refetch() })
       .catch(() => undefined)
   }, [jobId, refetch])
   usePolling(lookForRun, 5000, idleState !== null)

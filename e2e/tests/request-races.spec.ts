@@ -252,15 +252,27 @@ test.describe('Scenario: polling only as much as there is news', () => {
        async ({ page }) => {
     const jobId = await seedCompletedJob(uniqueName('Looked at'), 1)
     const job = await backendFetch(`/api/jobs/${jobId}?pages=false`)
-    // As if a run started and finished elsewhere between two looks.
+    // As if a run started and finished elsewhere between two looks. The page reads the
+    // dataset on load and then looks once at once; that first look is held, to answer
+    // late with the counters from before, after a newer look has seen them move.
     let moved = false
+    let reads = 0
+    let firstLook: Route | null = null
     await page.route((url) => url.pathname === `/api/jobs/${jobId}` && url.searchParams.get('pages') === 'false',
-      (route) => moved
-        ? route.fulfill({ json: { ...job, counters: { ...job.counters, pages_ingested: 99 } } })
-        : route.continue())
+      (route) => {
+        reads += 1
+        if (reads === 2) {
+          firstLook = route
+          return
+        }
+        return moved
+          ? route.fulfill({ json: { ...job, counters: { ...job.counters, pages_ingested: 99 } } })
+          : route.continue()
+      })
     await page.clock.install()
     await page.goto(`/jobs/${jobId}`)
     await expect(page.locator('tbody tr')).toHaveCount(1)
+    await expect.poll(() => firstLook).not.toBeNull()
     await stopClock(page)
     const looks = countRequests(page, 'GET', `/api/jobs/${jobId}`)
     moved = true
@@ -268,7 +280,11 @@ test.describe('Scenario: polling only as much as there is news', () => {
     await page.clock.runFor(5_000)
     // The look that saw the change and the reload it set off, and no fresh look on top.
     await expect.poll(looks).toBe(2)
+    const lateAnswer = page.waitForResponse((r) => r.request() === firstLook!.request())
+    await firstLook!.continue()
+    await lateAnswer
     await pause(APPLY_MS)
+    // The late answer is older than what the page already knows, so it reloads nothing.
     expect(looks()).toBe(2)
     await page.clock.runFor(5_000)
     await expect.poll(looks).toBe(3)
