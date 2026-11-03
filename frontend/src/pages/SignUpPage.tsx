@@ -30,8 +30,8 @@ export function SignUpPage() {
     <AccountCard title="Create an account" testid="sign-up-form" onSubmit={() => void submit()} footer={
       <p>Have an account? <a href="/sign-in" className="text-accent-ink hover:underline">Sign in</a></p>
     }>
-      <p className="text-sm text-ink-muted">An admin lets new accounts in. You can sign in right away and will see
-        when they have.</p>
+      <p className="text-sm text-ink-muted">New accounts need an admin's approval. Until then, signing in shows a
+        waiting page.</p>
       <AccountField label="Name" data-testid="sign-up-name" autoFocus autoComplete="name"
                     value={name} onChange={(e) => setName(e.target.value)} />
       <AccountField label="Email" data-testid="sign-up-email" type="email" required autoComplete="email"
