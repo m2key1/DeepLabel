@@ -25,7 +25,8 @@ export interface NewPasswordState {
  *  are the person's own name and email, which a password should not lean on. */
 export function useNewPassword(inputs: string[]): NewPasswordState {
   const [value, setValue] = useState(EMPTY_PASSWORD)
-  const [policy, setPolicy] = useState<PasswordRules>(FALLBACK_RULES)
+  // Unknown until fetched; the fallback stands in only when fetching fails.
+  const [policy, setPolicy] = useState<PasswordRules | null>(null)
   const [score, setScore] = useState<number | null>(null)
 
   useEffect(() => {
@@ -38,7 +39,7 @@ export function useNewPassword(inputs: string[]): NewPasswordState {
   const key = inputs.join('\n')
   useEffect(() => {
     setScore(null)
-    if (!policy.strength_check || !value.password) return
+    if (!policy?.strength_check || !value.password) return
     scorer ??= import('zxcvbn').then((m) => m.default)
     let live = true
     // Only the first 72 characters, as the server scores them.
@@ -46,7 +47,7 @@ export function useNewPassword(inputs: string[]): NewPasswordState {
       if (live) setScore(zxcvbn(value.password.slice(0, 72), key.split('\n').filter(Boolean)).score)
     })
     return () => { live = false }
-  }, [value.password, policy.strength_check, key])
+  }, [value.password, policy?.strength_check, key])
 
   const strength = useMemo(() => strengthOf(value.password, score, policy), [value.password, score, policy])
   const problem = newPasswordProblem(value)

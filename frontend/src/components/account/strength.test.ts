@@ -34,3 +34,10 @@ describe('strengthOf', () => {
       .toMatchObject({ level: 'good', acceptable: true, message: 'Long enough.' })
   })
 })
+
+describe('strengthOf before the rules are known', () => {
+  it('waits for them instead of assuming the fallback', () => {
+    expect(strengthOf('password1', 0, null)).toMatchObject({ acceptable: false, message: 'Checking…' })
+    expect(strengthOf('', null, null).message).toBe('Try three or four unrelated words.')
+  })
+})

@@ -23,20 +23,24 @@ export interface Strength {
 // Said by the server too when it refuses one (auth/app/password_rules.py).
 export const TOO_EASY = 'Too easy to guess - add another word.'
 
+const CHECKING: Strength = { level: 'fair', fill: 0.25, acceptable: false, message: 'Checking…' }
+
 /** How a password measures up, from its length and its zxcvbn score (null while the
- *  scorer is still loading). */
-export function strengthOf(password: string, score: number | null, rules: PasswordRules): Strength {
-  const least = Math.max(rules.min_length, 1)
+ *  scorer is still loading). `rules` is null until Authentik's are known, and nothing is
+ *  trusted before then. */
+export function strengthOf(password: string, score: number | null, rules: PasswordRules | null): Strength {
   if (!password) {
     return { level: 'empty', fill: 0, acceptable: false,
              message: 'Try three or four unrelated words.' }
   }
+  if (rules === null) return CHECKING
+  const least = Math.max(rules.min_length, 1)
   if (password.length < rules.min_length) {
     return { level: 'short', fill: 0.25 * (password.length / least), acceptable: false,
              message: `Too short - at least ${least} characters.` }
   }
   if (!rules.strength_check) return { level: 'good', fill: 1, acceptable: true, message: 'Long enough.' }
-  if (score === null) return { level: 'fair', fill: 0.25, acceptable: false, message: 'Checking…' }
+  if (score === null) return CHECKING
   const fill = (score + 1) / 5
   if (score < rules.min_score) {
     return { level: score < rules.min_score - 1 ? 'weak' : 'fair', fill, acceptable: false, message: TOO_EASY }

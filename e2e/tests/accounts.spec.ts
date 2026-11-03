@@ -205,4 +205,23 @@ test.describe('Scenario: accounts on DeepLabel\'s own pages', () => {
     expect(await submit(check, 'olaf@example.org', 'olaf1234')).toBe(400)
     expect(await submit(check, 'olaf@example.org', 'ember sparrow tundra kiln')).toBe(200)
   })
+
+  test('the button waits for Authentik\'s rules before it trusts a password', async ({ page }) => {
+    let release: () => void = () => undefined
+    const released = new Promise<void>((resolve) => { release = resolve })
+    await page.route('**/api/sign-in/password-rules', async (route) => {
+      await released
+      await route.continue()
+    })
+    await page.goto(`${site}/sign-up`)
+    await page.getByTestId('new-password').fill('password1')
+    await page.getByTestId('new-password-repeat').fill('password1')
+
+    await expect(page.getByTestId('password-strength-message')).toHaveText('Checking…')
+    await expect(page.getByTestId('sign-up-submit')).toBeDisabled()
+
+    release()
+    await expect(page.getByTestId('password-strength')).toHaveAttribute('data-level', 'weak')
+    await expect(page.getByTestId('sign-up-submit')).toBeDisabled()
+  })
 })
