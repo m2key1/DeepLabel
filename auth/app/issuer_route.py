@@ -13,17 +13,20 @@ def _origin(url: str) -> tuple[str, str, int]:
 def _rerouted(request: httpx.Request, public: str, internal: str) -> httpx.Request:
     """The same request sent to the internal address when it is for the public one. The
     provider builds every URL it answers with from the host it was asked on, so the public
-    host and scheme travel along in the headers."""
+    host and scheme travel along in the headers. A copy: the client files the cookies an
+    answer sets under the request it sent, and they must stay with the public address,
+    or the next call of a login flow goes without them."""
     scheme, host, port = _origin(public)
     if (request.url.scheme, request.url.host, request.url.port or (443 if scheme == 'https' else 80)) != (scheme, host, port):
         return request
     to_scheme, to_host, to_port = _origin(internal)
-    request.url = request.url.copy_with(scheme=to_scheme, host=to_host, port=to_port)
     public_host = urlsplit(public).netloc
-    request.headers['Host'] = public_host
-    request.headers['X-Forwarded-Host'] = public_host
-    request.headers['X-Forwarded-Proto'] = scheme
-    return request
+    headers = httpx.Headers(request.headers)
+    headers['Host'] = public_host
+    headers['X-Forwarded-Host'] = public_host
+    headers['X-Forwarded-Proto'] = scheme
+    return httpx.Request(request.method, request.url.copy_with(scheme=to_scheme, host=to_host, port=to_port),
+                         headers=headers, stream=request.stream, extensions=request.extensions)
 
 
 class AsyncIssuerTransport(httpx.AsyncBaseTransport):

@@ -71,3 +71,26 @@ def test_without_an_internal_address_nothing_is_rerouted(monkeypatch):
     monkeypatch.setattr(config, 'OIDC_ISSUER', ISSUER)
     monkeypatch.setattr(config, 'OIDC_INTERNAL_URL', '')
     assert issuer_route.async_transport() == {} and issuer_route.transport() == {}
+
+
+def test_a_cookie_set_over_the_internal_address_goes_back_on_the_next_call(monkeypatch):
+    """The login flow is one Authentik session across several calls. Rerouted, its cookie
+    has to come back on the next call to the public address, or every step starts over."""
+    monkeypatch.setattr(config, 'OIDC_ISSUER', ISSUER)
+    monkeypatch.setattr(config, 'OIDC_INTERNAL_URL', INTERNAL)
+    seen: list[str | None] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get('cookie'))
+        return httpx.Response(200, json={}, headers={'set-cookie': 'authentik_session=abc; Path=/'})
+
+    monkeypatch.setattr(issuer_route.httpx, 'AsyncHTTPTransport', lambda: httpx.MockTransport(answer))
+
+    async def two_steps():
+        async with sign_in.client() as browser:
+            await browser.get('/api/v3/flows/executor/login/')
+            await browser.get('/api/v3/flows/executor/login/')
+
+    asyncio.run(two_steps())
+
+    assert seen == [None, 'authentik_session=abc']
