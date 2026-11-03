@@ -5,7 +5,8 @@ redirecting back to the executor.
 
 Accounts: root@example.org / copper willow tandem fjord (the bootstrap admin),
 anna@example.org / quartz lantern orbit meadow, olaf@example.org / olaf1234 (long enough,
-but too easy to guess), and locked@example.org, whose password nobody knows, for the throttle."""
+but too easy to guess), carla@example.org / hazel comet ladder brine with the username carla,
+and locked@example.org, whose password nobody knows, for the throttle."""
 import json
 import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,6 +34,7 @@ add('service@example.org', None, type='internal_service_account')
 add('root@example.org', 'copper willow tandem fjord', 'Root Admin')
 add('anna@example.org', 'quartz lantern orbit meadow', 'Anna Example')
 add('olaf@example.org', 'olaf1234', 'Olaf Example')
+add('carla@example.org', 'hazel comet ladder brine', 'Carla Example', username='carla')
 add('locked@example.org', secrets.token_hex(16))
 
 

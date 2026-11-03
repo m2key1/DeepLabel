@@ -194,6 +194,30 @@ def _client_address(request: Request) -> str:
     return request.headers.get('X-Real-IP') or (request.client.host if request.client else '')
 
 
+def _account_key(name: str) -> str:
+    """The throttle's key for the account an email or username names, so every spelling of
+    it shares one count. A name nobody has is counted as typed."""
+    conn = store.connect(config.DB_PATH)
+    try:
+        known = conn.execute('SELECT subject FROM users WHERE lower(username) = lower(?) OR lower(email) = lower(?)',
+                             (name, name)).fetchone()
+    finally:
+        conn.close()
+    if known:
+        return f'account:{known[0].lower()}'
+    if authentik.enabled():
+        found = None
+        try:
+            # Authentik matches as written; people type their address in any case.
+            for spelling in dict.fromkeys((name, name.lower())):
+                found = found or authentik.find_user(email=spelling) or authentik.find_user(username=spelling)
+        except authentik.Unavailable:
+            found = None
+        if found:
+            return f"account:{found['username'].lower()}"
+    return f'account:{name.lower()}'
+
+
 @app.post('/api/sign-in')
 async def sign_in_with_password(body: SignIn, request: Request):
     """Signs in on DeepLabel's own page: the auth service runs Authentik's login flow for
@@ -202,7 +226,7 @@ async def sign_in_with_password(body: SignIn, request: Request):
     if not auth.oidc_enabled():
         raise HTTPException(404, 'signing in with a password is not used here')
     email = body.email.strip()
-    account = f'account:{email.lower()}'
+    account = _account_key(email)
     keys = [account, f'address:{_client_address(request)}']
     conn = store.connect(config.DB_PATH)
     try:

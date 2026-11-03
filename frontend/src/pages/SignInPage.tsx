@@ -48,8 +48,9 @@ export function SignInPage() {
         <p>Forgot your password? Ask an admin for a new one.</p>
       </>
     }>
-      <AccountField label="Email" data-testid="sign-in-email" type="email" required autoFocus
-                    autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
+      <AccountField label="Email or username" data-testid="sign-in-email" required autoFocus
+                    autoComplete="username" autoCapitalize="none" spellCheck={false}
+                    value={email} onChange={(e) => setEmail(e.target.value)} />
       <AccountField label="Password" data-testid="sign-in-password" type="password" required
                     autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       <AccountError message={error} />

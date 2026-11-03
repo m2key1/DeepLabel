@@ -77,4 +77,12 @@ test.describe('Scenario: signing in on DeepLabel\'s own page', () => {
     await expect(page.getByTestId('sign-in-form')).toBeVisible()
     expect(await signedInAs(page)).toBeNull()
   })
+
+  test('a username signs in as well as an email', async ({ page }) => {
+    await page.goto(`${site}/sign-in`)
+
+    expect(await submit(page, 'carla', 'hazel comet ladder brine')).toBe(200)
+
+    await expect.poll(() => signedInAs(page)).toBe('carla')
+  })
 })

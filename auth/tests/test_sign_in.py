@@ -150,3 +150,20 @@ class TestDevBypass:
 
     def test_there_is_no_password_sign_in(self, dev):
         assert dev.post('/api/sign-in', json={'email': 'a@b.c', 'password': 'x'}).status_code == 404
+
+
+class TestUsernames:
+    @pytest.fixture
+    def bo(self, provider):
+        provider.add('bo@example.org', 'bos-password', username='bo')
+        return provider
+
+    def test_the_username_signs_in_as_well_as_the_email(self, bo, client):
+        assert attempt(client, 'bos-password', email='bo').status_code == 200
+        assert client.get('/api/me').json()['user'] == 'bo'
+
+    def test_wrong_passwords_count_against_the_account_however_it_was_named(self, bo, client):
+        for name in ('bo', 'BO', 'bo@example.org', 'Bo@Example.org', 'bo'):
+            assert attempt(client, 'not-it', email=name).status_code == 400
+
+        assert attempt(client, 'bos-password', email='bo@example.org').status_code == 429

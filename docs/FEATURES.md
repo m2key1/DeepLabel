@@ -499,7 +499,7 @@ polygons) and *line tracing* (boundary lines, open or closed).
 
 ## Accounts and permissions
 
-People sign in on DeepLabel's own page with their email and password. The accounts live
+People sign in on DeepLabel's own page with their email or username and their password. The accounts live
 in Authentik, which nobody has to see or visit.
 
 - A wrong password says "Wrong email or password." After five in a row the account has to
