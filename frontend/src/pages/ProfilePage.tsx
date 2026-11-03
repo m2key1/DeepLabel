@@ -119,8 +119,8 @@ function PresenceState() {
 }
 
 async function logOut() {
-  await logout().catch(() => undefined)
-  window.location.href = '/api/login'
+  const done = await logout().catch(() => null)
+  window.location.href = done?.redirect ?? '/api/login'
 }
 
 // The settings read in groups by what they are about, under the profile itself.

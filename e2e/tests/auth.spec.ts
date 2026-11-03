@@ -13,13 +13,21 @@ test.describe('Scenario: signing in and out', () => {
     await expect(page.getByRole('link', { name: 'Admin' })).toBeVisible()
   })
 
-  test('logging out cycles the session and signs back in cleanly', async ({ page }) => {
+  test('logging out ends the session and, without a sign-in provider, signs back in cleanly', async ({ page, playwright }) => {
     await page.goto('/')
-    const before = (await page.context().cookies()).find((c) => c.name === 'sid')
     await page.getByTestId('user-menu').click()
+    const before = (await page.context().cookies()).find((c) => c.name === 'sid')
+    expect(before).toBeDefined()
+    // The browser leaves at once, so the answer is read on its way through.
+    let loggedOut: unknown = null
+    await page.route('**/api/logout', async (route) => {
+      const response = await route.fetch()
+      loggedOut = await response.json()
+      await route.fulfill({ response })
+    })
     await page.getByRole('button', { name: 'Log out' }).click()
-    // The logout/login navigation chain lands back on '/' with a fresh session;
-    // poll for the new cookie rather than racing the redirects.
+    // With a provider this is its end-session address; the dev bypass has none to end.
+    await expect.poll(() => loggedOut).toEqual({ ok: true, redirect: '/api/login' })
     await expect
       .poll(async () => {
         const sid = (await page.context().cookies()).find((c) => c.name === 'sid')?.value
@@ -27,5 +35,10 @@ test.describe('Scenario: signing in and out', () => {
       })
       .not.toBeNull()
     await expect(page.getByRole('link', { name: 'DeepLabel', exact: true })).toBeVisible()
+
+    const oldSession = await playwright.request.newContext({
+      baseURL: page.url(), extraHTTPHeaders: { Cookie: `sid=${before!.value}` } })
+    expect((await oldSession.get('/api/me', { maxRedirects: 0 })).status()).toBe(401)
+    await oldSession.dispose()
   })
 })

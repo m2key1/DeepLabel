@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT NOT NULL
+    expires_at TEXT NOT NULL,
+    id_token TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 -- Long-lived credentials for scripts, which have no cookie to send. Only the hash is
@@ -229,6 +230,9 @@ def connect(db_path: Path) -> sqlite3.Connection:
         # file on disk and versions the URL, so a new picture is a new address and nothing
         # has to ask a cache to forget the old one.
         conn.execute("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT ''")
+    if 'id_token' not in {r[1] for r in conn.execute('PRAGMA table_info(sessions)')}:
+        # The provider's ID token from sign-in, which log out hands back to end its session.
+        conn.execute('ALTER TABLE sessions ADD COLUMN id_token TEXT')
     if conn.execute('PRAGMA user_version').fetchone()[0] < TRAINING_OVERRIDES_MOVED:
         _move_training_overrides_to_columns(conn)
         conn.execute(f'PRAGMA user_version = {TRAINING_OVERRIDES_MOVED}')
@@ -291,9 +295,10 @@ def upsert_user(conn: sqlite3.Connection, subject: str, username: str, role: str
     return conn.execute('SELECT * FROM users WHERE subject = ?', (subject,)).fetchone()
 
 
-def create_session(conn: sqlite3.Connection, user_id: int, token: str, expires_at: str):
-    conn.execute('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)',
-                 (token, user_id, expires_at))
+def create_session(conn: sqlite3.Connection, user_id: int, token: str, expires_at: str,
+                   id_token: str | None = None):
+    conn.execute('INSERT INTO sessions (token, user_id, expires_at, id_token) VALUES (?, ?, ?, ?)',
+                 (token, user_id, expires_at, id_token))
     conn.execute("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", (user_id,))
     conn.commit()
 
@@ -325,6 +330,11 @@ def seen_is_stale(last_seen_at: str | None) -> bool:
 def touch_seen(conn: sqlite3.Connection, user_id: int):
     conn.execute("UPDATE users SET last_seen_at = datetime('now') WHERE id = ?", (user_id,))
     conn.commit()
+
+
+def session_id_token(conn: sqlite3.Connection, token: str | None) -> str | None:
+    row = conn.execute('SELECT id_token FROM sessions WHERE token = ?', (token,)).fetchone() if token else None
+    return row[0] if row else None
 
 
 def delete_session(conn: sqlite3.Connection, token: str | None):

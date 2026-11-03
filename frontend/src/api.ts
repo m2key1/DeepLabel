@@ -2685,7 +2685,9 @@ export function getMe(): Promise<{ id: number; user: string; role: Role; capabil
   return request('/api/me')
 }
 
-export function logout(): Promise<{ ok: boolean }> {
+/** `redirect` is where the browser goes next: through the sign-in provider's own logout
+ *  when there is one, so its session ends too. */
+export function logout(): Promise<{ ok: boolean; redirect: string }> {
   return request('/api/logout', { method: 'POST' })
 }
 

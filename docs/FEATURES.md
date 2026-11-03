@@ -520,7 +520,8 @@ Sign-in is handled by Authentik.
 - Click your avatar on your profile to upload and crop a picture.
 - Your settings are tabs on your own profile, grouped as Editing, Together and Connections:
   presence, which overlays a page opens with, keyboard shortcuts, character keyboard, API
-  tokens and language models. Log out sits at the foot of that list.
+  tokens and language models. Log out sits at the foot of that list; it
+  ends the Authentik session too, so the next sign-in asks for the password.
 - The theme (Auto, Light, Dark) is the button in the top bar, on every page.
 - Settings are stored with your account and follow you to every device.
 - Every page except the two editors and the transcript, which fill the window, ends with a

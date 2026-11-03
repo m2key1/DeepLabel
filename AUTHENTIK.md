@@ -41,6 +41,13 @@ In the admin UI (`http://<host>:9000`, log in as `akadmin`):
    - Subject mode: **based on the user's username** - the app stores this as
      the stable user id, so keep it consistent
    - Signing key: authentik self-signed certificate
+   - Advanced flow settings → Invalidation flow: **default-invalidation-flow**.
+     Log out in DeepLabel sends the browser to Authentik's end-session address;
+     the default `default-provider-invalidation-flow` ends only the app's session,
+     so Authentik would sign the person straight back in. This flow ends the
+     Authentik session too, and the next sign-in asks for the password. On an
+     existing deployment, change it on the provider (*Edit → Advanced flow
+     settings*).
 2. *Applications → Applications → Create*: name `DeepLabel`, slug
    `deeplabel`, pick the provider.
 3. Copy client ID and secret into `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`;

@@ -1,7 +1,7 @@
 import json
 import re
 from contextlib import asynccontextmanager
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -102,7 +102,7 @@ require_admin_session = require_role('admin', identify=session_user)
 
 
 def _establish_session(subject: str, username: str, email: str = '',
-                       display_name: str = '') -> RedirectResponse:
+                       display_name: str = '', id_token: str | None = None) -> RedirectResponse:
     conn = store.connect(config.DB_PATH)
     try:
         role = 'admin' if subject and subject == config.INITIAL_ADMIN_SUBJECT else None
@@ -110,7 +110,7 @@ def _establish_session(subject: str, username: str, email: str = '',
             role = 'admin'
         user = store.upsert_user(conn, subject, username, role, email=email, display_name=display_name)
         token = auth.new_token()
-        store.create_session(conn, user['id'], token, auth.session_expiry())
+        store.create_session(conn, user['id'], token, auth.session_expiry(), id_token=id_token)
     finally:
         conn.close()
     resp = RedirectResponse('/', status_code=303)
@@ -150,17 +150,38 @@ async def auth_callback(request: Request):
         raise HTTPException(400, 'no subject in token')
     username = claims.get('preferred_username') or claims.get('email') or claims.get('name') or subject
     return _establish_session(subject, username, email=claims.get('email') or '',
-                              display_name=claims.get('name') or '')
+                              display_name=claims.get('name') or '', id_token=token.get('id_token'))
+
+
+async def _after_logout(id_token: str | None) -> str:
+    """Where the browser goes once DeepLabel's session is gone: through the provider's
+    end-session address, so its session ends too and the next sign-in asks for the
+    password, then back to sign-in. Without a provider to end, straight to sign-in."""
+    client = auth.oauth()
+    if client is None:
+        return '/api/login'
+    try:
+        end_session = (await client.load_server_metadata()).get('end_session_endpoint')
+    except Exception:
+        end_session = None
+    if not end_session:
+        return '/api/login'
+    callback = urlsplit(config.OIDC_REDIRECT_URI)
+    params = {'id_token_hint': id_token} if id_token else {}
+    params['post_logout_redirect_uri'] = f'{callback.scheme}://{callback.netloc}/api/login'
+    return f"{end_session}{'&' if '?' in end_session else '?'}{urlencode(params)}"
 
 
 @app.post('/api/logout')
-def logout(request: Request):
+async def logout(request: Request):
+    token = request.cookies.get(config.SESSION_COOKIE)
     conn = store.connect(config.DB_PATH)
     try:
-        store.delete_session(conn, request.cookies.get(config.SESSION_COOKIE))
+        id_token = store.session_id_token(conn, token)
+        store.delete_session(conn, token)
     finally:
         conn.close()
-    resp = JSONResponse({'ok': True})
+    resp = JSONResponse({'ok': True, 'redirect': await _after_logout(id_token)})
     resp.delete_cookie(config.SESSION_COOKIE, path='/')
     return resp
 
