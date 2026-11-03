@@ -1974,7 +1974,7 @@ export function TileEditorPage() {
       ['Delete', 'delete the picked dots, else the selection'], ['1-9', 'pick a class, or reclass the selection'],
     ] as [string, string][] },
     { title: 'View', rows: [
-      ['Ctrl+wheel', 'zoom'], ['Shift+wheel', 'size the eraser\'s brush'],
+      ['Ctrl+wheel', 'zoom'], ['Shift+wheel', 'scroll left and right; with the eraser, size its brush'],
       ['Space+drag · Alt-drag · middle-drag', 'pan'], ['← · →', 'previous · next tile'],
       ['Ctrl+Z · Ctrl+Shift+Z', 'undo · redo'],
       [`${key(hotkeys.prevPage)} · ${key(hotkeys.nextPage)}`, 'previous · next tile'], ['?', 'this sheet'],
@@ -2782,7 +2782,7 @@ export function TileEditorPage() {
           }}
           sentence={sentence}
           notice={notice}
-          keys="Ctrl+Z undo · Ctrl+Shift+Z redo · Alt/middle-drag pans · Ctrl+wheel zooms · Shift+wheel sizes the eraser"
+          keys="Ctrl+Z undo · Ctrl+Shift+Z redo · Alt/middle-drag pans · Ctrl+wheel zooms · Shift+wheel scrolls left/right"
           onShortcuts={() => setSheetOpen(true)}
         />
       }

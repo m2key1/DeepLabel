@@ -3696,7 +3696,7 @@ export function PageViewerPage() {
     ] as [string, string][] },
     { title: 'View', rows: [
       ['hand', 'drag to move the page · Alt-drag anywhere'], ['Ctrl+wheel', 'zoom'],
-      ['Shift+wheel', 'size the eraser\'s brush'],
+      ['Shift+wheel', 'scroll left and right; with the eraser, size its brush'],
       ['Ctrl+Z · Ctrl+Shift+Z', 'undo · redo'], [comboLabel(hk.edit), 'edit mode'],
       [`${comboLabel(hk.prevPage)} · ${comboLabel(hk.nextPage)}`, 'previous · next page'],
       [`${comboLabel(hk.lineUp)} · ${comboLabel(hk.lineDown)}`, 'previous · next line'],
@@ -4262,7 +4262,7 @@ export function PageViewerPage() {
           }}
           sentence={sentence}
           notice={erasedNotice}
-          keys="Ctrl+Z undo · Ctrl+Shift+Z redo · Alt-drag pans · Ctrl+wheel zooms · Shift+wheel sizes the eraser"
+          keys="Ctrl+Z undo · Ctrl+Shift+Z redo · Alt-drag pans · Ctrl+wheel zooms · Shift+wheel scrolls left/right"
           onShortcuts={() => setSheetOpen(true)}
           provenance={page?.provenance && <ModelProvenance provenance={page.provenance} />}
         />

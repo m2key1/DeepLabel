@@ -241,6 +241,33 @@ test.describe('Scenario: reading a processed page', () => {
     expect(await under(at.x)).toBeCloseTo(0.35, 2)
   })
 
+  test('shift+wheel scrolls the scan left and right, plain wheel top to bottom', async ({ page }) => {
+    const { jobId, pageIds } = await seedViewer(1)
+    await openViewer(page, jobId, pageIds[0])
+    const pane = page.getByTestId('overlay-pane')
+    // A mouse wheel's notch as the browser hands it over: on deltaY, with Shift held
+    // where the browser did not turn it sideways itself.
+    const wheel = (init: { deltaY: number; ctrlKey?: boolean; shiftKey?: boolean }) => pane.evaluate((el, init) => {
+      const box = el.getBoundingClientRect()
+      el.dispatchEvent(new WheelEvent('wheel', {
+        clientX: box.left + box.width / 2, clientY: box.top + box.height / 2,
+        bubbles: true, cancelable: true, ...init,
+      }))
+    }, init)
+    for (let i = 0; i < 6; i++) await wheel({ deltaY: -NOTCH, ctrlKey: true })
+    await settled(() => scanZoom(page), 2 ** (6 * STEP))
+
+    const before = await scanRect(page)
+    await wheel({ deltaY: 100, shiftKey: true })
+    await expect.poll(async () => Math.round((await scanRect(page)).left - before.left)).toBe(-100)
+    expect(Math.round((await scanRect(page)).top - before.top)).toBe(0)
+
+    const sideways = await scanRect(page)
+    await wheel({ deltaY: 100 })
+    await expect.poll(async () => Math.round((await scanRect(page)).top - sideways.top)).toBe(-100)
+    expect(Math.round((await scanRect(page)).left - sideways.left)).toBe(0)
+  })
+
   test('a wheel that reports a whole gesture at once cannot teleport the scan',
     async ({ page }) => {
       const { jobId, pageIds } = await seedViewer(1)

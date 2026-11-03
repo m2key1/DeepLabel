@@ -233,7 +233,8 @@ DeepLabel puts the lines of each page in reading order and keeps it up to date a
 The page viewer shows a scan with its layout boxes and lines, and the recognised text
 beside it.
 
-- Zoom with Ctrl and the mouse wheel or a trackpad pinch; scroll with the wheel; pan with
+- Zoom with Ctrl and the mouse wheel or a trackpad pinch; scroll with the wheel, left and right
+  with Shift and the wheel (with the eraser in hand it sizes the brush instead); pan with
   Alt-drag or middle-drag. On touch screens, pinch to zoom and drag to pan. Double-click
   fits the page to the pane width.
 - The line under the pointer is magnified above the text, showing exactly the crop the OCR

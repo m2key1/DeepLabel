@@ -498,7 +498,7 @@ export function useImageSurface(
       p.touched = true
       // A pinch on a trackpad arrives as a wheel with ctrl held, which is also how the
       // page has always been zoomed with a mouse. Everything else scrolls the scan,
-      // including the sideways axis a trackpad sends and a wheel does not.
+      // including the sideways axis a trackpad sends.
       if (e.ctrlKey || e.metaKey) {
         const scale = WHEEL_SCALE[e.deltaMode] ?? WHEEL_SCALE[0]
         const step = Math.max(-MAX_STEP, Math.min(MAX_STEP, -e.deltaY * scale))
@@ -506,7 +506,10 @@ export function useImageSurface(
       } else {
         const page = pane.getBoundingClientRect().height
         const unit = e.deltaMode === 1 ? LINE_PX : e.deltaMode === 2 ? page : 1
-        panBy(p, e.deltaX * unit, e.deltaY * unit)
+        // Shift turns a mouse wheel sideways. Some browsers already send it that way;
+        // the rest still say deltaY.
+        const sideways = e.shiftKey && !e.deltaX
+        panBy(p, (sideways ? e.deltaY : e.deltaX) * unit, sideways ? 0 : e.deltaY * unit)
       }
       mirror(p)
       publishZoom(p)

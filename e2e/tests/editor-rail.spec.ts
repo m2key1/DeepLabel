@@ -5,7 +5,7 @@ import {
   seedDistinctPagesJob, seedLlmConnection, uniqueName,
 } from '../helpers/api'
 import { startLlmRead } from '../helpers/llm'
-import { LANDSCAPE, center, clickAt, dragAt, enterEditMode, openViewer } from '../helpers/viewer'
+import { LANDSCAPE, center, clickAt, dragAt, enterEditMode, openViewer, scanRect } from '../helpers/viewer'
 import type { NormPoint } from '../helpers/viewer'
 
 const DEV = identity('dev', 'admin')
@@ -61,6 +61,39 @@ const pill = (page: Page, name: string) => page.locator(`[data-testid="pen-pill"
 // A point inside the Paragraph box but in the gap between its line polygons, so a click
 // selects the element itself rather than a line.
 const PARAGRAPH_GAP: NormPoint = [0.5, 0.42]
+
+test.describe('Scenario: shift and the wheel', () => {
+  test('with the eraser in hand shift+wheel sizes its brush and leaves the scan where it is',
+       async ({ page }) => {
+    await seedEditor(page)
+    await eraserAt(page, 20)
+    const pane = page.getByTestId('overlay-pane')
+    const notch = (deltaY: number, held: 'shiftKey' | 'ctrlKey' = 'shiftKey') => pane.evaluate((el, { deltaY, held }) => {
+      const box = el.getBoundingClientRect()
+      el.dispatchEvent(new WheelEvent('wheel', {
+        deltaY, [held]: true, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2,
+        bubbles: true, cancelable: true,
+      }))
+    }, { deltaY, held })
+    // Zoomed in, so there is room to scroll the scan sideways.
+    for (let i = 0; i < 6; i++) await notch(-120, 'ctrlKey')
+    await expect.poll(async () => (await scanRect(page)).width).toBeGreaterThan((await pane.boundingBox())!.width * 1.5)
+    const before = await scanRect(page)
+
+    await notch(-120)
+    await expect(page.getByTestId('brush-radius')).not.toHaveValue('20')
+    const grown = Number(await page.getByTestId('brush-radius').inputValue())
+    expect(grown).toBeGreaterThan(20)
+    expect(await scanRect(page)).toEqual(before)
+
+    // Any other tool: the same notch scrolls the scan instead and keeps the brush size.
+    await page.getByTestId('tool-select').click()
+    await notch(120)
+    await expect.poll(async () => Math.round((await scanRect(page)).left - before.left)).not.toBe(0)
+    await page.getByTestId('tool-erase').click()
+    await expect(page.getByTestId('brush-radius')).toHaveValue(String(grown))
+  })
+})
 
 test.describe('Scenario: the eraser and what somebody has read', () => {
   // README: the eraser "rubs out the corners under it", and a line somebody has read is
