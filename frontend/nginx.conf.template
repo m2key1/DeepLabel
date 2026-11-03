@@ -41,7 +41,12 @@ server {
 
     # Route auth endpoints directly to the auth service
     location = /api/login         { proxy_set_header Host $host; proxy_pass $auth; }
-    location = /api/auth/callback { proxy_set_header Host $host; proxy_pass $auth; }
+    # Signing in, signing up and setting a password from a link. X-Real-IP is the address
+    # for the auth service's throttle, set here from the connection nginx accepted so a
+    # browser cannot claim another.
+    location ^~ /api/sign-in      { proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_pass $auth; }
+    location = /api/sign-up       { proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_pass $auth; }
+    location = /api/set-password  { proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_pass $auth; }
     location = /api/logout        { proxy_set_header Host $host; proxy_pass $auth; }
     location = /api/me            { proxy_set_header Host $host; proxy_pass $auth; }
     location ^~ /api/users        { proxy_set_header Host $host; proxy_pass $auth; }

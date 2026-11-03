@@ -8,8 +8,6 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
-    "authlib>=1.7.2",
-    "itsdangerous>=2.2.0",
     "httpx>=0.28.1",
     "python-dotenv>=1.2.2",
     # Uploaded pictures are decoded and re-encoded rather than served as they arrive,
@@ -19,6 +17,7 @@ dependencies = [
     # FastAPI parses a multipart upload through this; without it the import of any
     # route taking an UploadFile fails, which takes the whole service with it.
     "python-multipart>=0.0.20",
+    "zxcvbn==4.5.0",
 ]
 
 [dependency-groups]

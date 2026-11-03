@@ -6,6 +6,7 @@ import { useCrumb } from '../components/NavBar'
 import { Button } from '../components/ui/Button'
 import { AdminTokens } from '../components/users/AdminTokens'
 import { InvitePerson } from '../components/users/InvitePerson'
+import { PendingApprovals } from '../components/users/PendingApprovals'
 import { RightsTable } from '../components/users/RightsTable'
 import { Tabs, panelId, tabId } from '../components/ui/Tabs'
 import { UserDetail } from '../components/users/UserDetail'
@@ -154,12 +155,13 @@ export function AdminPage() {
   return (
     <div className={pageShell}>
       <PageHeader title="Admin">
-        Accounts live in Authentik. Here you set what each person may do; click a name for
-        their role, cluster account, sessions and history.
+        Here you let people in and set what each of them may do; click a name for their
+        role, cluster account, sessions and history.
       </PageHeader>
       {error && <p className="mb-3 text-sm text-danger">{error}</p>}
       <Tabs label="Admin" className="mb-4" active={tab} onSelect={setTab}
-            items={[{ id: 'people', label: `People${users ? ` ${users.length}` : ''}` }, { id: 'tokens', label: 'API tokens' }]} />
+            items={[{ id: 'people', label: `People${users ? ` ${users.filter((u) => !u.pending).length}` : ''}` },
+                    { id: 'tokens', label: 'API tokens' }]} />
       <datalist id={ACCOUNT_LIST_ID}>
         {accounts.map((a) => (
           <option key={a} value={a} />
@@ -167,13 +169,14 @@ export function AdminPage() {
       </datalist>
       {tab === 'people' && (
         <div role="tabpanel" id={panelId('people')} aria-labelledby={tabId('people')}>
+          {users && <PendingApprovals users={users.filter((u) => u.pending)} onDecided={replace} onError={onError} />}
           {invitations && <InvitePerson />}
           {users && users.length === 0 && (
             <EmptyState className="mt-3">No accounts yet. One appears the first time somebody signs in.</EmptyState>
           )}
           {users && users.length > 0 && (
             <RightsTable
-              users={users}
+              users={users.filter((u) => !u.pending)}
               capabilities={capabilities}
               roles={roles}
               myId={myId}
@@ -183,7 +186,7 @@ export function AdminPage() {
               detail={(u) => (
                 <>
                   <AccountControls user={u} self={u.id === myId} onPatch={(body) => apply(u.id, body)} />
-                  <UserDetail user={u} self={u.id === myId} onChanged={replace} onError={onError} />
+                  <UserDetail user={u} self={u.id === myId} canReset={invitations} onChanged={replace} onError={onError} />
                 </>
               )}
             />

@@ -499,8 +499,16 @@ polygons) and *line tracing* (boundary lines, open or closed).
 
 ## Accounts and permissions
 
-Sign-in is handled by Authentik.
+People sign in on DeepLabel's own page with their email and password. The accounts live
+in Authentik, which nobody has to see or visit.
 
+- A wrong password says "Wrong email or password." After five in a row the account has to
+  wait a minute, doubling with every further miss up to 15 minutes; one address gets
+  twenty before it waits. A forgotten password goes through an admin.
+- Where sign-up is switched on, the sign-in page offers **Create an account**. A new
+  account can sign in at once but only sees a page saying it waits for an admin; it opens
+  DeepLabel by itself once approved. So does anyone signing in for the first time who was
+  not invited.
 - Each account has a role - admin, member or viewer - which sets its permissions:
   re-running phases, discarding checked work, deleting datasets, managing models and
   training. Admins can grant or remove single permissions per person on the **Admin** page.
@@ -510,8 +518,14 @@ Sign-in is handled by Authentik.
   for one person; click a dot to make or lift one. Click a name for their role, cluster
   account, sessions, what they can reach and edited, and the history of changes to the
   account. API tokens have their own tab.
-- Admins can invite people by email: the app creates the account and a one-time link to
-  set a password, which the admin sends. See [AUTHENTIK.md](../AUTHENTIK.md).
+- People waiting for approval head the Admin page, and a count beside **Admin** in the top
+  bar says someone is waiting. **Approve** lets them in with the role picked there,
+  **Reject** switches the account off.
+- Admins can invite people by email with a role: the app creates the account and gives a
+  one-time link, which the admin sends. Opening it sets a password on DeepLabel's own page
+  and signs the person in, without waiting for approval. **Reset password** in a person's
+  details gives the same kind of link for a forgotten password. Links work once, for 7
+  days, and a new one cancels the last. See [AUTHENTIK.md](../AUTHENTIK.md).
 - Admins can see and revoke every API token.
 
 ## Profile and settings
@@ -520,10 +534,11 @@ Sign-in is handled by Authentik.
   written summary of their work, work statistics (lines corrected and checked, pages signed
   off, trainings, models, best CER), a year of activity and recent datasets.
 - Click your avatar on your profile to upload and crop a picture.
-- Your settings are tabs on your own profile, grouped as Editing, Together and Connections:
-  presence, which overlays a page opens with, keyboard shortcuts, character keyboard, API
-  tokens and language models. Log out sits at the foot of that list; it
-  ends the Authentik session too, so the next sign-in asks for the password.
+- Your settings are tabs on your own profile, grouped as You, Editing, Together and
+  Connections: your password, presence, which overlays a page opens with, keyboard
+  shortcuts, character keyboard, API tokens and language models. Changing your password
+  signs out every other browser you are signed in on. Log out sits at the foot of that list and brings you back
+  to the sign-in page.
 - The theme (Auto, Light, Dark) is the button in the top bar, on every page.
 - Settings are stored with your account and follow you to every device.
 - Every page except the two editors and the transcript, which fill the window, ends with a

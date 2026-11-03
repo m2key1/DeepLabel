@@ -747,6 +747,8 @@ export interface AppUser {
   display_name: string
   role: Role
   active: number
+  /** Signed up and waiting for an admin to let them in. */
+  pending: number
   /** Training is granted per person and per target; admins always have both. */
   train_local: number
   train_cluster: number
@@ -921,7 +923,7 @@ async function failed<T>(res: Response, what: string): Promise<T> {
   // Not authenticated: bounce to the login handshake and stall the caller while
   // the page navigates away (never resolve, so no error flashes first).
   if (res.status === 401) {
-    window.location.href = '/api/login'
+    window.location.href = `/api/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`
     return new Promise<T>(() => undefined)
   }
   const body = await res.text()
@@ -2681,12 +2683,55 @@ export function downloadMaskSet(jobId: string, fused = false): Promise<void> {
                       fused ? 'full-maps.zip' : 'masks.zip')
 }
 
-export function getMe(): Promise<{ id: number; user: string; role: Role; capabilities: string[] }> {
+export interface Me {
+  id: number
+  user: string
+  role: Role
+  capabilities: string[]
+  /** Signed up and waiting for an admin: such an account sees only the waiting page. */
+  pending: boolean
+  email: string
+  name: string
+  /** Whether this deployment lets a person set their own password here. */
+  password_change: boolean
+}
+
+export function getMe(): Promise<Me> {
   return request('/api/me')
 }
 
-/** `redirect` is where the browser goes next: through the sign-in provider's own logout
- *  when there is one, so its session ends too. */
+/** Signs in with a password on DeepLabel's own page. `next` is the page to go back to; the
+ *  answer says where that is once the auth service has checked it is on this site. */
+export function signIn(email: string, password: string, next: string): Promise<{ next: string }> {
+  return request('/api/sign-in', json('POST', { email, password, next }))
+}
+
+export function getSignInOptions(): Promise<{ sign_up: boolean }> {
+  return request('/api/sign-in/options')
+}
+
+/** A new account, signed in at once and waiting for an admin's approval. */
+export function signUp(name: string, email: string, password: string): Promise<{ next: string }> {
+  return request('/api/sign-up', json('POST', { name, email, password }))
+}
+
+/** Who a one-time password link is for; it fails once the link is spent or expired. */
+export function getPasswordLink(token: string): Promise<{ email: string; purpose: 'invite' | 'reset' }> {
+  return request(`/api/set-password?token=${encodeURIComponent(token)}`)
+}
+
+/** Sets the password a link is for and signs its owner in. */
+export function setPasswordWithLink(token: string, password: string): Promise<{ next: string }> {
+  return request('/api/set-password', json('POST', { token, password }))
+}
+
+/** A new password for the person signed in; their other sessions end. */
+export function changeMyPassword(password: string): Promise<{ ended_sessions: number }> {
+  return request('/api/users/me/password', json('POST', { password }))
+}
+
+/** `redirect` is where the browser goes next: the sign-in page, or straight back in under
+ *  the dev bypass. */
 export function logout(): Promise<{ ok: boolean; redirect: string }> {
   return request('/api/logout', { method: 'POST' })
 }
@@ -2698,15 +2743,37 @@ export function getUsers(): Promise<{
   return request('/api/users')
 }
 
-export interface Invitation {
+/** A one-time link to DeepLabel's set-password page, as a path on this site. */
+export interface PasswordLink {
   link: string
-  /** False when the email already had an account: the link then resets its password. */
-  created: boolean
   valid_days: number
 }
 
-export function inviteUser(email: string, name: string): Promise<Invitation> {
-  return request('/api/users/invitations', json('POST', { email, name }))
+export interface Invitation extends PasswordLink {
+  /** True when the account had to be made first. */
+  created: boolean
+  /** True when DeepLabel already knows this person: the link then resets their password. */
+  known: boolean
+}
+
+export function inviteUser(email: string, name: string, role: Role): Promise<Invitation> {
+  return request('/api/users/invitations', json('POST', { email, name, role }))
+}
+
+export function makePasswordLink(userId: number): Promise<PasswordLink> {
+  return request(`/api/users/${userId}/password-link`, json('POST', {}))
+}
+
+export function getPendingCount(): Promise<{ count: number }> {
+  return request('/api/users/pending')
+}
+
+export function approveUser(userId: number, role: Role): Promise<AppUser> {
+  return request(`/api/users/${userId}/approve`, json('POST', { role }))
+}
+
+export function rejectUser(userId: number): Promise<AppUser> {
+  return request(`/api/users/${userId}/reject`, json('POST', {}))
 }
 
 export function patchUser(

@@ -1,13 +1,13 @@
 import json
 import re
 from contextlib import asynccontextmanager
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
-from app import auth, authentik, avatars, config, store
+from app import auth, authentik, avatars, config, sign_in, store
 
 
 @asynccontextmanager
@@ -18,12 +18,6 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title='deeplabel-auth', lifespan=lifespan)
-
-if auth.oidc_enabled():
-    from starlette.middleware.sessions import SessionMiddleware
-
-    app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET, same_site='lax',
-                       https_only=config.SESSION_COOKIE_SECURE, session_cookie='oidc_handshake')
 
 
 def _session_user(request: Request):
@@ -66,9 +60,9 @@ def _caller(request: Request):
 READ_METHODS = {'GET', 'HEAD', 'OPTIONS'}
 
 
-def current_user(request: Request) -> dict:
-    """A session or an API token, which acts as its owner. A read-only token is refused
-    any write, the same way the backend refuses it."""
+def present_user(request: Request) -> dict:
+    """Whoever is signed in, let in yet or not. A read-only token is refused any write,
+    the same way the backend refuses it."""
     found = _caller(request)
     if found is None:
         raise HTTPException(401, 'not authenticated')
@@ -76,6 +70,16 @@ def current_user(request: Request) -> dict:
     if readonly and request.method not in READ_METHODS:
         raise HTTPException(403, 'read-only API token')
     return dict(user)
+
+
+WAITING = 'this account is waiting for an admin to approve it'
+
+
+def current_user(user: dict = Depends(present_user)) -> dict:
+    """Someone signed in and let in: a pending account may only say who it is."""
+    if user['pending']:
+        raise HTTPException(403, WAITING)
+    return user
 
 
 def session_user(request: Request) -> dict:
@@ -87,6 +91,8 @@ def session_user(request: Request) -> dict:
         if _bearer_user(request) is not None:
             raise HTTPException(403, 'needs a signed-in session, not an API token')
         raise HTTPException(401, 'not authenticated')
+    if user['pending']:
+        raise HTTPException(403, WAITING)
     return dict(user)
 
 
@@ -101,95 +107,198 @@ def require_role(*roles: str, identify=current_user):
 require_admin_session = require_role('admin', identify=session_user)
 
 
-def _establish_session(subject: str, username: str, email: str = '',
-                       display_name: str = '', id_token: str | None = None) -> RedirectResponse:
+def _first_role(conn, subject: str, email: str) -> tuple[str, bool]:
+    """The role a first sign-in gets, and whether it waits for an admin first: the
+    bootstrap admin and the dev user are in at once, someone invited comes in with the
+    role they were invited with, and anyone else waits."""
+    if subject == config.INITIAL_ADMIN_SUBJECT or (config.DEV_AUTH and subject == config.DEV_USER):
+        return 'admin', False
+    invited = store.take_invitation(conn, email) if email else None
+    return (invited, False) if invited else ('viewer', True)
+
+
+def _new_session(subject: str, username: str, email: str = '', display_name: str = '') -> str:
     conn = store.connect(config.DB_PATH)
     try:
-        role = 'admin' if subject and subject == config.INITIAL_ADMIN_SUBJECT else None
-        if config.DEV_AUTH and subject == config.DEV_USER:
-            role = 'admin'
-        user = store.upsert_user(conn, subject, username, role, email=email, display_name=display_name)
+        role, pending = (None, False) if store.known_user(conn, subject) else _first_role(conn, subject, email)
+        user = store.upsert_user(conn, subject, username, role, email=email, display_name=display_name,
+                                 pending=pending)
         token = auth.new_token()
-        store.create_session(conn, user['id'], token, auth.session_expiry(), id_token=id_token)
+        store.create_session(conn, user['id'], token, auth.session_expiry())
     finally:
         conn.close()
-    resp = RedirectResponse('/', status_code=303)
+    return token
+
+
+def _with_session(resp: Response, token: str) -> Response:
     resp.set_cookie(config.SESSION_COOKIE, token, httponly=True, samesite='lax',
                     secure=config.SESSION_COOKIE_SECURE, max_age=config.SESSION_TTL_DAYS * 86400, path='/')
     return resp
 
 
+def _safe_next(path: str | None) -> str:
+    """Where to go after signing in: a path on this site, never another site."""
+    if not path or not path.startswith('/') or path.startswith('//') or path.startswith('/\\'):
+        return '/'
+    return path
+
+
 @app.get('/api/login')
-async def login(request: Request):
+def login(next: str | None = None):
+    """Where a visitor without a session is sent. The dev bypass signs them straight in;
+    otherwise they get DeepLabel's own sign-in page, and Authentik stays out of sight."""
     if config.DEV_AUTH:
-        return _establish_session(config.DEV_USER, config.DEV_USER)
-    client = auth.oauth()
-    if client is None:
+        token = _new_session(config.DEV_USER, config.DEV_USER)
+        return _with_session(RedirectResponse(_safe_next(next), status_code=303), token)
+    if not auth.oidc_enabled():
         raise HTTPException(503, 'authentication is not configured')
-    # The handshake state lives in a cookie on this host, and the provider returns to the
-    # callback host, so a login started anywhere else would come back without it.
-    callback = urlsplit(config.OIDC_REDIRECT_URI)
-    if callback.hostname and request.url.hostname != callback.hostname:
-        return RedirectResponse(f'{callback.scheme}://{callback.netloc}/api/login', status_code=307)
-    return await client.authorize_redirect(request, config.OIDC_REDIRECT_URI)
+    return RedirectResponse(f'/sign-in?{urlencode({"next": _safe_next(next)})}', status_code=303)
 
 
-@app.get('/api/auth/callback')
-async def auth_callback(request: Request):
-    from authlib.integrations.base_client.errors import OAuthError
-    client = auth.oauth()
-    if client is None:
-        raise HTTPException(503, 'authentication is not configured')
+class SignIn(BaseModel):
+    email: str
+    password: str
+    next: str = '/'
+
+
+def _client_address(request: Request) -> str:
+    # Set by the frontend's nginx from the connection it accepted; the browser cannot.
+    return request.headers.get('X-Real-IP') or (request.client.host if request.client else '')
+
+
+@app.post('/api/sign-in')
+async def sign_in_with_password(body: SignIn, request: Request):
+    """Signs in on DeepLabel's own page: the auth service runs Authentik's login flow for
+    the person and answers with a DeepLabel session. Wrong passwords are throttled per
+    account and per address, since Authentik sees every attempt come from here."""
+    if not auth.oidc_enabled():
+        raise HTTPException(404, 'signing in with a password is not used here')
+    email = body.email.strip()
+    account = f'account:{email.lower()}'
+    keys = [account, f'address:{_client_address(request)}']
+    conn = store.connect(config.DB_PATH)
     try:
-        token = await client.authorize_access_token(request)
-    except OAuthError as e:
-        raise HTTPException(403, f'login failed: {e.description or e.error}')
-    claims = token.get('userinfo') or {}
-    subject = claims.get('sub')
-    if not subject:
-        raise HTTPException(400, 'no subject in token')
+        wait = store.sign_in_wait(conn, keys)
+        if wait:
+            minutes = -(-wait // 60)
+            raise HTTPException(429, {'message': f'Too many attempts - try again in {minutes} '
+                                                 f'{"minute" if minutes == 1 else "minutes"}.',
+                                      'retry_after': wait})
+        try:
+            claims = await sign_in.sign_in(email, body.password)
+        except sign_in.WrongCredentials:
+            store.note_sign_in_failure(conn, keys)
+            raise HTTPException(400, {'message': 'Wrong email or password.'}) from None
+        except sign_in.Unavailable as why:
+            print(f'AUTH: sign-in failed on the provider side: {why}', flush=True)
+            raise HTTPException(502, {'message': 'Signing in is not possible right now. '
+                                                 'Try again in a minute, or tell an admin.'}) from None
+        store.clear_sign_in_failures(conn, account)
+    finally:
+        conn.close()
+    return _signed_in(claims, _safe_next(body.next))
+
+
+def _signed_in(claims: dict, next_page: str) -> Response:
+    """A DeepLabel session for whoever the provider named, and where to go now."""
+    subject = claims['sub']
     username = claims.get('preferred_username') or claims.get('email') or claims.get('name') or subject
-    return _establish_session(subject, username, email=claims.get('email') or '',
-                              display_name=claims.get('name') or '', id_token=token.get('id_token'))
+    token = _new_session(subject, username, email=claims.get('email') or '', display_name=claims.get('name') or '')
+    return _with_session(JSONResponse({'next': next_page}), token)
 
 
-async def _after_logout(id_token: str | None) -> str:
-    """Where the browser goes once DeepLabel's session is gone: through the provider's
-    end-session address, so its session ends too and the next sign-in asks for the
-    password, then back to sign-in. Without a provider to end, straight to sign-in."""
-    client = auth.oauth()
-    if client is None:
-        return '/api/login'
+async def _sign_in_after_setting(username: str, password: str) -> Response:
+    """Sign someone in with the password they have just set, through the same flow as
+    the sign-in page, so the session is exactly the one a sign-in would give."""
     try:
-        end_session = (await client.load_server_metadata()).get('end_session_endpoint')
-    except Exception:
-        end_session = None
-    if not end_session:
-        return '/api/login'
-    callback = urlsplit(config.OIDC_REDIRECT_URI)
-    params = {'id_token_hint': id_token} if id_token else {}
-    params['post_logout_redirect_uri'] = f'{callback.scheme}://{callback.netloc}/api/login'
-    return f"{end_session}{'&' if '?' in end_session else '?'}{urlencode(params)}"
+        claims = await sign_in.sign_in(username, password)
+    except (sign_in.WrongCredentials, sign_in.Unavailable) as why:
+        print(f'AUTH: signing in after setting a password failed: {why!r}', flush=True)
+        raise HTTPException(502, {'message': 'Your password is set, but signing you in failed. '
+                                             'Sign in on the sign-in page.'}) from None
+    return _signed_in(claims, '/')
+
+
+def _account_problem(why: Exception) -> HTTPException:
+    if isinstance(why, authentik.Refused):
+        return HTTPException(409, {'message': str(why)})
+    print(f'AUTH: Authentik call failed: {why}', flush=True)
+    return HTTPException(502, {'message': 'Authentik could not be reached. Try again in a minute, or tell an admin.'})
+
+
+def _checked_password(password: str, account: dict | None = None) -> None:
+    problems = authentik.password_problems(password, account)
+    if problems:
+        raise HTTPException(400, {'message': ' '.join(problems)})
+
+
+def _sign_up_enabled() -> bool:
+    return config.SELF_SIGN_UP and auth.oidc_enabled() and authentik.enabled()
+
+
+@app.get('/api/sign-in/options')
+def sign_in_options():
+    """What the sign-in page may offer besides signing in."""
+    return {'sign_up': _sign_up_enabled()}
+
+
+class SignUp(BaseModel):
+    name: str = ''
+    email: str
+    password: str
+
+
+@app.post('/api/sign-up')
+async def sign_up(body: SignUp, request: Request):
+    """A new account, made in Authentik and signed in at once. It waits for an admin to
+    let it in. One address may only make a few, so the form is no way to fill Authentik."""
+    if not _sign_up_enabled():
+        raise HTTPException(404, {'message': 'Accounts are made by an admin here.'})
+    email = body.email.strip().lower()
+    if not EMAIL_RE.match(email):
+        raise HTTPException(400, {'message': 'That is not an email address.'})
+    address = [f'sign-up:{_client_address(request)}']
+    conn = store.connect(config.DB_PATH)
+    try:
+        wait = store.sign_in_wait(conn, address)
+        if wait:
+            raise HTTPException(429, {'message': 'Too many new accounts from here - try again later.',
+                                      'retry_after': wait})
+        try:
+            if authentik.find_user(email=email) is not None:
+                raise HTTPException(409, {'message': 'There is already an account for this email. Sign in, '
+                                                     'or ask an admin for a new password.'})
+            _checked_password(body.password, {'username': email, 'email': email, 'name': body.name.strip()})
+            made = authentik.create_user(email, body.name.strip())
+            authentik.set_password(made['pk'], body.password)
+        except (authentik.Refused, authentik.Unavailable) as why:
+            raise _account_problem(why) from None
+        store.note_sign_in_failure(conn, address)
+    finally:
+        conn.close()
+    return await _sign_in_after_setting(made['username'], body.password)
 
 
 @app.post('/api/logout')
-async def logout(request: Request):
-    token = request.cookies.get(config.SESSION_COOKIE)
+def logout(request: Request):
+    """Ends DeepLabel's session. The browser never held one of Authentik's, so there is
+    nothing else to end; without the dev bypass it lands on the sign-in page."""
     conn = store.connect(config.DB_PATH)
     try:
-        id_token = store.session_id_token(conn, token)
-        store.delete_session(conn, token)
+        store.delete_session(conn, request.cookies.get(config.SESSION_COOKIE))
     finally:
         conn.close()
-    resp = JSONResponse({'ok': True, 'redirect': await _after_logout(id_token)})
+    resp = JSONResponse({'ok': True, 'redirect': '/api/login' if config.DEV_AUTH else '/sign-in'})
     resp.delete_cookie(config.SESSION_COOKIE, path='/')
     return resp
 
 
 @app.get('/api/me')
-def me(user: dict = Depends(current_user)):
+def me(user: dict = Depends(present_user)):
     return {'id': user['id'], 'user': user.get('username') or user['subject'],
-            'role': user['role'], 'capabilities': sorted(store.effective_caps(user))}
+            'role': user['role'], 'capabilities': sorted(store.effective_caps(user)),
+            'pending': bool(user['pending']), 'email': user['email'], 'name': user['display_name'],
+            'password_change': auth.oidc_enabled() and authentik.enabled()}
 
 
 class UserPatch(BaseModel):
@@ -220,7 +329,7 @@ def get_users(_admin=Depends(require_admin_session)):
                 # What each role allows, which the admin page shows as the line a person's
                 # exceptions break.
                 'roles': {role: sorted(caps) for role, caps in store.ROLE_CAPS.items()},
-                'invitations': authentik.invitations_enabled()}
+                'invitations': auth.oidc_enabled() and authentik.enabled()}
     finally:
         conn.close()
 
@@ -330,35 +439,213 @@ def get_user_names():
 class Invitation(BaseModel):
     email: str
     name: str = ''
+    role: str = 'viewer'
 
 
 EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+LINK_VALID_DAYS = 7
+
+
+def _require_accounts():
+    if not (auth.oidc_enabled() and authentik.enabled()):
+        raise HTTPException(503, {'message': 'Accounts cannot be managed here (no AUTHENTIK_API_TOKEN).'})
+
+
+def _password_link(conn, *, purpose: str, account: dict, created_by: str) -> dict:
+    """A one-time link to DeepLabel's own set-password page. The path only: the page that
+    shows it adds the address the admin reached DeepLabel on."""
+    token = auth.new_token()
+    store.create_password_link(conn, auth.hash_api_token(token), purpose=purpose, email=account['email'],
+                               username=account['username'], account_pk=account['pk'],
+                               created_by=created_by, valid_days=LINK_VALID_DAYS)
+    return {'link': f'/set-password?token={token}', 'valid_days': LINK_VALID_DAYS}
 
 
 @app.post('/api/users/invitations')
 def invite_user(body: Invitation, me: dict = Depends(require_admin_session)):
     """A link the person opens to set their password: a new account for an unknown email,
-    a reset for a known one. The admin sends it themselves, so no mail server is needed."""
-    if not authentik.invitations_enabled():
-        raise HTTPException(503, 'inviting is not configured (AUTHENTIK_API_TOKEN)')
-    email = body.email.strip()
+    a reset for one DeepLabel already knows. The admin sends it themselves, so no mail
+    server is needed. Whoever is invited comes in with this role, without waiting."""
+    _require_accounts()
+    email = body.email.strip().lower()
     if not EMAIL_RE.match(email):
-        raise HTTPException(400, 'not an email address')
+        raise HTTPException(400, {'message': 'That is not an email address.'})
+    if body.role not in store.ROLES:
+        raise HTTPException(400, {'message': 'No such role.'})
     try:
-        link, created = authentik.recovery_link(email, body.name.strip())
-    except authentik.Refused as e:
-        raise HTTPException(409, str(e))
-    except authentik.Unavailable as e:
-        raise HTTPException(502, str(e))
+        found = authentik.find_user(email=email)
+        account = authentik.create_user(email, body.name.strip()) if found is None else authentik.owned(found)
+    except (authentik.Refused, authentik.Unavailable) as why:
+        raise _account_problem(why) from None
     conn = store.connect(config.DB_PATH)
     try:
         known = store.get_user_by_email(conn, email)
-        if known is not None:
+        if known is None:
+            store.invite(conn, email, body.role, _actor(me))
+        else:
             store.log_user_change(conn, known['id'], _actor(me), 'password_link', '', 'issued')
+            conn.commit()
+        link = _password_link(conn, purpose='reset' if known else 'invite', account=account, created_by=_actor(me))
+    finally:
+        conn.close()
+    return {**link, 'created': found is None, 'known': known is not None}
+
+
+@app.post('/api/users/{user_id}/password-link')
+def reset_password_link(user_id: int, me: dict = Depends(require_admin_session)):
+    """A one-time link with which this person sets a new password. Their current one keeps
+    working until the link is used."""
+    _require_accounts()
+    conn = store.connect(config.DB_PATH)
+    try:
+        user = store.get_user(conn, user_id)
+        if user is None:
+            raise HTTPException(404)
+        try:
+            account = authentik.account(username=user['subject'])
+        except (authentik.Refused, authentik.Unavailable) as why:
+            raise _account_problem(why) from None
+        link = _password_link(conn, purpose='reset', account=account, created_by=_actor(me))
+        store.log_user_change(conn, user_id, _actor(me), 'password_link', '', 'issued')
+        conn.commit()
+    finally:
+        conn.close()
+    return link
+
+
+def _open_link(conn, token: str):
+    row = store.password_link(conn, auth.hash_api_token(token))
+    if row is None:
+        raise HTTPException(410, {'message': 'This link has expired or was already used. Ask an admin for a new one.'})
+    return row
+
+
+@app.get('/api/set-password')
+def password_link_info(token: str):
+    """Who a password link is for, so the page can say whose password is being set."""
+    conn = store.connect(config.DB_PATH)
+    try:
+        row = _open_link(conn, token)
+    finally:
+        conn.close()
+    return {'email': row['email'], 'purpose': row['purpose']}
+
+
+class SetPassword(BaseModel):
+    token: str
+    password: str
+
+
+@app.post('/api/set-password')
+async def set_password_with_link(body: SetPassword):
+    """Set the password a link is for, spend the link, end the person's other sessions,
+    and sign them in with it."""
+    conn = store.connect(config.DB_PATH)
+    try:
+        row = _open_link(conn, body.token)
+        try:
+            _checked_password(body.password, {'username': row['username'], 'email': row['email']})
+            authentik.set_password(row['account_pk'], body.password)
+        except (authentik.Refused, authentik.Unavailable) as why:
+            raise _account_problem(why) from None
+        store.spend_password_link(conn, row['token_hash'])
+        known = store.known_user(conn, row['username'])
+        if known is not None:
+            store.revoke_sessions(conn, known['id'])
+            store.log_user_change(conn, known['id'], LINK_ACTOR, 'password', '', 'set')
             conn.commit()
     finally:
         conn.close()
-    return {'link': link, 'created': created, 'valid_days': authentik.LINK_VALID_DAYS}
+    return await _sign_in_after_setting(row['username'], body.password)
+
+
+LINK_ACTOR = 'password link'
+
+
+class NewPassword(BaseModel):
+    password: str
+
+
+@app.post('/api/users/me/password')
+def change_my_password(body: NewPassword, request: Request, me: dict = Depends(session_user)):
+    """A new password for the person signed in. The session they are using is the proof,
+    so the old password is not asked; every other session of theirs ends."""
+    _require_accounts()
+    try:
+        account = authentik.account(username=me['subject'])
+        _checked_password(body.password, account)
+        authentik.set_password(account['pk'], body.password)
+    except (authentik.Refused, authentik.Unavailable) as why:
+        raise _account_problem(why) from None
+    conn = store.connect(config.DB_PATH)
+    try:
+        ended = store.revoke_other_sessions(conn, me['id'], request.cookies.get(config.SESSION_COOKIE))
+        store.log_user_change(conn, me['id'], _actor(me), 'password', '', 'changed')
+        conn.commit()
+    finally:
+        conn.close()
+    return {'ended_sessions': ended}
+
+
+@app.get('/api/users/pending')
+def pending_count(_admin=Depends(require_admin_session)):
+    """How many sign-ups wait for an admin, for the badge on Admin."""
+    conn = store.connect(config.DB_PATH)
+    try:
+        return {'count': store.count_pending(conn)}
+    finally:
+        conn.close()
+
+
+class Approval(BaseModel):
+    role: str = 'viewer'
+
+
+def _pending(conn, user_id: int):
+    user = store.get_user(conn, user_id)
+    if user is None:
+        raise HTTPException(404)
+    if not user['pending']:
+        raise HTTPException(409, {'message': 'This account is not waiting for approval.'})
+    return user
+
+
+@app.post('/api/users/{user_id}/approve')
+def approve(user_id: int, body: Approval, me: dict = Depends(require_admin_session)):
+    if body.role not in store.ROLES:
+        raise HTTPException(400, {'message': 'No such role.'})
+    conn = store.connect(config.DB_PATH)
+    try:
+        _pending(conn, user_id)
+        store.approve_user(conn, user_id, body.role)
+        store.log_user_change(conn, user_id, _actor(me), 'approved', 'pending', body.role)
+        conn.commit()
+        return _user_payload(store.get_user(conn, user_id))
+    finally:
+        conn.close()
+
+
+@app.post('/api/users/{user_id}/reject')
+def reject(user_id: int, me: dict = Depends(require_admin_session)):
+    """Turn a sign-up away: the account is switched off here and in Authentik, so it can
+    neither come in nor sign in again."""
+    conn = store.connect(config.DB_PATH)
+    try:
+        user = _pending(conn, user_id)
+        if authentik.enabled():
+            try:
+                authentik.set_active(authentik.account(username=user['subject'])['pk'], False)
+            except authentik.Refused:
+                pass
+            except authentik.Unavailable as why:
+                raise _account_problem(why) from None
+        store.set_user_active(conn, user_id, False)
+        conn.execute('UPDATE users SET pending = 0 WHERE id = ?', (user_id,))
+        store.log_user_change(conn, user_id, _actor(me), 'rejected', 'pending', 'disabled')
+        conn.commit()
+        return _user_payload(store.get_user(conn, user_id))
+    finally:
+        conn.close()
 
 
 @app.patch('/api/users/{user_id}')
@@ -598,6 +885,8 @@ def validate(request: Request):
     if found is None:
         return Response(status_code=401)
     user, readonly = found
+    if user['pending']:
+        return Response(status_code=403)
     username = (user['username'] or user['subject']).replace('\n', ' ').replace('\r', ' ')
     headers = {'X-Auth-User': username, 'X-Auth-Role': user['role']}
     if readonly:
@@ -632,9 +921,7 @@ def _check_auth_config():
                if not getattr(config, n)]
     if missing:
         print(f'AUTH: OIDC_ISSUER is set but {", ".join(missing)} missing - login will fail.', flush=True)
-    if config.SESSION_SECRET == 'dev-insecure-change-me':
-        print('AUTH: SESSION_SECRET is still the insecure default - set a random value in production.', flush=True)
     if not config.INITIAL_ADMIN_SUBJECT:
         print('AUTH: INITIAL_ADMIN_SUBJECT is unset - the first sign-in becomes a member and no one '
               'can manage roles. Set it to your OIDC subject to bootstrap an admin.', flush=True)
-    print(f'AUTH: OIDC login delegated to {config.OIDC_ISSUER}', flush=True)
+    print(f'AUTH: signing in through {config.OIDC_ISSUER}', flush=True)

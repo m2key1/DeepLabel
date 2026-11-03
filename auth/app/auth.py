@@ -2,31 +2,11 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from app import config, issuer_route
-
-_oauth = None
+from app import config
 
 
 def oidc_enabled() -> bool:
     return not config.DEV_AUTH and bool(config.OIDC_ISSUER)
-
-
-def oauth():
-    """The Authlib OIDC client, built lazily against the discovery document.
-    Returns None in dev-bypass mode or when OIDC is not configured."""
-    global _oauth
-    if not oidc_enabled():
-        return None
-    if _oauth is None:
-        from authlib.integrations.starlette_client import OAuth
-        _oauth = OAuth().register(
-            name='pocketid',
-            client_id=config.OIDC_CLIENT_ID,
-            client_secret=config.OIDC_CLIENT_SECRET,
-            server_metadata_url=config.OIDC_ISSUER.rstrip('/') + '/.well-known/openid-configuration',
-            client_kwargs={'scope': 'openid profile email', **issuer_route.async_transport()},
-        )
-    return _oauth
 
 
 def new_token() -> str:

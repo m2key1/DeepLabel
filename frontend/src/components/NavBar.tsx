@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { Link, Outlet, useMatch, useNavigate } from 'react-router-dom'
-import { getQueue } from '../api'
+import { getPendingCount, getQueue } from '../api'
 import type { QueueState } from '../api'
 import { useAuth } from '../auth'
 import { useCommand } from '../commands'
@@ -99,9 +99,26 @@ function ProfileLink() {
   )
 }
 
+// How often an admin's top bar asks whether anyone is waiting to be let in.
+const PENDING_EVERY_MS = 30_000
+
+/** How many sign-ups wait for an admin, for the badge on Admin; 0 for anyone else. */
+function usePendingCount(isAdmin: boolean): number {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    if (!isAdmin) return
+    const refresh = () => getPendingCount().then((r) => setCount(r.count)).catch(() => {})
+    refresh()
+    const t = setInterval(refresh, PENDING_EVERY_MS)
+    return () => clearInterval(t)
+  }, [isAdmin])
+  return count
+}
+
 export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
   const { user, isAdmin, canEdit } = useAuth()
   const [queue, setQueue] = useState<QueueState | null>(null)
+  const pending = usePendingCount(isAdmin)
   const navigate = useNavigate()
 
   // The nav is on every page, so these are the commands that work anywhere. Each is
@@ -158,8 +175,15 @@ export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
             Models
           </Link>
           {isAdmin && (
-            <Link to="/admin" className={buttonClass({ variant: 'ghost', size: 'sm' })}>
+            <Link to="/admin" className={buttonClass({ variant: 'ghost', size: 'sm' }, 'gap-1.5')}
+                  title={pending ? `${pending} waiting for approval` : undefined}>
               Admin
+              {pending > 0 && (
+                <span data-testid="admin-pending" aria-label={`${pending} waiting for approval`}
+                      className="min-w-4 rounded-full bg-accent px-1 text-center text-[10px] font-semibold leading-4 text-on-accent">
+                  {pending}
+                </span>
+              )}
             </Link>
           )}
           {canEdit && (

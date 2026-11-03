@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, type ComponentType } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import './index.css'
@@ -39,6 +39,9 @@ import { DatasetSettingsPage } from './pages/DatasetSettingsPage'
 import { TranscriptPage } from './pages/TranscriptPage'
 import { CorpusPage } from './pages/CorpusPage'
 import { NotFoundPage, RouteError } from './pages/NotFoundPage'
+import { SetPasswordPage } from './pages/SetPasswordPage'
+import { SignInPage } from './pages/SignInPage'
+import { SignUpPage } from './pages/SignUpPage'
 
 initTheme()
 
@@ -82,16 +85,22 @@ const router = createBrowserRouter([
   },
 ])
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <AuthProvider>
-      <SettingsProvider>
-        <CommandsProvider>
-          <PresenceProvider>
-            <RouterProvider router={router} />
-          </PresenceProvider>
-        </CommandsProvider>
-      </SettingsProvider>
-    </AuthProvider>
-  </StrictMode>,
+// The pages for getting in stand alone: everything else asks who is signed in first.
+const STANDALONE: Record<string, ComponentType> = {
+  '/sign-in': SignInPage, '/sign-up': SignUpPage, '/set-password': SetPasswordPage,
+}
+const Standalone = STANDALONE[window.location.pathname]
+
+const page = Standalone ? <Standalone /> : (
+  <AuthProvider>
+    <SettingsProvider>
+      <CommandsProvider>
+        <PresenceProvider>
+          <RouterProvider router={router} />
+        </PresenceProvider>
+      </CommandsProvider>
+    </SettingsProvider>
+  </AuthProvider>
 )
+
+createRoot(document.getElementById('root')!).render(<StrictMode>{page}</StrictMode>)

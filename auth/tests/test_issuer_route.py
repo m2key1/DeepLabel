@@ -7,7 +7,7 @@ import asyncio
 import httpx
 import pytest
 
-from app import auth, authentik, config, issuer_route
+from app import authentik, config, issuer_route, sign_in
 
 ISSUER = 'https://deeplabel.example.ts.net:10000/application/o/deeplabel/'
 INTERNAL = 'http://deeplabel-authentik:9000'
@@ -26,7 +26,6 @@ def routed(monkeypatch):
     monkeypatch.setattr(config, 'OIDC_INTERNAL_URL', INTERNAL)
     monkeypatch.setattr(config, 'OIDC_CLIENT_ID', 'client')
     monkeypatch.setattr(config, 'OIDC_CLIENT_SECRET', 'secret')
-    monkeypatch.setattr(auth, '_oauth', None)
     seen: list[httpx.Request] = []
 
     def answer(request: httpx.Request) -> httpx.Response:
@@ -35,36 +34,30 @@ def routed(monkeypatch):
             return httpx.Response(200, json=DISCOVERY)
         if request.url.path == '/api/v3/core/users/' and request.method == 'GET':
             return httpx.Response(200, json={'results': [{'pk': 7, 'type': 'external', 'is_superuser': False, 'is_active': True}]})
-        if request.url.path == '/api/v3/core/users/7/recovery/':
-            return httpx.Response(200, json={'link': 'https://deeplabel.example.ts.net:10000/recover/abc'})
         return httpx.Response(404)
 
     monkeypatch.setattr(issuer_route.httpx, 'AsyncHTTPTransport', lambda: httpx.MockTransport(answer))
     monkeypatch.setattr(issuer_route.httpx, 'HTTPTransport', lambda: httpx.MockTransport(answer))
     yield seen
-    auth._oauth = None
 
 
-def test_the_login_reads_the_provider_over_the_internal_address(routed):
-    client = auth.oauth()
-    metadata = asyncio.run(client.load_server_metadata())
+def test_signing_in_reaches_the_provider_over_the_internal_address(routed):
+    async def discover():
+        async with sign_in.client() as browser:
+            return (await browser.get(ISSUER + '.well-known/openid-configuration')).json()
 
-    assert metadata['token_endpoint'] == DISCOVERY['token_endpoint']
+    assert asyncio.run(discover())['token_endpoint'] == DISCOVERY['token_endpoint']
     [request] = routed
     assert str(request.url) == f'{INTERNAL}/application/o/deeplabel/.well-known/openid-configuration'
     assert request.headers['Host'] == 'deeplabel.example.ts.net:10000'
     assert request.headers['X-Forwarded-Proto'] == 'https'
 
 
-def test_an_invite_reaches_authentik_the_same_way(routed, monkeypatch):
+def test_managing_accounts_reaches_authentik_the_same_way(routed, monkeypatch):
     monkeypatch.setattr(config, 'AUTHENTIK_API_TOKEN', 'token')
-    link, created = authentik.recovery_link('ada@example.org', 'Ada')
 
-    assert (link, created) == ('https://deeplabel.example.ts.net:10000/recover/abc', False)
-    assert [str(r.url) for r in routed] == [
-        f'{INTERNAL}/api/v3/core/users/?email=ada%40example.org',
-        f'{INTERNAL}/api/v3/core/users/7/recovery/',
-    ]
+    assert authentik.find_user(email='ada@example.org')['pk'] == 7
+    assert [str(r.url) for r in routed] == [f'{INTERNAL}/api/v3/core/users/?email=ada%40example.org']
     assert {r.headers['Host'] for r in routed} == {'deeplabel.example.ts.net:10000'}
 
 

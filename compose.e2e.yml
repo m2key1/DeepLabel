@@ -105,7 +105,6 @@ services:
     environment:
       AUTH_DATA_DIR: /data
       DEV_AUTH: "true"
-      SESSION_SECRET: e2e-insecure
       SESSION_COOKIE_SECURE: "false"
     volumes:
       - e2e-auth-data:/data
@@ -127,6 +126,49 @@ services:
     ports:
       - "8090:80"
 
+  # DeepLabel's own sign-in page, for the scenarios about signing in: a second auth service
+  # that signs in through a stub Authentik (e2e/stub/authentik/server.py) and a frontend in
+  # front of it. Everything else keeps the dev bypass above. The port is picked by Docker,
+  # so stacks running side by side never collide; a scenario asks compose for it.
+  authentik:
+    build: ./backend
+    container_name: deeplabel-e2e-authentik
+    command: ["python", "/stub/authentik/server.py"]
+    volumes:
+      - ./e2e/stub:/stub:ro
+
+  auth-oidc:
+    build: ./auth
+    container_name: deeplabel-e2e-auth-oidc
+    depends_on:
+      - authentik
+    environment:
+      AUTH_DATA_DIR: /data
+      OIDC_ISSUER: http://authentik:9000/application/o/deeplabel/
+      OIDC_CLIENT_ID: e2e-client
+      OIDC_CLIENT_SECRET: e2e-client-secret
+      OIDC_REDIRECT_URI: http://deeplabel.test/api/auth/callback
+      AUTHENTIK_API_TOKEN: e2e-authentik-token
+      INITIAL_ADMIN_SUBJECT: root@example.org
+      SELF_SIGN_UP: "true"
+      SESSION_COOKIE_SECURE: "false"
+    volumes:
+      - e2e-auth-oidc-data:/data
+
+  frontend-oidc:
+    build: ./frontend
+    container_name: deeplabel-e2e-frontend-oidc
+    depends_on:
+      - auth-oidc
+      - backend
+    environment:
+      AUTH_URL: http://auth-oidc:8000
+      BACKEND_URL: http://backend:8000
+      FRONTEND_SECRET: e2e-secret
+    ports:
+      - "127.0.0.1::80"
+
 volumes:
   e2e-backend-data:
   e2e-auth-data:
+  e2e-auth-oidc-data:

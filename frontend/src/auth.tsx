@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { getMe, type Role } from './api'
+import { getMe, type Me, type Role } from './api'
+import { PendingPage } from './pages/PendingPage'
 
 interface Auth {
   id: number
@@ -11,6 +12,8 @@ interface Auth {
    *  exceptions an admin made. The backend checks it too - this only decides whether
    *  a control is worth showing. */
   can: (capability: string) => boolean
+  /** Whether a person may set their own password here, which needs Authentik's API. */
+  passwordChange: boolean
 }
 
 const AuthContext = createContext<Auth | null>(null)
@@ -20,9 +23,10 @@ const AuthContext = createContext<Auth | null>(null)
 // bounce completes.
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [auth, setAuth] = useState<Auth | null>(null)
+  const [waiting, setWaiting] = useState<Me | null>(null)
   useEffect(() => {
     getMe()
-      .then((me) =>
+      .then((me) => me.pending ? setWaiting(me) :
         setAuth({
           id: me.id,
           user: me.user,
@@ -31,10 +35,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           canEdit: me.role !== 'viewer',
           // An admin may do everything by virtue of being one, whatever the list says.
           can: (capability) => me.role === 'admin' || (me.capabilities ?? []).includes(capability),
+          passwordChange: me.password_change,
         }),
       )
       .catch(() => undefined)
   }, [])
+  if (waiting) return <PendingPage me={waiting} />
   if (!auth) return null
   return <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>
 }

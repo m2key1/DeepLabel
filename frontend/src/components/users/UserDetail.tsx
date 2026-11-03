@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  getContributorAccess, getContributorActivity, getUserAudit, revokeUserSessions,
-  type AppUser, type ContributorAccess, type ContributorActivity, type UserAuditEntry,
+  getContributorAccess, getContributorActivity, getUserAudit, makePasswordLink, revokeUserSessions,
+  type AppUser, type ContributorAccess, type ContributorActivity, type PasswordLink, type UserAuditEntry,
 } from '../../api'
 import { formatDate, formatRelative } from '../../util'
 import { Button } from '../ui/Button'
@@ -10,6 +10,7 @@ import { AccessPanel } from './AccessPanel'
 import { ActivityPanel } from './ActivityPanel'
 import { ADMIN_TOKENS_ID } from './AdminTokens'
 import { auditLine } from './auditLine'
+import { PasswordLinkBox } from './PasswordLinkBox'
 import { EmptyState } from '../ui/EmptyState'
 
 /** One section, in a card of its own. Three of these ran together as bare headings before,
@@ -30,15 +31,18 @@ const manageLink = 'ml-1.5 text-xs text-accent-ink hover:underline'
 interface UserDetailProps {
   user: AppUser
   self: boolean
+  /** Whether DeepLabel can make password links here, which needs Authentik's API. */
+  canReset: boolean
   onChanged: (user: AppUser) => void
   onError: (message: string) => void
 }
 
-export function UserDetail({ user, self, onChanged, onError }: UserDetailProps) {
+export function UserDetail({ user, self, canReset, onChanged, onError }: UserDetailProps) {
   const [access, setAccess] = useState<ContributorAccess | null>(null)
   const [activity, setActivity] = useState<ContributorActivity | null>(null)
   const [audit, setAudit] = useState<UserAuditEntry[] | null>(null)
   const [busy, setBusy] = useState(false)
+  const [resetLink, setResetLink] = useState<PasswordLink | null>(null)
 
   const loadAudit = useCallback(
     () => getUserAudit(user.id).then((r) => setAudit(r.entries)).catch((e: Error) => onError(e.message)),
@@ -62,6 +66,18 @@ export function UserDetail({ user, self, onChanged, onError }: UserDetailProps) 
     try {
       await revokeUserSessions(user.id)
       onChanged({ ...user, sessions: 0 })
+      await loadAudit()
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const resetPassword = async () => {
+    setBusy(true)
+    try {
+      setResetLink(await makePasswordLink(user.id))
       await loadAudit()
     } catch (e) {
       onError((e as Error).message)
@@ -131,11 +147,28 @@ export function UserDetail({ user, self, onChanged, onError }: UserDetailProps) 
               )}
             </dd>
           </div>
+          {canReset && !self && (
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-ink-muted">Password</dt>
+              <dd>
+                <Button size="xs" data-testid="reset-password" disabled={busy}
+                        title="A one-time link with which they choose a new password" onClick={resetPassword}>
+                  Reset password
+                </Button>
+              </dd>
+            </div>
+          )}
           <div className="flex justify-between gap-3">
             <dt className="text-ink-muted">Subject</dt>
             <dd className="truncate font-mono text-xs" title={user.subject}>{user.subject}</dd>
           </div>
         </dl>
+        {resetLink && (
+          <div className="mt-3">
+            <PasswordLinkBox link={resetLink} onDismiss={() => setResetLink(null)}
+                             note={`A new password for ${user.email || user.username}. Their current one works until they use it.`} />
+          </div>
+        )}
       </Panel>
       <Panel title="History">
         {audit === null ? loading : audit.length === 0 ? (

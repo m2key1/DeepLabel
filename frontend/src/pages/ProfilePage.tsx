@@ -1,3 +1,4 @@
+import { ChangePassword } from '../components/account/ChangePassword'
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, Navigate, useLocation, useParams, useSearchParams } from 'react-router-dom'
@@ -125,15 +126,19 @@ async function logOut() {
 
 // The settings read in groups by what they are about, under the profile itself.
 const SECTION_GROUP: Record<string, string> = {
-  [OVERVIEW]: 'You', opening: 'Editing', keys: 'Editing', characters: 'Editing',
+  [OVERVIEW]: 'You', password: 'You', opening: 'Editing', keys: 'Editing', characters: 'Editing',
   together: 'Together', llm: 'Connections', tokens: 'Connections',
 }
 
 function OwnTabs({ profile }: { profile: PersonProfile | null }) {
-  const { user } = useAuth()
+  const { user, passwordChange } = useAuth()
   const [params, setParams] = useSearchParams()
   const panels = useSettingsPanels()
-  const tabs = [{ id: OVERVIEW, label: 'Overview', node: <Overview profile={profile} /> }, ...panels]
+  const tabs = [
+    { id: OVERVIEW, label: 'Overview', node: <Overview profile={profile} /> },
+    ...(passwordChange ? [{ id: 'password', label: 'Password', node: <ChangePassword /> }] : []),
+    ...panels,
+  ]
   const asked = params.get('section')
   const active = tabs.some((t) => t.id === asked) ? (asked as string) : OVERVIEW
   return (

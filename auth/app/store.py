@@ -1,4 +1,5 @@
 import json
+import math
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -49,10 +50,40 @@ CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT NOT NULL,
-    id_token TEXT
+    expires_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+-- One-time links to set a password on DeepLabel's own page: an invitation, or a reset an
+-- admin made. Only the hash of the token is kept, as for API tokens. `username` and
+-- `account_pk` name the Authentik account the password is for.
+CREATE TABLE IF NOT EXISTS password_links (
+    token_hash TEXT PRIMARY KEY,
+    purpose TEXT NOT NULL,
+    email TEXT NOT NULL,
+    username TEXT NOT NULL,
+    account_pk INTEGER NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    used_at TEXT
+);
+-- Who an admin invited and with which role, until they first sign in: an invitation is
+-- already the decision to let them in, so they skip the wait for approval.
+CREATE TABLE IF NOT EXISTS invitations (
+    email TEXT PRIMARY KEY,
+    role TEXT NOT NULL,
+    invited_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Wrong passwords, counted per account and per client address. `key` is "account:<email>"
+-- or "address:<ip>"; a key is left alone once its wait is over, and starts afresh after
+-- an hour without a failure.
+CREATE TABLE IF NOT EXISTS sign_in_failures (
+    key TEXT PRIMARY KEY,
+    failures INTEGER NOT NULL,
+    last_at TEXT NOT NULL,
+    locked_until TEXT
+);
 -- Long-lived credentials for scripts, which have no cookie to send. Only the hash is
 -- stored, so a leaked database yields no usable token; `prefix` exists to let a user
 -- recognise which token a row is. A read-only token is refused every write by the
@@ -225,14 +256,15 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE users ADD COLUMN last_login_at TEXT')
     if 'last_seen_at' not in columns:
         conn.execute('ALTER TABLE users ADD COLUMN last_seen_at TEXT')
+    if 'pending' not in columns:
+        # Signed up but not yet let in by an admin: such an account can say who it is and
+        # log out, and nothing else.
+        conn.execute('ALTER TABLE users ADD COLUMN pending INTEGER NOT NULL DEFAULT 0')
     if 'avatar' not in columns:
         # The token of the picture this person currently has, empty for none. It names the
         # file on disk and versions the URL, so a new picture is a new address and nothing
         # has to ask a cache to forget the old one.
         conn.execute("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT ''")
-    if 'id_token' not in {r[1] for r in conn.execute('PRAGMA table_info(sessions)')}:
-        # The provider's ID token from sign-in, which log out hands back to end its session.
-        conn.execute('ALTER TABLE sessions ADD COLUMN id_token TEXT')
     if conn.execute('PRAGMA user_version').fetchone()[0] < TRAINING_OVERRIDES_MOVED:
         _move_training_overrides_to_columns(conn)
         conn.execute(f'PRAGMA user_version = {TRAINING_OVERRIDES_MOVED}')
@@ -275,15 +307,16 @@ LOGIN_ACTOR = 'login'
 
 
 def upsert_user(conn: sqlite3.Connection, subject: str, username: str, role: str | None = None,
-                email: str = '', display_name: str = ''):
+                email: str = '', display_name: str = '', pending: bool = False):
     """Return the user for an OIDC subject, creating it on first sight. `role` applies
     only when creating (bootstrap admin); an existing user's role is left to the admin
     UI. The profile fields are refreshed to the latest the provider reports; a changed
     username is logged because the backend attributes work by that name."""
     row = conn.execute('SELECT * FROM users WHERE subject = ?', (subject,)).fetchone()
     if row is None:
-        conn.execute('INSERT INTO users (subject, username, email, display_name, role) VALUES (?, ?, ?, ?, ?)',
-                     (subject, username or '', email or '', display_name or '', role or 'member'))
+        conn.execute('INSERT INTO users (subject, username, email, display_name, role, pending) '
+                     'VALUES (?, ?, ?, ?, ?, ?)',
+                     (subject, username or '', email or '', display_name or '', role or 'member', int(pending)))
     else:
         reported = {'username': username, 'email': email, 'display_name': display_name}
         for field, value in reported.items():
@@ -295,10 +328,9 @@ def upsert_user(conn: sqlite3.Connection, subject: str, username: str, role: str
     return conn.execute('SELECT * FROM users WHERE subject = ?', (subject,)).fetchone()
 
 
-def create_session(conn: sqlite3.Connection, user_id: int, token: str, expires_at: str,
-                   id_token: str | None = None):
-    conn.execute('INSERT INTO sessions (token, user_id, expires_at, id_token) VALUES (?, ?, ?, ?)',
-                 (token, user_id, expires_at, id_token))
+def create_session(conn: sqlite3.Connection, user_id: int, token: str, expires_at: str):
+    conn.execute('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)',
+                 (token, user_id, expires_at))
     conn.execute("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", (user_id,))
     conn.commit()
 
@@ -332,11 +364,6 @@ def touch_seen(conn: sqlite3.Connection, user_id: int):
     conn.commit()
 
 
-def session_id_token(conn: sqlite3.Connection, token: str | None) -> str | None:
-    row = conn.execute('SELECT id_token FROM sessions WHERE token = ?', (token,)).fetchone() if token else None
-    return row[0] if row else None
-
-
 def delete_session(conn: sqlite3.Connection, token: str | None):
     if token:
         conn.execute('DELETE FROM sessions WHERE token = ?', (token,))
@@ -346,7 +373,7 @@ def delete_session(conn: sqlite3.Connection, token: str | None):
 # One account as the admin page shows it: profile, role, grants, and how it is being
 # used right now. Live means unexpired - a revoked session is deleted, not expired.
 _USER_SUMMARY = """
-    SELECT u.id, u.subject, u.username, u.email, u.display_name, u.role, u.active,
+    SELECT u.id, u.subject, u.username, u.email, u.display_name, u.role, u.active, u.pending,
            u.train_local, u.train_cluster, u.slurm_account, u.permissions, u.created_at,
            u.last_login_at, u.last_seen_at, u.avatar,
            (SELECT COUNT(*) FROM sessions s
@@ -377,12 +404,17 @@ def get_user_by_username(conn: sqlite3.Connection, username: str):
 
 
 def get_user_by_email(conn: sqlite3.Connection, email: str):
-    return conn.execute(_USER_SUMMARY + ' WHERE u.email = ?', (email,)).fetchone()
+    return conn.execute(_USER_SUMMARY + ' WHERE lower(u.email) = lower(?)', (email,)).fetchone()
 
 
 def set_avatar(conn: sqlite3.Connection, user_id: int, token: str) -> None:
     conn.execute('UPDATE users SET avatar = ? WHERE id = ?', (token, user_id))
     conn.commit()
+
+
+def revoke_other_sessions(conn: sqlite3.Connection, user_id: int, keep: str | None) -> int:
+    """Every session of a person but the one they are using. Never commits."""
+    return conn.execute('DELETE FROM sessions WHERE user_id = ? AND token IS NOT ?', (user_id, keep)).rowcount
 
 
 def revoke_sessions(conn: sqlite3.Connection, user_id: int) -> int:
@@ -491,3 +523,97 @@ def delete_api_token(conn: sqlite3.Connection, token_id: int, user_id: int | Non
     deleted = conn.execute(f'DELETE FROM api_tokens {where}', args).rowcount
     conn.commit()
     return bool(deleted)
+
+
+# Wrong passwords before the first wait, per account and per address; from then on each one
+# makes the next attempt wait twice as long as the last, up to SIGN_IN_LONGEST_WAIT. An
+# address gets more, because a lab or an office shares one. New accounts are counted the
+# same way per address, so a script cannot fill Authentik. A quiet hour forgives the lot.
+SIGN_IN_TRIES = {'account': 5, 'address': 20, 'sign-up': 3}
+SIGN_IN_FIRST_WAIT = 60
+SIGN_IN_LONGEST_WAIT = 15 * 60
+SIGN_IN_FORGIVEN_AFTER = 60 * 60
+
+
+def _utc(moment: datetime) -> str:
+    return moment.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def sign_in_wait(conn: sqlite3.Connection, keys: list[str], now: datetime | None = None) -> int:
+    """Seconds before any of these keys may try again; 0 when all of them may now."""
+    now = now or datetime.now(timezone.utc)
+    marks = ','.join('?' * len(keys))
+    rows = conn.execute(f'SELECT locked_until FROM sign_in_failures WHERE key IN ({marks}) '
+                        'AND locked_until IS NOT NULL', keys).fetchall()
+    waits = [(datetime.strptime(r[0], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc) - now).total_seconds()
+             for r in rows]
+    return max([0, *(math.ceil(w) for w in waits if w > 0)])
+
+
+def note_sign_in_failure(conn: sqlite3.Connection, keys: list[str], now: datetime | None = None):
+    now = now or datetime.now(timezone.utc)
+    forgiven = _utc(now - timedelta(seconds=SIGN_IN_FORGIVEN_AFTER))
+    for key in keys:
+        row = conn.execute('SELECT failures, last_at FROM sign_in_failures WHERE key = ?', (key,)).fetchone()
+        failures = 1 if row is None or row[1] < forgiven else row[0] + 1
+        over = failures - SIGN_IN_TRIES[key.partition(':')[0]]
+        wait = min(SIGN_IN_FIRST_WAIT * 2 ** over, SIGN_IN_LONGEST_WAIT) if over >= 0 else 0
+        locked = _utc(now + timedelta(seconds=wait)) if wait else None
+        conn.execute('INSERT INTO sign_in_failures (key, failures, last_at, locked_until) VALUES (?, ?, ?, ?) '
+                     'ON CONFLICT(key) DO UPDATE SET failures = excluded.failures, last_at = excluded.last_at, '
+                     'locked_until = excluded.locked_until', (key, failures, _utc(now), locked))
+    conn.commit()
+
+
+def clear_sign_in_failures(conn: sqlite3.Connection, key: str):
+    conn.execute('DELETE FROM sign_in_failures WHERE key = ?', (key,))
+    conn.commit()
+
+
+def known_user(conn: sqlite3.Connection, subject: str):
+    return conn.execute('SELECT * FROM users WHERE subject = ?', (subject,)).fetchone()
+
+
+def count_pending(conn: sqlite3.Connection) -> int:
+    return conn.execute('SELECT COUNT(*) FROM users WHERE pending = 1 AND active = 1').fetchone()[0]
+
+
+def approve_user(conn: sqlite3.Connection, user_id: int, role: str):
+    """Let a pending account in with this role. Never commits."""
+    conn.execute('UPDATE users SET pending = 0, role = ? WHERE id = ?', (role, user_id))
+
+
+def invite(conn: sqlite3.Connection, email: str, role: str, invited_by: str):
+    conn.execute('INSERT INTO invitations (email, role, invited_by) VALUES (?, ?, ?) '
+                 'ON CONFLICT(email) DO UPDATE SET role = excluded.role, invited_by = excluded.invited_by, '
+                 "created_at = datetime('now')", (email.lower(), role, invited_by))
+    conn.commit()
+
+
+def take_invitation(conn: sqlite3.Connection, email: str) -> str | None:
+    """The role someone was invited with, once: the invitation is spent on first sign-in."""
+    row = conn.execute('SELECT role FROM invitations WHERE email = ?', (email.lower(),)).fetchone()
+    if row is not None:
+        conn.execute('DELETE FROM invitations WHERE email = ?', (email.lower(),))
+    return row[0] if row else None
+
+
+def create_password_link(conn: sqlite3.Connection, token_hash: str, *, purpose: str, email: str,
+                         username: str, account_pk: int, created_by: str, valid_days: int):
+    """A new link, which cancels any unused one for the same person."""
+    conn.execute('DELETE FROM password_links WHERE email = ? AND used_at IS NULL', (email,))
+    conn.execute('INSERT INTO password_links (token_hash, purpose, email, username, account_pk, created_by, '
+                 "expires_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now', ?))",
+                 (token_hash, purpose, email, username, account_pk, created_by, f'+{valid_days} days'))
+    conn.commit()
+
+
+def password_link(conn: sqlite3.Connection, token_hash: str):
+    """A link that may still be used, or None."""
+    return conn.execute("SELECT * FROM password_links WHERE token_hash = ? AND used_at IS NULL "
+                        "AND expires_at > datetime('now')", (token_hash,)).fetchone()
+
+
+def spend_password_link(conn: sqlite3.Connection, token_hash: str):
+    conn.execute("UPDATE password_links SET used_at = datetime('now') WHERE token_hash = ?", (token_hash,))
+    conn.commit()

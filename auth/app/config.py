@@ -35,13 +35,16 @@ OIDC_REDIRECT_URI = os.environ.get('OIDC_REDIRECT_URI', '')
 # OIDC_ISSUER; only this service's own calls (discovery, keys, token, user info and the
 # invite API) are sent here, carrying the public host so the provider answers as itself.
 OIDC_INTERNAL_URL = os.environ.get('OIDC_INTERNAL_URL', '').rstrip('/')
-SESSION_SECRET = os.environ.get('SESSION_SECRET', 'dev-insecure-change-me')
 SESSION_COOKIE = os.environ.get('SESSION_COOKIE', 'sid')
 SESSION_TTL_DAYS = int(os.environ.get('SESSION_TTL_DAYS', '14'))
 SESSION_COOKIE_SECURE = _bool_env('SESSION_COOKIE_SECURE', 'true')
 INITIAL_ADMIN_SUBJECT = os.environ.get('INITIAL_ADMIN_SUBJECT', '')
 
-# An Authentik API token that lets admins invite people from the Admin page. Leave it
-# empty to keep that off. It should belong to a service account that may only view and
-# add users and create recovery links; see AUTHENTIK.md.
+# An Authentik API token with which DeepLabel manages accounts: invitations, password
+# links, password changes, sign-up and rejections. Leave it empty to keep all of that
+# off. It should belong to a service account with only the permissions AUTHENTIK.md lists.
 AUTHENTIK_API_TOKEN = os.environ.get('AUTHENTIK_API_TOKEN', '')
+
+# Lets people make their own account on the sign-in page. A new account waits until an
+# admin approves it, with the role the admin picks. Needs AUTHENTIK_API_TOKEN.
+SELF_SIGN_UP = _bool_env('SELF_SIGN_UP', 'false')
