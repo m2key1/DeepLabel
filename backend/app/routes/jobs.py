@@ -13,8 +13,8 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from app import (blobs, caches, config, consensus, conventions, corpus, data_use, decode, evaluator, geometry,
-                 iiif, imports, ingest, jobs, layout_templates, llm, map_classes, model_registry, page_rows, queue_eta,
-                 reading_order, registry, schemas, store, trainer)
+                 iiif, imports, ingest, jobs, layout_shapes, layout_templates, llm, map_classes, model_registry,
+                 page_rows, queue_eta, reading_order, registry, schemas, store, trainer)
 from app.deps import (can_access_job, can_reach_group, check_capability, current_user, get_db, get_user,
                       require_job_access, require_job_owner, require_role)
 
@@ -134,10 +134,12 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
                gt_from_pdf: bool = Form(False), layout_template_id: int | None = Form(None),
                hold: bool = Form(False), as_test: bool = Form(False),
                ocr_convention: str = Form('{}'), data_use: str = Form('{}'),
+               layout_shape: str = Form('box'),
                files: list[UploadFile] = None, conn=Depends(get_db),
                user: str = Depends(get_user), _editor=Depends(require_role('admin', 'member'))):
     """Create a dataset from uploaded files - a .txt beside an image is ingested as that page's transcription.
     With `hold`, it waits as 'uploading' while more batches are added, until it is started."""
+    _valid_layout_shape(layout_shape)
     if not files:
         raise HTTPException(400, 'no files uploaded')
     ingest.valid_task(task)
@@ -205,13 +207,13 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
         'INSERT INTO jobs (id, name, owner, line_mode, task, run_layout, run_lines, run_ocr, '
         'run_predict, model_id, run_tile, tile_size, tile_skip_blank, line_width, '
         'model_layout_id, model_lines_id, model_ocr_id, ocr_decode, gt_autocheck, gt_ordered, '
-        'gt_from_pdf, reading_order, new_pages_test, status) '
-        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'gt_from_pdf, reading_order, new_pages_test, status, layout_shape) '
+        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         (job_id, name, user, line_mode, task, int(run_layout), int(run_lines), int(run_ocr),
          int(run_predict), model_id, int(run_tile), tile_size, int(tile_skip_blank), line_width,
          models['layout'], models['lines'], models['ocr'], ocr_decode, int(gt_autocheck),
          int(gt_ordered), int(gt_from_pdf), page_reading_order, int(as_test),
-         UPLOADING if hold else 'queued'))
+         UPLOADING if hold else 'queued', layout_shape))
     _set_convention(conn, job_id, convention)
     _set_data_use(conn, job_id, uses)
     # Tiling jobs register the uploads as full maps (job_maps); the tile phase produces
@@ -344,6 +346,7 @@ class JobOptions(BaseModel):
     layout_template_id: int | None = None
     ocr_convention: dict[str, bool] = {}
     data_use: dict[str, bool] = {}
+    layout_shape: str = 'box'
 
 
 class PathJob(JobOptions):
@@ -387,17 +390,19 @@ def _checked_options(conn, body: JobOptions, grants) -> dict:
 
 def _insert_job(conn, job_id: str, user: str, body: JobOptions, o: dict,
                 source_path: str | None = None, iiif_source: dict | None = None) -> None:
+    _valid_layout_shape(body.layout_shape)
     conn.execute(
         'INSERT INTO jobs (id, name, owner, source_path, iiif_source, line_mode, task, run_layout, run_lines, '
         'run_ocr, run_predict, model_id, run_tile, tile_size, tile_skip_blank, line_width, '
         'model_layout_id, model_lines_id, model_ocr_id, ocr_decode, gt_autocheck, gt_ordered, '
-        'gt_from_pdf, reading_order) '
-        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'gt_from_pdf, reading_order, layout_shape) '
+        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         (job_id, o['name'], user, source_path, json.dumps(iiif_source) if iiif_source else None,
          o['line_mode'], body.task, int(o['run_layout']), int(o['run_lines']), int(o['run_ocr']),
          int(o['run_predict']), o['model_id'], int(o['run_tile']), o['tile_size'], int(body.tile_skip_blank),
          o['line_width'], o['models']['layout'], o['models']['lines'], o['models']['ocr'], body.ocr_decode,
-         int(body.gt_autocheck), int(body.gt_ordered), int(o['gt_from_pdf']), body.page_reading_order))
+         int(body.gt_autocheck), int(body.gt_ordered), int(o['gt_from_pdf']), body.page_reading_order,
+         body.layout_shape))
     _set_convention(conn, job_id, o['convention'])
     _set_data_use(conn, job_id, o['data_use'])
 
@@ -1033,22 +1038,25 @@ def resequence_job(conn, job_id: str) -> int:
     return len(pages)
 
 
-LAYOUT_SHAPES = ('box', 'polygon')
+def _valid_layout_shape(shape: str) -> None:
+    if shape not in layout_shapes.LEVELS:
+        raise HTTPException(400, f'layout_shape must be one of {list(layout_shapes.LEVELS)}')
 
 
-def set_layout_shape(conn, job_id: str, shape: str) -> None:
-    """Switch a dataset between box and polygon elements. Into polygons, every element
-    without an outline takes its box's four corners; back to boxes, the outlines stay on
-    file, so switching back loses nothing."""
-    if shape not in LAYOUT_SHAPES:
-        raise HTTPException(400, f'layout_shape must be one of {list(LAYOUT_SHAPES)}')
-    conn.execute('UPDATE jobs SET layout_shape = ? WHERE id = ?', (shape, job_id))
-    if shape == 'polygon':
-        for row in conn.execute(
-                'SELECT e.id, e.bbox FROM elements e JOIN pages p ON e.page_id = p.id '
-                'WHERE p.job_id = ? AND e.polygon IS NULL', (job_id,)).fetchall():
-            conn.execute('UPDATE elements SET polygon = ? WHERE id = ?',
-                         (json.dumps(geometry.bbox_ring(json.loads(row['bbox']))), row['id']))
+def set_layout_shape(conn, job_id: str, shape: str, author: str) -> None:
+    _valid_layout_shape(shape)
+    layout_shapes.apply(conn, job_id, shape, author)
+
+
+@router.get('/api/jobs/{job_id}/layout-shape-changes')
+def layout_shape_changes(job_id: str, shape: str, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """How many elements a lower layout shape would turn into boxes, by what they are now -
+    asked before the change, so it can be confirmed with the count."""
+    if not can_access_job(conn, job_id, user):
+        raise HTTPException(404)
+    if shape not in layout_shapes.LEVELS:
+        raise HTTPException(400, f'shape must be one of {list(layout_shapes.LEVELS)}')
+    return layout_shapes.changes(conn, [job_id], shape)
 
 
 def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict) -> None:
@@ -1066,7 +1074,7 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
     if 'layout_shape' in fields and body.layout_shape is not None:
         if user['role'] != 'admin' and job['owner'] != user['username']:
             raise HTTPException(403, 'not permitted')
-        set_layout_shape(conn, job_id, body.layout_shape)
+        set_layout_shape(conn, job_id, body.layout_shape, user['username'])
     if 'tile_size' in fields and body.tile_size is not None:
         if user['role'] != 'admin' and job['owner'] != user['username']:
             raise HTTPException(403, 'not permitted')

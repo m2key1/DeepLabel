@@ -6,7 +6,8 @@ from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel
 
-from app import caches, candidates, config, dataset_sync, geometry, layout_templates, serializers, store, training
+from app import (caches, candidates, config, dataset_sync, geometry, layout_shapes, layout_templates, serializers,
+                 store, training)
 from app.deps import (IMMUTABLE_CACHE, current_user, get_db, get_user, require_element_access,
                       require_page_access, require_unchanged)
 
@@ -37,7 +38,7 @@ def _sync_element_job(conn, element_id: int):
 def _polygon_mode(conn, page_id: int) -> bool:
     row = conn.execute('SELECT j.layout_shape FROM pages p JOIN jobs j ON j.id = p.job_id WHERE p.id = ?',
                        (page_id,)).fetchone()
-    return row is not None and row['layout_shape'] == 'polygon'
+    return row is not None and layout_shapes.outlines(row['layout_shape'])
 
 
 def _set_shape(conn, element_id: int, bbox: list, polygon: list | None) -> None:

@@ -96,6 +96,15 @@ export function CursorIcon() {
 // A line's two shapes, told apart at 16px by what they are rather than by how many sides
 // they have: four corners square to each other, against an outline that bends where it
 // likes and carries a handle on every corner.
+export function UprightBoxIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h18v12H3z" />
+    </svg>
+  )
+}
+
 export function TurnedBoxIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"

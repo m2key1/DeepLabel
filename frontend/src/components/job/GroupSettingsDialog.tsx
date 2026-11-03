@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
-import { listModels, listUsableLlmModels, setGroupJobs } from '../../api'
+import { getGroupLayoutShapeChanges, listModels, listUsableLlmModels, setGroupJobs } from '../../api'
 import type {
-  Group, GroupJobsOutcome, GroupJobsPatch, LineMode, LlmModel, ModelTask, OcrDecode, RegistryModel,
+  Group, GroupJobsOutcome, GroupJobsPatch, LayoutShape, LayoutShapeChanges, LineMode, LlmModel, ModelTask, OcrDecode,
+  RegistryModel,
 } from '../../api'
 import { Modal, modalBtn, modalPrimaryBtn } from '../Modal'
-import { DECODE_CHOICES, LINE_MODE_CHOICES, NEEDS_LAYOUT, PHASE_CHOICES } from './processing'
+import {
+  DECODE_CHOICES, LAYOUT_SHAPE_CHOICES, LINE_MODE_CHOICES, NEEDS_LAYOUT, PHASE_CHOICES, shapeChangesText,
+} from './processing'
 import { controlClass } from '../ui/Field'
 
 interface GroupSettingsDialogProps {
@@ -46,8 +49,21 @@ export function GroupSettingsDialog({ group, count, onClose, onDone, onError }:
   const [lines, setLines] = useState(true)
   const [ocr, setOcr] = useState(true)
   const [lineMode, setLineMode] = useState<LineMode>('per_crop')
+  const [shape, setShape] = useState<LayoutShape | typeof KEEP>(KEEP)
+  // What the picked shape would turn into boxes across the group, counted before applying.
+  const [shapeChanges, setShapeChanges] = useState<LayoutShapeChanges | null>(null)
   const [busy, setBusy] = useState(false)
   const [outcome, setOutcome] = useState<GroupJobsOutcome | null>(null)
+
+  useEffect(() => {
+    setShapeChanges(null)
+    if (shape === KEEP) return
+    let live = true
+    getGroupLayoutShapeChanges(group.id, shape).then((c) => { if (live) setShapeChanges(c) })
+      .catch((e: Error) => onError(e.message))
+    return () => { live = false }
+  }, [group.id, shape, onError])
+  const converting = shape !== KEEP && shapeChanges ? shapeChangesText(shapeChanges, shape) : null
 
   useEffect(() => {
     listModels().then((r) => setModels(r.models)).catch((e: Error) => onError(e.message))
@@ -67,6 +83,7 @@ export function GroupSettingsDialog({ group, count, onClose, onDone, onError }:
       })
     }
     if (decode !== KEEP) body.ocr_decode = decode
+    if (shape !== KEEP) body.layout_shape = shape
     if (pinReaders) body.llm_model_ids = readWith
     if (pinPhases) {
       body.run_layout = layout
@@ -81,6 +98,7 @@ export function GroupSettingsDialog({ group, count, onClose, onDone, onError }:
   const nothingPicked = Object.keys(body).length === 0
 
   const save = async () => {
+    if (converting && !window.confirm(`${converting}. Apply?`)) return
     setBusy(true)
     try {
       setOutcome(await setGroupJobs(group.id, body))
@@ -167,6 +185,30 @@ export function GroupSettingsDialog({ group, count, onClose, onDone, onError }:
             <option key={value} value={value}>{label}</option>
           ))}
         </select>
+      </div>
+      <div className={section}>
+        <label className="mb-1 block text-sm font-medium text-ink" htmlFor="group-pick-layout-shape">
+          Layout element shapes
+        </label>
+        <select
+          id="group-pick-layout-shape"
+          data-testid="group-pick-layout-shape"
+          value={shape}
+          onChange={(e) => setShape(e.target.value as LayoutShape | typeof KEEP)}
+          className={inputClass}
+        >
+          <option value={KEEP}>Leave as it is</option>
+          {LAYOUT_SHAPE_CHOICES.map(([value, label, hint]) => (
+            <option key={value} value={value}>{label} - {hint.toLowerCase()}</option>
+          ))}
+        </select>
+        {shape !== KEEP && (
+          <p data-testid="group-layout-shape-note" className={`mt-1.5 text-xs ${converting ? 'text-warn' : 'text-ink-muted'}`}>
+            {shapeChanges === null ? 'Counting what this changes…'
+              : converting ? `${converting}. The revision history keeps the old shapes.`
+                : 'Nothing on these datasets\' pages goes beyond this level, so no shape changes.'}
+          </p>
+        )}
       </div>
       {readers !== null && readers.length > 0 && (
         <div className={section} data-testid="group-pick-llm-models">

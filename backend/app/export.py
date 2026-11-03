@@ -2,7 +2,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from app import formats, iiif
+from app import formats, iiif, layout_shapes
 from app.caches import counted_page
 
 
@@ -23,7 +23,7 @@ def _rounded(polygon: list) -> list:
 def collect_job(conn, job_id: str, checked_only: bool = False) -> dict:
     job = conn.execute('SELECT id, name, owner, created_at, layout_shape, iiif_source FROM jobs WHERE id = ?',
                        (job_id,)).fetchone()
-    outlines = job is not None and job['layout_shape'] == 'polygon'
+    outlines = job is not None and layout_shapes.outlines(job['layout_shape'])
     pages = []
     for page in conn.execute(
             f'SELECT * FROM pages WHERE job_id = ? AND {counted_page()} '

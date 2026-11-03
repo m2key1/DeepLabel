@@ -1,6 +1,6 @@
 import unicodedata
 
-from app import export
+from app import export, layout_shapes
 from app.caches import counted_page
 from app.text_search import matcher
 
@@ -28,7 +28,7 @@ def page(conn, job_id: str, idx: int) -> dict | None:
     if row is None:
         return None
     shape = conn.execute('SELECT layout_shape FROM jobs WHERE id = ?', (job_id,)).fetchone()
-    return export.page_entry(conn, row, outlines=shape is not None and shape['layout_shape'] == 'polygon')
+    return export.page_entry(conn, row, outlines=shape is not None and layout_shapes.outlines(shape['layout_shape']))
 
 
 def search(conn, job_id: str, query: str, mode: str, reviewed_only: bool) -> dict:

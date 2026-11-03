@@ -9,7 +9,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageStat
 
 from app import (align, backend_client, candidates, config, conventions, corpus, geometry, iiif, layout_classes,
-                 layout_templates, ocr_phase, pdf, registry, scans, store)
+                 layout_shapes, layout_templates, ocr_phase, pdf, registry, scans, store)
 from app.caches import counted_page
 from app.ocr_phase import is_cancelled
 from app.remote_models import RemoteLayout, RemoteLines, RemoteOcrEngine, scan_image
@@ -154,7 +154,8 @@ def phase_layout(conn, job_id: str, stage, batch_size: int):
         "WHERE p.job_id = ? AND p.deleted = 0 AND e.deleted = 0",
         (job_id,)).fetchone()['c']
     # The detector only finds boxes; in a polygon dataset each arrives as its four corners.
-    outlines = conn.execute('SELECT layout_shape FROM jobs WHERE id = ?', (job_id,)).fetchone()['layout_shape'] == 'polygon'
+    outlines = layout_shapes.outlines(
+        conn.execute('SELECT layout_shape FROM jobs WHERE id = ?', (job_id,)).fetchone()['layout_shape'])
     vocabulary = layout_templates.vocabulary(conn, job_id, registry.running_model_id('layout'))
     left_out = {}
 
@@ -330,7 +331,7 @@ def _lines_per_page(stage, img, el_boxes, skip=frozenset(), rings=None):
 def _rings(conn, job_id: str, elements) -> list | None:
     """The elements' outlines, while the dataset draws them; a box-mode dataset keeps its
     outlines on file but reads every element as its box."""
-    if conn.execute('SELECT layout_shape FROM jobs WHERE id = ?', (job_id,)).fetchone()['layout_shape'] != 'polygon':
+    if not layout_shapes.outlines(conn.execute('SELECT layout_shape FROM jobs WHERE id = ?', (job_id,)).fetchone()['layout_shape']):
         return None
     return [json.loads(e['polygon']) if e['polygon'] else None for e in elements]
 

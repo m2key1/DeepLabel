@@ -3,7 +3,7 @@ import re
 import shutil
 from pathlib import Path
 
-from app import layout_classes, layout_templates
+from app import layout_classes, layout_shapes, layout_templates
 from app.caches import counted_page
 
 ANNOTATION_FILE = '_annotations.coco.json'
@@ -42,8 +42,8 @@ def collect(conn, job_id: str, outlines: bool = False) -> tuple[dict, dict]:
     detector that unmarked regions are background. With `outlines`, a polygon dataset's
     elements carry their outline as the segmentation; training leaves it out, since the
     layout model detects boxes."""
-    polygons = outlines and conn.execute(
-        'SELECT layout_shape FROM jobs WHERE id = ?', (job_id,)).fetchone()['layout_shape'] == 'polygon'
+    polygons = outlines and layout_shapes.outlines(
+        conn.execute('SELECT layout_shape FROM jobs WHERE id = ?', (job_id,)).fetchone()['layout_shape'])
     pages = conn.execute(
         'SELECT id, content_hash, filename, source_file, width, height FROM pages '
         f"WHERE job_id = ? AND layout_checked = 1 AND {counted_page()} "

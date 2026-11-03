@@ -4,11 +4,13 @@ import type { ReactNode } from 'react'
  *  the canvas, and a status footer. The pages own everything inside the slots - the
  *  page viewer keeps its OCR panel and loupe in the canvas slot, the tile editor its
  *  brush and export panels in the rail - so the frame decides only where things go. */
-export function EditorShell({ header, headerTestId, rail, canvas, status, style }: {
+export function EditorShell({ header, headerTestId, rail, wideRail = false, canvas, status, style }: {
   header: { left: ReactNode; actions?: ReactNode }
   headerTestId?: string
   /** null when the editor has no rail to show, as the viewer outside edit mode. */
   rail: ReactNode | null
+  /** Room for a pen row that carries more than its name, as layout pens with shapes do. */
+  wideRail?: boolean
   canvas: ReactNode
   status: ReactNode
   style?: React.CSSProperties
@@ -32,7 +34,7 @@ export function EditorShell({ header, headerTestId, rail, canvas, status, style 
           // min-h-0 as well as overflow: a flex child's minimum height is its content by
           // default, so without it the rail grows to fit and every overflow inside it is
           // moot - which is how a long list once painted over the panels below it.
-          <aside className="flex min-h-0 w-56 shrink-0 flex-col gap-3 overflow-y-auto border-r border-line p-3">
+          <aside className={`flex min-h-0 ${wideRail ? 'w-64' : 'w-56'} shrink-0 flex-col gap-3 overflow-y-auto border-r border-line p-3`}>
             {rail}
           </aside>
         )}

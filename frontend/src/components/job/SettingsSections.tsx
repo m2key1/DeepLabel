@@ -1,20 +1,31 @@
-import type { LayoutShape, LlmModel } from '../../api'
+import type { LayoutShape, LayoutShapeChanges, LlmModel } from '../../api'
 import { KeptOutModels, keptOut } from './DataUseSwitches'
-import { LAYOUT_SHAPE_CHOICES } from './processing'
+import { LAYOUT_SHAPE_CHOICES, lowersShape, shapeChangesText } from './processing'
 
 const choiceCard = (chosen: boolean) =>
-  `flex-1 rounded border px-3 py-2 text-left text-sm ${chosen ? 'border-accent bg-accent-wash' : 'border-line-strong'}`
+  `flex flex-1 flex-col justify-start rounded border px-3 py-2 text-left text-sm ${chosen ? 'border-accent bg-accent-wash' : 'border-line-strong'}`
 
-/** Boxes or outlines for a dataset's layout elements. Switching converts what is there at
- *  once, so the note says what saving will do. */
-export function LayoutShapeChoice({ value, saved, onChange }: {
+/** How free a dataset's layout elements may be. Raising it changes nothing drawn; lowering
+ *  it turns what goes beyond the new level into the tightest allowed shape, so the note
+ *  says how many before anything is saved. */
+export function LayoutShapeChoice({ value, saved, changes, onChange }: {
   value: LayoutShape
   saved: LayoutShape
+  /** For a lower level than the saved one: what it would change, or null while counting. */
+  changes?: LayoutShapeChanges | null
   onChange: (shape: LayoutShape) => void
 }) {
+  const lowering = lowersShape(value, saved)
+  const note = value === saved ? null
+    : !lowering ? (saved === 'box'
+      ? 'Saving gives every box its four corners, so each can be turned or reshaped up to this level.'
+      : 'Saving allows the new shapes; nothing already drawn changes.')
+    : changes == null ? 'Counting what this changes…'
+    : shapeChangesText(changes, value)?.concat('. The revision history keeps the old shapes.')
+      ?? 'Nothing on the pages goes beyond this level, so nothing changes.'
   return (
     <div data-testid="processing-layout-shape">
-      <span className="mb-1 block text-sm font-medium text-ink">Layout elements</span>
+      <span className="mb-1 block text-sm font-medium text-ink">Layout element shapes</span>
       <div className="flex gap-2">
         {LAYOUT_SHAPE_CHOICES.map(([shape, label, hint]) => (
           <button key={shape} type="button" data-testid="processing-layout-shape-option" data-shape={shape}
@@ -24,11 +35,10 @@ export function LayoutShapeChoice({ value, saved, onChange }: {
           </button>
         ))}
       </div>
-      {value !== saved && (
-        <p className="mt-1.5 text-xs text-ink-muted" data-testid="processing-layout-shape-note">
-          {value === 'polygon'
-            ? 'Saving turns every box into its four corners, applied at once.'
-            : 'Saving shows every element as its bounding box; the outlines are kept for switching back.'}
+      {note && (
+        <p className={`mt-1.5 text-xs ${lowering && changes && shapeChangesText(changes, value) ? 'text-warn' : 'text-ink-muted'}`}
+           data-testid="processing-layout-shape-note">
+          {note}
         </p>
       )}
     </div>

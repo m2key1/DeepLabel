@@ -1,4 +1,4 @@
-import type { Counters, JobStatus } from './api'
+import type { Counters, JobStatus, LayoutShape } from './api'
 import type { Tone } from './components/ui/Badge'
 
 export function humanBytes(bytes: number): string {
@@ -332,6 +332,26 @@ export function getLinePenShape(): LinePenShape {
 
 export function setLinePenShape(shape: LinePenShape): void {
   localStorage.setItem(LINE_PEN_KEY, shape)
+}
+
+const ELEMENT_PEN_KEY = 'deeplabel.elementPenShapes'
+
+/** The shape each layout class's pen was last left on, by class name. */
+export function getElementPenShapes(): Record<string, LayoutShape> {
+  try {
+    const stored = JSON.parse(localStorage.getItem(ELEMENT_PEN_KEY) ?? '{}')
+    return stored && typeof stored === 'object' ? stored : {}
+  } catch {
+    return {}
+  }
+}
+
+export function setElementPenShapes(shapes: Record<string, LayoutShape>): void {
+  try {
+    localStorage.setItem(ELEMENT_PEN_KEY, JSON.stringify(shapes))
+  } catch {
+    // A browser that keeps nothing forgets the choice; the pen still works.
+  }
 }
 
 const REVIEW_CONF_KEY = 'deeplabel.reviewConf'

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app import layout_shapes
 from app.deps import (REACHABLE_GROUP_IDS, can_access_job, can_reach_group, current_user, get_db,
                       require_role)
 from app.routes.bulk import each_isolated
@@ -120,6 +121,17 @@ def delete_group(group_id: int, conn=Depends(get_db), user: dict = Depends(curre
 # A group has no one name and is not inside another group, so these two stay on the
 # dataset they belong to.
 NOT_BULK = ('name', 'group_id')
+
+
+@router.get('/api/groups/{group_id}/layout-shape-changes')
+def group_layout_shape_changes(group_id: int, shape: str, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """What a lower layout shape would change across every dataset of a group the caller can see."""
+    _group_or_404(conn, group_id, user)
+    if shape not in layout_shapes.LEVELS:
+        raise HTTPException(400, f'shape must be one of {list(layout_shapes.LEVELS)}')
+    job_ids = [row['id'] for row in conn.execute('SELECT id FROM jobs WHERE group_id = ?', (group_id,))
+               if can_access_job(conn, row['id'], user)]
+    return layout_shapes.changes(conn, job_ids, shape) if job_ids else {'polygon': 0, 'rotated': 0}
 
 
 @router.patch('/api/groups/{group_id}/jobs')

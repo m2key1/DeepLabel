@@ -1,4 +1,4 @@
-import type { LayoutShape, LineMode, OcrDecode } from '../../api'
+import type { LayoutShape, LayoutShapeChanges, LineMode, OcrDecode } from '../../api'
 
 /** The text pipeline's phases as a person picks them, in the order they run. One list so
  *  creating a dataset and changing one afterwards describe the same thing. */
@@ -14,9 +14,29 @@ export const LINE_MODE_CHOICES: readonly (readonly [LineMode, string, string])[]
 ]
 
 export const LAYOUT_SHAPE_CHOICES: readonly (readonly [LayoutShape, string, string])[] = [
-  ['box', 'Boxes', 'Each layout element is a rectangle'],
-  ['polygon', 'Polygons', 'Each element is an outline, reshaped like a text line; lines are found inside it'],
+  ['box', 'Aligned', 'Upright boxes only'],
+  ['rotated', 'Rotated', 'Upright boxes, and boxes turned to follow a slanted block'],
+  ['polygon', 'Polygons', 'Boxes, turned boxes and free outlines; lines are found inside each'],
 ]
+
+const SHAPE_LEVEL: Record<LayoutShape, number> = { box: 0, rotated: 1, polygon: 2 }
+
+export const lowersShape = (to: LayoutShape, from: LayoutShape) => SHAPE_LEVEL[to] < SHAPE_LEVEL[from]
+
+const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/** What lowering a dataset's layout shape does to the elements above it, in one sentence,
+ *  or null when nothing on its pages goes beyond the new level. */
+export function shapeChangesText(changes: LayoutShapeChanges, to: LayoutShape): string | null {
+  const parts = [
+    changes.polygon > 0 && counted(changes.polygon, 'polygon', 'polygons'),
+    changes.rotated > 0 && counted(changes.rotated, 'rotated box', 'rotated boxes'),
+  ].filter(Boolean)
+  if (parts.length === 0) return null
+  const total = changes.polygon + changes.rotated
+  const into = to === 'box' ? (total === 1 ? 'an upright box' : 'upright boxes') : (total === 1 ? 'a rotated box' : 'rotated boxes')
+  return `${parts.join(' and ')} ${total === 1 ? 'becomes' : 'become'} ${into} around ${total === 1 ? 'it' : 'them'}`
+}
 
 export const NEEDS_LAYOUT = 'Needs layout detection'
 

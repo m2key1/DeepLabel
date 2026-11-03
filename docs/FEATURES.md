@@ -180,9 +180,14 @@ how it is processed: the New job steps open filled in as the dataset stands, wit
 source and pages. Changes apply to the next run; nothing already recognised is thrown away.
 
 - Rename the dataset on the first step; a name another dataset has is refused there.
-- Choose the phases, the line detection, whether layout elements are boxes or polygons, the
-  page structure used for reading order, the models, decoding and convention flags, the
+- Choose the phases, the line detection, how free layout elements may be, the page
+  structure used for reading order, the models, decoding and convention flags, the
   language models that read it, and its data use.
+- **Layout element shapes** is a ceiling, set when the dataset is created, in its Settings
+  or for a whole group: **Aligned** (upright boxes, the default), **Rotated** (also boxes
+  turned to follow a slanted block) or **Polygons** (also free outlines). Lowering it says
+  first how many elements go beyond the new level and asks before saving; each becomes the
+  tightest allowed shape around it, and the revision history keeps the old shape.
 - When the OCR settings change, Review offers to re-read the unchecked lines at once.
 - A map dataset keeps a smaller **Settings**: its name, and its tile size if it cut its own tiles.
 - **Re-run** a phase over the dataset (from the **Run** menu on its page), a selection of
@@ -243,6 +248,10 @@ Press `e` to edit the page.
 - **Draw** (`d`): pick a class on the rail (or press its digit) and drag a box, or click
   two corners. Draw a text line in three clicks: start of the line, its end, then its
   height. Free polygons are drawn a corner per click and closed on the first corner.
+- Above Aligned, every layout class on the rail carries the pens its dataset allows: an
+  upright box, a rotated box (three clicks, like a line) and an outline. Each class
+  remembers its pen. A selected element's **Element shape** switch turns it into any
+  allowed shape.
 - Selected lines: drag a corner to resize, drag the ring to rotate (Shift snaps to 5
   degrees), `,` and `.` turn by one degree. Switch a line to a polygon to follow a curved
   baseline.

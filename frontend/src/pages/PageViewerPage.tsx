@@ -55,7 +55,9 @@ import type { Crumb } from '../components/NavBar'
 import { BarDivider, Button, ButtonGroup, GroupButton, Toggle } from '../components/ui/Button'
 import { Select } from '../components/ui/Field'
 import { Segmented } from '../components/ui/Segmented'
-import { KeyboardIcon, PanelIcon, PenIcon, PolygonIcon, RereadIcon, RevertIcon, RotateIcon, TrashIcon, TurnedBoxIcon } from '../components/icons'
+import {
+  KeyboardIcon, PanelIcon, PenIcon, PolygonIcon, RereadIcon, RevertIcon, RotateIcon, TrashIcon, TurnedBoxIcon, UprightBoxIcon,
+} from '../components/icons'
 import { boxChrome } from '../components/chrome'
 import { Splitter } from '../components/ui/Splitter'
 import { LineLoupe } from '../components/viewer/LineLoupe'
@@ -89,7 +91,8 @@ import { usePageLiveFeed } from '../editor/usePageLiveFeed'
 import { simplifyPolyline } from '../lib/geometry/core'
 import { eraseFromGeom } from '../lib/geometry/region'
 import {
-  REVIEW_THRESHOLDS, classColor, confBadgeClass, getHiddenClasses, setClassColors, getLinePenShape, getOcrFrac,
+  REVIEW_THRESHOLDS, classColor, confBadgeClass, getElementPenShapes, getHiddenClasses, setClassColors, getLinePenShape,
+  getOcrFrac, setElementPenShapes,
   getPenClass, clampKeyboardSize, clampLoupeHeight, getKeyboardPlace, getKeyboardSize, getLoupeHeight,
   getReadingsFrac, getReadingsOpen, setReadingsOpen, setHiddenClasses, setLoupeHeight,
   setKeyboardPlace, setKeyboardSize, setLinePenShape, setOcrFrac, setPenClass, setReadingsFrac, setReviewConf,
@@ -97,6 +100,8 @@ import {
 import type { LinePenShape } from '../util'
 import { clamp01, polyCenter, polyMaxX, polyMinX } from '../lib/geometry/core'
 import type { Ring } from '../lib/geometry/core'
+import { allowedShapes, elementShape, reshaped, withinLevel } from '../lib/geometry/elementShape'
+import type { ElementShape } from '../lib/geometry/elementShape'
 import {
   acrossQuad, angleAround, angledQuad, bigEnough, containingStack, cropAxis, cropPlan, dropVertex, lineBox, linesAt, minAreaQuad, moveBbox, moveEdge, moveEdgeFree, movePoly, orderBbox, pagePoints, polyBigEnough, polygonCrossing, quadAngle, quadCrossing, resizeBbox, resizeQuadCorner, rotateHandleAnchor, rotatePoly, splitLongSides, splitSide,
 } from '../lib/geometry/quad'
@@ -190,6 +195,26 @@ const clampReadingsFrac = (f: number) => Math.min(READINGS_FRAC.most, Math.max(R
 
 // How close to the bottom edge a dragged keyboard's lower edge must come to dock again.
 const KEYBOARD_SNAP_PX = 48
+
+// A layout pen's three shapes, as the class rail offers them and the Element shape switch
+// turns a selected element into.
+const ELEMENT_PENS: Record<ElementShape, { label: string; hint: string; editHint: string; article: string; icon: ReactNode }> = {
+  box: {
+    label: 'Draw as an upright box', article: 'an upright box', icon: <UprightBoxIcon />,
+    hint: 'Box: drag, or click two corners',
+    editHint: 'Upright box: the box around it, square to the page',
+  },
+  rotated: {
+    label: 'Draw as a rotated box', article: 'a rotated box', icon: <TurnedBoxIcon />,
+    hint: 'Rotated box: three clicks - one end of a side, its other end, then the height',
+    editHint: 'Rotated box: four corners kept square to each other, turned to fit',
+  },
+  polygon: {
+    label: 'Draw as an outline', article: 'a polygon', icon: <PolygonIcon />,
+    hint: 'Outline: a corner per click - click the first corner again to close it',
+    editHint: 'Polygon: corners that move on their own - click a side to add one',
+  },
+}
 
 export function PageViewerPage() {
   const { user, isAdmin, canEdit, can } = useAuth()
@@ -328,11 +353,20 @@ export function PageViewerPage() {
   // The pen says what Draw would draw, and nothing more: it is remembered between
   // visits, so every other tool has to behave the same whichever pen was left loaded.
   const drawingLines = tool === 'draw' && penClass === LINE_CLASS
-  // Whether this dataset draws its layout elements as outlines rather than boxes.
-  const outlines = job?.layout_shape === 'polygon'
-  // A layout pen in a polygon dataset draws a box or, shaped so, an outline a corner a click.
-  const [elementPenShape, setElementPenShape] = useState<LinePenShape>('box')
-  const drawingOutlines = tool === 'draw' && penClass !== LINE_CLASS && outlines && elementPenShape === 'polygon'
+  // How free this dataset's layout elements may be; above Aligned each keeps an outline.
+  const shapeLevel = job?.layout_shape ?? 'box'
+  const outlines = shapeLevel !== 'box'
+  // Each layout pen remembers its shape - a box, a rotated box or an outline - within what
+  // the dataset allows.
+  const [penShapes, setPenShapes] = useState<Record<string, ElementShape>>(getElementPenShapes)
+  const penShapeOf = (className: string): ElementShape => {
+    const remembered = penShapes[className] ?? 'box'
+    return withinLevel(remembered, shapeLevel) ? remembered : 'box'
+  }
+  const elementPenShape = penShapeOf(penClass)
+  const drawingLayout = tool === 'draw' && penClass !== LINE_CLASS && outlines
+  const drawingOutlines = drawingLayout && elementPenShape === 'polygon'
+  const drawingTurnedBox = drawingLayout && elementPenShape === 'rotated'
   // What the pen in hand draws in, for its previews.
   const penColour = drawingLines ? LINE_CLASS : penClass
   const [layoutClasses, setLayoutClasses] = useState<string[]>([])
@@ -1132,6 +1166,16 @@ export function PageViewerPage() {
     if (penClass !== LINE_CLASS || tool !== 'draw') pickClass(LINE_CLASS)
   }
 
+  // Choosing a layout pen's shape is also choosing that pen, as with the Line pen.
+  const pickElementPen = (className: string, shape: ElementShape) => {
+    setPenShapes((prev) => {
+      const next = { ...prev, [className]: shape }
+      setElementPenShapes(next)
+      return next
+    })
+    if (penClass !== className || tool !== 'draw') pickClass(className)
+  }
+
   const toggleHidden = (name: string) => {
     setHidden((prev) => {
       const next = new Set(prev)
@@ -1173,7 +1217,7 @@ export function PageViewerPage() {
     setBoxDraft(null)
     setPolyDraft(null)
     setDrawCursor(null)
-  }, [penClass, linePenShape, editing, pageId])
+  }, [penClass, linePenShape, elementPenShape, editing, pageId])
 
   // What the last sweep did is worth reading right after it, not once the tool has moved on.
   useEffect(() => setErasedNotice(null), [tool, pageId])
@@ -1285,15 +1329,17 @@ export function PageViewerPage() {
   const nextDrag = (d: Drag, [x, y]: Pt, mods: Modifiers): Drag => {
     if (d.mode === 'move') return { ...d, bbox: moveBbox(d.origin, x - d.from[0], y - d.from[1]) }
     if (d.mode === 'resize') return { ...d, bbox: resizeBbox(d.bbox, d.corner, x, y) }
+    // Below Polygons an element keeps its corners square, whatever the modifier.
+    const free = mods.ctrl && (d.mode === 'lvertex' || d.mode === 'ledge') && (d.of === 'line' || shapeLevel === 'polygon')
     if (d.mode === 'lvertex') {
-      const rigid = !mods.ctrl && d.origin.length === 4
+      const rigid = !free && d.origin.length === 4
       const poly: Ring = rigid
         ? resizeQuadCorner(d.origin, d.vi, [x, y], aspect)
         : d.origin.map((p, i): Pt => (i === d.vi ? [x, y] : p))
       return { ...d, poly }
     }
     if (d.mode === 'ledge') {
-      const poly = mods.ctrl
+      const poly = free
         ? moveEdgeFree(d.origin, d.ei, x - d.from[0], y - d.from[1])
         : moveEdge(d.origin, d.ei, x - d.from[0], y - d.from[1], aspect)
       return { ...d, poly }
@@ -1348,7 +1394,7 @@ export function PageViewerPage() {
         // four-corner line, where that handle is the grow control and a fifth corner
         // would be a surprise - the Polygon button is how a box becomes a polygon. An
         // element's outline gains one on any side: it has no grow control to keep.
-        else if (d.mode === 'ledge' && (d.origin.length > 4 || d.of === 'element')) {
+        else if (d.mode === 'ledge' && (d.origin.length > 4 || (d.of === 'element' && shapeLevel === 'polygon'))) {
           commitOutline(d.of, d.id, splitSide(d.origin, d.ei), d.origin)
         }
         // Otherwise the handle was clicked, not dragged - and a selected line's handles
@@ -1553,7 +1599,7 @@ export function PageViewerPage() {
     const quad = angledQuad(draft.a, draft.b, pt, aspect)
     setLineDraft(null)
     setDrawCursor(null)
-    if (quad && polyBigEnough(quad)) commitLineCreate(quad)
+    if (quad && polyBigEnough(quad)) (drawingLines ? commitLineCreate(quad) : commitOutlineCreate(quad))
   }
 
   // Clicking the first corner again closes the polygon; anywhere else adds a corner. A
@@ -1883,7 +1929,7 @@ export function PageViewerPage() {
       return
     }
     if ((drawingLines && linePenShape === 'polygon') || drawingOutlines) beginPolyStroke(e, pt)
-    else if (drawingLines) beginDrag(e, { mode: 'lside', from: pt, to: pt })
+    else if (drawingLines || drawingTurnedBox) beginDrag(e, { mode: 'lside', from: pt, to: pt })
     else beginDrag(e, { mode: 'new', from: pt, bbox: orderBbox(pt[0], pt[1], pt[0], pt[1]) })
   }
 
@@ -3371,35 +3417,43 @@ export function PageViewerPage() {
 
   const classRail = () => {
     // One pen class: its colour, its digit hint, and an eye to hide the class on the page.
+    // A pen's shapes as one small joined control, so every row keeps room for its name.
+    const shapeButton = 'px-[3px] py-0.5 [&_svg]:size-3.5'
     const shapeToggle = (shape: LinePenShape, label: string, hint: string, icon: ReactNode) => (
-      <Toggle
+      <GroupButton
         on={tool === 'draw' && penClass === LINE_CLASS && linePenShape === shape}
         data-testid={`line-pen-${shape}`}
         aria-label={label}
         title={hint}
         onClick={() => pickLinePen(shape)}
-        className="flex shrink-0 justify-center px-1"
+        className={shapeButton}
       >
         {icon}
-      </Toggle>
+      </GroupButton>
     )
 
-    const elementShapeToggle = (shape: LinePenShape, label: string, hint: string, icon: ReactNode) => (
-      <Toggle
-        on={elementPenShape === shape}
-        data-testid={`element-pen-${shape}`}
-        aria-label={label}
-        title={hint}
-        onClick={() => setElementPenShape(shape)}
-        className="flex shrink-0 justify-center px-1"
-      >
-        {icon}
-      </Toggle>
-    )
+    const elementShapeToggle = (className: string, shape: ElementShape) => {
+      const { label, hint, icon } = ELEMENT_PENS[shape]
+      return (
+        <GroupButton
+          key={shape}
+          on={tool === 'draw' && penClass === className && elementPenShape === shape}
+          data-testid={`element-pen-${shape}`}
+          data-class={className}
+          aria-label={`${label}: ${className}`}
+          title={hint}
+          onClick={() => pickElementPen(className, shape)}
+          className={shapeButton}
+        >
+          {icon}
+        </GroupButton>
+      )
+    }
 
-    const penGroup = (label: string, items: readonly (readonly [string, number | null])[]) => (
+    const penGroup = (label: string, items: readonly (readonly [string, number | null])[], className?: string) => (
       <PenPanel
         heading={label}
+        className={className}
         pens={items.map(([name, digit]) => ({
           key: name, label: name, color: classColor(name), digit, hidden: hidden.has(name),
         }))}
@@ -3408,15 +3462,14 @@ export function PageViewerPage() {
         onPick={(key) => pickClass(String(key))}
         onToggleHidden={(key) => toggleHidden(String(key))}
         extra={(pen) => pen.key === LINE_CLASS ? (
-          <>
+          <ButtonGroup aria-label="Line pen shape">
             {shapeToggle('box', 'Draw lines as a box', 'Box: three clicks - the start of the line, its end, then its height', <TurnedBoxIcon />)}
             {shapeToggle('polygon', 'Draw lines as a polygon', 'Polygon: a corner per click - click the first corner again to close it', <PolygonIcon />)}
-          </>
-        ) : outlines && tool === 'draw' && penClass === pen.key ? (
-          <>
-            {elementShapeToggle('box', 'Draw as a box', 'Box: drag, or click two corners', <TurnedBoxIcon />)}
-            {elementShapeToggle('polygon', 'Draw as an outline', 'Outline: a corner per click - click the first corner again to close it', <PolygonIcon />)}
-          </>
+          </ButtonGroup>
+        ) : outlines ? (
+          <ButtonGroup aria-label={`${pen.label} pen shape`}>
+            {allowedShapes(shapeLevel).map((shape) => elementShapeToggle(String(pen.key), shape))}
+          </ButtonGroup>
         ) : null}
       />
     )
@@ -3478,6 +3531,32 @@ export function PageViewerPage() {
               <option key={c} value={c}>{c}</option>
             ))}
           </Select>
+          {outlines && curEl.polygon && (() => {
+            const ring = curEl.polygon
+            const now = elementShape(ring, aspect)
+            return (
+              <>
+                <div className="pt-1 text-[10px] font-medium uppercase tracking-wide text-ink-subtle">
+                  Element shape
+                </div>
+                <div className="flex gap-1" data-testid="element-shape">
+                  {allowedShapes(shapeLevel).map((shape) => (
+                    <Toggle
+                      key={shape}
+                      on={now === shape}
+                      data-testid={`element-shape-${shape}`}
+                      aria-label={`Make this element ${ELEMENT_PENS[shape].article}`}
+                      title={ELEMENT_PENS[shape].editHint}
+                      onClick={() => now !== shape && commitElementPoly(curEl.id, reshaped(ring, shape, aspect))}
+                      className="flex flex-1 justify-center"
+                    >
+                      {ELEMENT_PENS[shape].icon}
+                    </Toggle>
+                  ))}
+                </div>
+              </>
+            )
+          })()}
         </div>
       )
     }
@@ -3510,7 +3589,8 @@ export function PageViewerPage() {
           bindings={{ select: hk.toolSelect, hand: hk.toolHand, draw: hk.toolDraw, erase: hk.toolErase }}
         />
         {tool === 'erase' && <BrushPanel radius={brushRadius} onRadius={setBrushRadius} />}
-        {penGroup('Lines', [[LINE_CLASS, null]])}
+        {/* One row, which the class lists below would otherwise squeeze when the rail is full. */}
+        {penGroup('Lines', [[LINE_CLASS, null]], 'shrink-0')}
         {penGroup('Content', content)}
         {penGroup('Containers', containerItems)}
         {selectionPanel()}
@@ -3635,7 +3715,7 @@ export function PageViewerPage() {
                   : 'click each corner of the line · ⌫ takes one back · Esc cancel'
                 : lineDraft
                 ? lineDraft.b
-                  ? 'click to set the line height · Esc cancel'
+                  ? `click to set the ${drawingLines ? 'line' : 'box'} height · Esc cancel`
                   : 'click the other end of the side · Esc cancel'
                 : cutArmed
                 ? 'drag a cut across the selection, or click to cut straight across there · Esc cancel'
@@ -3651,6 +3731,7 @@ export function PageViewerPage() {
     <>
     <EditorShell
       headerTestId="viewer-header"
+      wideRail={outlines}
       style={{ ['--vkbd-h' as string]: `${kbVisible ? kbHeight : 0}px` }}
       header={{
         left: (<>

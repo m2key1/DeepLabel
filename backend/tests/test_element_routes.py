@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app import candidates, store
+from app import candidates, layout_shapes, store
 from app.deps import get_db
 from app.main import app
 
@@ -451,6 +451,74 @@ class TestTheCrop:
         assert client.get('/api/elements/99/crop', headers=ALICE).status_code == 404
 
 
+class TestLayoutShapeLevels:
+    """Aligned, Rotated and Polygons are ceilings: lowering one turns every shape above it
+    into the tightest one allowed around it, and the revisions keep what it was."""
+
+    OUTLINE = [[0.1, 0.1], [0.8, 0.05], [0.9, 0.4], [0.2, 0.45], [0.05, 0.3]]
+    # A box turned 30 degrees on the 400 x 200 page, square in pixels.
+    TURNED = [[0.3518, 0.2134], [0.6982, 0.6134], [0.6482, 0.7866], [0.3018, 0.3866]]
+
+    def _shape(self, conn, element_id):
+        row = conn.execute('SELECT bbox, polygon FROM elements WHERE id = ?', (element_id,)).fetchone()
+        return json.loads(row['bbox']), json.loads(row['polygon']) if row['polygon'] else None
+
+    def _setup(self, client, conn):
+        assert client.patch('/api/jobs/j1', json={'layout_shape': 'polygon'}, headers=ALICE).status_code == 200
+        assert client.patch('/api/elements/1', json={'polygon': self.OUTLINE}, headers=ALICE).status_code == 200
+        assert client.patch('/api/elements/2', json={'polygon': self.TURNED}, headers=ALICE).status_code == 200
+
+    def test_a_dataset_can_be_made_rotated(self, client, conn):
+        assert client.patch('/api/jobs/j1', json={'layout_shape': 'rotated'}, headers=ALICE).status_code == 200
+        assert client.get('/api/jobs/j1', headers=ALICE).json()['layout_shape'] == 'rotated'
+        # Outlines are in use, so each box arrives as its four corners.
+        assert self._shape(conn, 1)[1] == [[0.0, 0.0], [1.0, 0.0], [1.0, 0.5], [0.0, 0.5]]
+
+    def test_the_count_says_what_lowering_would_change(self, client, conn):
+        self._setup(client, conn)
+
+        assert client.get('/api/jobs/j1/layout-shape-changes', params={'shape': 'rotated'},
+                          headers=ALICE).json() == {'polygon': 1, 'rotated': 0}
+        assert client.get('/api/jobs/j1/layout-shape-changes', params={'shape': 'box'},
+                          headers=ALICE).json() == {'polygon': 1, 'rotated': 1}
+        assert client.get('/api/jobs/j1/layout-shape-changes', params={'shape': 'polygon'},
+                          headers=ALICE).json() == {'polygon': 0, 'rotated': 0}
+
+    def test_lowering_to_rotated_squares_the_polygon_and_keeps_the_turned_box(self, client, conn):
+        self._setup(client, conn)
+        before = conn.execute("SELECT COUNT(*) FROM revisions WHERE target_type = 'element'").fetchone()[0]
+
+        assert client.patch('/api/jobs/j1', json={'layout_shape': 'rotated'}, headers=ALICE).status_code == 200
+
+        bbox, ring = self._shape(conn, 1)
+        assert len(ring) == 4 and layout_shapes.shape_of(ring, (400, 200)) in ('rotated', 'box')
+        assert all(layout_shapes.covers(ring, point, (400, 200)) for point in self.OUTLINE)
+        assert self._shape(conn, 2)[1] == self.TURNED
+        # One revision, for the one element that changed; the one before it holds the outline.
+        assert conn.execute("SELECT COUNT(*) FROM revisions WHERE target_type = 'element'").fetchone()[0] == before + 1
+        last_two = conn.execute("SELECT snapshot FROM revisions WHERE target_type = 'element' AND target_id = 1 "
+                                'ORDER BY id DESC LIMIT 2').fetchall()
+        assert json.loads(last_two[1][0])['polygon'] == self.OUTLINE
+
+    def test_lowering_to_aligned_leaves_every_element_its_box(self, client, conn):
+        self._setup(client, conn)
+
+        client.patch('/api/jobs/j1', json={'layout_shape': 'box'}, headers=ALICE)
+
+        assert self._shape(conn, 1) == ([0.05, 0.05, 0.9, 0.45], None)
+        bbox, ring = self._shape(conn, 2)
+        assert ring is None and bbox == pytest.approx([0.3018, 0.2134, 0.6982, 0.7866], abs=1e-4)
+
+    def test_a_group_counts_across_its_datasets(self, client, conn):
+        self._setup(client, conn)
+        conn.execute("INSERT INTO groups (id, name, owner) VALUES (7, 'Volumes', 'alice')")
+        conn.execute("UPDATE jobs SET group_id = 7 WHERE id = 'j1'")
+        conn.commit()
+
+        assert client.get('/api/groups/7/layout-shape-changes', params={'shape': 'box'},
+                          headers=ALICE).json() == {'polygon': 1, 'rotated': 1}
+
+
 class TestWhoMayEdit:
     def test_a_stranger_is_not_told_the_element_exists(self, client):
         assert client.patch('/api/elements/1', json={'checked': True},
@@ -473,7 +541,7 @@ class TestWhoMayEdit:
 
 class TestPolygonElements:
     """A polygon dataset's elements are outlines, reshaped like a line; its box is their
-    bounds, and a box dataset keeps any outline on file for when it switches back."""
+    bounds."""
 
     def _element(self, conn, element_id):
         row = conn.execute('SELECT bbox, polygon FROM elements WHERE id = ?', (element_id,)).fetchone()
@@ -482,7 +550,7 @@ class TestPolygonElements:
     def _polygons(self, client):
         assert client.patch('/api/jobs/j1', json={'layout_shape': 'polygon'}, headers=ALICE).status_code == 200
 
-    def test_switching_on_gives_every_box_its_four_corners_and_off_keeps_them(self, client, conn):
+    def test_switching_on_gives_every_box_its_four_corners_and_off_takes_them_away(self, client, conn):
         self._polygons(client)
         assert self._element(conn, 1) == ([0.0, 0.0, 1.0, 0.5], [[0.0, 0.0], [1.0, 0.0], [1.0, 0.5], [0.0, 0.5]])
         page = client.get('/api/jobs/j1/pages/1', headers=ALICE).json()
@@ -490,7 +558,7 @@ class TestPolygonElements:
         assert client.get('/api/jobs/j1', headers=ALICE).json()['layout_shape'] == 'polygon'
 
         client.patch('/api/jobs/j1', json={'layout_shape': 'box'}, headers=ALICE)
-        assert self._element(conn, 1)[1] == [[0.0, 0.0], [1.0, 0.0], [1.0, 0.5], [0.0, 0.5]]
+        assert self._element(conn, 1) == ([0.0, 0.0, 1.0, 0.5], None)
 
     def test_only_the_owner_switches_and_only_to_a_shape_there_is(self, client):
         assert client.patch('/api/jobs/j1', json={'layout_shape': 'polygon'}, headers=BOB).status_code in (403, 404)
@@ -515,13 +583,13 @@ class TestPolygonElements:
         self._polygons(client)
         assert client.patch('/api/elements/1', json={'polygon': [[0, 0], [1, 1]]}, headers=ALICE).status_code == 400
 
-    def test_a_box_moved_in_box_mode_carries_its_kept_outline_with_it(self, client, conn):
+    def test_raising_from_boxes_starts_from_the_box_not_an_old_hidden_outline(self, client, conn):
+        conn.execute("UPDATE elements SET polygon = '[[0.2,0.1],[0.6,0.1],[0.4,0.3]]' WHERE id = 1")
+        conn.commit()
+
         self._polygons(client)
-        client.patch('/api/jobs/j1', json={'layout_shape': 'box'}, headers=ALICE)
 
-        client.patch('/api/elements/1', json={'bbox': [0.0, 0.0, 0.5, 0.5]}, headers=ALICE)
-
-        assert self._element(conn, 1)[1] == [[0.0, 0.0], [0.5, 0.0], [0.5, 0.5], [0.0, 0.5]]
+        assert self._element(conn, 1)[1] == [[0.0, 0.0], [1.0, 0.0], [1.0, 0.5], [0.0, 0.5]]
 
     def test_drawing_in_polygon_mode_takes_a_box_or_an_outline(self, client, conn):
         self._polygons(client)

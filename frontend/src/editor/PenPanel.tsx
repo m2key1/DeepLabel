@@ -13,9 +13,10 @@ export interface PenRow extends Pen {
  *  owns its classes and may recolour, add and remove them here; a scan's layout classes
  *  are fixed, and get an eye to hide them instead. */
 export function PenPanel({
-  heading = 'Classes', pens, active, selected = null, onPick, onToggleHidden, editable, extra, ranking,
+  heading = 'Classes', pens, active, selected = null, onPick, onToggleHidden, editable, extra, ranking, className = '',
 }: {
   heading?: ReactNode
+  className?: string
   pens: PenRow[]
   active: Pen['key'] | null
   /** The class of what is selected on the page, if anything is. */
@@ -39,7 +40,7 @@ export function PenPanel({
     // However many classes there are - there is no limit - they take the room they need
     // up to a share of the rail and scroll beyond it, so the list and the panels below
     // stay within reach.
-    <div className="flex min-h-0 flex-col" style={{ maxHeight: '40%' }}>
+    <div className={`flex min-h-0 flex-col ${className}`.trim()} style={{ maxHeight: '40%' }}>
       <p className="mb-1 shrink-0 text-[10px] font-medium uppercase tracking-wide text-ink-subtle">{heading}</p>
       <div data-testid="class-list" className="min-h-0 space-y-1 overflow-y-auto">
         {pens.map((pen) => {

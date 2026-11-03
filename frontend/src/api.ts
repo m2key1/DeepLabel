@@ -1128,8 +1128,10 @@ export function uploadJob(
   asTest = false,
   ocrConvention: OcrConvention = {},
   dataUse: DataUse = ALL_USES,
+  layoutShape: LayoutShape = 'box',
 ): Promise<{ job_id: string }> {
   const form = new FormData()
+  form.append('layout_shape', layoutShape)
   if (asTest) form.append('as_test', 'true')
   form.append('ocr_convention', JSON.stringify(ocrConvention))
   form.append('data_use', JSON.stringify(dataUse))
@@ -1198,6 +1200,7 @@ export interface JobOptions {
   layout_template_id: number | null
   ocr_convention: OcrConvention
   data_use: DataUse
+  layout_shape: LayoutShape
 }
 
 export function createJobFromPath(
@@ -1387,7 +1390,20 @@ export interface Processing {
   layout_shape: LayoutShape
 }
 
-export type LayoutShape = 'box' | 'polygon'
+/** How free a dataset's layout elements may be - a ceiling: Aligned boxes only, also
+ *  rotated boxes, or also polygons. */
+export type LayoutShape = 'box' | 'rotated' | 'polygon'
+
+/** How many elements a lower layout shape would turn into boxes, by what they are now. */
+export interface LayoutShapeChanges { polygon: number; rotated: number }
+
+export function getLayoutShapeChanges(jobId: string, shape: LayoutShape): Promise<LayoutShapeChanges> {
+  return request(`/api/jobs/${jobId}/layout-shape-changes?shape=${shape}`)
+}
+
+export function getGroupLayoutShapeChanges(groupId: number, shape: LayoutShape): Promise<LayoutShapeChanges> {
+  return request(`/api/groups/${groupId}/layout-shape-changes?shape=${shape}`)
+}
 
 /** Which phases the next run performs, and whether lines are looked for inside the layout
  *  boxes or across the whole page. Nothing already recognised is touched; the server
@@ -1457,6 +1473,7 @@ export interface GroupJobsPatch {
   run_layout?: boolean
   run_lines?: boolean
   run_ocr?: boolean
+  layout_shape?: LayoutShape
 }
 
 export interface GroupJobsOutcome {

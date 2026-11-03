@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
   ALL_USES, PHASE_CAPABILITY, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromIiif,
-  createJobFromPath, iiifThumbnailUrl, ApiError, getEnabledTasks, getLayoutTemplates, getMapModels, importJob, isTileTask, listConventionFlags,
+  createJobFromPath, iiifThumbnailUrl, ApiError, getEnabledTasks, getLayoutShapeChanges, getLayoutTemplates, getMapModels, importJob, isTileTask, listConventionFlags,
   checkJobName, listModels, listUsableLlmModels, renameJob, reocr, reocrPreview, setDataUse as saveDataUse, setJobLlmSettings,
   setJobModels, setJobProcessing, setNewPagesTest, uploadJob,
 } from '../api'
 import type {
-  ConventionFlag, DataUse, JobOptions, JobWithoutPages, LayoutShape, LlmModel, ReocrPreview, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, OcrDecode,
+  ConventionFlag, DataUse, JobOptions, JobWithoutPages, LayoutShape, LayoutShapeChanges, LlmModel, ReocrPreview, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, OcrDecode,
   Phases, RegistryModel, Task,
 } from '../api'
 import { useAuth } from '../auth'
@@ -20,7 +20,7 @@ import { AlignmentChoice, LayoutShapeChoice, LlmReaders } from '../components/jo
 import { IiifSource, NO_IIIF } from '../components/job/IiifSource'
 import type { IiifChoice } from '../components/job/IiifSource'
 import { PagePicker, useFileItems } from '../components/job/PagePicker'
-import { LINE_MODE_CHOICES, NEEDS_LAYOUT, PHASE_CHOICES } from '../components/job/processing'
+import { LAYOUT_SHAPE_CHOICES, LINE_MODE_CHOICES, NEEDS_LAYOUT, PHASE_CHOICES, lowersShape, shapeChangesText } from '../components/job/processing'
 import { Stepper } from '../components/ui/Stepper'
 import { SkippedSymlinks } from '../components/job/SkippedSymlinks'
 import { useCrumb } from '../components/NavBar'
@@ -137,6 +137,17 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   const [lineMode, setLineMode] = useState<LineMode>((edit?.line_mode as LineMode | undefined) ?? 'per_page')
   const [structure, setStructure] = useState(edit?.reading_order || 'auto')
   const [shape, setShape] = useState<LayoutShape>(edit?.layout_shape ?? 'box')
+  // What a lower shape would turn into boxes, counted before it is saved.
+  const [shapeChanges, setShapeChanges] = useState<LayoutShapeChanges | null>(null)
+  const savedShape = edit?.layout_shape ?? 'box'
+  useEffect(() => {
+    setShapeChanges(null)
+    if (!edit || !lowersShape(shape, savedShape)) return
+    let live = true
+    getLayoutShapeChanges(edit.id, shape).then((c) => { if (live) setShapeChanges(c) })
+      .catch((e: Error) => { if (live) setError(e.message) })
+    return () => { live = false }
+  }, [edit?.id, shape, savedShape])
   const [templates, setTemplates] = useState<LayoutTemplate[]>([])
   const [templateId, setTemplateId] = useState<number | null>(null)
   // A phase the person may not run starts off and stays off; the backend refuses it too.
@@ -404,6 +415,8 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
       { label: 'Runs', step: 'run' as Step,
         value: PHASE_CHOICES.filter(([key]) => ran(key)).map(([, label]) => label).join(', ') || 'nothing yet' },
       ...(template && !edit ? [{ label: 'Layout', value: `${template.name} template`, step: 'run' as Step }] : []),
+      ...(!isMap && !archive ? [{ label: 'Shapes', step: 'run' as Step,
+                                  value: LAYOUT_SHAPE_CHOICES.find(([key]) => key === shape)![1] }] : []),
       ...(asTest ? [{ label: 'Test pages', value: edit ? 'pages added from now on' : 'yes, kept out of training',
                       step: 'run' as Step }] : []),
     ] : []),
@@ -447,6 +460,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
     gt_ordered: gtOrdered, gt_from_pdf: gtFromPdf, layout_template_id: isMap ? null : templateId,
     ocr_convention: ran('ocr') && !isMap ? convention : {},
     data_use: dataUse,
+    layout_shape: isMap ? 'box' : shape,
   })
 
   // The template of a dataset's layout model, where that reads top to bottom: then it, not
@@ -496,6 +510,8 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
       return
     }
     if (!canSubmit) return
+    const converting = edit && lowersShape(shape, savedShape) && shapeChanges && shapeChangesText(shapeChanges, shape)
+    if (converting && !window.confirm(`${converting}. Save?`)) return
     setError(null)
     setBusy(true)
     if (edit) {
@@ -533,6 +549,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
           !isMap && asTest,
           ran('ocr') && !isMap ? convention : {},
           dataUse,
+          isMap ? 'box' : shape,
         )
       }
       if (archive) {
@@ -1174,7 +1191,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
               </div>
             )}
             {edit && !isMap && (<>
-              <LayoutShapeChoice value={shape} saved={edit.layout_shape ?? 'box'} onChange={setShape} />
+              <LayoutShapeChoice value={shape} saved={savedShape} changes={shapeChanges} onChange={setShape} />
               {phases.layout && <LabelMapping jobId={edit.id} canEdit onError={setError} />}
               {(edit.counters.gt_total ?? 0) > 0 && (
                 <AlignmentChoice autocheck={gtAutocheck} ordered={gtOrdered}
@@ -1213,6 +1230,9 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
                   </p>
                 )}
               </div>
+            )}
+            {!edit && !isMap && !archive && (
+              <LayoutShapeChoice value={shape} saved={shape} onChange={setShape} />
             )}
             {!isMap && phases.lines && !archive && (
               <div>
