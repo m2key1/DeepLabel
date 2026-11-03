@@ -73,13 +73,39 @@ def present_user(request: Request) -> dict:
 
 
 WAITING = 'this account is waiting for an admin to approve it'
+NEW_PASSWORD_FIRST = 'this session has to choose a new password first'
+
+
+def _held_back(user) -> str | None:
+    """Why a signed-in person may not go further yet, or None. A session that signed in
+    with a password below the rules may only choose a new one; API tokens carry no such
+    flag and keep working."""
+    if user['pending']:
+        return WAITING
+    if dict(user).get('password_change_due'):
+        return NEW_PASSWORD_FIRST
+    return None
 
 
 def current_user(user: dict = Depends(present_user)) -> dict:
     """Someone signed in and let in: a pending account may only say who it is."""
+    why = _held_back(user)
+    if why:
+        raise HTTPException(403, why)
+    return user
+
+
+def own_session(request: Request) -> dict:
+    """A signed-in browser session, let in, which may be held back only to choose a new
+    password - what that very session is there to do."""
+    user = _session_user(request)
+    if user is None:
+        if _bearer_user(request) is not None:
+            raise HTTPException(403, 'needs a signed-in session, not an API token')
+        raise HTTPException(401, 'not authenticated')
     if user['pending']:
         raise HTTPException(403, WAITING)
-    return user
+    return dict(user)
 
 
 def session_user(request: Request) -> dict:
@@ -91,8 +117,9 @@ def session_user(request: Request) -> dict:
         if _bearer_user(request) is not None:
             raise HTTPException(403, 'needs a signed-in session, not an API token')
         raise HTTPException(401, 'not authenticated')
-    if user['pending']:
-        raise HTTPException(403, WAITING)
+    why = _held_back(user)
+    if why:
+        raise HTTPException(403, why)
     return dict(user)
 
 
@@ -117,14 +144,15 @@ def _first_role(conn, subject: str, email: str) -> tuple[str, bool]:
     return (invited, False) if invited else ('viewer', True)
 
 
-def _new_session(subject: str, username: str, email: str = '', display_name: str = '') -> str:
+def _new_session(subject: str, username: str, email: str = '', display_name: str = '',
+                 must_change_password: bool = False) -> str:
     conn = store.connect(config.DB_PATH)
     try:
         role, pending = (None, False) if store.known_user(conn, subject) else _first_role(conn, subject, email)
         user = store.upsert_user(conn, subject, username, role, email=email, display_name=display_name,
                                  pending=pending)
         token = auth.new_token()
-        store.create_session(conn, user['id'], token, auth.session_expiry())
+        store.create_session(conn, user['id'], token, auth.session_expiry(), must_change_password)
     finally:
         conn.close()
     return token
@@ -196,14 +224,28 @@ async def sign_in_with_password(body: SignIn, request: Request):
         store.clear_sign_in_failures(conn, account)
     finally:
         conn.close()
-    return _signed_in(claims, _safe_next(body.next))
+    return _signed_in(claims, _safe_next(body.next), weak=_below_the_rules(body.password, claims))
 
 
-def _signed_in(claims: dict, next_page: str) -> Response:
+def _below_the_rules(password: str, claims: dict) -> bool:
+    """Whether a password that just signed someone in no longer meets Authentik's rules.
+    Sign-in is the only moment DeepLabel sees it. Not knowing never holds anyone back."""
+    if not authentik.enabled():
+        return False
+    try:
+        return bool(authentik.password_problems(password, {
+            'username': claims.get('preferred_username') or '', 'email': claims.get('email') or '',
+            'name': claims.get('name') or ''}))
+    except authentik.Unavailable:
+        return False
+
+
+def _signed_in(claims: dict, next_page: str, weak: bool = False) -> Response:
     """A DeepLabel session for whoever the provider named, and where to go now."""
     subject = claims['sub']
     username = claims.get('preferred_username') or claims.get('email') or claims.get('name') or subject
-    token = _new_session(subject, username, email=claims.get('email') or '', display_name=claims.get('name') or '')
+    token = _new_session(subject, username, email=claims.get('email') or '', display_name=claims.get('name') or '',
+                         must_change_password=weak)
     return _with_session(JSONResponse({'next': next_page}), token)
 
 
@@ -240,6 +282,25 @@ def _sign_up_enabled() -> bool:
 def sign_in_options():
     """What the sign-in page may offer besides signing in."""
     return {'sign_up': _sign_up_enabled()}
+
+
+@app.get('/api/sign-in/password-rules')
+def password_rules_for_the_meter():
+    """What a new password has to reach, for the strength meter on the account pages:
+    Authentik's minimum length, and the zxcvbn score it has to exceed when it checks one.
+    The server still checks every password itself."""
+    policy = None
+    if auth.oidc_enabled() and authentik.enabled():
+        try:
+            policy = authentik.password_policy()
+        except authentik.Unavailable:
+            policy = None
+    if policy is None:
+        return {'min_length': authentik.SHORTEST_PASSWORD, 'strength_check': False, 'min_score': 0}
+    checked = bool(policy.get('check_zxcvbn'))
+    return {'min_length': policy.get('length_min', 0) if policy.get('check_static_rules') else 0,
+            'strength_check': checked,
+            'min_score': policy.get('zxcvbn_score_threshold', 2) + 1 if checked else 0}
 
 
 class SignUp(BaseModel):
@@ -298,6 +359,7 @@ def me(user: dict = Depends(present_user)):
     return {'id': user['id'], 'user': user.get('username') or user['subject'],
             'role': user['role'], 'capabilities': sorted(store.effective_caps(user)),
             'pending': bool(user['pending']), 'email': user['email'], 'name': user['display_name'],
+            'password_change_due': bool(user.get('password_change_due')),
             'password_change': auth.oidc_enabled() and authentik.enabled()}
 
 
@@ -567,7 +629,7 @@ class NewPassword(BaseModel):
 
 
 @app.post('/api/users/me/password')
-def change_my_password(body: NewPassword, request: Request, me: dict = Depends(session_user)):
+def change_my_password(body: NewPassword, request: Request, me: dict = Depends(own_session)):
     """A new password for the person signed in. The session they are using is the proof,
     so the old password is not asked; every other session of theirs ends."""
     _require_accounts()
@@ -580,6 +642,7 @@ def change_my_password(body: NewPassword, request: Request, me: dict = Depends(s
     conn = store.connect(config.DB_PATH)
     try:
         ended = store.revoke_other_sessions(conn, me['id'], request.cookies.get(config.SESSION_COOKIE))
+        store.password_changed(conn, request.cookies.get(config.SESSION_COOKIE))
         store.log_user_change(conn, me['id'], _actor(me), 'password', '', 'changed')
         conn.commit()
     finally:
@@ -885,7 +948,7 @@ def validate(request: Request):
     if found is None:
         return Response(status_code=401)
     user, readonly = found
-    if user['pending']:
+    if _held_back(user):
         return Response(status_code=403)
     username = (user['username'] or user['subject']).replace('\n', ' ').replace('\r', ' ')
     headers = {'X-Auth-User': username, 'X-Auth-Role': user['role']}

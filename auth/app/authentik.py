@@ -77,18 +77,26 @@ def create_user(email: str, name: str) -> dict:
             'username': email, 'email': email, 'name': name, 'type': 'external', 'path': 'users'})
 
 
-def password_problems(password: str, account: dict | None = None) -> list[str]:
-    """What is wrong with a password by Authentik's password policy, in its own words;
-    empty when it may be set. `account` is whose password it is, which a strength check
-    holds the password against, as Authentik does."""
+def password_policy() -> dict | None:
+    """The password policy Authentik's own password changes are held to, or None when this
+    deployment has none."""
     with _client() as client:
-        policies = _call(client, 'GET', '/api/v3/policies/password/', params={'name': PASSWORD_POLICY})['results']
-        brand = _call(client, 'GET', '/api/v3/core/brands/current/').get('branding_title', '')
-    if not policies:
+        found = _call(client, 'GET', '/api/v3/policies/password/', params={'name': PASSWORD_POLICY})['results']
+    return found[0] if found else None
+
+
+def password_problems(password: str, account: dict | None = None) -> list[str]:
+    """What is wrong with a password by Authentik's password policy; empty when it may be
+    set. `account` is whose password it is, which a strength check holds the password
+    against, as Authentik does."""
+    policy = password_policy()
+    if policy is None:
         return [] if len(password) >= SHORTEST_PASSWORD else [
             f'Password needs to be {SHORTEST_PASSWORD} characters or longer.']
+    with _client() as client:
+        brand = _call(client, 'GET', '/api/v3/core/brands/current/').get('branding_title', '')
     inputs = [account.get(field, '') for field in ('username', 'name', 'email')] if account else []
-    return password_rules.problems(policies[0], password, [*inputs, brand])
+    return password_rules.problems(policy, password, [*inputs, brand])
 
 
 def set_password(user_pk: int, password: str) -> None:

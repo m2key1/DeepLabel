@@ -3,8 +3,9 @@ authorization endpoint, the token exchange and the user info for signing in, and
 API for managing accounts. Each step answers the way the real one does, down to a POST
 redirecting back to the executor.
 
-Accounts: root@example.org / root-password (the bootstrap admin), anna@example.org /
-anna-password, and locked@example.org, whose password nobody knows, for the throttle."""
+Accounts: root@example.org / copper willow tandem fjord (the bootstrap admin),
+anna@example.org / quartz lantern orbit meadow, olaf@example.org / olaf1234 (long enough,
+but too easy to guess), and locked@example.org, whose password nobody knows, for the throttle."""
 import json
 import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,8 +30,9 @@ def add(email: str, password: str | None, name: str = '', **overrides) -> dict:
 
 
 add('service@example.org', None, type='internal_service_account')
-add('root@example.org', 'root-password', 'Root Admin')
-add('anna@example.org', 'anna-password', 'Anna Example')
+add('root@example.org', 'copper willow tandem fjord', 'Root Admin')
+add('anna@example.org', 'quartz lantern orbit meadow', 'Anna Example')
+add('olaf@example.org', 'olaf1234', 'Olaf Example')
 add('locked@example.org', secrets.token_hex(16))
 
 
@@ -83,9 +85,8 @@ class Handler(BaseHTTPRequestHandler):
                 'length_min': SHORTEST, 'amount_digits': 0, 'amount_uppercase': 0, 'amount_lowercase': 0,
                 'amount_symbols': 0, 'check_static_rules': True, 'check_have_i_been_pwned': False,
                 'error_message': f'Password needs to be {SHORTEST} characters or longer.',
-                # Off, so the scenarios' passwords need not be strong; zxcvbn is the auth
-                # service's own unit test.
-                'check_zxcvbn': False, 'zxcvbn_score_threshold': 2}]})
+                # As a fresh Authentik has it: guessable passwords are refused.
+                'check_zxcvbn': True, 'zxcvbn_score_threshold': 2}]})
         parts = path.strip('/').split('/')
         if parts[:4] == ['api', 'v3', 'core', 'users'] and len(parts) >= 5 and int(parts[4]) in users:
             user = users[int(parts[4])]

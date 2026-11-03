@@ -16,7 +16,7 @@ test.describe('Scenario: signing in on DeepLabel\'s own page', () => {
     await expect(page.getByTestId('sign-in-form')).toBeVisible()
     expect(await signedInAs(page)).toBeNull()
 
-    await submit(page, 'root@example.org', 'root-password')
+    await submit(page, 'root@example.org', 'copper willow tandem fjord')
 
     await expect(page).toHaveURL(`${site}/models`)
     await expect.poll(() => signedInAs(page)).toBe('root@example.org')
@@ -52,7 +52,7 @@ test.describe('Scenario: signing in on DeepLabel\'s own page', () => {
   test('someone made in Authentik but never let in sees only the waiting page, and can log out from it',
        async ({ page }) => {
     await page.goto(`${site}/models`)
-    await submit(page, 'anna@example.org', 'anna-password')
+    await submit(page, 'anna@example.org', 'quartz lantern orbit meadow')
 
     await expect(page.getByTestId('pending-approval')).toBeVisible()
     await expect(page.getByTestId('pending-email')).toHaveText('anna@example.org')
@@ -67,7 +67,7 @@ test.describe('Scenario: signing in on DeepLabel\'s own page', () => {
 
   test('log out ends the session and lands back on the sign-in page', async ({ page }) => {
     await page.goto(`${site}/`)
-    await submit(page, 'root@example.org', 'root-password')
+    await submit(page, 'root@example.org', 'copper willow tandem fjord')
     await expect.poll(() => signedInAs(page)).toBe('root@example.org')
 
     await page.getByTestId('user-menu').click()

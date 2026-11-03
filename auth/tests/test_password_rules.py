@@ -26,16 +26,16 @@ def test_each_count_rule_is_held(rule, weak, strong):
     assert password_rules.problems(policy, strong, []) == []
 
 
-def test_a_guessable_password_is_too_weak_with_zxcvbn_s_advice():
-    found = password_rules.problems(DEFAULT, 'password1', [])
-    assert found[0] == 'Password is too weak.' and len(found) > 1
+def test_a_guessable_password_gets_one_plain_sentence_not_zxcvbn_s_advice():
+    assert password_rules.problems(DEFAULT, 'password1', []) == [password_rules.TOO_EASY]
+    assert password_rules.TOO_EASY == 'Too easy to guess - add another word.'
 
 
 def test_the_person_s_own_name_does_not_make_a_strong_password():
     strong_alone = 'annaexample2026'
     assert password_rules.problems(DEFAULT, strong_alone, []) == []
-    assert password_rules.problems(DEFAULT, strong_alone, ['anna@example.org', 'Anna Example', 'annaexample'])[0] \
-        == 'Password is too weak.'
+    assert password_rules.problems(DEFAULT, strong_alone, ['anna@example.org', 'Anna Example', 'annaexample']) \
+        == [password_rules.TOO_EASY]
 
 
 def test_a_good_password_passes_everything():

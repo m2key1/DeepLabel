@@ -1,3 +1,5 @@
+import type { PasswordRules } from './components/account/strength'
+
 export type JobStatus = 'uploading' | 'queued' | 'running' | 'done' | 'error' | 'cancelled'
 export type Phase = 'ingest' | 'layout' | 'lines' | 'ocr' | 'predict' | 'tile'
 export type ExportFormat = 'json' | 'md' | 'txt' | 'zip' | 'page' | 'alto' | 'hocr' | 'tei' | 'iiif'
@@ -2694,6 +2696,8 @@ export interface Me {
   name: string
   /** Whether this deployment lets a person set their own password here. */
   password_change: boolean
+  /** Signed in with a password below the rules: this session must choose a new one first. */
+  password_change_due: boolean
 }
 
 export function getMe(): Promise<Me> {
@@ -2708,6 +2712,11 @@ export function signIn(email: string, password: string, next: string): Promise<{
 
 export function getSignInOptions(): Promise<{ sign_up: boolean }> {
   return request('/api/sign-in/options')
+}
+
+/** What a new password has to reach, read from Authentik's policy, for the strength meter. */
+export function getPasswordRules(): Promise<PasswordRules> {
+  return request('/api/sign-in/password-rules')
 }
 
 /** A new account, signed in at once and waiting for an admin's approval. */

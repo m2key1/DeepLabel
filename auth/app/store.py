@@ -50,7 +50,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT NOT NULL
+    expires_at TEXT NOT NULL,
+    -- Signed in with a password that no longer meets the rules: this session may only
+    -- choose a new one.
+    must_change_password INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 -- One-time links to set a password on DeepLabel's own page: an invitation, or a reset an
@@ -256,6 +259,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE users ADD COLUMN last_login_at TEXT')
     if 'last_seen_at' not in columns:
         conn.execute('ALTER TABLE users ADD COLUMN last_seen_at TEXT')
+    if 'must_change_password' not in {r[1] for r in conn.execute('PRAGMA table_info(sessions)')}:
+        conn.execute('ALTER TABLE sessions ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0')
     if 'pending' not in columns:
         # Signed up but not yet let in by an admin: such an account can say who it is and
         # log out, and nothing else.
@@ -328,9 +333,10 @@ def upsert_user(conn: sqlite3.Connection, subject: str, username: str, role: str
     return conn.execute('SELECT * FROM users WHERE subject = ?', (subject,)).fetchone()
 
 
-def create_session(conn: sqlite3.Connection, user_id: int, token: str, expires_at: str):
-    conn.execute('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)',
-                 (token, user_id, expires_at))
+def create_session(conn: sqlite3.Connection, user_id: int, token: str, expires_at: str,
+                   must_change_password: bool = False):
+    conn.execute('INSERT INTO sessions (token, user_id, expires_at, must_change_password) VALUES (?, ?, ?, ?)',
+                 (token, user_id, expires_at, int(must_change_password)))
     conn.execute("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", (user_id,))
     conn.commit()
 
@@ -340,7 +346,7 @@ def get_user_by_session(conn: sqlite3.Connection, token: str | None):
     if not token:
         return None
     return conn.execute(
-        "SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id "
+        "SELECT u.*, s.must_change_password AS password_change_due FROM sessions s JOIN users u ON u.id = s.user_id "
         "WHERE s.token = ? AND u.active = 1 AND s.expires_at > datetime('now')",
         (token,)).fetchone()
 
@@ -410,6 +416,11 @@ def get_user_by_email(conn: sqlite3.Connection, email: str):
 def set_avatar(conn: sqlite3.Connection, user_id: int, token: str) -> None:
     conn.execute('UPDATE users SET avatar = ? WHERE id = ?', (token, user_id))
     conn.commit()
+
+
+def password_changed(conn: sqlite3.Connection, token: str | None):
+    """The session that chose a new password may go anywhere again. Never commits."""
+    conn.execute('UPDATE sessions SET must_change_password = 0 WHERE token = ?', (token,))
 
 
 def revoke_other_sessions(conn: sqlite3.Connection, user_id: int, keep: str | None) -> int:

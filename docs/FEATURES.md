@@ -505,6 +505,13 @@ in Authentik, which nobody has to see or visit.
 - A wrong password says "Wrong email or password." After five in a row the account has to
   wait a minute, doubling with every further miss up to 15 minutes; one address gets
   twenty before it waits. A forgotten password goes through an admin.
+- Wherever a new password is chosen - signing up, a set-password link, Profile → Password -
+  a bar under the field shows how strong it is as you type and says plainly what is
+  missing ("Too short - at least 8 characters.", "Too easy to guess - add another word.").
+  The button works once it is good enough by Authentik's rules.
+- Someone who signs in with a password that no longer meets those rules is asked to choose
+  a new one before anything else opens; their other browsers are signed out once they have.
+  API tokens keep working.
 - Where sign-up is switched on, the sign-in page offers **Create an account**. A new
   account can sign in at once but only sees a page saying it waits for an admin; it opens
   DeepLabel by itself once approved. So does anyone signing in for the first time who was

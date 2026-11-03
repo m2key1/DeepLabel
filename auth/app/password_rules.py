@@ -4,6 +4,10 @@ from hashlib import sha1
 import httpx
 from zxcvbn import zxcvbn
 
+# What a password too easy to guess is told, in place of zxcvbn's advice, which changes
+# with every password and never says what to type. The page's strength meter says the same.
+TOO_EASY = 'Too easy to guess - add another word.'
+
 RE_LOWER = re.compile('[a-z]')
 RE_UPPER = re.compile('[A-Z]')
 RE_DIGITS = re.compile('[0-9]')
@@ -11,8 +15,9 @@ RE_DIGITS = re.compile('[0-9]')
 
 def problems(policy: dict, password: str, user_inputs: list[str]) -> list[str]:
     """What is wrong with a password by an Authentik password policy, checked the way
-    Authentik checks it (authentik/policies/password/models.py) and in its words. Done here
-    because the policy-test API fails for any caller but a superuser."""
+    Authentik checks it (authentik/policies/password/models.py), in its words except for a
+    guessable one. Done here because the policy-test API fails for any caller but a
+    superuser."""
     if not password:
         return ['Password not set.']
     if policy.get('check_static_rules') and not _passes_static(policy, password):
@@ -26,7 +31,7 @@ def problems(policy: dict, password: str, user_inputs: list[str]) -> list[str]:
         # any password passes anyway.
         result = zxcvbn(password[:72], [i for i in user_inputs if i])
         if result['score'] <= policy.get('zxcvbn_score_threshold', 2):
-            return ['Password is too weak.', *result['feedback'].get('suggestions', [])]
+            return [TOO_EASY]
     return []
 
 

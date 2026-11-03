@@ -29,6 +29,7 @@ class FakeAuthentik:
         self.requests: list[tuple[str, str]] = []
         self.sessions: dict[str, dict] = {}
         self.extra_stage: str | None = None
+        self.policy = POLICY
         self.down = False
         self.add('service@example.org', type='internal_service_account', pk=1)
 
@@ -65,7 +66,7 @@ class FakeAuthentik:
             return httpx.Response(201, json=self._public(self.add(body['email'], name=body['name'], **{
                 k: body[k] for k in ('username', 'type')})))
         if path == '/api/v3/policies/password/':
-            return httpx.Response(200, json={'results': [POLICY]})
+            return httpx.Response(200, json={'results': [self.policy]})
         pk = int(path.split('/')[5])
         if path.endswith('/set_password/'):
             self.users[pk]['password'] = body['password']

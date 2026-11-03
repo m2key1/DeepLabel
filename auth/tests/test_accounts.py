@@ -354,3 +354,76 @@ def test_the_service_reaches_authentik_s_admin_api_with_its_token(fake):
     assert [r for r in fake.requests if r[1].startswith('/api/v3/core/users/')][:2] == [
         ('GET', '/api/v3/core/users/'), ('POST', '/api/v3/core/users/')]
 
+
+class TestPasswordRulesForTheMeter:
+    def test_the_policy_s_length_and_strength_threshold_are_served_to_anyone(self, fake):
+        from tests.fake_authentik import POLICY
+        POLICY_CHECKED = {**POLICY, 'check_zxcvbn': True, 'zxcvbn_score_threshold': 3, 'length_min': 10}
+        fake.policy = POLICY_CHECKED
+
+        assert browser().get('/api/sign-in/password-rules').json() == {
+            'min_length': 10, 'strength_check': True, 'min_score': 4}
+
+    def test_without_authentik_s_api_only_the_fallback_length_is_known(self, fake, monkeypatch):
+        monkeypatch.setattr(config, 'AUTHENTIK_API_TOKEN', '')
+
+        assert browser().get('/api/sign-in/password-rules').json() == {
+            'min_length': 8, 'strength_check': False, 'min_score': 0}
+
+
+class TestWeakPasswordAtSignIn:
+    @pytest.fixture
+    def weak(self, fake):
+        fake.add('olaf@example.org', 'olaf123')
+        conn = store.connect(config.DB_PATH)
+        store.upsert_user(conn, 'olaf@example.org', 'olaf@example.org', 'member', email='olaf@example.org')
+        conn.close()
+        return fake
+
+    def test_a_password_below_the_rules_opens_only_the_way_to_a_new_one(self, weak):
+        client = browser()
+
+        assert sign_in(client, 'olaf@example.org', 'olaf123').status_code == 200
+
+        me = client.get('/api/me').json()
+        assert (me['user'], me['password_change_due']) == ('olaf@example.org', True)
+        assert client.get('/validate').status_code == 403
+        assert client.get('/api/settings').status_code == 403
+
+    def test_a_new_password_lets_them_in_and_ends_their_other_sessions(self, weak):
+        elsewhere = signed_in('olaf@example.org')
+        client = browser()
+        sign_in(client, 'olaf@example.org', 'olaf123')
+
+        changed = client.post('/api/users/me/password', json={'password': 'olafs-new-password'})
+
+        assert changed.status_code == 200
+        assert client.get('/api/me').json()['password_change_due'] is False
+        assert client.get('/validate').status_code == 200
+        assert elsewhere.get('/api/me').status_code == 401
+
+    def test_the_new_password_has_to_meet_the_rules_too(self, weak):
+        client = browser()
+        sign_in(client, 'olaf@example.org', 'olaf123')
+
+        refused = client.post('/api/users/me/password', json={'password': 'short'})
+
+        assert refused.status_code == 400
+        assert client.get('/validate').status_code == 403
+
+    def test_api_tokens_keep_working(self, weak):
+        conn = store.connect(config.DB_PATH)
+        raw = 'dl_' + auth.new_token()
+        store.create_api_token(conn, account('olaf@example.org')['id'], 'script', auth.hash_api_token(raw),
+                               raw[:8], False, None)
+        conn.close()
+        sign_in(browser(), 'olaf@example.org', 'olaf123')
+
+        assert browser().get('/validate', headers={'Authorization': f'Bearer {raw}'}).status_code == 200
+
+    def test_a_password_that_meets_the_rules_is_not_asked_again(self, fake):
+        client = browser()
+        sign_in(client, 'alice@example.org', 'alice-password')
+
+        assert client.get('/api/me').json()['password_change_due'] is False
+        assert client.get('/validate').status_code == 200

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { getPasswordLink, setPasswordWithLink } from '../api'
 import { AccountCard, AccountError } from '../components/account/AccountCard'
 import { NewPassword } from '../components/account/NewPassword'
-import { EMPTY_PASSWORD, newPasswordProblem } from '../components/account/passwordCheck'
+import { useNewPassword } from '../components/account/useNewPassword'
 import { Button } from '../components/ui/Button'
 
 const token = () => new URLSearchParams(window.location.search).get('token') ?? ''
@@ -12,21 +12,20 @@ const token = () => new URLSearchParams(window.location.search).get('token') ?? 
 export function SetPasswordPage() {
   const [link, setLink] = useState<{ email: string; purpose: 'invite' | 'reset' } | null>(null)
   const [dead, setDead] = useState<string | null>(null)
-  const [password, setPassword] = useState(EMPTY_PASSWORD)
+  const password = useNewPassword(link ? [link.email] : [])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const problem = newPasswordProblem(password)
 
   useEffect(() => {
     getPasswordLink(token()).then(setLink).catch((err: Error) => setDead(err.message))
   }, [])
 
   const submit = async () => {
-    if (problem) return
+    if (!password.acceptable) return
     setBusy(true)
     setError(null)
     try {
-      const { next } = await setPasswordWithLink(token(), password.password)
+      const { next } = await setPasswordWithLink(token(), password.value.password)
       window.location.replace(next)
     } catch (err) {
       setError((err as Error).message)
@@ -51,10 +50,10 @@ export function SetPasswordPage() {
         For <span data-testid="set-password-email" className="text-ink">{link.email}</span>. You sign in with
         this email and the password you choose here.
       </p>
-      <NewPassword value={password} onChange={setPassword} />
-      <AccountError message={problem ?? error} />
+      <NewPassword state={password} />
+      <AccountError message={password.problem ?? error} />
       <Button data-testid="set-password-submit" type="submit" variant="primary" size="md" className="w-full"
-              disabled={busy || !!problem}>
+              disabled={busy || !password.acceptable}>
         {busy ? 'Saving…' : 'Set password and sign in'}
       </Button>
     </AccountCard>

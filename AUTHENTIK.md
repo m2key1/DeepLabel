@@ -103,9 +103,13 @@ With `AUTHENTIK_API_TOKEN` set, DeepLabel manages accounts in Authentik itself:
   make three accounts an hour.
 
 Every password is checked against Authentik's `default-password-change-password-policy`
-before it is set, in Authentik's own words. DeepLabel reads the policy and applies it
-itself, because Authentik's policy-test endpoint fails for any caller but a superuser;
-a token without permission to read the policy falls back to a minimum of 8 characters.
+before it is set. DeepLabel reads the policy and applies it itself, because Authentik's
+policy-test endpoint fails for any caller but a superuser; a token without permission to
+read the policy falls back to a minimum of 8 characters. The pages show a strength meter
+held to the same policy, and a password too easy to guess is told so in one plain
+sentence rather than with zxcvbn's advice. The same check runs at every sign-in: a
+password that no longer meets the policy signs the person in to a page where they must
+choose a new one first.
 Only `external` accounts are touched: one that is `internal` or a superuser is managed in
 Authentik, so a link can never hand over an operator's access.
 

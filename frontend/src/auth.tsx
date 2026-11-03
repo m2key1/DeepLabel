@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { getMe, type Me, type Role } from './api'
+import { ChooseNewPasswordPage } from './pages/ChooseNewPasswordPage'
 import { PendingPage } from './pages/PendingPage'
 
 interface Auth {
@@ -26,7 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [waiting, setWaiting] = useState<Me | null>(null)
   useEffect(() => {
     getMe()
-      .then((me) => me.pending ? setWaiting(me) :
+      .then((me) => me.pending || me.password_change_due ? setWaiting(me) :
         setAuth({
           id: me.id,
           user: me.user,
@@ -40,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       )
       .catch(() => undefined)
   }, [])
-  if (waiting) return <PendingPage me={waiting} />
+  if (waiting) return waiting.pending ? <PendingPage me={waiting} /> : <ChooseNewPasswordPage me={waiting} />
   if (!auth) return null
   return <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>
 }

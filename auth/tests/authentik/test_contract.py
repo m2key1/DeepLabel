@@ -116,7 +116,7 @@ def test_accounts_are_found_by_email_and_by_username(managing):
 
 def test_authentik_judges_a_password_by_its_own_rules(managing):
     assert authentik.password_problems('short') == ['Password needs to be 8 characters or longer.']
-    assert authentik.password_problems('password1', managing)[0] == 'Password is too weak.'
+    assert authentik.password_problems('password1', managing) == ['Too easy to guess - add another word.']
     assert authentik.password_problems('violet hinge saddle parade', managing) == []
 
 
