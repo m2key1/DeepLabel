@@ -424,6 +424,36 @@ test.describe('Scenario: reading a processed page', () => {
       await expect(overlay.locator('svg polygon')).toHaveCount(0)
     })
 
+  test('in edit mode Labels tags every drawn box and Confidence is switched off until viewing again',
+    async ({ page }) => {
+      const { jobId, pageIds } = await seedViewer(1)
+      await openViewer(page, jobId, pageIds[0])
+      const tags = page.getByTestId('overlay-box').getByTestId('region-label')
+      const labels = page.getByRole('button', { name: 'Labels', exact: true })
+      const confidence = page.getByRole('button', { name: 'Confidence', exact: true })
+
+      await enterEditMode(page)
+      await expect(labels).toHaveAttribute('aria-pressed', 'true')
+      await expect(tags).toHaveText(['Header', 'Paragraph'])
+      await expect(confidence).toBeDisabled()
+      await expect(confidence).toHaveAttribute('title', 'Not shown while editing')
+
+      await labels.click()
+      await expect(tags).toHaveCount(0)
+      await labels.click()
+      await expect(tags).toHaveText(['Header', 'Paragraph'])
+      // A tag goes with its box: Layout off takes both away, whatever Labels says.
+      await page.getByRole('button', { name: 'Layout', exact: true }).click()
+      await expect(page.getByTestId('region-box')).toHaveCount(0)
+      await expect(tags).toHaveCount(0)
+      await expect(labels).toHaveAttribute('aria-pressed', 'true')
+
+      await page.getByRole('button', { name: 'View', exact: true }).click()
+      await expect(confidence).toBeEnabled()
+      await confidence.click()
+      await expect(page.getByTestId('overlay-box').locator('rect[stroke="#dc2626"]')).toHaveCount(1)
+    })
+
   // The loupe shows the crop the model reads, but nothing on the page said which region
   // became it - and on a line the backend refuses to straighten that region is an upright
   // box swallowing the neighbours, which is exactly when someone needs to see it.

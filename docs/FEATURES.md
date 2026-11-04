@@ -263,6 +263,8 @@ Press `e` to edit the page.
   and carries on after.
 - In edit mode, Layout and Lines hide the boxes or the lines while you edit; editing always
   starts with both shown, and the view keeps its own setting.
+- Labels tags every box with its class name in edit mode too; Confidence is off while
+  editing and comes back when you return to viewing.
 - Delete a line straight from the text list with its trash can, without entering edit mode.
 - Ctrl+Z undoes and Ctrl+Shift+Z redoes any edit, including merges and splits, in or out of
   edit mode.

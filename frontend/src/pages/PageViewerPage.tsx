@@ -98,7 +98,7 @@ import {
   setKeyboardPlace, setKeyboardSize, setLinePenShape, setOcrFrac, setPenClass, setReadingsFrac, setReviewConf,
 } from '../util'
 import type { LinePenShape } from '../util'
-import { clamp01, polyCenter, polyMaxX, polyMinX } from '../lib/geometry/core'
+import { clamp01, polyCenter, polyMaxX, polyMinX, polyMinY } from '../lib/geometry/core'
 import type { Ring } from '../lib/geometry/core'
 import { allowedShapes, elementShape, reshaped, withinLevel } from '../lib/geometry/elementShape'
 import type { ElementShape } from '../lib/geometry/elementShape'
@@ -106,6 +106,7 @@ import {
   acrossQuad, angleAround, angledQuad, bigEnough, containingStack, cropAxis, cropPlan, dropVertex, lineBox, linesAt, minAreaQuad, moveBbox, moveEdge, moveEdgeFree, movePoly, orderBbox, pagePoints, polyBigEnough, polygonCrossing, quadAngle, quadCrossing, resizeBbox, resizeQuadCorner, rotateHandleAnchor, rotatePoly, splitLongSides, splitSide,
 } from '../lib/geometry/quad'
 import { confStroke, elMinConf, profileStops } from '../lib/confidence'
+import { RegionLabel } from '../components/viewer/RegionLabel'
 import { errorRates, percent } from '../lib/errorRate'
 import { DECORATIVE, LINE_CLASS, isEditable } from '../lib/layoutClasses'
 import { composedEdit, displayed, sameText } from '../lib/text'
@@ -2714,6 +2715,13 @@ export function PageViewerPage() {
                      onPointerDown={(e) => onEditPointerDown(e, outlineTarget())} />
           )}
         </svg>
+        {showLabels && selectable.map((el) => {
+          const [x, y] = liveBox?.id === el.id ? liveBox.bbox
+            : livePoly?.of === 'element' && livePoly.id === el.id ? [polyMinX(livePoly.poly), polyMinY(livePoly.poly)]
+            : el.bbox
+          return <RegionLabel key={`t${el.id}`} className={el.class_name} x={x} y={y}
+                              container={el.kind === 'container'} />
+        })}
         {/* Handles are DOM, not SVG: nothing keeps an SVG shape's size fixed under zoom. */}
         {polyDraft && (
           <span
@@ -2899,32 +2907,10 @@ export function PageViewerPage() {
     () => (
       <div className="pointer-events-none absolute inset-0">
         {shownContainers.map((el) => (
-          <span
-            key={`c${el.id}`}
-            className="absolute rounded-t-sm px-1 text-[9px] font-medium italic leading-3 text-white opacity-70"
-            style={{
-              left: `${el.bbox[0] * 100}%`,
-              top: `${el.bbox[1] * 100}%`,
-              transform: 'translateY(-100%)',
-              backgroundColor: classColor(el.class_name),
-            }}
-          >
-            {el.class_name}
-          </span>
+          <RegionLabel key={`c${el.id}`} className={el.class_name} x={el.bbox[0]} y={el.bbox[1]} container />
         ))}
         {shownElements.map((el) => (
-          <span
-            key={el.id}
-            className="absolute rounded-t-sm px-1 text-[9px] font-medium leading-3 text-white"
-            style={{
-              left: `${el.bbox[0] * 100}%`,
-              top: `${el.bbox[1] * 100}%`,
-              transform: 'translateY(-100%)',
-              backgroundColor: classColor(el.class_name),
-            }}
-          >
-            {el.class_name}
-          </span>
+          <RegionLabel key={el.id} className={el.class_name} x={el.bbox[0]} y={el.bbox[1]} />
         ))}
       </div>
     ),
@@ -2957,17 +2943,7 @@ export function PageViewerPage() {
 
   const highlightLabel = () =>
     showLabels && selected && elementById.has(selected.id) ? (
-      <span
-        className="pointer-events-none absolute rounded-t-sm px-1 text-[9px] font-medium leading-3 text-white"
-        style={{
-          left: `${selected.bbox[0] * 100}%`,
-          top: `${selected.bbox[1] * 100}%`,
-          transform: 'translateY(-100%)',
-          backgroundColor: classColor(selected.class_name),
-        }}
-      >
-        {selected.class_name}
-      </span>
+      <RegionLabel className={selected.class_name} x={selected.bbox[0]} y={selected.bbox[1]} />
     ) : null
 
   const panelBox = `h-full overflow-auto ${boxChrome}`
@@ -3824,7 +3800,9 @@ export function PageViewerPage() {
                 </>
               )}
               <GroupButton on={showLabels} onClick={() => setShowLabels((v) => !v)}>Labels</GroupButton>
-              <GroupButton on={showConfidence} onClick={() => setShowConfidence((v) => !v)}>Confidence</GroupButton>
+              <GroupButton on={showConfidence && !editing} disabled={editing}
+                           title={editing ? 'Not shown while editing' : undefined}
+                           onClick={() => setShowConfidence((v) => !v)}>Confidence</GroupButton>
               <GroupButton on={showOrder} onClick={() => setShowOrder((v) => !v)}>Order</GroupButton>
             </ButtonGroup>
             {canEdit && page && (

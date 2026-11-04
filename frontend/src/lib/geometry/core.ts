@@ -10,6 +10,8 @@ export const polyMinX = (p: Ring) => Math.min(...p.map((q) => q[0]))
 
 export const polyMaxX = (p: Ring) => Math.max(...p.map((q) => q[0]))
 
+export const polyMinY = (p: Ring) => Math.min(...p.map((q) => q[1]))
+
 export function polyCenter(poly: Ring): [number, number] {
   if (poly.length === 0) return [0, 0]
   let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity
