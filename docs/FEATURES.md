@@ -261,8 +261,9 @@ Press `e` to edit the page.
   checked are skipped unless you hold Shift.
 - Hold Space, Alt or the mouse wheel button for the hand tool; a drawing in progress waits
   and carries on after.
-- In edit mode, Layout and Lines hide the boxes or the lines while you edit; editing always
-  starts with both shown, and the view keeps its own setting.
+- In edit mode, Layout and Lines in the top bar are the class eyes in the left panel: Lines
+  is the Line eye, and Layout hides or shows every layout class at once (lit while any is
+  shown). The eyes stay as you left them, and the view keeps its own setting.
 - Labels tags every box with its class name in edit mode too; Confidence is off while
   editing and comes back when you return to viewing.
 - Delete a line straight from the text list with its trash can, without entering edit mode.

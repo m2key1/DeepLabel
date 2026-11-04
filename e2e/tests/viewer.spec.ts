@@ -393,35 +393,61 @@ test.describe('Scenario: reading a processed page', () => {
     await expect(overlay.locator('marker#ro-arrow')).toHaveCount(1)
   })
 
-  test('in edit mode the layout and lines buttons hide what is being edited, then hand the view back',
+  test('in edit mode Layout and Lines are the class eyes, kept until changed, and the view keeps its own',
     async ({ page }) => {
       const { jobId, pageIds } = await seedViewer(1)
       await openViewer(page, jobId, pageIds[0])
       const overlay = page.getByTestId('overlay-box')
       const layout = page.getByRole('button', { name: 'Layout', exact: true })
       const lines = page.getByRole('button', { name: 'Lines', exact: true })
+      const eye = (action: 'Hide' | 'Show', cls: string) =>
+        page.getByRole('button', { name: `${action} ${cls}`, exact: true })
       // The view as it opens: boxes on, lines off.
       await expect(overlay.locator('rect[data-id]')).toHaveCount(2)
       await expect(overlay.locator('svg polygon')).toHaveCount(0)
 
-      // Editing starts with everything drawn, whatever the view showed.
+      // Editing draws what the eyes show, all of it on a fresh browser.
       await enterEditMode(page)
       await expect(page.getByTestId('region-box')).toHaveCount(2)
       await expect(page.getByTestId('line-poly')).toHaveCount(6)
+      await expect(layout).toHaveAttribute('aria-pressed', 'true')
+      await expect(lines).toHaveAttribute('aria-pressed', 'true')
 
+      // Lines in the top bar is the Line eye, both ways.
       await lines.click()
       await expect(page.getByTestId('line-poly')).toHaveCount(0)
-      await expect(page.getByTestId('region-box')).toHaveCount(2)
+      await expect(eye('Show', 'Line')).toBeVisible()
+      await eye('Show', 'Line').click()
+      await expect(page.getByTestId('line-poly')).toHaveCount(6)
+      await expect(lines).toHaveAttribute('aria-pressed', 'true')
+
+      // Layout closes every layout class's eye; one eye opened again lights it.
       await layout.click()
       await expect(page.getByTestId('region-box')).toHaveCount(0)
-      await lines.click()
+      for (const cls of ['Header', 'Paragraph', 'Column']) await expect(eye('Show', cls)).toBeVisible()
       await expect(page.getByTestId('line-poly')).toHaveCount(6)
+      await eye('Show', 'Header').click()
+      await expect(layout).toHaveAttribute('aria-pressed', 'true')
+      await expect(page.getByTestId('region-box')).toHaveCount(1)
+      // With any class shown, Layout hides them all - and then shows them all.
+      await layout.click()
       await expect(page.getByTestId('region-box')).toHaveCount(0)
+      await expect(eye('Show', 'Header')).toBeVisible()
+      await layout.click()
+      await expect(page.getByTestId('region-box')).toHaveCount(2)
+      for (const cls of ['Header', 'Paragraph', 'Column']) await expect(eye('Hide', cls)).toBeVisible()
 
       // Back to viewing: the view's own choice, untouched by the editing.
+      await lines.click()
       await page.getByRole('button', { name: 'View', exact: true }).click()
       await expect(overlay.locator('rect[data-id]')).toHaveCount(2)
       await expect(overlay.locator('svg polygon')).toHaveCount(0)
+      // And editing again finds the eyes as they were left.
+      await enterEditMode(page)
+      await expect(lines).toHaveAttribute('aria-pressed', 'false')
+      await expect(page.getByTestId('line-poly')).toHaveCount(0)
+      await expect(eye('Show', 'Line')).toBeVisible()
+      await expect(page.getByTestId('region-box')).toHaveCount(2)
     })
 
   test('in edit mode Labels tags every drawn box and Confidence is switched off until viewing again',

@@ -286,12 +286,6 @@ export function PageViewerPage() {
   // Manual rotations not yet persisted; kept frontend-side and saved when the line is checked.
   const [pendingOrient, setPendingOrient] = useState<Map<number, number>>(new Map())
   const [editing, setEditing] = useState(false)
-  // Edit mode's own pair of layer switches: it starts with everything drawn, since what is
-  // hidden cannot be edited, and leaves the view's choice as it was.
-  const [editLayers, setEditLayers] = useState({ layout: true, lines: true })
-  useEffect(() => {
-    if (editing) setEditLayers({ layout: true, lines: true })
-  }, [editing])
   // Which of selectedId / activeLine the one editor is currently acting on.
   const [selKind, setSelKind] = useState<'element' | 'line'>('element')
   const [mergeSet, setMergeSet] = useState<Set<number>>(new Set())
@@ -547,12 +541,10 @@ export function PageViewerPage() {
   const selectable = useMemo(
     () =>
       editing
-        ? (editLayers.layout
-            ? page?.elements.filter(
-              (e) => isEditable(e) && !hidden.has(e.class_name) && !hiddenEls.has(e.id)) ?? []
-            : [])
+        ? page?.elements.filter(
+          (e) => isEditable(e) && !hidden.has(e.class_name) && !hiddenEls.has(e.id)) ?? []
         : elements,
-    [editing, editLayers.layout, page, elements, hidden, hiddenEls],
+    [editing, page, elements, hidden, hiddenEls],
   )
   // Everything the region list shows: hidden entries stay listed (dimmed), which
   // is the only way back from having hidden them.
@@ -570,12 +562,12 @@ export function PageViewerPage() {
     [page],
   )
   const visibleLines = useMemo(() => {
-    if (hidden.has(LINE_CLASS) || (editing && !editLayers.lines)) return []
+    if (hidden.has(LINE_CLASS)) return []
     if (hiddenEls.size === 0) return pageLines
     const hiddenLineIds = new Set(
       (page?.elements ?? []).filter((e) => hiddenEls.has(e.id)).flatMap((e) => e.lines.map((l) => l.id)))
     return pageLines.filter((l) => !hiddenLineIds.has(l.id))
-  }, [hidden, hiddenEls, page, pageLines, editing, editLayers.lines])
+  }, [hidden, hiddenEls, page, pageLines])
   // The brush takes exactly what is drawn: a line on the scan can be swept whatever its
   // region's class, and one the eye has taken off cannot.
   const drawnLineIds = useMemo(() => new Set(visibleLines.map((l) => l.id)), [visibleLines])
@@ -1184,6 +1176,26 @@ export function PageViewerPage() {
       const next = new Set(prev)
       if (next.has(name)) next.delete(name)
       else next.add(name)
+      setHiddenClasses(next)
+      return next
+    })
+  }
+
+  // Edit mode's Layout button speaks for every layout class's eye at once: the dataset's
+  // classes, and any other class a box on this page carries.
+  const layoutClassNames = useMemo(
+    () => [...new Set([...layoutClasses, ...(page?.elements.map((e) => e.class_name) ?? [])])]
+      .filter((c) => c !== LINE_CLASS),
+    [layoutClasses, page])
+  const layoutShown = layoutClassNames.some((c) => !hidden.has(c))
+
+  const toggleLayoutClasses = () => {
+    setHidden((prev) => {
+      const next = new Set(prev)
+      for (const c of layoutClassNames) {
+        if (layoutShown) next.add(c)
+        else next.delete(c)
+      }
       setHiddenClasses(next)
       return next
     })
@@ -3788,10 +3800,8 @@ export function PageViewerPage() {
             <ButtonGroup aria-label="Show on the scan">
               {editing ? (
                 <>
-                  <GroupButton on={editLayers.layout}
-                               onClick={() => setEditLayers((l) => ({ ...l, layout: !l.layout }))}>Layout</GroupButton>
-                  <GroupButton on={editLayers.lines}
-                               onClick={() => setEditLayers((l) => ({ ...l, lines: !l.lines }))}>Lines</GroupButton>
+                  <GroupButton on={layoutShown} onClick={toggleLayoutClasses}>Layout</GroupButton>
+                  <GroupButton on={!hidden.has(LINE_CLASS)} onClick={() => toggleHidden(LINE_CLASS)}>Lines</GroupButton>
                 </>
               ) : (
                 <>
