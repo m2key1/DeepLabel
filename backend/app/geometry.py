@@ -143,6 +143,17 @@ def line_center(poly: list) -> tuple:
     return (sum(p[0] for p in poly) / len(poly), sum(p[1] for p in poly) / len(poly))
 
 
+def smallest_box_at(boxes: list, cx: float, cy: float) -> int | None:
+    """Index of the smallest bbox (normalized) containing (cx, cy), or None."""
+    best, best_area = None, None
+    for i, (x0, y0, x1, y1) in enumerate(boxes):
+        if x0 <= cx <= x1 and y0 <= cy <= y1:
+            area = (x1 - x0) * (y1 - y0)
+            if best_area is None or area < best_area:
+                best, best_area = i, area
+    return best
+
+
 SLIVER = 0.003
 
 
@@ -378,6 +389,54 @@ def resequence_page(conn, page_id: int) -> set[int]:
         if _place(conn, elements[i], order_idx):
             changed.add(elements[i]['id'])
     return changed
+
+
+def refile_lines(conn, page_id: int, only: set[int] | None = None) -> set[int]:
+    """Put each line into the smallest content box around its centre, or Unassigned when
+    no content box holds it - as layout detection files them, now after a person's edit.
+    Containers never hold lines. `only` limits it to those lines. A line already
+    Unassigned stays in its bucket; which bucket is resequence_page's to settle, so call
+    that afterwards. Returns the lines that moved."""
+    boxes = conn.execute(
+        "SELECT id, bbox FROM elements WHERE page_id = ? AND kind = 'content' AND deleted = 0",
+        (page_id,)).fetchall()
+    bounds = [json.loads(b['bbox']) for b in boxes]
+    lines = conn.execute(
+        'SELECT l.id, l.element_id, l.polygon, e.kind, e.deleted AS box_gone FROM lines l '
+        'JOIN elements e ON l.element_id = e.id WHERE e.page_id = ? AND l.deleted = 0 ORDER BY l.id',
+        (page_id,)).fetchall()
+    moves, homeless = [], []
+    for line in lines:
+        if only is not None and line['id'] not in only:
+            continue
+        polygon = json.loads(line['polygon'])
+        i = smallest_box_at(bounds, *line_center(polygon))
+        if i is not None:
+            if boxes[i]['id'] != line['element_id']:
+                moves.append((line, boxes[i]['id']))
+        elif line['kind'] != 'orphan' or line['box_gone']:
+            homeless.append((line, polygon))
+    if homeless:
+        spare = orphan_buckets(conn, page_id)
+        bucket = spare[0] if spare else _new_bucket(
+            conn, page_id, _next_element_order(conn, page_id), _extent([poly for _, poly in homeless]))
+        moves += [(line, bucket) for line, _ in homeless]
+    touched: set[int] = set()
+    for line, element_id in moves:
+        touched |= _file_line(conn, line, element_id, LAST)
+    for element_id in touched:
+        if conn.execute("SELECT kind FROM elements WHERE id = ?", (element_id,)).fetchone()['kind'] != 'orphan':
+            resequence_lines(conn, element_id)
+    return {line['id'] for line, _ in moves}
+
+
+# Where a moved line is put for now, after every other; resequencing gives it its place.
+LAST = 1 << 30
+
+
+def _next_element_order(conn, page_id: int) -> int:
+    return conn.execute('SELECT COALESCE(MAX(order_idx), -1) + 1 n FROM elements WHERE page_id = ?',
+                        (page_id,)).fetchone()['n']
 
 
 def _place(conn, element, order_idx: int) -> bool:

@@ -977,10 +977,11 @@ export function PageViewerPage() {
     if (!loaded) return
     setLinePolygonLocal(id, poly)
     try {
-      const unassigned = page?.elements.some((e) => e.kind === 'orphan' && e.lines.some((l) => l.id === id))
+      const holder = page?.elements.find((e) => e.lines.some((l) => l.id === id))
       const line = await guardedSave('line', loaded, (revision) => patchLinePolygon(id, poly, revision))
-      // Moving a line outside every box can move it between the boxes, and its neighbours with it.
-      if (unassigned) await reloadPage()
+      // A line moved into another box is filed there; outside every box it can move between
+      // the boxes, and its neighbours with it.
+      if (holder?.kind === 'orphan' || line.element_id !== holder?.id) await reloadPage()
       else applyLine(line)
       recordEdit(line.span)
     } catch (e) {

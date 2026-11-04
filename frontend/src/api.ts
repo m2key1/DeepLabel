@@ -2325,7 +2325,9 @@ export function patchLine(
     json('PATCH', { corrected_text: correctedText, revision, from_reading: fromReading }))
 }
 
-export function patchLinePolygon(lineId: number, polygon: [number, number][], revision?: number): Promise<Spanned<Line>> {
+/** The line comes back with the box it now sits in: moved onto another box, it is filed there. */
+export function patchLinePolygon(lineId: number, polygon: [number, number][], revision?: number):
+  Promise<Spanned<Line & { element_id: number }>> {
   return request(`/api/lines/${lineId}`, json('PATCH', { polygon, revision }))
 }
 

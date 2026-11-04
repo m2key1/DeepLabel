@@ -225,6 +225,10 @@ DeepLabel puts the lines of each page in reading order and keeps it up to date a
   the page structure setting.
 - Lines outside every box are read where they stand, between the boxes around them.
 - Drawing, moving, splitting, merging or deleting a box updates the order at once.
+- A line always sits in the box it lies in: drawing, moving, resizing, reshaping or
+  reclassing a box, or moving a line, puts each line into the smallest content box around
+  its centre, else Unassigned. Containers hold no lines. Deleting a box keeps its lines;
+  one undo puts everything back.
 - Each layout template sets how pages are read; a dataset follows the template of its
   layout model.
 

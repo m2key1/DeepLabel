@@ -204,17 +204,6 @@ def phase_layout(conn, job_id: str, stage, batch_size: int):
               + ', '.join(f'{label} ({n})' for label, n in sorted(left_out.items())), flush=True)
 
 
-def _element_at(boxes, cx, cy):
-    """Index of the smallest content bbox (normalized) containing (cx, cy), or None."""
-    best, best_area = None, None
-    for i, (x0, y0, x1, y1) in enumerate(boxes):
-        if x0 <= cx <= x1 and y0 <= cy <= y1:
-            area = (x1 - x0) * (y1 - y0)
-            if best_area is None or area < best_area:
-                best, best_area = i, area
-    return best
-
-
 def _join_row(polys):
     """One quad spanning a row's fragments, keeping the outer corners so tilt survives."""
     if len(polys) == 1:
@@ -321,7 +310,7 @@ def _lines_per_page(stage, img, el_boxes, skip=frozenset(), rings=None):
         cy = sum(p[1] for p in norm) / len(norm)
         holding = [box if ring is None or geometry.point_in_ring(cx, cy, ring) else [2, 2, 2, 2]
                    for box, ring in zip(el_boxes, rings)]
-        idx = _element_at(holding, cx, cy)
+        idx = geometry.smallest_box_at(holding, cx, cy)
         if idx in skip:
             continue
         (per_el[idx] if idx is not None else orphans).append(norm)

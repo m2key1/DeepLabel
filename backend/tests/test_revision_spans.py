@@ -110,7 +110,9 @@ def _race_the_next_mark(db_path, monkeypatch) -> threading.Thread:
 def _assert_only_alice_inside(conn, span):
     inside = conn.execute('SELECT author FROM revisions WHERE id > ? AND id <= ?',
                           (span['from'], span['to'])).fetchall()
-    assert inside and {r['author'] for r in inside} == {'alice'}
+    # The system's own writes (reading order, lines refiled) belong to the edit.
+    authors = {r['author'] for r in inside}
+    assert 'alice' in authors and authors <= {'alice', 'system:reading-order'}
     machine_ids = [r['id'] for r in conn.execute(
         "SELECT id FROM revisions WHERE author = 'model:ocr' AND action = 'update'")]
     assert len(machine_ids) == 1 and machine_ids[0] > span['to']

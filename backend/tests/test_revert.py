@@ -234,18 +234,19 @@ class TestUndo:
         assert (first['deleted'], first['text'], first['order_idx']) == (0, 'first', 0)
         assert line(conn, 2)['order_idx'] == 1
 
-    def test_undoing_a_box_delete_brings_its_lines_and_their_readings_back(self, stack):
+    def test_undoing_a_box_delete_takes_its_lines_back_in_with_their_readings(self, stack):
         client, conn = stack
         for line_id, text in ((1, 'first'), (2, 'second')):
             candidates.add(conn, 1, 'llm:reader', text, line_id=line_id, order_idx=line_id)
         conn.commit()
         span = client.delete('/api/elements/1', headers=ALICE).json()['span']
-        assert [line(conn, i)['deleted'] for i in (1, 2)] == [1, 1]
+        assert [line(conn, i)['element_id'] != 1 for i in (1, 2)] == [True, True]
 
         assert undo(client, 1, span).status_code == 200
 
         assert element(conn, 1)['deleted'] == 0
-        assert [(line(conn, i)['deleted'], line(conn, i)['order_idx']) for i in (1, 2)] == [(0, 0), (0, 1)]
+        assert [(line(conn, i)['deleted'], line(conn, i)['element_id'], line(conn, i)['order_idx'])
+                for i in (1, 2)] == [(0, 1, 0), (0, 1, 1)]
         assert [r['line_id'] for r in conn.execute('SELECT line_id FROM candidates ORDER BY id')] == [1, 2]
 
     def test_a_line_deleted_before_its_box_stays_deleted_when_the_box_comes_back(self, stack):

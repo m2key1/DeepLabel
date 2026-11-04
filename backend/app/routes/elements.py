@@ -102,7 +102,9 @@ def patch_element(element_id: int, body: ElementPatch, conn=Depends(get_db),
         conn.execute('UPDATE elements SET deleted = ? WHERE id = ?', (int(body.deleted), element_id))
     store.log_element(conn, element_id, user, 'update')
     if fields & {'class_name', 'bbox', 'polygon', 'deleted'}:
-        geometry.resequence_page(conn, _page_of(conn, element_id))
+        page_id = _page_of(conn, element_id)
+        geometry.refile_lines(conn, page_id)
+        geometry.resequence_page(conn, page_id)
     span = store.end_span(conn, mark)
     conn.commit()
     for line_id in rechecked:
@@ -152,6 +154,7 @@ def create_element(page_id: int, body: ElementCreate, conn=Depends(get_db),
         'VALUES (?,?,?,?,?,?,?,1,?)',
         (page_id, order_idx, class_name, raw, json.dumps(bbox), None, kind, json.dumps(ring) if ring else None))
     store.log_element(conn, cur.lastrowid, user, 'create')
+    geometry.refile_lines(conn, page_id)
     geometry.resequence_page(conn, page_id)
     span = store.end_span(conn, mark)
     conn.commit()
@@ -162,30 +165,22 @@ def create_element(page_id: int, body: ElementCreate, conn=Depends(get_db),
 @router.delete('/api/elements/{element_id}')
 def delete_element(element_id: int, conn=Depends(get_db), user: str = Depends(get_user),
                    auth: dict = Depends(current_user)):
-    """Soft-delete an element and the lines beneath it."""
+    """Soft-delete an element. Its lines stay, falling to the box around them or to
+    Unassigned; only deleting a line throws its transcription away."""
     require_element_access(conn, element_id, auth)
     row = conn.execute('SELECT page_id FROM elements WHERE id = ?', (element_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
     # Soft only. The crop stays cached because the delete may be undone.
     _sync_element_job(conn, element_id)
-    line_ids = [r['id'] for r in conn.execute(
-        'SELECT id FROM lines WHERE element_id = ? AND deleted = 0', (element_id,))]
     store.ensure_origin(conn, 'element', element_id, user)
-    for line_id in line_ids:
-        store.ensure_origin(conn, 'line', line_id, user)
     mark = store.begin_span(conn)
     conn.execute('UPDATE elements SET deleted = 1 WHERE id = ?', (element_id,))
     store.log_element(conn, element_id, user, 'delete')
-    for line_id in line_ids:
-        conn.execute('UPDATE lines SET deleted = 1 WHERE id = ?', (line_id,))
-        store.log_line(conn, line_id, user, 'delete')
+    geometry.refile_lines(conn, row['page_id'])
     geometry.resequence_page(conn, row['page_id'])
     span = store.end_span(conn, mark)
     conn.commit()
-    candidates.rematch_page(conn, row['page_id'])
-    for line_id in line_ids:
-        training.enqueue(line_id)
     return {'id': element_id, 'deleted': True, 'span': span}
 
 

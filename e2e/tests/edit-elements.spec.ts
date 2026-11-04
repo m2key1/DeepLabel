@@ -1,5 +1,5 @@
 import { test, expect } from '../helpers/test'
-import { getPageDetail, jobPageIds, seedCompletedJob, uniqueName } from '../helpers/api'
+import { getPageDetail, jobPageIds, pageLines, seedCompletedJob, seedJobWithoutLayout, uniqueName } from '../helpers/api'
 import { LANDSCAPE, center, clickAt, dragAt, enterEditMode, openViewer } from '../helpers/viewer'
 
 interface Element {
@@ -264,8 +264,10 @@ test.describe('Scenario: working on several boxes at once', () => {
     await expect(merged(page)).toHaveCount(els.length)
 
     await page.keyboard.press('Delete')
-    // Backend oracle: every gathered element is gone, not just the one that was selected.
-    await expect.poll(async () => (await elements(jobId, pageId)).length).toBe(0)
+    // Backend oracle: every gathered box is gone, not just the one that was selected, and
+    // their six lines are kept, Unassigned.
+    await expect.poll(async () => (await elements(jobId, pageId)).filter((e) => e.kind !== 'orphan')).toHaveLength(0)
+    expect(await pageLines(jobId, pageId)).toHaveLength(6)
     await expect(merged(page)).toHaveCount(0)
   })
 
@@ -437,11 +439,13 @@ test.describe('Scenario: the readings list after the listed region is gone', () 
     const para = paragraph(await elements(jobId, pageId))
     await expect(page.locator(`[data-testid="region-box"][data-id="${para.id}"]`)).toHaveCount(1)
     await page.keyboard.press('Delete')
-    await expect.poll(async () => (await elements(jobId, pageId)).map((e) => e.class_name)).toEqual(['Header'])
+    await expect.poll(async () => (await elements(jobId, pageId)).map((e) => e.class_name).sort())
+      .toEqual(['Header', 'Unassigned'])
 
-    // The page's lines are what is left, and they are listed; nothing says "No lines yet.".
+    // The page's lines are listed - the box's own, now Unassigned, among them; nothing says
+    // "No lines yet.".
     await expect(headerRows(page)).toHaveCount(3)
-    await expect(rows).toHaveCount(3)
+    await expect(rows).toHaveCount(6)
     await expect(page.getByText('No lines yet.')).toHaveCount(0)
     await expect(page.locator(`[data-testid="region-box"][data-id="${para.id}"]`)).toHaveCount(0)
   })
@@ -458,10 +462,11 @@ test.describe('Scenario: the readings list after the listed region is gone', () 
     await clickAt(page, PARAGRAPH_GAP, { shift: true })
     await expect(gathered(page)).toHaveCount(1)
     await page.keyboard.press('Delete')
-    await expect.poll(async () => (await elements(jobId, pageId)).map((e) => e.class_name)).toEqual(['Header'])
+    await expect.poll(async () => (await elements(jobId, pageId)).map((e) => e.class_name).sort())
+      .toEqual(['Header', 'Unassigned'])
 
     await expect(headerRows(page)).toHaveCount(3)
-    await expect(rows).toHaveCount(3)
+    await expect(rows).toHaveCount(6)
     await expect(page.getByText('No lines yet.')).toHaveCount(0)
   })
 
@@ -486,5 +491,42 @@ test.describe('Scenario: the readings list after the listed region is gone', () 
     await expect(rows).toHaveCount(6)
     await expect(headerRows(page)).toHaveCount(3)
     await expect(page.getByText('No lines yet.')).toHaveCount(0)
+  })
+})
+
+test.describe('Scenario: boxing the lines of a page that skipped layout', () => {
+  test('a box drawn over unassigned lines takes them in, and one undo hands them back', async ({ page }) => {
+    const jobId = await seedJobWithoutLayout(uniqueName('Boxing lines'))
+    const [pageId] = await jobPageIds(jobId)
+    const homes = async () => {
+      const detail = await getPageDetail(jobId, pageId)
+      return Object.fromEntries(detail.elements.flatMap((e: Element & { lines: { id: number }[] }) =>
+        e.lines.map((l) => [l.id, e.kind === 'orphan' ? 'Unassigned' : `${e.class_name} ${e.id}`])))
+    }
+    const lines = await pageLines(jobId, pageId)
+    expect(lines).toHaveLength(6)
+    expect(new Set(Object.values(await homes()))).toEqual(new Set(['Unassigned']))
+    // The first three lines from the top, and a box that holds exactly their centres.
+    const ys = (l: { polygon: number[][] }) => l.polygon.map((p) => p[1])
+    const sorted = [...lines].sort((a, b) => Math.min(...ys(a)) - Math.min(...ys(b)))
+    const top = sorted.slice(0, 3)
+    const xs = lines.flatMap((l) => l.polygon.map((p) => p[0]))
+    const box = [Math.min(...xs) - 0.02, Math.min(...ys(top[0])) - 0.01,
+                 Math.max(...xs) + 0.02, Math.max(...ys(top[2])) + 0.005]
+
+    await openViewer(page, jobId, pageId)
+    await enterEditMode(page)
+    await page.locator('[data-testid="pen-pill"][data-class="Paragraph"]').click()
+    await dragAt(page, [box[0], box[1]], [box[2], box[3]])
+
+    await expect.poll(async () => (await elements(jobId, pageId)).filter((e) => e.kind === 'content')).toHaveLength(1)
+    const drawn = (await elements(jobId, pageId)).find((e) => e.kind === 'content')!
+    const expected = Object.fromEntries(sorted.map((l, i) => [l.id, i < 3 ? `Paragraph ${drawn.id}` : 'Unassigned']))
+    await expect.poll(homes).toEqual(expected)
+    await expect(page.getByTestId('region-label')).toHaveText(['Paragraph'])
+
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(async () => (await elements(jobId, pageId)).filter((e) => e.kind === 'content')).toHaveLength(0)
+    await expect.poll(async () => new Set(Object.values(await homes()))).toEqual(new Set(['Unassigned']))
   })
 })

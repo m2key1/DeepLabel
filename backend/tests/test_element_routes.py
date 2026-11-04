@@ -210,32 +210,19 @@ class TestDrawingAndRemoving:
     def test_deleting_one_that_does_not_exist_is_a_404(self, client):
         assert client.delete('/api/elements/99', headers=ALICE).status_code == 404
 
-    def test_deleting_a_box_deletes_the_lines_under_it(self, client, conn):
-        client.delete('/api/elements/1', headers=ALICE)
-
-        assert [(r['id'], r['deleted']) for r in conn.execute(
-            'SELECT id, deleted FROM lines ORDER BY id')] == [(1, 1), (2, 1), (3, 0)]
-
-    def test_deleting_a_box_hands_its_lines_readings_back(self, client, conn):
-        """As deleting a line does: a reading stays in the pool, waiting for a line,
-        rather than attached to one nobody can see."""
-        for line_id, text in ((1, 'Left of the cut'), (2, 'Right of the cut'), (3, 'In the second box')):
+    def test_deleting_a_box_keeps_its_lines_and_their_readings(self, client, conn):
+        """Only the box goes; its lines fall to Unassigned with their transcriptions."""
+        for line_id, text in ((1, 'Left of the cut'), (2, 'Right of the cut')):
             candidates.add(conn, 1, 'llm:reader', text, line_id=line_id, order_idx=line_id)
         conn.commit()
 
         client.delete('/api/elements/1', headers=ALICE)
 
+        assert [(r['id'], r['deleted'], r['kind']) for r in conn.execute(
+            'SELECT l.id, l.deleted, e.kind FROM lines l JOIN elements e ON l.element_id = e.id '
+            'ORDER BY l.id')] == [(1, 0, 'orphan'), (2, 0, 'orphan'), (3, 0, 'content')]
         assert [(r['text'], r['line_id']) for r in conn.execute(
-            'SELECT text, line_id FROM candidates ORDER BY id')] == [
-            ('Left of the cut', None), ('Right of the cut', None), ('In the second box', 3)]
-
-    def test_deleting_a_box_takes_its_lines_out_of_the_training_data(self, client, monkeypatch):
-        queued = []
-        monkeypatch.setattr('app.training.enqueue', queued.append)
-
-        client.delete('/api/elements/1', headers=ALICE)
-
-        assert queued == [1, 2]
+            'SELECT text, line_id FROM candidates ORDER BY id')] == [('Left of the cut', 1), ('Right of the cut', 2)]
 
 
 def reading_order(conn):
@@ -264,15 +251,16 @@ class TestTheOrderFollowsTheEdit:
     def test_moving_a_box_below_another_swaps_them(self, client, conn):
         client.patch('/api/elements/1', json={'bbox': [0.0, 0.6, 1.0, 0.9]}, headers=ALICE)
 
-        assert reading_order(conn) == [(2, 0), (1, 1)]
+        # The two lines it left behind are read first, from a bucket of their own (3).
+        assert reading_order(conn) == [(3, 0), (2, 1), (1, 2)]
 
     def test_the_renumbering_is_the_systems_and_inside_the_edits_span(self, client, conn):
         span = client.patch('/api/elements/1', json={'bbox': [0.0, 0.6, 1.0, 0.9]}, headers=ALICE).json()['span']
 
         renumbered = conn.execute(
-            "SELECT id, author, json_extract(snapshot, '$.order_idx') AS order_idx FROM revisions "
-            "WHERE target_type = 'element' AND target_id = 2 AND action = 'update'").fetchall()
-        assert [(r['author'], r['order_idx']) for r in renumbered] == [('system:reading-order', 0)]
+            "SELECT id, json_extract(snapshot, '$.order_idx') AS order_idx FROM revisions "
+            "WHERE target_type = 'element' AND target_id = 1 AND author = 'system:reading-order'").fetchall()
+        assert [r['order_idx'] for r in renumbered] == [2]
         assert span['from'] < renumbered[0]['id'] <= span['to']
 
     def test_undoing_the_move_puts_the_order_back(self, client, conn):
@@ -281,10 +269,11 @@ class TestTheOrderFollowsTheEdit:
         assert undo(client, span).status_code == 200
         assert reading_order(conn) == [(1, 0), (2, 1)]
 
-    def test_deleting_a_box_closes_the_gap_it_leaves(self, client, conn):
+    def test_deleting_a_box_leaves_its_lines_read_where_it_stood(self, client, conn):
         client.delete('/api/elements/1', headers=ALICE)
 
-        assert reading_order(conn) == [(2, 0)]
+        assert reading_order(conn) == [(3, 0), (2, 1)]
+        assert lines_of(conn, 3) == ['Left of the cut', 'Right of the cut']
 
     def test_a_box_reclassed_as_a_column_takes_the_box_inside_it(self, client, conn):
         # A column numbers among the containers; the paragraph now inside it reads first.
@@ -301,6 +290,111 @@ class TestTheOrderFollowsTheEdit:
         client.post('/api/elements/merge', json={'ids': [2, third]}, headers=ALICE)
 
         assert reading_order(conn) == [(1, 0), (third, 1)]
+
+
+def home_of(conn, line_id):
+    return conn.execute('SELECT element_id FROM lines WHERE id = ?', (line_id,)).fetchone()['element_id']
+
+
+def unassigned(conn, line_id):
+    return conn.execute('SELECT e.kind FROM lines l JOIN elements e ON l.element_id = e.id WHERE l.id = ?',
+                        (line_id,)).fetchone()['kind'] == 'orphan'
+
+
+def draw(client, class_name, bbox):
+    response = client.post('/api/pages/1/elements', json={'class_name': class_name, 'bbox': bbox}, headers=ALICE)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+class TestLinesFollowTheBoxes:
+    """Line 1 sits top left and line 2 top right in box 1 (the top half); line 3 in box 2
+    (the bottom half). After any box edit, each line is in the smallest content box
+    around its centre, or Unassigned (#71)."""
+
+    def test_a_box_drawn_over_unassigned_lines_takes_them_in(self, client, conn):
+        conn.execute("UPDATE elements SET kind = 'orphan', class_name = 'Unassigned' WHERE id = 2")
+        conn.commit()
+
+        new_id = draw(client, 'Paragraph', [0.0, 0.55, 0.5, 0.75])['id']
+
+        assert home_of(conn, 3) == new_id
+        assert lines_of(conn, new_id) == ['In the second box']
+
+    def test_a_smaller_box_inside_a_paragraph_takes_only_the_lines_it_holds(self, client, conn):
+        new_id = draw(client, 'Header', [0.0, 0.0, 0.5, 0.2])['id']
+
+        assert lines_of(conn, new_id) == ['Left of the cut']
+        assert lines_of(conn, 1) == ['Right of the cut']
+
+    def test_a_container_takes_no_lines(self, client, conn):
+        draw(client, 'Column', [0.0, 0.0, 0.5, 0.2])
+
+        assert lines_of(conn, 1) == ['Left of the cut', 'Right of the cut']
+
+    def test_a_box_moved_off_a_line_lets_it_go_to_unassigned(self, client, conn):
+        client.patch('/api/elements/1', json={'bbox': [0.0, 0.0, 0.5, 0.5]}, headers=ALICE)
+
+        assert lines_of(conn, 1) == ['Left of the cut']
+        assert unassigned(conn, 2)
+
+    def test_a_box_resized_over_a_line_takes_it_from_the_bigger_box(self, client, conn):
+        new_id = draw(client, 'Header', [0.0, 0.0, 0.2, 0.2])['id']
+        assert lines_of(conn, new_id) == []
+
+        client.patch(f'/api/elements/{new_id}', json={'bbox': [0.0, 0.0, 0.5, 0.2]}, headers=ALICE)
+
+        assert lines_of(conn, new_id) == ['Left of the cut']
+
+    def test_a_box_reclassed_as_a_container_gives_its_lines_up(self, client, conn):
+        new_id = draw(client, 'Header', [0.0, 0.0, 0.5, 0.2])['id']
+
+        client.patch(f'/api/elements/{new_id}', json={'class_name': 'Column'}, headers=ALICE)
+
+        assert lines_of(conn, 1) == ['Left of the cut', 'Right of the cut']
+
+    def test_deleting_a_box_hands_its_lines_to_the_box_around_them(self, client, conn):
+        new_id = draw(client, 'Header', [0.0, 0.0, 0.5, 0.2])['id']
+
+        client.delete(f'/api/elements/{new_id}', headers=ALICE)
+
+        assert lines_of(conn, 1) == ['Left of the cut', 'Right of the cut']
+
+    def test_the_moves_are_the_systems_and_inside_the_edits_span(self, client, conn):
+        span = draw(client, 'Header', [0.0, 0.0, 0.5, 0.2])['span']
+
+        moved = conn.execute("SELECT id, author FROM revisions WHERE target_type = 'line' AND target_id = 1 "
+                             "AND action = 'update'").fetchall()
+        assert [r['author'] for r in moved] == ['system:reading-order']
+        assert span['from'] < moved[0]['id'] <= span['to']
+
+    def test_one_undo_of_the_drawing_puts_the_lines_back(self, client, conn):
+        drawn = draw(client, 'Header', [0.0, 0.0, 0.5, 0.2])
+
+        assert undo(client, drawn['span']).status_code == 200
+        assert lines_of(conn, 1) == ['Left of the cut', 'Right of the cut']
+
+    def test_one_undo_of_a_delete_brings_the_box_back_with_its_lines(self, client, conn):
+        span = client.delete('/api/elements/1', headers=ALICE).json()['span']
+
+        assert undo(client, span).status_code == 200
+        assert lines_of(conn, 1) == ['Left of the cut', 'Right of the cut']
+
+    def test_a_line_moved_into_another_box_goes_into_it(self, client, conn):
+        response = client.patch('/api/lines/1', json={'polygon': json.loads(quad(0.6, 0.6, 0.9, 0.7))},
+                                headers=ALICE)
+
+        assert response.status_code == 200, response.text
+        assert response.json()['element_id'] == 2
+        assert lines_of(conn, 2) == ['In the second box', 'Left of the cut']
+
+    def test_a_line_moved_off_every_box_goes_to_unassigned(self, client, conn):
+        conn.execute("UPDATE elements SET bbox = '[0.0,0.5,0.5,1.0]' WHERE id = 2")
+        conn.commit()
+
+        client.patch('/api/lines/1', json={'polygon': json.loads(quad(0.6, 0.6, 0.9, 0.7))}, headers=ALICE)
+
+        assert unassigned(conn, 1)
 
 
 class TestSplitting:

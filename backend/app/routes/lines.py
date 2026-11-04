@@ -58,6 +58,8 @@ def patch_line(line_id: int, body: LinePatch, conn=Depends(get_db), user: str = 
         conn.execute('UPDATE lines SET polygon = ? WHERE id = ?',
                      (json.dumps(geometry.valid_polygon(body.polygon)), line_id))
         geometry.resequence_lines(conn, row['element_id'])
+        if geometry.refile_lines(conn, row['page_id'], only={line_id}):
+            geometry.resequence_page(conn, row['page_id'])
     if body.orientation is not None:
         conn.execute('UPDATE lines SET orientation = ? WHERE id = ?',
                      (int(body.orientation) % 360, line_id))
@@ -344,18 +346,12 @@ def merge_lines(body: LineMerge, conn=Depends(get_db), user: str = Depends(get_u
 
 
 def _element_at(conn, page_id: int, cx: float, cy: float) -> int | None:
-    """Id of the smallest content element containing the point - the runner's
-    _element_at, over live rows."""
-    best, best_area = None, None
-    for e in conn.execute(
-            "SELECT id, bbox FROM elements WHERE page_id = ? AND kind = 'content' AND deleted = 0",
-            (page_id,)):
-        x0, y0, x1, y1 = json.loads(e['bbox'])
-        if x0 <= cx <= x1 and y0 <= cy <= y1:
-            area = (x1 - x0) * (y1 - y0)
-            if best_area is None or area < best_area:
-                best, best_area = e['id'], area
-    return best
+    """Id of the smallest content element containing the point, over live rows."""
+    boxes = conn.execute(
+        "SELECT id, bbox FROM elements WHERE page_id = ? AND kind = 'content' AND deleted = 0",
+        (page_id,)).fetchall()
+    i = geometry.smallest_box_at([json.loads(b['bbox']) for b in boxes], cx, cy)
+    return None if i is None else boxes[i]['id']
 
 
 def _settle_pool(conn, element_id: int) -> int:

@@ -8,7 +8,8 @@ from app import caches, registry, store
 
 
 def line_dict(row, revision: int, text_author: str = '') -> dict:
-    return {'id': row['id'], 'order_idx': row['order_idx'], 'polygon': json.loads(row['polygon']),
+    return {'id': row['id'], 'element_id': row['element_id'], 'order_idx': row['order_idx'],
+            'polygon': json.loads(row['polygon']),
             'text': row['text'], 'corrected_text': row['corrected_text'],
             # Who wrote the correction, so the client can tell a person's typing from a
             # machine's fill-in (store.MACHINE_AUTHORS) - the eraser spares only the former.
