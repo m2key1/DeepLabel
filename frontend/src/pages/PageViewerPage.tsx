@@ -100,10 +100,10 @@ import {
 import type { LinePenShape } from '../util'
 import { clamp01, polyCenter, polyMaxX, polyMinX, polyMinY } from '../lib/geometry/core'
 import type { Ring } from '../lib/geometry/core'
-import { allowedShapes, elementShape, reshaped, withinLevel } from '../lib/geometry/elementShape'
+import { allowedShapes, elementShape, reshaped, withinLevel, wrapped } from '../lib/geometry/elementShape'
 import type { ElementShape } from '../lib/geometry/elementShape'
 import {
-  acrossQuad, angleAround, angledQuad, bigEnough, containingStack, cropAxis, cropPlan, dropVertex, lineBox, linesAt, minAreaQuad, moveBbox, moveEdge, moveEdgeFree, movePoly, orderBbox, pagePoints, polyBigEnough, polygonCrossing, quadAngle, quadCrossing, resizeBbox, resizeQuadCorner, rotateHandleAnchor, rotatePoly, splitLongSides, splitSide,
+  acrossQuad, angleAround, angledQuad, bigEnough, boxRing, containingStack, cropAxis, cropPlan, dropVertex, lineBox, linesAt, minAreaQuad, moveBbox, moveEdge, moveEdgeFree, movePoly, orderBbox, pagePoints, polyBigEnough, polygonCrossing, quadAngle, quadCrossing, resizeBbox, resizeQuadCorner, rotateHandleAnchor, rotatePoly, splitLongSides, splitSide,
 } from '../lib/geometry/quad'
 import { confStroke, elMinConf, profileStops } from '../lib/confidence'
 import { RegionLabel } from '../components/viewer/RegionLabel'
@@ -161,6 +161,10 @@ const MODIFIER_KEYS = new Set(['Control', 'Meta', 'Shift'])
 
 // A press that travels less than this (screen px) before release is a click.
 const CLICK_SLOP_PX = 6
+
+const gathered = (count: number, kind: 'element' | 'line') =>
+  `${count} ${kind === 'line' ? (count === 1 ? 'line' : 'lines') : (count === 1 ? 'box' : 'boxes')}`
+
 // How near the first corner counts as clicking it. Wider than the click slop above: this
 // is aiming at a 10px marker, not telling a click from a drag.
 const CLOSE_SLOP_PX = 12
@@ -1143,9 +1147,37 @@ export function PageViewerPage() {
     }
   }
 
-  // A class loads the pen for the next stroke and nothing else - the selected box is
-  // reclassed from its own control. Null is the Select tool.
+  // A gathered set and a class make a box of that class drawn tightly around the set, in
+  // the class's pen shape; the server files the lines by where they lie.
+  const commitWrap = async (className: string, kind: 'element' | 'line', ids: number[]) => {
+    if (!page) return
+    const rings = kind === 'line'
+      ? ids.map((id) => findLine(id)?.polygon).filter((r): r is Ring => !!r)
+      : page.elements.filter((el) => ids.includes(el.id)).map((el) => el.polygon ?? boxRing(el.bbox))
+    if (!rings.length) return
+    const shape = penShapeOf(className)
+    const ring = wrapped(rings, shape, aspect)
+    try {
+      const el = await createElement(page.id, className,
+        shape === 'box' ? { bbox: [ring[0][0], ring[0][1], ring[2][0], ring[2][1]] } : { polygon: ring })
+      setMergeSet(new Set())
+      recordEdit(el.span)
+      setSelKind('element')
+      setActiveLine(null)
+      setSelectedId(el.id)
+      await reloadPage()
+    } catch (e) {
+      fail(e)
+    }
+  }
+
+  // A class loads the pen for the next stroke, or with a set gathered, boxes the set. The
+  // selected box is reclassed from its own control. Null is the Select tool.
   const pickClass = (className: string | null) => {
+    if (className !== null && className !== LINE_CLASS && editing && mergeSet.size) {
+      commitWrap(className, mergeKind.current, [...mergeSet])
+      return
+    }
     if (className === null) {
       setTool('select')
       return
@@ -3713,7 +3745,7 @@ export function PageViewerPage() {
                 : cutArmed
                 ? 'drag a cut across the selection, or click to cut straight across there · Esc cancel'
                 : mergeSet.size
-                  ? `${mergeSet.size} selected · m merges · Entf deletes · Esc clears`
+                  ? `${gathered(mergeSet.size, mergeKind.current)} selected · a class key boxes them · m merges · Entf deletes · Esc clears`
                   : 'click to select · drag to edit · ⇧click/⇧drag multi · s split · m merge · Entf delete · ⌘Z undo · Esc exit'
               : reviewMode
                 ? `↑/↓ flagged lines · ${comboLabel(hk.readings)} readings · Enter edit · ⇧Enter check + next · Esc back · e edit`

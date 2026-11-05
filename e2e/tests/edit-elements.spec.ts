@@ -224,7 +224,7 @@ test.describe('Scenario: working on several boxes at once', () => {
     await dragAt(page, from, to, { shift: true })
 
     await expect(merged(page)).toHaveCount(els.length)
-    await expect(page.getByText(`${els.length} selected`, { exact: false })).toBeVisible()
+    await expect(page.getByText(`${els.length} boxes selected`, { exact: false })).toBeVisible()
 
     // Paired presence/absence: a sweep that covers only one leaves the other out.
     const [oneFrom, oneTo] = around([paragraph(els).bbox])
@@ -528,5 +528,71 @@ test.describe('Scenario: boxing the lines of a page that skipped layout', () => 
     await page.keyboard.press('ControlOrMeta+z')
     await expect.poll(async () => (await elements(jobId, pageId)).filter((e) => e.kind === 'content')).toHaveLength(0)
     await expect.poll(async () => new Set(Object.values(await homes()))).toEqual(new Set(['Unassigned']))
+  })
+
+  test('gathered lines and a class key make a box that fits them exactly, and one undo takes it away', async ({ page }) => {
+    const jobId = await seedJobWithoutLayout(uniqueName('Wrapping lines'))
+    const [pageId] = await jobPageIds(jobId)
+    const homes = async () => {
+      const detail = await getPageDetail(jobId, pageId)
+      return Object.fromEntries(detail.elements.flatMap((e: Element & { lines: { id: number }[] }) =>
+        e.lines.map((l) => [l.id, e.kind === 'orphan' ? 'Unassigned' : `${e.class_name} ${e.id}`])))
+    }
+    const lines = await pageLines(jobId, pageId)
+    const ys = (l: { polygon: number[][] }) => l.polygon.map((p) => p[1])
+    const sorted = [...lines].sort((a, b) => Math.min(...ys(a)) - Math.min(...ys(b)))
+    const top = sorted.slice(0, 3)
+    const corners = top.flatMap((l) => l.polygon)
+    const bounds = [Math.min(...corners.map((p) => p[0])), Math.min(...corners.map((p) => p[1])),
+                    Math.max(...corners.map((p) => p[0])), Math.max(...corners.map((p) => p[1]))]
+
+    await openViewer(page, jobId, pageId)
+    await enterEditMode(page)
+    const paragraphPen = page.locator('[data-testid="pen-pill"][data-class="Paragraph"]')
+    const digit = await paragraphPen.getAttribute('title')
+    expect(digit).toMatch(/^[0-9]$/)
+    await dragAt(page, [bounds[0] - 0.01, bounds[1] - 0.005], [bounds[2] + 0.01, bounds[3] + 0.003], { shift: true })
+    await expect(page.locator('[data-testid="line-poly"][data-merged]')).toHaveCount(3)
+    await expect(page.getByText('3 lines selected · a class key boxes them · m merges · Entf deletes · Esc clears'))
+      .toBeVisible()
+
+    await page.keyboard.press(digit!)
+
+    await expect.poll(async () => (await elements(jobId, pageId)).filter((e) => e.kind === 'content')).toHaveLength(1)
+    const drawn = (await elements(jobId, pageId)).find((e) => e.kind === 'content')!
+    expect(drawn.class_name).toBe('Paragraph')
+    drawn.bbox.forEach((v, i) => expect(v).toBeCloseTo(bounds[i], 3))
+    await expect.poll(homes).toEqual(
+      Object.fromEntries(sorted.map((l, i) => [l.id, i < 3 ? `Paragraph ${drawn.id}` : 'Unassigned'])))
+    await expect(page.locator('[data-testid="line-poly"][data-merged]')).toHaveCount(0)
+
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(async () => (await elements(jobId, pageId)).filter((e) => e.kind === 'content')).toHaveLength(0)
+    await expect.poll(async () => new Set(Object.values(await homes()))).toEqual(new Set(['Unassigned']))
+  })
+
+  test('gathered boxes and a container class get a container around them, and their lines stay', async ({ page }) => {
+    const { jobId, pageId } = await seedEditor(page)
+    const before = await elements(jobId, pageId)
+    const content = before.filter((e) => e.kind === 'content')
+    expect(content.map((e) => e.class_name).sort()).toEqual(['Header', 'Paragraph'])
+    const linesBefore = await pageLines(jobId, pageId)
+    const bounds = [0, 1, 2, 3].map((i) => (i < 2 ? Math.min : Math.max)(...content.map((e) => e.bbox[i])))
+
+    await dragAt(page, [bounds[0] - 0.01, bounds[1] - 0.01], [bounds[2] + 0.01, bounds[3] + 0.01], { shift: true })
+    await expect(page.locator('[data-testid="region-box"][data-merged]')).toHaveCount(2)
+    await expect(page.getByText('2 boxes selected · a class key boxes them · m merges · Entf deletes · Esc clears'))
+      .toBeVisible()
+    await page.locator('[data-testid="pen-pill"][data-class="Column"]').click()
+
+    await expect.poll(async () => (await elements(jobId, pageId)).filter((e) => e.class_name === 'Column')).toHaveLength(1)
+    const column = (await elements(jobId, pageId)).find((e) => e.class_name === 'Column')!
+    column.bbox.forEach((v, i) => expect(v).toBeCloseTo(bounds[i], 3))
+    const homeOf = (ls: { id: number; element_id?: number }[]) => Object.fromEntries(ls.map((l) => [l.id, l.element_id]))
+    expect(homeOf(await pageLines(jobId, pageId))).toEqual(homeOf(linesBefore))
+
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect.poll(async () => (await elements(jobId, pageId)).filter((e) => e.class_name === 'Column')).toHaveLength(0)
+    expect((await elements(jobId, pageId)).map((e) => e.id).sort()).toEqual(before.map((e) => e.id).sort())
   })
 })

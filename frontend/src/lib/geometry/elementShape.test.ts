@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Ring } from './core'
-import { allowedShapes, elementShape, reshaped, withinLevel } from './elementShape'
+import { allowedShapes, elementShape, reshaped, withinLevel, wrapped } from './elementShape'
 
 // A page twice as wide as it is high: a square corner in pixels is not one in 0-1 terms.
 const ASPECT = 2
@@ -54,5 +54,27 @@ describe('reshaped', () => {
   it('gives a box corners of its own so it reads as a polygon', () => {
     const box: Ring = [[0.1, 0.1], [0.5, 0.1], [0.5, 0.3], [0.1, 0.3]]
     expect(elementShape(reshaped(box, 'polygon', ASPECT), ASPECT)).toBe('polygon')
+  })
+})
+
+describe('wrapped', () => {
+  const lines: Ring[] = [
+    [[0.1, 0.1], [0.5, 0.12], [0.5, 0.16], [0.1, 0.14]],
+    [[0.12, 0.2], [0.6, 0.22], [0.6, 0.26], [0.12, 0.24]],
+  ]
+
+  it('boxes the gathered outlines in their upright bounds, with no margin', () => {
+    expect(wrapped(lines, 'box', ASPECT)).toEqual([[0.1, 0.1], [0.6, 0.1], [0.6, 0.26], [0.1, 0.26]])
+  })
+
+  it('turns the box to the tightest rotated rectangle around them', () => {
+    const ring = wrapped([turned(1, 0.3, 0.3, 0.05, 20), turned(1, 0.45, 0.3, 0.05, 20)], 'rotated', ASPECT)
+    expect(elementShape(ring, ASPECT)).toBe('rotated')
+    expect(ring).toHaveLength(4)
+  })
+
+  it('outlines them with their convex hull, wound like a box from its top left', () => {
+    const ring = wrapped(lines, 'polygon', ASPECT)
+    expect(ring).toEqual([[0.1, 0.1], [0.5, 0.12], [0.6, 0.22], [0.6, 0.26], [0.12, 0.24], [0.1, 0.14]])
   })
 })

@@ -250,6 +250,10 @@ Press `e` to edit the page.
 
 - **Select** (`v`): click to pick a box or line, drag to move it. Shift-click or Shift-drag
   to select several.
+- With several lines or boxes selected, a class's digit (or its button on the rail) draws a
+  box of that class tightly around them, in that class's pen shape. The lines go into it
+  unless a smaller box already holds them, so this is the quickest way to box the lines of
+  a page that skipped layout, or to put a Column or Table around boxes.
 - **Draw** (`d`): pick a class on the rail (or press its digit) and drag a box, or click
   two corners. Draw a text line in three clicks: start of the line, its end, then its
   height. Free polygons are drawn a corner per click and closed on the first corner.

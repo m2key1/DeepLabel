@@ -1,6 +1,6 @@
 import type { LayoutShape } from '../../api'
 import type { Ring } from './core'
-import { minAreaQuad, splitLongSides } from './quad'
+import { hull, minAreaQuad, splitLongSides } from './quad'
 
 /** What a layout element is drawn as. The names are the dataset levels' own, since a level
  *  is the freest shape it allows. */
@@ -50,4 +50,13 @@ export function reshaped(poly: Ring, to: ElementShape, aspect: number): Ring {
   if (to === 'box') return boundsRing(poly)
   if (to === 'rotated') return minAreaQuad(poly, aspect)
   return poly.length > 4 ? poly : splitLongSides(poly, aspect)
+}
+
+/** The tightest shape of the given kind around several outlines: their upright bounds,
+ *  the smallest rotated rectangle, or their convex hull. */
+export function wrapped(rings: Ring[], to: ElementShape, aspect: number): Ring {
+  const corners = rings.flat()
+  if (to === 'box') return boundsRing(corners)
+  if (to === 'rotated') return minAreaQuad(corners, aspect)
+  return hull(corners)
 }

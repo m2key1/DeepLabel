@@ -7,6 +7,8 @@ import type { Pt, Ring } from './core'
 
 export const MIN_BOX = 0.004
 
+export const boxRing = ([x0, y0, x1, y1]: Bbox): Ring => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+
 export function orderBbox(x0: number, y0: number, x1: number, y1: number): Bbox {
   return [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)]
 }
@@ -209,7 +211,7 @@ export function resizeQuadCorner(quad: Ring, i: number, to: Pt, aspect: number, 
 }
 
 /** The convex hull, counter-clockwise in pixel space (Andrew's monotone chain). */
-function hull(P: Pt[]): Pt[] {
+export function hull(P: Pt[]): Pt[] {
   const pts = [...P].sort((a, b) => a[0] - b[0] || a[1] - b[1])
   if (pts.length < 3) return pts
   const cross = (o: Pt, a: Pt, b: Pt) =>
