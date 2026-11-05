@@ -309,6 +309,10 @@ export function PageViewerPage() {
   // the real tool back and a keyup that goes missing cannot strand the editor.
   const [spaceHeld, setSpaceHeld] = useState(false)
   const [altHeld, setAltHeld] = useState(false)
+  // Ctrl (or Cmd) held with the Draw tool draws over the selected shape: its handles go
+  // away until the key is let go.
+  const [ctrlHeld, setCtrlHeld] = useState(false)
+  const forcingDraw = tool === 'draw' && ctrlHeld
   const handKey = tool === 'hand' || spaceHeld || altHeld
   // The corners clicked so far, first one first. Closed by clicking that first corner again.
   const [polyDraft, setPolyDraft] = useState<Ring | null>(null)
@@ -1941,7 +1945,8 @@ export function PageViewerPage() {
     }
     // Shift-click: add/remove the hit item from the merge set instead of selecting. Not on
     // a handle, where Shift modifies the drag (angle snapping) rather than the selection.
-    const onHandle = target !== undefined && (target.kind === 'element'
+    const forced = tool === 'draw' && (e.ctrlKey || e.metaKey)
+    const onHandle = !forced && target !== undefined && (target.kind === 'element'
       ? target.corner !== undefined
       : target.vi !== undefined || target.ei !== undefined || target.rotate === true)
     if (e.shiftKey && !onHandle) {
@@ -2304,6 +2309,7 @@ export function PageViewerPage() {
         if (!e.repeat) setAltHeld(true)
         return
       }
+      if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(true)
       if (e.key === 'Escape') {
         if (armed) arm(null)
         else if (editingId !== null) setEditingId(null)
@@ -2504,10 +2510,12 @@ export function PageViewerPage() {
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key === ' ') setSpaceHeld(false)
       if (e.key === 'Alt') setAltHeld(false)
+      if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(false)
     }
     const onBlur = () => {
       setSpaceHeld(false)
       setAltHeld(false)
+      setCtrlHeld(false)
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('keyup', onKeyUp)
@@ -2585,6 +2593,7 @@ export function PageViewerPage() {
     const closing = !!polyDraft && polyDraft.length >= 3 && !!aim
       && screenDistance(polyDraft[0], aim) <= CLOSE_SLOP_PX
     const rotateHandle = poly ? rotateHandleAnchor(poly, aspect) : null
+    const handlesShown = !forcingDraw || !!liveBox || !!livePoly
     const turning = dragView?.mode === 'lrotate' ? dragView : null
     // The scissors' preview: the stroke being drawn, and the cut it will make - across
     // the line where the stroke crosses it, or along one axis of a box.
@@ -2814,7 +2823,7 @@ export function PageViewerPage() {
             className="pointer-events-none absolute -ml-[5px] -mt-[5px] h-[10px] w-[10px] rounded-sm border-2 bg-white/70"
           />
         )}
-        {box &&
+        {box && handlesShown &&
           HANDLES.map(([corner, fx, fy]) => (
             <span
               key={corner}
@@ -2825,7 +2834,7 @@ export function PageViewerPage() {
               className="absolute -ml-[5px] -mt-[5px] h-[10px] w-[10px] rounded-sm border border-white bg-accent shadow"
             />
           ))}
-        {poly &&
+        {poly && handlesShown &&
           poly.map(([x, y], i) => {
             const [bx, by] = poly[(i + 1) % poly.length]
             const alongX = Math.abs(bx - x) >= Math.abs(by - y)
@@ -2844,7 +2853,7 @@ export function PageViewerPage() {
               />
             )
           })}
-        {poly &&
+        {poly && handlesShown &&
           poly.map(([x, y], i) => (
             <span
               key={`v${i}`}
@@ -2863,7 +2872,7 @@ export function PageViewerPage() {
               className="absolute -ml-[5px] -mt-[5px] h-[10px] w-[10px] rounded-full border border-white bg-accent shadow"
             />
           ))}
-        {poly && rotateHandle && (
+        {poly && handlesShown && rotateHandle && (
           <>
             <span
               className="pointer-events-none absolute h-px origin-left bg-accent"
@@ -3705,7 +3714,7 @@ export function PageViewerPage() {
     ] as [string, string][] },
     { title: 'Drawing', rows: [
       ['drag', 'draw a box with the pen class'], ['click · click', 'the same box in two clicks'],
-      ['Ctrl+press', 'draw through what is already there'],
+      ['Ctrl+drag', 'draw over the selected shape, its handles hidden'],
       ['Line pen', 'click start · end · height'], ['Line polygon', 'a corner per click · first again closes'],
       ['Enter · right-click · double-click', 'finish the polygon'],
       ['Backspace', 'take the last corner back'], ['Esc', 'cancel'],
@@ -3746,7 +3755,11 @@ export function PageViewerPage() {
                 ? 'drag a cut across the selection, or click to cut straight across there · Esc cancel'
                 : mergeSet.size
                   ? `${gathered(mergeSet.size, mergeKind.current)} selected · a class key boxes them · m merges · Entf deletes · Esc clears`
-                  : 'click to select · drag to edit · ⇧click/⇧drag multi · s split · m merge · Entf delete · ⌘Z undo · Esc exit'
+                  : forcingDraw
+                    ? 'drawing over the selected shape · let go of Ctrl for its handles'
+                    : tool === 'draw'
+                      ? 'drag to draw · Ctrl+drag draws over the selection · ⇧drag multi · Esc exit'
+                      : 'click to select · drag to edit · ⇧click/⇧drag multi · s split · m merge · Entf delete · ⌘Z undo · Esc exit'
               : reviewMode
                 ? `↑/↓ flagged lines · ${comboLabel(hk.readings)} readings · Enter edit · ⇧Enter check + next · Esc back · e edit`
                 : canLineNav

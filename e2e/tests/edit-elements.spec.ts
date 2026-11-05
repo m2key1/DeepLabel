@@ -42,6 +42,30 @@ test.describe('Scenario: correcting the layout', () => {
     await expect.poll(async () => (await elements(jobId, pageId)).length).toBe(2)
   })
 
+  test('holding Ctrl hides the selected box\'s handles and draws over its corner instead of resizing it', async ({ page }) => {
+    const { jobId, pageId } = await seedEditor(page)
+    const handles = page.getByTestId('element-handle')
+
+    await page.locator('[data-testid="pen-pill"][data-class="Paragraph"]').click()
+    await dragAt(page, [0.03, 0.3], [0.08, 0.55])
+    await expect.poll(async () => (await elements(jobId, pageId)).length).toBe(3)
+    const first = (await elements(jobId, pageId)).find((e) => e.bbox[2] < 0.1)!
+    await expect(handles).toHaveCount(8)
+
+    await page.keyboard.down('Control')
+    await expect(handles).toHaveCount(0)
+    await dragAt(page, [first.bbox[2], first.bbox[3]], [0.14, 0.7])
+    await page.keyboard.up('Control')
+
+    await expect.poll(async () => (await elements(jobId, pageId)).length).toBe(4)
+    const els = await elements(jobId, pageId)
+    expect(els.find((e) => e.id === first.id)!.bbox).toEqual(first.bbox)
+    const second = els.find((e) => e.bbox[2] > 0.12 && e.bbox[2] < 0.16)!
+    expect(second.class_name).toBe('Paragraph')
+    ;[first.bbox[2], first.bbox[3], 0.14, 0.7].forEach((v, i) => expect(Math.abs(second.bbox[i] - v)).toBeLessThan(0.02))
+    await expect(handles).toHaveCount(8)
+  })
+
   test('the pen draws columns inside a table, one after another, without picking the table', async ({ page }) => {
     const { jobId, pageId } = await seedEditor(page)
     const pen = (name: string) => page.locator(`[data-testid="pen-pill"][data-class="${name}"]`)

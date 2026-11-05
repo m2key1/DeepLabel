@@ -257,6 +257,8 @@ Press `e` to edit the page.
 - **Draw** (`d`): pick a class on the rail (or press its digit) and drag a box, or click
   two corners. Draw a text line in three clicks: start of the line, its end, then its
   height. Free polygons are drawn a corner per click and closed on the first corner.
+  Hold Ctrl (Cmd on a Mac) to draw over the selected shape: its handles hide until the key
+  is let go, so a press on them draws instead of resizing.
 - Above Aligned, every layout class on the rail carries the pens its dataset allows: an
   upright box, a rotated box (three clicks, like a line) and an outline. Each class
   remembers its pen. A selected element's **Element shape** switch turns it into any
