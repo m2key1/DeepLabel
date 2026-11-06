@@ -70,14 +70,12 @@ test.describe('Scenario: a save the tile editor could not make', () => {
       headers: { ...JSON_HEADERS, ...identity('colleague', 'admin') },
       body: JSON.stringify({ points: THEIRS }),
     })
-    const answer = page.waitForResponse((r) => r.url().endsWith(`/api/regions/${region.id}`)
-                                             && r.request().method() === 'PATCH')
+    const answer = page.waitForResponse((r) => r.url().endsWith(`/api/pages/${tileId}/regions/batch`))
     await dragVertex(page, [0.2, 0.2], [0.1, 0.1])
     expect((await answer).status()).toBe(409)
 
     // Said in the footer, not by taking the whole editor down.
-    await expect(page.getByTestId('editor-notice'))
-      .toHaveText('colleague changed this region since you loaded it - theirs is shown now; make your change again to replace it.')
+    await expect(page.getByTestId('editor-notice')).toHaveText('Move corner refused - changed by colleague since you loaded it')
     await expect(page.getByTestId('tile-canvas')).toBeVisible()
     await expect(page.getByTestId('map-region')).toHaveCount(1)
     // The colleague's shape stands on the server and is what the tile now shows.
@@ -93,9 +91,8 @@ test.describe('Scenario: a save the tile editor could not make', () => {
     await selectSquare(page)
     await expect.poll(() => firstHandle(page)).toEqual(SQUARE[0])
 
-    await page.route(`**/api/regions/${region.id}`, (route) => route.request().method() === 'PATCH'
-      ? route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'disk full' }) })
-      : route.fallback())
+    await page.route(`**/api/pages/${tileId}/regions/batch`, (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'disk full' }) }))
     await dragVertex(page, [0.2, 0.2], [0.1, 0.1])
 
     await expect(page.getByTestId('editor-notice')).toContainText('disk full')
@@ -115,14 +112,12 @@ test.describe('Scenario: a save the tile editor could not make', () => {
       headers: { ...JSON_HEADERS, ...identity('colleague', 'admin') },
       body: JSON.stringify({ points: THEIRS }),
     })
-    const answer = page.waitForResponse((r) => r.url().endsWith(`/api/regions/${region.id}`)
-                                             && r.request().method() === 'PATCH')
+    const answer = page.waitForResponse((r) => r.url().endsWith(`/api/pages/${tileId}/regions/batch`))
     await page.getByRole('button', { name: 'Erase' }).click()
     await eraseStroke(page, SQUARE[0])
     expect((await answer).status()).toBe(409)
 
-    await expect(page.getByTestId('editor-notice'))
-      .toHaveText('colleague changed this region since you loaded it - theirs is shown now; make your change again to replace it.')
+    await expect(page.getByTestId('editor-notice')).toHaveText('Erase refused - changed by colleague since you loaded it')
     await expect(page.getByTestId('tile-canvas')).toBeVisible()
     await expect.poll(async () => roundPoints((await tileRegions(jobId, tileId))[0].points)).toEqual(THEIRS)
     await selectShape(page, THEIRS_CENTRE)
@@ -130,7 +125,7 @@ test.describe('Scenario: a save the tile editor could not make', () => {
     await expect(page.getByTestId('vertex-handle')).toHaveCount(4)
   })
 
-  test('a merge the server half made says why, shows the tile as it stands and can be taken back', async ({ page }) => {
+  test('a merge the server refuses says why and leaves both shapes as they were', async ({ page }) => {
     const jobId = await seedMapJob(uniqueName('Merge failed'))
     const [tileId] = await tileIds(jobId)
     const classId = await firstDrawableClass(jobId)
@@ -139,27 +134,21 @@ test.describe('Scenario: a save the tile editor could not make', () => {
     await openTileEditor(page, jobId, tileId)
     await expect(page.getByTestId('map-region')).toHaveCount(2)
 
-    await page.route(`**/api/regions/${dropped.id}`, (route) => route.request().method() === 'DELETE'
-      ? route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'disk full' }) })
-      : route.fallback())
+    await page.route(`**/api/pages/${tileId}/regions/batch`, (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'disk full' }) }))
     await selectSquare(page)
     await page.keyboard.down('Shift')
     await clickTile(page, TOUCHING_CENTRE)
     await page.keyboard.up('Shift')
     await page.keyboard.press('m')
 
-    await expect(page.getByTestId('editor-notice')).toContainText('disk full')
+    await expect(page.getByTestId('editor-notice')).toHaveText('Merge refused - disk full')
     await expect(page.getByTestId('tile-canvas')).toBeVisible()
-    // The union was saved before the delete failed: both stand on the server and on screen.
-    await expect.poll(async () => (await tileRegions(jobId, tileId)).map((r) => [r.id, r.points.length]))
-      .toEqual([[kept.id, 8], [dropped.id, 4]])
+    // One request: nothing of the merge was made, on the server or on screen.
+    expect((await tileRegions(jobId, tileId)).map((r) => [r.id, roundPoints(r.points)]))
+      .toEqual([[kept.id, SQUARE], [dropped.id, TOUCHING]])
     await expect(page.locator(`[data-testid="map-region"][data-region-id="${dropped.id}"]`)).toHaveCount(1)
     await expect(page.locator(`[data-testid="map-region"][data-region-id="${kept.id}"]`)).toHaveCount(1)
-
-    // The half that was made is one step back.
-    await page.keyboard.press('Control+z')
-    await expect.poll(async () => roundPoints((await tileRegions(jobId, tileId))
-      .find((r) => r.id === kept.id)!.points)).toEqual(SQUARE)
   })
 })
 

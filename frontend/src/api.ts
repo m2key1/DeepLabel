@@ -386,6 +386,8 @@ export interface PageDetail {
   /** The template of the dataset's layout model, where it reads top to bottom and so sets
    *  the order instead of the page's or the dataset's setting. */
   reading_order_template: string | null
+  /** The page's own newest revision: its switches are refused if a person changed it since. */
+  revision?: number
   /** The dataset's newest revision when this was loaded: where a live view starts listening. */
   job_revision: number
   /** Which models produced what is on the page, and how much people have since done by hand. */
@@ -2301,12 +2303,16 @@ export function setPagesDeleted(jobId: string, pageIds: number[], deleted: boole
   return request(`/api/jobs/${jobId}/pages`, json('PATCH', { page_ids: pageIds, deleted }))
 }
 
-export function setPageLayoutChecked(pageId: number, layoutChecked: boolean): Promise<{ layout_checked: boolean }> {
-  return request(`/api/pages/${pageId}`, json('PATCH', { layout_checked: layoutChecked }))
+type PageFlags = Spanned<{ layout_checked: boolean; lines_checked: boolean; revision: number }>
+
+/** `revision` is the page's as it was loaded; given, the switch is refused with 409 if a
+ *  person changed the page since. */
+export function setPageLayoutChecked(pageId: number, layoutChecked: boolean, revision?: number): Promise<PageFlags> {
+  return request(`/api/pages/${pageId}`, json('PATCH', { layout_checked: layoutChecked, revision }))
 }
 
-export function setPageLinesChecked(pageId: number, linesChecked: boolean): Promise<{ lines_checked: boolean }> {
-  return request(`/api/pages/${pageId}`, json('PATCH', { lines_checked: linesChecked }))
+export function setPageLinesChecked(pageId: number, linesChecked: boolean, revision?: number): Promise<PageFlags> {
+  return request(`/api/pages/${pageId}`, json('PATCH', { lines_checked: linesChecked, revision }))
 }
 
 /** This page's own layout, or '' to follow the dataset again. The lines of a page with
@@ -2366,12 +2372,14 @@ export function createLine(pageId: number, polygon: [number, number][]): Promise
 export function splitLine(
   lineId: number,
   cut: { cut_x: number } | { cut_y: number } | { cut_line: [[number, number], [number, number]] },
+  revision?: number,
 ): Promise<{ lines: Line[]; span: EditSpan }> {
-  return request(`/api/lines/${lineId}/split`, json('POST', cut))
+  return request(`/api/lines/${lineId}/split`, json('POST', { ...cut, revision }))
 }
 
-export function mergeLines(ids: number[]): Promise<Spanned<Line>> {
-  return request('/api/lines/merge', json('POST', { ids }))
+/** `revisions` are the lines' as they were loaded; one a person changed since refuses the merge. */
+export function mergeLines(ids: number[], revisions?: Record<number, number>): Promise<Spanned<Line>> {
+  return request('/api/lines/merge', json('POST', { ids, revisions }))
 }
 
 export function reocrLine(lineId: number): Promise<Line> {
@@ -2395,19 +2403,35 @@ export function createElement(pageId: number, className: string,
   return request(`/api/pages/${pageId}/elements`, json('POST', { class_name: className, ...shape }))
 }
 
-export function deleteElement(elementId: number): Promise<{ deleted: boolean; span: EditSpan }> {
-  return request(`/api/elements/${elementId}`, { method: 'DELETE' })
+export function deleteElement(elementId: number, revision?: number): Promise<{ deleted: boolean; span: EditSpan }> {
+  const q = revision === undefined ? '' : `?revision=${revision}`
+  return request(`/api/elements/${elementId}${q}`, { method: 'DELETE' })
+}
+
+export interface RowAt {
+  id: number
+  revision?: number
+}
+
+/** Boxes and lines deleted together: one request, one span, refused whole if a person
+ *  changed any of them since it was loaded. */
+export function deleteSet(pageId: number, rows: { elements: RowAt[]; lines: RowAt[] }): Promise<{
+  removed_elements: number[]; removed_lines: number[]; span: EditSpan
+}> {
+  return request(`/api/pages/${pageId}/delete`, json('POST', rows))
 }
 
 export function splitElement(
   elementId: number,
   cut: { cut_x: number } | { cut_y: number },
+  revision?: number,
 ): Promise<{ elements: PageElement[]; span: EditSpan }> {
-  return request(`/api/elements/${elementId}/split`, json('POST', cut))
+  return request(`/api/elements/${elementId}/split`, json('POST', { ...cut, revision }))
 }
 
-export function mergeElements(ids: number[]): Promise<Spanned<PageElement>> {
-  return request('/api/elements/merge', json('POST', { ids }))
+/** `revisions` are the boxes' as they were loaded; one a person changed since refuses the merge. */
+export function mergeElements(ids: number[], revisions?: Record<number, number>): Promise<Spanned<PageElement>> {
+  return request('/api/elements/merge', json('POST', { ids, revisions }))
 }
 
 export function elementRevisions(elementId: number): Promise<Revision[]> {
@@ -2649,8 +2673,23 @@ export function patchRegion(
   return request(`/api/regions/${regionId}`, json('PATCH', body))
 }
 
-export function deleteRegion(regionId: number): Promise<{ deleted: boolean; span: EditSpan }> {
-  return request(`/api/regions/${regionId}`, { method: 'DELETE' })
+export function deleteRegion(regionId: number, revision?: number): Promise<{ deleted: boolean; span: EditSpan }> {
+  const q = revision === undefined ? '' : `?revision=${revision}`
+  return request(`/api/regions/${regionId}${q}`, { method: 'DELETE' })
+}
+
+export interface RegionBatch {
+  create: { key: string; class_id: number; points: Ring; holes?: Ring[]; kind?: RegionKind }[]
+  patch: { id: number; revision?: number; class_id?: number; points?: Ring; holes?: Ring[] }[]
+  delete: RowAt[]
+}
+
+/** Several shapes of one tile created, changed and deleted in one request and one span;
+ *  new ones come back under the key they were sent with. */
+export function batchRegions(pageId: number, batch: RegionBatch): Promise<{
+  created: Record<string, Region>; regions: Region[]; removed: number[]; span: EditSpan
+}> {
+  return request(`/api/pages/${pageId}/regions/batch`, json('POST', batch))
 }
 
 /** Take a span of this page's edits back (undo), or put them back again (redo). Refused

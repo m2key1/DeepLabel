@@ -106,7 +106,7 @@ test.describe("Scenario: a map tile's palette and the operations on its shapes",
     const TRIANGLE = SQUARE.slice(0, 3)
     const creates: string[] = []
     page.on('request', (r) => {
-      if (r.method() === 'POST' && r.url().endsWith(`/api/pages/${tileId}/regions`)) creates.push(r.url())
+      if (r.method() === 'POST' && r.url().endsWith(`/api/pages/${tileId}/regions/batch`)) creates.push(r.url())
     })
     for (const point of TRIANGLE) await clickTile(page, point)
     await expect(page.getByTestId('draft-dot')).toHaveCount(3)

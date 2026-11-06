@@ -1333,6 +1333,15 @@ def latest_revision(conn: sqlite3.Connection, target_type: str, target_id: int) 
     return latest_revisions(conn, target_type, [target_id])[target_id]
 
 
+def latest_person_revision(conn: sqlite3.Connection, target_type: str, target_id: int) -> int:
+    """The newest revision a person wrote to the row: what an edit made against an older
+    one would overwrite. The system's renumbering and a model's reading are not."""
+    row = conn.execute(
+        f'SELECT MAX(id) AS id FROM revisions WHERE target_type = ? AND target_id = ? AND {person_author_sql()}',
+        (target_type, target_id)).fetchone()
+    return row['id'] or 0
+
+
 def revision_mark(conn: sqlite3.Connection) -> int:
     """The newest revision id anywhere. Read once before a write and once before its
     commit, the pair brackets exactly the revisions that write logged - the span a

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  clipByLine,
   clamp01, midpoints, pathLengthPx, pointInRing, polyCenter, polyMaxX, polyMinX, ringAreaPx, segDist,
   simplifyPolyline,
 } from './core'
-import type { Ring } from './core'
+import type { Pt, Ring } from './core'
 
 const SQUARE: Ring = [[0, 0], [2, 0], [2, 2], [0, 2]]
 
@@ -63,5 +64,19 @@ describe('simplifyPolyline', () => {
   })
   it('leaves a two-point line alone', () => {
     expect(simplifyPolyline([[0, 0], [1, 1]], 5, 100, 100)).toEqual([[0, 0], [1, 1]])
+  })
+})
+
+describe('clipByLine', () => {
+  const square: Ring = [[0, 0], [1, 0], [1, 1], [0, 1]]
+
+  it('keeps the part of a ring on one side of a cut drawn top to bottom, and the rest on the other', () => {
+    const cut: [Pt, Pt] = [[0.5, 0], [0.5, 1]]
+    expect(clipByLine(square, cut[0], cut[1], true)).toEqual([[0, 0], [0.5, 0], [0.5, 1], [0, 1]])
+    expect(clipByLine(square, cut[0], cut[1], false)).toEqual([[0.5, 0], [1, 0], [1, 1], [0.5, 1]])
+  })
+
+  it('leaves nothing on a side the ring does not reach', () => {
+    expect(clipByLine(square, [2, 0], [2, 1], false)).toEqual([])
   })
 })

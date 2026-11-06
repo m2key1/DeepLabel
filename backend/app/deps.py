@@ -183,12 +183,13 @@ def require_unchanged(conn, target_type: str, target_id: int, expected: int | No
                       current: Callable[[], dict] | None = None) -> None:
     """Optimistic concurrency for edits. A client that says which revision it loaded is
     refused with 409 once someone else has saved a newer one - the response names them
-    and carries the row as it stands. A client that sends no revision keeps the old
-    last-write-wins."""
+    and carries the row as it stands. Only a person's revision counts: the system's
+    renumbering and a model's reading never refuse anyone. A client that sends no
+    revision keeps the old last-write-wins."""
     if expected is None:
         return
-    latest = store.latest_revision(conn, target_type, target_id)
-    if latest == expected:
+    latest = store.latest_person_revision(conn, target_type, target_id)
+    if latest <= expected:
         return
     raise HTTPException(409, conflict_detail(conn, latest, current=current))
 

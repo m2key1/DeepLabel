@@ -2,18 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  createElement,
-  createLine,
   deleteLine,
-  mergeElements,
-  mergeLines,
   patchLineOrientation,
   turnPage,
   patchLinePolygon,
   reocrLine,
-  splitElement,
-  splitLine,
-  deleteElement,
   getJob,
   getJobLayoutClasses,
   conflictOf,
@@ -24,7 +17,6 @@ import {
   attachCandidate,
   runPagePhase,
   getReviewQueue,
-  patchElement,
   patchLine,
   listModels,
   renditionUrl,
@@ -32,10 +24,8 @@ import {
   setLineChecked,
   READING_ORDERS,
   READING_ORDER_LABEL,
-  setPageLayoutChecked,
   markTestPages,
   setPageNote,
-  setPageLinesChecked,
   setPageReadingOrder,
   tilesUrl,
   isUncounted,
@@ -86,7 +76,13 @@ import { useZoomReadout } from '../editor/useZoomReadout'
 import { useImageSurface } from '../hooks/useImageSurface'
 import { usePointerDrag } from '../hooks/usePointerDrag'
 import { spanOf, useEditHistory } from '../editor/useEditHistory'
-import { useGuardedSave } from '../editor/guardedSave'
+import { EditQueue, isTemporary, temporaryId } from '../editor/editQueue'
+import type { Edit, QueueHooks } from '../editor/editQueue'
+import {
+  deleteRows, drawBox, drawLine, localSteps, mergeBoxes, mergeLinesEdit, moveLine, patchBox, setPageFlag,
+  splitBox, splitLineEdit,
+} from '../editor/pageEdits'
+import { RevisionBook, useGuardedSave } from '../editor/guardedSave'
 import { usePageLiveFeed } from '../editor/usePageLiveFeed'
 import { simplifyPolyline } from '../lib/geometry/core'
 import { eraseFromGeom } from '../lib/geometry/region'
@@ -242,7 +238,19 @@ export function PageViewerPage() {
   const [job, setJob] = useState<JobDetail | null>(null)
   // What the OCR model resizes a line to, for the loupe. Null until a run has recorded it.
   const [ocrModel, setOcrModel] = useState<RegistryModel | null>(null)
-  const [page, setPage] = useState<PageDetail | null>(null)
+  // What the server last sent. What is shown is this with every edit not yet in it laid
+  // on top, so an edit shows the moment it is made and never waits for the server (#72).
+  const [basePage, setPage] = useState<PageDetail | null>(null)
+  const queueHooks = useRef<QueueHooks>({ onRefused: () => undefined, onIdle: () => undefined })
+  const [edits] = useState(() => new EditQueue<PageDetail>({
+    onRefused: (label, error) => queueHooks.current.onRefused(label, error),
+    onIdle: () => queueHooks.current.onIdle(),
+  }))
+  const [queueVersion, setQueueVersion] = useState(0)
+  useEffect(() => edits.subscribe(() => setQueueVersion((v) => v + 1)), [edits])
+  const page = useMemo(() => (basePage ? edits.view(basePage, basePage.id) : null),
+    [basePage, edits, queueVersion])
+  const [book] = useState(() => new RevisionBook())
   const [candidates, setCandidates] = useState<LineCandidate[]>([])
   // Which of the active line's readings the arrows are on, if any.
   const [readingCursor, setReadingCursor] = useState<number | null>(null)
@@ -839,89 +847,104 @@ export function PageViewerPage() {
     setActiveLine((cur) => (cur !== null && wasIn(cur) && !touchedLines.has(cur) ? null : cur))
     setSelectedId((cur) => (cur !== null && removed.has(cur) ? null : cur))
   }
-  const { record: recordEdit, undo, redo, canUndo, canRedo } = useEditHistory(page?.id, applyRevert, setError)
+  const { record: recordEdit, undo, redo, canUndo, canRedo } = useEditHistory<PageDetail>(
+    page?.id, applyRevert, setError, (edit) => edits.push(edit))
 
   const fail = (e: unknown) => setError((e as Error).message)
+
+  // An edit goes on screen now and to the server in its turn; its span joins the history
+  // once the server has answered, and until then undo shows the page as it was before it.
+  const pushEdit = (edit: Edit<PageDetail, { span: EditSpan }>) => {
+    if (!page) return
+    const realId = (id: number) => edits.realId(id)
+    const after = edit.apply(page, { id: realId })
+    const settled = edits.push(edit)
+    recordEdit(settled.then((result) => result.span, () => undefined), localSteps(page, after, realId))
+  }
+  const editDeps = () => ({ pageId: page!.id, book, aspect })
+  const kindOf = (className: string): PageElement['kind'] => (containerClasses.has(className) ? 'container' : 'content')
+
+  queueHooks.current = {
+    onRefused: (label, error) => {
+      setError(`${label} refused - ${conflictOf(error)?.message ?? (error as Error).message}`)
+    },
+    onIdle: () => void reloadPage(),
+  }
+
+  // A shape picked while it was still being saved stays picked under the id it was given.
+  useEffect(() => {
+    setSelectedId((cur) => (cur === null ? cur : edits.realId(cur)))
+    setActiveLine((cur) => (cur === null ? cur : edits.realId(cur)))
+    setMergeSet((cur) => ([...cur].some(isTemporary) ? new Set([...cur].map((id) => edits.realId(id))) : cur))
+  }, [edits, queueVersion])
+
+  // Closing the tab with edits still on their way would lose them.
+  useEffect(() => {
+    const onLeave = (e: BeforeUnloadEvent) => {
+      if (edits.pending) e.preventDefault()
+    }
+    window.addEventListener('beforeunload', onLeave)
+    return () => window.removeEventListener('beforeunload', onLeave)
+  }, [edits])
 
   // A colleague's change since the page loaded is not saved over: it is shown instead.
   const guardedSave = useGuardedSave((message) => {
     setError(message)
     void reloadPage()
-  })
+  }, book)
 
   // Server-authoritative like saveEdit: validation, order_idx and new ids all
   // live server-side, and during a drag the UI already renders from local state.
-  const commitBbox = async (id: number, bbox: Bbox) => {
+  // The reading order a box edit moves arrives with the reload that follows the edit.
+  const commitBbox = (id: number, bbox: Bbox) => {
     const loaded = page?.elements.find((e) => e.id === id)
-    if (!loaded) return
-    try {
-      const el = await guardedSave('box', loaded, (revision) => patchElement(id, { bbox, revision }))
-      applyElement(el)
-      recordEdit(el.span)
-      // A box moved can move the reading order of the boxes around it.
-      await reloadPage()
-    } catch (e) {
-      fail(e)
-    }
+    if (loaded) pushEdit(patchBox(editDeps(), loaded, { bbox }, 'Move box'))
   }
 
-  const commitElementPoly = async (id: number, polygon: Ring) => {
+  const commitElementPoly = (id: number, polygon: Ring) => {
     const loaded = page?.elements.find((e) => e.id === id)
-    if (!loaded) return
-    try {
-      const el = await guardedSave('box', loaded, (revision) => patchElement(id, { polygon, revision }))
-      applyElement(el)
-      recordEdit(el.span)
-      await reloadPage()
-    } catch (e) {
-      fail(e)
-    }
+    if (loaded) pushEdit(patchBox(editDeps(), loaded, { polygon }, 'Reshape box'))
   }
 
-  const commitClass = async (el: PageElement, className: string) => {
-    try {
-      const updated = await guardedSave('box', el,
-        (revision) => patchElement(el.id, { class_name: className, revision }))
-      applyElement(updated)
-      recordEdit(updated.span)
-      await reloadPage()
-    } catch (e) {
-      fail(e)
-    }
+  const commitClass = (el: PageElement, className: string) => {
+    pushEdit(patchBox(editDeps(), el, { class_name: className, kind: kindOf(className) }, 'Change class'))
   }
 
-  const commitDelete = async (id: number) => {
-    try {
-      const gone = await deleteElement(id)
-      setPage((p) => (p ? { ...p, elements: p.elements.filter((e) => e.id !== id) } : p))
-      setSelectedId((cur) => (cur === id ? null : cur))
-      recordEdit(gone.span)
-      await reloadPage()
-    } catch (e) {
-      fail(e)
-    }
+  const commitDelete = (id: number) => {
+    if (!page) return
+    pushEdit(deleteRows(editDeps(), page, { elements: [id], lines: [] }))
+    setSelectedId((cur) => (cur === id ? null : cur))
   }
 
-  const commitCreate = async (bbox: Bbox) => {
+  const selectNewBox = (id: number) => {
+    setSelKind('element')
+    setActiveLine(null)
+    setSelectedId(id)
+  }
+
+  const commitCreate = (bbox: Bbox) => {
     if (!page || tool !== 'draw') return
-    try {
-      const el = await createElement(page.id, penClass, { bbox })
-      setPage((p) => (p ? { ...p, elements: [...p.elements, el] } : p))
-      recordEdit(el.span)
-      setSelKind('element')
-      setActiveLine(null)
-      setSelectedId(el.id)
-      await reloadPage()
-    } catch (e) {
-      fail(e)
-    }
+    const temp = temporaryId()
+    pushEdit(drawBox(editDeps(), temp, penClass, kindOf(penClass), { bbox }))
+    selectNewBox(temp)
   }
 
   // Re-fetch keeps selection: selectedId/activeLine are ids, so `selected`/`selectedLine`
-  // recompute against the new page automatically.
-  const reloadPage = useCallback(
-    () => getPage(jobId, pageId!).then(showPage).catch((e: Error) => setError(e.message)),
-    [jobId, pageId, showPage])
+  // recompute against the new page automatically. Only the newest reload is shown, and
+  // edits it does not hold yet stay on top of it.
+  const reloadSeq = useRef(0)
+  const reloadPage = useCallback(async () => {
+    const seq = ++reloadSeq.current
+    const mark = edits.mark()
+    try {
+      const fresh = await getPage(jobId, pageId!)
+      if (seq !== reloadSeq.current) return
+      edits.absorb(mark)
+      showPage(fresh)
+    } catch (e) {
+      if (seq === reloadSeq.current) setError((e as Error).message)
+    }
+  }, [jobId, pageId, showPage, edits])
 
   // Turning is done to the scan rather than to the view of it, so everything on the page
   // moved and the whole page is read again.
@@ -968,123 +991,59 @@ export function PageViewerPage() {
 
   const findLine = (id: number) => page?.elements.flatMap((e) => e.lines).find((l) => l.id === id)
 
-  const setLinePolygonLocal = (id: number, polygon: Ring) =>
-    setPage((p) =>
-      p
-        ? { ...p, elements: p.elements.map((el) => ({
-            ...el, lines: el.lines.map((l) => (l.id === id ? { ...l, polygon } : l)) })) }
-        : p,
-    )
-
   // Reshape/move keeps the existing OCR read and correction - a box tweak is usually
   // over the same characters; the element bbox is unchanged so re-detection is not triggered.
   // The new polygon is shown at once, so a second edit that lands before the reply (two
   // quick key presses) builds on this one instead of on the polygon it replaced.
-  const commitLinePoly = async (id: number, poly: Ring, prev?: Ring) => {
+  const commitLinePoly = (id: number, poly: Ring) => {
     const loaded = findLine(id)
-    if (!loaded) return
-    setLinePolygonLocal(id, poly)
-    try {
-      const holder = page?.elements.find((e) => e.lines.some((l) => l.id === id))
-      const line = await guardedSave('line', loaded, (revision) => patchLinePolygon(id, poly, revision))
-      // A line moved into another box is filed there; outside every box it can move between
-      // the boxes, and its neighbours with it.
-      if (holder?.kind === 'orphan' || line.element_id !== holder?.id) await reloadPage()
-      else applyLine(line)
-      recordEdit(line.span)
-    } catch (e) {
-      if (prev) setLinePolygonLocal(id, prev)
-      fail(e)
-    }
+    if (loaded) pushEdit(moveLine(editDeps(), loaded, poly))
   }
 
   // The polygon pen's ring becomes whatever the pen draws: a line, or with a layout class
   // loaded in a polygon dataset, an element of that class.
   const commitRing = (ring: Ring) => (drawingLines ? commitLineCreate(ring) : commitOutlineCreate(ring))
 
-  const commitOutlineCreate = async (polygon: Ring) => {
+  const commitOutlineCreate = (polygon: Ring) => {
     if (!page || tool !== 'draw') return
-    try {
-      const el = await createElement(page.id, penClass, { polygon })
-      setPage((p) => (p ? { ...p, elements: [...p.elements, el] } : p))
-      recordEdit(el.span)
-      setSelKind('element')
-      setActiveLine(null)
-      setSelectedId(el.id)
-      await reloadPage()
-    } catch (e) {
-      fail(e)
-    }
+    const temp = temporaryId()
+    pushEdit(drawBox(editDeps(), temp, penClass, kindOf(penClass), { polygon }))
+    selectNewBox(temp)
   }
 
-  const commitLineCreate = async (poly: Ring) => {
+  const commitLineCreate = (poly: Ring) => {
     if (!page) return
-    try {
-      const ln = await createLine(page.id, poly)
-      // Parent/order_idx are assigned server-side, so reload rather than guess.
-      await reloadPage()
-      recordEdit(ln.span)
-      setSelKind('line')
-      setActiveLine(ln.id)
-    } catch (e) {
-      fail(e)
-    }
+    const temp = temporaryId()
+    pushEdit(drawLine(editDeps(), temp, poly))
+    setSelKind('line')
+    setActiveLine(temp)
   }
 
-  // A gathered set, deleted together: one reload at the end rather than one per item,
-  // one step back for the lot, and the set is cleared so nothing stays selected that no
-  // longer exists.
-  const commitSetDelete = async (kind: 'element' | 'line', ids: number[]) => {
-    const remove = (id: number) => {
-      if (kind === 'element') return deleteElement(id)
-      const loaded = findLine(id)
-      if (!loaded) return null
-      return guardedSave('line', loaded, (revision) => deleteLine(id, revision))
-    }
-    try {
-      const spans: EditSpan[] = []
-      for (const id of ids) {
-        const gone = await remove(id)
-        if (gone) spans.push(gone.span)
-      }
-      await reloadPage()
-      if (spans.length) recordEdit(spanOf(...spans))
-      setMergeSet(new Set())
-      if (kind === 'line') setActiveLine((cur) => (cur !== null && ids.includes(cur) ? null : cur))
-      else setSelectedId((cur) => (cur !== null && ids.includes(cur) ? null : cur))
-    } catch (e) {
-      fail(e)
-    }
+  // A gathered set goes in one request, one step back for the lot, and the set is
+  // cleared so nothing stays selected that no longer exists.
+  const commitSetDelete = (kind: 'element' | 'line', ids: number[]) => {
+    if (!page) return
+    pushEdit(deleteRows(editDeps(), page, kind === 'line' ? { elements: [], lines: ids } : { elements: ids, lines: [] }))
+    setMergeSet(new Set())
+    if (kind === 'line') setActiveLine((cur) => (cur !== null && ids.includes(cur) ? null : cur))
+    else setSelectedId((cur) => (cur !== null && ids.includes(cur) ? null : cur))
   }
 
-  const commitLineDelete = async (id: number) => {
-    const loaded = findLine(id)
-    if (!loaded) return
-    try {
-      const gone = await guardedSave('line', loaded, (revision) => deleteLine(id, revision))
-      await reloadPage()
-      recordEdit(gone.span)
-      setActiveLine((cur) => (cur === id ? null : cur))
-    } catch (e) {
-      fail(e)
-    }
+  const commitLineDelete = (id: number) => {
+    if (!page) return
+    pushEdit(deleteRows(editDeps(), page, { elements: [], lines: [id] }))
+    setActiveLine((cur) => (cur === id ? null : cur))
   }
 
   // A line is cut along the stroke itself, tilted or not. A layout box stays axis-aligned,
   // so the stroke's direction picks the axis and its middle the place.
-  const commitCut = async (from: Pt, to: Pt) => {
-    try {
-      let cut: { span: EditSpan } | null = null
-      if (selKind === 'line' && activeLine !== null) cut = await splitLine(activeLine, { cut_line: [from, to] })
-      else if (selKind === 'element' && selectedId !== null) {
-        const upright = Math.abs(to[1] - from[1]) >= Math.abs((to[0] - from[0]) * aspect)
-        const mid: Pt = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]
-        cut = await splitElement(selectedId, upright ? { cut_x: mid[0] } : { cut_y: mid[1] })
-      }
-      await reloadPage()
-      if (cut) recordEdit(cut.span)
-    } catch (e) {
-      fail(e)
+  const commitCut = (from: Pt, to: Pt) => {
+    if (selKind === 'line' && selectedLine) {
+      pushEdit(splitLineEdit(editDeps(), selectedLine, [from, to], temporaryId()))
+    } else if (selKind === 'element' && selected) {
+      const upright = Math.abs(to[1] - from[1]) >= Math.abs((to[0] - from[0]) * aspect)
+      const mid: Pt = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]
+      pushEdit(splitBox(editDeps(), selected, upright ? { cut_x: mid[0] } : { cut_y: mid[1] }, temporaryId()))
     }
   }
 
@@ -1092,68 +1051,56 @@ export function PageViewerPage() {
   const cutAcross = (at: Pt): [Pt, Pt] =>
     selKind === 'line' && selectedLine ? acrossQuad(selectedLine.polygon, at, aspect) : [[at[0], 0], [at[0], 1]]
 
-  const commitMerge = async (kind: 'element' | 'line', ids: number[]) => {
-    if (ids.length < 2) return
-    try {
-      let merged: { span: EditSpan }
-      if (kind === 'line') {
-        const line = await mergeLines(ids)
-        merged = line
-        setSelKind('line')
-        setActiveLine(line.id)
-      } else {
-        const el = await mergeElements(ids)
-        merged = el
-        setSelKind('element')
-        setSelectedId(el.id)
-      }
-      setMergeSet(new Set())
-      await reloadPage()
-      recordEdit(merged.span)
-    } catch (e) {
-      fail(e)
+  // The merged one keeps the id of the first box in reading order, or of the topmost line.
+  const commitMerge = (kind: 'element' | 'line', ids: number[]) => {
+    if (ids.length < 2 || !page) return
+    const edit = kind === 'line' ? mergeLinesEdit(editDeps(), page, ids) : mergeBoxes(editDeps(), page, ids)
+    const merged = edit.apply(page, { id: (id) => edits.realId(id) })
+    const kept = kind === 'line'
+      ? ids.find((id) => merged.elements.some((el) => el.lines.some((l) => l.id === id)))
+      : ids.find((id) => merged.elements.some((el) => el.id === id))
+    pushEdit(edit)
+    setMergeSet(new Set())
+    if (kept === undefined) return
+    if (kind === 'line') {
+      setSelKind('line')
+      setActiveLine(kept)
+    } else {
+      setSelKind('element')
+      setSelectedId(kept)
     }
   }
 
-  const toggleLayoutChecked = async () => {
+  const toggleLayoutChecked = () => {
     if (!page) return
     const next = !page.layout_checked
-    try {
-      await setPageLayoutChecked(page.id, next)
-      setPage((p) => (p ? { ...p, layout_checked: next } : p))
-      setJob((j) =>
-        j ? { ...j, pages: j.pages.map((x) => (x.id === page.id ? { ...x, layout_checked: next } : x)) } : j,
-      )
-    } catch (e) {
-      fail(e)
-    }
+    pushEdit(setPageFlag(editDeps(), page, 'layout_checked', next))
+    setJob((j) =>
+      j ? { ...j, pages: j.pages.map((x) => (x.id === page.id ? { ...x, layout_checked: next } : x)) } : j,
+    )
   }
 
+  // Dataset-wide marking, not one of the page's edits: shown at once, put back if refused.
   const toggleTestPage = async () => {
     if (!page) return
     const next = !page.is_test
+    setPage((p) => (p ? { ...p, is_test: next } : p))
     try {
       await markTestPages(jobId, [page.id], next)
-      setPage((p) => (p ? { ...p, is_test: next } : p))
     } catch (e) {
+      setPage((p) => (p ? { ...p, is_test: !next } : p))
       fail(e)
     }
   }
 
-  const toggleLinesChecked = async () => {
+  const toggleLinesChecked = () => {
     if (!page) return
-    const next = !page.lines_checked
-    try {
-      await setPageLinesChecked(page.id, next)
-      setPage((p) => (p ? { ...p, lines_checked: next } : p))
-    } catch (e) {
-      fail(e)
-    }
+    pushEdit(setPageFlag(editDeps(), page, 'lines_checked', !page.lines_checked))
   }
 
   // A gathered set and a class make a box of that class drawn tightly around the set, in
   // the class's pen shape; the server files the lines by where they lie.
-  const commitWrap = async (className: string, kind: 'element' | 'line', ids: number[]) => {
+  const commitWrap = (className: string, kind: 'element' | 'line', ids: number[]) => {
     if (!page) return
     const rings = kind === 'line'
       ? ids.map((id) => findLine(id)?.polygon).filter((r): r is Ring => !!r)
@@ -1161,18 +1108,11 @@ export function PageViewerPage() {
     if (!rings.length) return
     const shape = penShapeOf(className)
     const ring = wrapped(rings, shape, aspect)
-    try {
-      const el = await createElement(page.id, className,
-        shape === 'box' ? { bbox: [ring[0][0], ring[0][1], ring[2][0], ring[2][1]] } : { polygon: ring })
-      setMergeSet(new Set())
-      recordEdit(el.span)
-      setSelKind('element')
-      setActiveLine(null)
-      setSelectedId(el.id)
-      await reloadPage()
-    } catch (e) {
-      fail(e)
-    }
+    const temp = temporaryId()
+    pushEdit(drawBox(editDeps(), temp, className, kindOf(className),
+      shape === 'box' ? { bbox: [ring[0][0], ring[0][1], ring[2][0], ring[2][1]] } : { polygon: ring }))
+    setMergeSet(new Set())
+    selectNewBox(temp)
   }
 
   // A class loads the pen for the next stroke, or with a set gathered, boxes the set. The
@@ -1438,16 +1378,16 @@ export function PageViewerPage() {
       const d = stop()
       if (!d) return
       const polyChanged = (a: Ring, b: Ring) => a.some((p, i) => p[0] !== b[i][0] || p[1] !== b[i][1])
-      const commitOutline = (of: Outlined, id: number, poly: Ring, origin: Ring) =>
-        of === 'element' ? commitElementPoly(id, poly) : commitLinePoly(id, poly, origin)
+      const commitOutline = (of: Outlined, id: number, poly: Ring) =>
+        of === 'element' ? commitElementPoly(id, poly) : commitLinePoly(id, poly)
       if (d.mode === 'lvertex' || d.mode === 'ledge' || d.mode === 'lrotate') {
-        if (polyChanged(d.poly, d.origin)) commitOutline(d.of, d.id, d.poly, d.origin)
+        if (polyChanged(d.poly, d.origin)) commitOutline(d.of, d.id, d.poly)
         // A side of a polygon that is pressed and not dragged gains a corner. Not on a
         // four-corner line, where that handle is the grow control and a fifth corner
         // would be a surprise - the Polygon button is how a box becomes a polygon. An
         // element's outline gains one on any side: it has no grow control to keep.
         else if (d.mode === 'ledge' && (d.origin.length > 4 || (d.of === 'element' && shapeLevel === 'polygon'))) {
-          commitOutline(d.of, d.id, splitSide(d.origin, d.ei), d.origin)
+          commitOutline(d.of, d.id, splitSide(d.origin, d.ei))
         }
         // Otherwise the handle was clicked, not dragged - and a selected line's handles
         // cover the line itself, so this is where a second click on the same spot lands.
@@ -1488,7 +1428,7 @@ export function PageViewerPage() {
           selectAt(d.from)
           return
         }
-        commitOutline(d.of, d.id, d.poly, d.origin)
+        commitOutline(d.of, d.id, d.poly)
         return
       }
       // Pressing on the selected box arms a move; if it never moved the user was
@@ -1896,14 +1836,14 @@ export function PageViewerPage() {
   }
 
   const reshapeLine = (poly: Ring) => {
-    if (curLine) commitLinePoly(curLine.id, poly, curLine.polygon)
+    if (curLine) commitLinePoly(curLine.id, poly)
     else if (curOutlined) commitElementPoly(curOutlined.id, poly)
   }
 
   const turnSelectedLine = (degrees: number) => {
     if (!curLine) return
     const poly = curLine.polygon
-    commitLinePoly(curLine.id, rotatePoly(poly, polyCenter(poly), degrees, aspect), poly)
+    commitLinePoly(curLine.id, rotatePoly(poly, polyCenter(poly), degrees, aspect))
   }
 
   // One pointerdown handler for the whole editor. `target` describes what was grabbed:
@@ -2117,7 +2057,10 @@ export function PageViewerPage() {
     line: Line, text: string | null, revision: number, fromReading = false,
   ): Promise<Line | null> => {
     try {
-      const saved = await patchLine(line.id, text, revision, fromReading)
+      // A line drawn a moment ago is saved under the id the server gives it.
+      const id = await edits.whenReal(line.id)
+      const saved = await patchLine(id, text, book.of('line', id, revision), fromReading)
+      book.note('line', id, saved.revision)
       applyLine(saved)
       setConflict(null)
       return saved
@@ -2294,7 +2237,8 @@ export function PageViewerPage() {
       }
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      const t = e.target
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return
       if (e.key === '?' && editingId === null) {
         e.preventDefault()
         setSheetOpen((v) => !v)
@@ -3933,7 +3877,7 @@ export function PageViewerPage() {
       }}
       rail={editing ? classRail() : null}
       canvas={<>
-      {error && <p className="mx-3 mt-3 shrink-0 text-sm text-danger">{error}</p>}
+      {error && <p role="alert" className="mx-3 mt-3 shrink-0 text-sm text-danger">{error}</p>}
       {conflict && (
         <div className="mx-3 mt-3 shrink-0">
           <LineConflict conflict={conflict} busy={resolving} onKeepTheirs={keepTheirs} onUseMine={overwriteWithMine} />

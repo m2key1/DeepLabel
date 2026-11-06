@@ -163,14 +163,17 @@ def create_element(page_id: int, body: ElementCreate, conn=Depends(get_db),
 
 
 @router.delete('/api/elements/{element_id}')
-def delete_element(element_id: int, conn=Depends(get_db), user: str = Depends(get_user),
-                   auth: dict = Depends(current_user)):
+def delete_element(element_id: int, revision: int | None = None, conn=Depends(get_db),
+                   user: str = Depends(get_user), auth: dict = Depends(current_user)):
     """Soft-delete an element. Its lines stay, falling to the box around them or to
     Unassigned; only deleting a line throws its transcription away."""
     require_element_access(conn, element_id, auth)
     row = conn.execute('SELECT page_id FROM elements WHERE id = ?', (element_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
+    store.write_lock(conn)
+    require_unchanged(conn, 'element', element_id, revision,
+                      lambda: serializers.element_with_lines(conn, element_id))
     # Soft only. The crop stays cached because the delete may be undone.
     _sync_element_job(conn, element_id)
     store.ensure_origin(conn, 'element', element_id, user)
@@ -184,9 +187,66 @@ def delete_element(element_id: int, conn=Depends(get_db), user: str = Depends(ge
     return {'id': element_id, 'deleted': True, 'span': span}
 
 
+class RowAt(BaseModel):
+    id: int
+    revision: int | None = None
+
+
+class SetDelete(BaseModel):
+    elements: list[RowAt] = []
+    lines: list[RowAt] = []
+
+
+@router.post('/api/pages/{page_id}/delete')
+def delete_set(page_id: int, body: SetDelete, conn=Depends(get_db), user: str = Depends(get_user),
+               auth: dict = Depends(current_user)):
+    """Soft-delete a gathered set of boxes and lines in one go: one request, one span, so
+    one undo brings the whole set back. A row a person changed since it was loaded
+    refuses the whole set. Boxes keep their lines, as a single delete does."""
+    require_page_access(conn, page_id, auth)
+    element_ids = [r.id for r in body.elements]
+    line_ids = [r.id for r in body.lines]
+    store.write_lock(conn)
+    on_page = {r['id'] for r in conn.execute(
+        'SELECT id FROM elements WHERE page_id = ? AND deleted = 0', (page_id,))}
+    homes = {r['id']: r['element_id'] for r in conn.execute(
+        f'SELECT l.id, l.element_id FROM lines l JOIN elements e ON e.id = l.element_id '
+        f'WHERE e.page_id = ? AND l.deleted = 0', (page_id,))}
+    if not set(element_ids) <= on_page or not set(line_ids) <= set(homes):
+        raise HTTPException(400, 'every row must be a live one of this page')
+    for r in body.elements:
+        require_unchanged(conn, 'element', r.id, r.revision, lambda i=r.id: serializers.element_with_lines(conn, i))
+    for r in body.lines:
+        require_unchanged(conn, 'line', r.id, r.revision, lambda i=r.id: serializers.get_line(conn, i))
+    for i in element_ids:
+        store.ensure_origin(conn, 'element', i, user)
+    for i in line_ids:
+        store.ensure_origin(conn, 'line', i, user)
+    mark = store.begin_span(conn)
+    for i in line_ids:
+        conn.execute('UPDATE lines SET deleted = 1 WHERE id = ?', (i,))
+        store.log_line(conn, i, user, 'delete')
+    for i in element_ids:
+        conn.execute('UPDATE elements SET deleted = 1 WHERE id = ?', (i,))
+        store.log_element(conn, i, user, 'delete')
+    for element_id in {homes[i] for i in line_ids} - set(element_ids):
+        geometry.resequence_lines(conn, element_id)
+    geometry.refile_lines(conn, page_id)
+    geometry.resequence_page(conn, page_id)
+    span = store.end_span(conn, mark)
+    conn.commit()
+    if line_ids:
+        candidates.rematch_page(conn, page_id)
+        for i in line_ids:
+            training.enqueue(i)
+    dataset_sync.enqueue(conn.execute('SELECT job_id FROM pages WHERE id = ?', (page_id,)).fetchone()['job_id'])
+    return {'removed_elements': element_ids, 'removed_lines': line_ids, 'span': span}
+
+
 class ElementSplit(BaseModel):
     cut_x: float | None = None
     cut_y: float | None = None
+    revision: int | None = None
 
 
 @router.post('/api/elements/{element_id}/split')
@@ -200,6 +260,9 @@ def split_element(element_id: int, body: ElementSplit, conn=Depends(get_db),
         raise HTTPException(404)
     if (body.cut_x is None) == (body.cut_y is None):
         raise HTTPException(400, 'pass exactly one of cut_x, cut_y')
+    store.write_lock(conn)
+    require_unchanged(conn, 'element', element_id, body.revision,
+                      lambda: serializers.element_with_lines(conn, element_id))
     x0, y0, x1, y1 = json.loads(row['bbox'])
     if body.cut_x is not None:
         if not (x0 < body.cut_x < x1):
@@ -262,6 +325,8 @@ def split_element(element_id: int, body: ElementSplit, conn=Depends(get_db),
 
 class ElementMerge(BaseModel):
     ids: list[int]
+    # The revision each was loaded at; one a person changed since refuses the merge.
+    revisions: dict[int, int] | None = None
 
 
 @router.post('/api/elements/merge')
@@ -278,6 +343,10 @@ def merge_elements(body: ElementMerge, conn=Depends(get_db), user: str = Depends
         raise HTTPException(404)
     if len({r['page_id'] for r in rows}) != 1:
         raise HTTPException(400, 'elements must share a page')
+    store.write_lock(conn)
+    for eid in body.ids:
+        require_unchanged(conn, 'element', eid, (body.revisions or {}).get(eid),
+                          lambda eid=eid: serializers.element_with_lines(conn, eid))
     # Keep the first in reading order; union every box into it and reparent all lines.
     keep = min(rows, key=lambda r: r['order_idx'])
     for r in rows:

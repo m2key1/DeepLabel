@@ -272,3 +272,159 @@ async def _first_event(events) -> str:
 
 async def _collect(events) -> list[str]:
     return [event async for event in events]
+
+
+def page_rows(conn, table, ids):
+    marks = ','.join('?' * len(ids))
+    return {r['id']: r['deleted'] for r in conn.execute(
+        f'SELECT id, deleted FROM {table} WHERE id IN ({marks})', ids)}
+
+
+def revert(client, page_id, span, direction='undo'):
+    return client.post(f'/api/pages/{page_id}/revert', headers=ALICE, json={
+        'from_revision': span['from'], 'to_revision': span['to'], 'direction': direction})
+
+
+class TestEveryEditIsGuarded:
+    """Not only patches: a delete, merge, split or page toggle made against a row a person
+    changed since it was loaded is refused too, and changes nothing."""
+
+    def test_a_box_delete_on_a_stale_revision_is_refused(self, stack):
+        client, conn = stack
+        client.patch('/api/elements/1', json={'checked': True}, headers=BOB)
+        refused = client.delete('/api/elements/1', params={'revision': 0}, headers=ALICE)
+        assert refused.status_code == 409
+        assert refused.json()['detail']['author'] == 'bob'
+        assert page_rows(conn, 'elements', [1]) == {1: 0}
+
+    def test_a_box_delete_on_the_current_revision_goes_through(self, stack):
+        client, conn = stack
+        theirs = client.patch('/api/elements/1', json={'checked': True}, headers=BOB).json()
+        assert client.delete('/api/elements/1', params={'revision': theirs['revision']}, headers=ALICE).status_code == 200
+        assert page_rows(conn, 'elements', [1]) == {1: 1}
+
+    def test_a_merge_with_one_stale_line_is_refused(self, stack):
+        client, conn = stack
+        patch_line(client, 2, BOB, corrected_text='Bobs')
+        refused = client.post('/api/lines/merge', headers=ALICE,
+                              json={'ids': [1, 2], 'revisions': {'1': 0, '2': 0}})
+        assert refused.status_code == 409
+        assert page_rows(conn, 'lines', [1, 2]) == {1: 0, 2: 0}
+
+    def test_a_box_merge_with_a_stale_box_is_refused(self, stack):
+        client, conn = stack
+        conn.execute("INSERT INTO elements (id, page_id, order_idx, class_name, bbox, kind) "
+                     "VALUES (9, 1, 1, 'Paragraph', '[0,0.5,1,1]', 'content')")
+        conn.commit()
+        client.patch('/api/elements/9', json={'checked': True}, headers=BOB)
+        refused = client.post('/api/elements/merge', headers=ALICE,
+                              json={'ids': [1, 9], 'revisions': {'1': 0, '9': 0}})
+        assert refused.status_code == 409
+        assert page_rows(conn, 'elements', [1, 9]) == {1: 0, 9: 0}
+
+    def test_splits_on_a_stale_revision_are_refused(self, stack):
+        client, conn = stack
+        client.patch('/api/elements/1', json={'checked': True}, headers=BOB)
+        assert client.post('/api/elements/1/split', headers=ALICE,
+                           json={'cut_x': 0.5, 'revision': 0}).status_code == 409
+        patch_line(client, 1, BOB, corrected_text='Bobs')
+        assert client.post('/api/lines/1/split', headers=ALICE,
+                           json={'cut_x': 0.5, 'revision': 0}).status_code == 409
+        assert conn.execute('SELECT COUNT(*) n FROM elements WHERE page_id = 1').fetchone()['n'] == 1
+        assert conn.execute('SELECT COUNT(*) n FROM lines WHERE element_id = 1').fetchone()['n'] == 2
+
+    def test_a_region_delete_on_a_stale_revision_is_refused(self, stack):
+        client, conn = stack
+        client.patch('/api/regions/1', json={'checked': True}, headers=BOB)
+        assert client.delete('/api/regions/1', params={'revision': 0}, headers=ALICE).status_code == 409
+        assert page_rows(conn, 'regions', [1]) == {1: 0}
+
+    def test_a_page_toggle_on_a_stale_page_is_refused(self, stack):
+        client, conn = stack
+        page = client.get('/api/jobs/j/pages/1', headers=ALICE).json()
+        assert page['revision'] == 0
+        client.patch('/api/pages/1', json={'layout_checked': True}, headers=BOB)
+        refused = client.patch('/api/pages/1', json={'lines_checked': True, 'revision': 0}, headers=ALICE)
+        assert refused.status_code == 409
+        assert conn.execute('SELECT lines_checked FROM pages WHERE id = 1').fetchone()['lines_checked'] == 0
+        again = client.get('/api/jobs/j/pages/1', headers=ALICE).json()
+        accepted = client.patch('/api/pages/1', json={'lines_checked': True, 'revision': again['revision']},
+                                headers=ALICE)
+        assert accepted.status_code == 200
+        assert accepted.json()['revision'] > again['revision']
+
+    def test_the_systems_and_models_writes_do_not_count_as_a_colleagues(self, stack):
+        client, conn = stack
+        store.log_line(conn, 1, 'system:reading-order', 'update')
+        store.log_line(conn, 1, 'model:ocr@3', 'update')
+        conn.commit()
+        assert patch_line(client, 1, ALICE, corrected_text='mine', revision=0).status_code == 200
+
+
+class TestOneRequestPerSet:
+    def test_boxes_and_lines_are_deleted_together_in_one_span(self, stack):
+        client, conn = stack
+        conn.execute("INSERT INTO elements (id, page_id, order_idx, class_name, bbox, kind) "
+                     "VALUES (9, 1, 1, 'Paragraph', '[0,0.5,1,1]', 'content')")
+        conn.commit()
+        done = client.post('/api/pages/1/delete', headers=ALICE, json={
+            'elements': [{'id': 9, 'revision': 0}], 'lines': [{'id': 1, 'revision': 0}, {'id': 2, 'revision': 0}]})
+        assert done.status_code == 200, done.text
+        body = done.json()
+        assert sorted(body['removed_lines']) == [1, 2]
+        assert body['removed_elements'] == [9]
+        assert page_rows(conn, 'lines', [1, 2]) == {1: 1, 2: 1}
+        assert page_rows(conn, 'elements', [9]) == {9: 1}
+
+        assert revert(client, 1, body['span']).status_code == 200
+        assert page_rows(conn, 'lines', [1, 2]) == {1: 0, 2: 0}
+        assert page_rows(conn, 'elements', [9]) == {9: 0}
+
+    def test_one_stale_row_refuses_the_whole_set(self, stack):
+        client, conn = stack
+        patch_line(client, 2, BOB, corrected_text='Bobs')
+        refused = client.post('/api/pages/1/delete', headers=ALICE, json={
+            'elements': [], 'lines': [{'id': 1, 'revision': 0}, {'id': 2, 'revision': 0}]})
+        assert refused.status_code == 409
+        assert refused.json()['detail']['author'] == 'bob'
+        assert page_rows(conn, 'lines', [1, 2]) == {1: 0, 2: 0}
+
+    def test_a_row_of_another_page_is_refused(self, stack):
+        client, conn = stack
+        refused = client.post('/api/pages/1/delete', headers=ALICE, json={
+            'elements': [], 'lines': [{'id': 3, 'revision': 0}]})
+        assert refused.status_code == 400
+        assert page_rows(conn, 'lines', [3]) == {3: 0}
+
+    def test_tile_shapes_are_created_changed_and_deleted_in_one_span(self, stack):
+        client, conn = stack
+        conn.execute("INSERT INTO regions (id, page_id, order_idx, class_id, points, holes, kind) "
+                     "VALUES (2, 1, 1, 1, '[[0.5,0.5],[0.6,0.5],[0.6,0.6]]', '[]', 'polygon')")
+        conn.commit()
+        done = client.post('/api/pages/1/regions/batch', headers=ALICE, json={
+            'create': [{'key': 'a', 'class_id': 1, 'points': [[0.3, 0.3], [0.4, 0.3], [0.4, 0.4]]}],
+            'patch': [{'id': 1, 'revision': 0, 'points': [[0.1, 0.1], [0.25, 0.1], [0.25, 0.25]]}],
+            'delete': [{'id': 2, 'revision': 0}]})
+        assert done.status_code == 200, done.text
+        body = done.json()
+        created = body['created']['a']
+        assert created['points'] == [[0.3, 0.3], [0.4, 0.3], [0.4, 0.4]]
+        assert [r['id'] for r in body['regions']] == [1]
+        assert body['regions'][0]['points'] == [[0.1, 0.1], [0.25, 0.1], [0.25, 0.25]]
+        assert body['removed'] == [2]
+        assert page_rows(conn, 'regions', [1, 2, created['id']]) == {1: 0, 2: 1, created['id']: 0}
+
+        assert revert(client, 1, body['span']).status_code == 200
+        assert page_rows(conn, 'regions', [1, 2, created['id']]) == {1: 0, 2: 0, created['id']: 1}
+        assert json.loads(conn.execute('SELECT points FROM regions WHERE id = 1').fetchone()['points']) == \
+            [[0.1, 0.1], [0.2, 0.1], [0.2, 0.2]]
+
+    def test_a_stale_tile_shape_refuses_the_whole_batch(self, stack):
+        client, conn = stack
+        client.patch('/api/regions/1', json={'checked': True}, headers=BOB)
+        refused = client.post('/api/pages/1/regions/batch', headers=ALICE, json={
+            'create': [{'key': 'a', 'class_id': 1, 'points': [[0.3, 0.3], [0.4, 0.3], [0.4, 0.4]]}],
+            'patch': [], 'delete': [{'id': 1, 'revision': 0}]})
+        assert refused.status_code == 409
+        assert conn.execute('SELECT COUNT(*) n FROM regions').fetchone()['n'] == 1
+        assert page_rows(conn, 'regions', [1]) == {1: 0}

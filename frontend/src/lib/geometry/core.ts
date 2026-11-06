@@ -116,3 +116,27 @@ export function midpoints(ring: Ring, closed = true): Pt[] {
   }
   return out
 }
+
+/** The part of a ring on one side of the line from `a` to `b`: with `first`, the side
+ *  where (b - a) x (p - a) is positive - for a cut drawn top to bottom, the part left of
+ *  it - else the other. Empty if the ring does not reach that side. */
+export function clipByLine(ring: Ring, a: Pt, b: Pt, first: boolean): Ring {
+  const side = ([x, y]: Pt) => {
+    const cross = (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0])
+    return first ? cross : -cross
+  }
+  const out: Ring = []
+  ring.forEach((cur, i) => {
+    const prev = ring[(i + ring.length - 1) % ring.length]
+    const [sc, sp] = [side(cur), side(prev)]
+    const crossing = (): Pt => {
+      const t = sp / (sp - sc)
+      return [prev[0] + t * (cur[0] - prev[0]), prev[1] + t * (cur[1] - prev[1])]
+    }
+    if (sc >= 0) {
+      if (sp < 0) out.push(crossing())
+      out.push(cur)
+    } else if (sp >= 0) out.push(crossing())
+  })
+  return out
+}

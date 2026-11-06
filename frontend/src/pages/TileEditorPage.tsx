@@ -1,12 +1,12 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  conflictOf, createJobClass, createRegion, deleteJobClass, deleteRegion, detectRegions, getEdgeMethods,
-  getJob, getJobMapClasses, getPage, isUncounted, patchJobClass, patchRegion, reorderJobClasses, setLineWidth,
+  conflictOf, createJobClass, deleteJobClass, detectRegions, getEdgeMethods,
+  getJob, getJobMapClasses, getPage, isUncounted, patchJobClass, reorderJobClasses, setLineWidth,
   tilesUrl, setPageLayoutChecked,
 } from '../api'
 import type {
-  EditSpan, EdgeMethod, JobDetail, MapClass, PageDetail, Region, RevertResult, Ring,
+  EdgeMethod, JobDetail, MapClass, PageDetail, Region, RevertResult, Ring,
 } from '../api'
 import { useAuth } from '../auth'
 import { clamp01, midpoints, simplifyPolyline } from '../lib/geometry/core'
@@ -16,8 +16,12 @@ import {
 import type { EdgeHit } from '../lib/geometry/region'
 import { useImageSurface } from '../hooks/useImageSurface'
 import { usePointerDrag } from '../hooks/usePointerDrag'
-import { spanOf, useEditHistory } from '../editor/useEditHistory'
-import { useGuardedSave } from '../editor/guardedSave'
+import { useEditHistory } from '../editor/useEditHistory'
+import { RevisionBook } from '../editor/guardedSave'
+import { EditQueue, isTemporary, temporaryId } from '../editor/editQueue'
+import type { QueueHooks } from '../editor/editQueue'
+import { regionSteps, tileEdit } from '../editor/tileEdits'
+import type { TileChange } from '../editor/tileEdits'
 import { usePageLiveFeed } from '../editor/usePageLiveFeed'
 import { comboLabel, eventCombo, useSettings } from '../settings'
 import { PresenceBanner } from '../components/presence/PresenceBanner'
@@ -127,6 +131,7 @@ interface EraseStroke {
   touched: Set<number> // every region the brush has reached
   after: Map<number, Region> // latest geometry of every region hit
   deletedIds: Set<number> // regions that fell below their floor mid-stroke
+  loaded: Map<number, number> // the revision each was at when the brush first reached it
   last: Pt // previous cursor position, so each move erases along a segment, not a dot
 }
 
@@ -141,7 +146,19 @@ export function TileEditorPage() {
   const [job, setJob] = useState<JobDetail | null>(null)
   const [page, setPage] = useState<PageDetail | null>(null)
   const [classes, setClasses] = useState<MapClass[]>([])
-  const [regions, setRegions] = useState<Region[]>([])
+  // What the server last sent; what is shown is this with every edit not yet in it on top,
+  // so an edit shows the moment it is made (#72).
+  const [baseRegions, setRegions] = useState<Region[]>([])
+  const queueHooks = useRef<QueueHooks>({ onRefused: () => undefined, onIdle: () => undefined })
+  const [edits] = useState(() => new EditQueue<Region[]>({
+    onRefused: (label, error) => queueHooks.current.onRefused(label, error),
+    onIdle: () => queueHooks.current.onIdle(),
+  }))
+  const [queueVersion, setQueueVersion] = useState(0)
+  useEffect(() => edits.subscribe(() => setQueueVersion((v) => v + 1)), [edits])
+  const regions = useMemo(() => edits.view(baseRegions, page?.id),
+    [baseRegions, edits, page?.id, queueVersion])
+  const [book] = useState(() => new RevisionBook())
   const [error, setError] = useState<string | null>(null)
   useAutoClear(error, setError)
 
@@ -292,7 +309,8 @@ export function TileEditorPage() {
     result.removed_regions.forEach(removeLocal)
     setSelectedId((cur) => (cur !== null && result.removed_regions.includes(cur) ? null : cur))
   }, [upsertLocal, removeLocal])
-  const { record: recordEdit, undo, redo, reset: resetHistory } = useEditHistory(page?.id, applyRevert, flashError)
+  const { record: recordEdit, undo, redo, reset: resetHistory } = useEditHistory<Region[]>(
+    page?.id, applyRevert, flashError, (edit) => edits.push(edit))
 
   const classById = useMemo(() => new Map(classes.map((c) => [c.id, c])), [classes])
   const drawable = useMemo(() => classes.filter((c) => c.id !== 0), [classes])
@@ -385,32 +403,54 @@ export function TileEditorPage() {
 
   // Another person's shapes arrive as they draw them, and refresh the tile in place.
   const livePageId = page?.id
+  // Only the newest reload is shown, and edits it does not hold yet stay on top of it.
+  const reloadSeq = useRef(0)
   const reloadTile = useCallback(() => {
     if (livePageId === undefined || !jobId) return
+    const seq = ++reloadSeq.current
+    const mark = edits.mark()
     getPage(jobId, livePageId)
-      .then(showTile)
-      .catch((e: Error) => flash(e.message, 'error'))
-  }, [livePageId, jobId, showTile, flash])
+      .then((fresh) => {
+        if (seq !== reloadSeq.current) return
+        edits.absorb(mark)
+        showTile(fresh)
+      })
+      .catch((e: Error) => { if (seq === reloadSeq.current) flash(e.message, 'error') })
+  }, [livePageId, jobId, showTile, flash, edits])
   usePageLiveFeed(livePageId, page?.job_revision ?? 0, reloadTile)
 
-  // A colleague's change since the tile loaded is not saved over: it is shown instead.
-  const guardedSave = useGuardedSave((message) => {
-    flash(message, 'error')
-    reloadTile()
-  })
-  // A gesture whose writes stopped part-way: what did save stays one step back, and the
-  // tile is shown as the server now has it. A refusal has already said so and reloaded.
-  const editFailed = useCallback((e: unknown, saved: EditSpan[]) => {
-    if (saved.length) recordEdit(spanOf(...saved))
-    if (conflictOf(e)) return
-    flash((e as Error).message, 'error')
-    reloadTile()
-  }, [recordEdit, flash, reloadTile])
-  const saveRegion = useCallback(
-    (r: Region, body: Omit<Parameters<typeof patchRegion>[1], 'revision'>) =>
-      guardedSave('region', r, (revision) => patchRegion(r.id, { ...body, revision })),
-    [guardedSave],
-  )
+  queueHooks.current = {
+    onRefused: (label, error) => {
+      flash(`${label} refused - ${conflictOf(error)?.message ?? (error as Error).message}`, 'error')
+    },
+    onIdle: () => reloadTile(),
+  }
+
+  // An edit goes on screen now and to the server in its turn, one request however many
+  // shapes it touches; until the server has answered, undo shows the tile as it was.
+  const pushTile = useCallback((change: TileChange, label: string) => {
+    if (!page) return
+    const realId = (id: number) => edits.realId(id)
+    const edit = tileEdit({ pageId: page.id, book, className: (id) => classById.get(id)?.name ?? '' }, change, label)
+    const after = edit.apply(regions, { id: realId })
+    const settled = edits.push(edit)
+    recordEdit(settled.then((saved) => saved.span, () => undefined), regionSteps(regions, after, realId))
+  }, [page, edits, book, classById, regions, recordEdit])
+
+  // A shape picked while it was still being saved stays picked under the id it was given.
+  useEffect(() => {
+    setSelectedId((cur) => (cur === null ? cur : edits.realId(cur)))
+    setMergeSet((cur) => ([...cur].some(isTemporary) ? new Set([...cur].map((id) => edits.realId(id))) : cur))
+  }, [edits, queueVersion])
+
+  // Closing the tab with edits still on their way would lose them.
+  useEffect(() => {
+    const onLeave = (e: BeforeUnloadEvent) => {
+      if (edits.pending) e.preventDefault()
+    }
+    window.addEventListener('beforeunload', onLeave)
+    return () => window.removeEventListener('beforeunload', onLeave)
+  }, [edits])
 
   // Ordered live tiles, for prev/next navigation and the header count. A duplicate or an
   // unreadable scan was never rendered, so there is nothing to step onto.
@@ -674,18 +714,16 @@ export function TileEditorPage() {
   // Writes one ring of a region back as an undoable edit, refusing to leave a ring below a
   // triangle or a traced line below a segment.
   const replaceRing = useCallback(
-    async (r: Region, ringIdx: number, ring: Ring) => {
+    (r: Region, ringIdx: number, ring: Ring) => {
       const floor = isLine(r) && ringIdx === 0 ? 2 : 3
       if (ring.length < floor) {
         flash(`That would leave fewer than ${floor} points`, 'error')
         return
       }
       const next = withRing(r, ringIdx, ring)
-      const updated = await saveRegion(r, { points: next.points, holes: next.holes })
-      upsertLocal(updated)
-      recordEdit(updated.span)
+      pushTile({ patch: [{ region: r, points: next.points, holes: next.holes }] }, 'Redraw')
     },
-    [flash, saveRegion, upsertLocal, recordEdit],
+    [flash, pushTile],
   )
 
   // Ends a redraw at vertex `end`: the stretch between the two vertices becomes the drawn
@@ -745,28 +783,17 @@ export function TileEditorPage() {
     // A ring's closing edge is implied; a line's is a point like any other, so closing one
     // writes the first point again at the end. That repetition is what makes it closed.
     const pts = closing && !isRingDraft(d) && d.pts.length >= 3 ? closeRun(d.pts) : d.pts
-    try {
-      if (d.holeFor !== null) {
-        const target = regions.find((r) => r.id === d.holeFor)
-        if (target) {
-          const updated = await saveRegion(target, { holes: [...target.holes, pts] })
-          upsertLocal(updated)
-          recordEdit(updated.span)
-        }
-      } else {
-        const created = await createRegion(page.id, activeClassId, pts, [], drawKind)
-        upsertLocal(created)
-        setSelectedId(created.id)
-        recordEdit(created.span)
-      }
-    } catch (e) {
-      // The shape stays in hand, so a save the server refused can be finished again.
-      flash((e as Error).message, 'error')
-      return
+    if (d.holeFor !== null) {
+      const target = regions.find((r) => r.id === d.holeFor)
+      if (target) pushTile({ patch: [{ region: target, holes: [...target.holes, pts] }] }, 'Cut a hole')
+    } else {
+      const temp = temporaryId()
+      pushTile({ create: [{ temp, class_id: activeClassId, points: pts, kind: drawKind }] }, 'Draw')
+      setSelectedId(temp)
     }
     setDraft(null)
     setCursor(null)
-  }, [page, regions, activeClassId, drawKind, isRingDraft, extendFromRedraw, saveRegion, upsertLocal, recordEdit, flash])
+  }, [page, regions, activeClassId, drawKind, isRingDraft, extendFromRedraw, pushTile])
 
   // Persists a finished shape. Takes the draft explicitly, so a stroke can commit the
   // shape it just completed without waiting for the state to come round.
@@ -902,7 +929,7 @@ export function TileEditorPage() {
   // m: one shape out of the gathered ones. Polygons become their union, so they have to
   // touch or overlap; traced lines are joined end to end. The first gathered shape keeps
   // its id and class, the others are deleted, all in one undo step.
-  const mergeGathered = useCallback(async () => {
+  const mergeGathered = useCallback(() => {
     const picked = [...mergeSet].map((id) => regions.find((r) => r.id === id)).filter((r): r is Region => !!r)
     if (picked.length < 2) return
     const lines = picked.filter(isLine)
@@ -923,20 +950,10 @@ export function TileEditorPage() {
       geom = parts[0]
     }
     const [keep, ...drop] = picked
-    const spans: EditSpan[] = []
-    try {
-      const updated = await saveRegion(keep, geom)
-      spans.push(updated.span)
-      for (const r of drop) spans.push((await deleteRegion(r.id)).span)
-      drop.forEach((r) => removeLocal(r.id))
-      upsertLocal(updated)
-      recordEdit(spanOf(...spans))
-      setMergeSet(new Set())
-      setSelectedId(keep.id)
-    } catch (e) {
-      editFailed(e, spans)
-    }
-  }, [mergeSet, regions, tileW, tileH, flash, removeLocal, saveRegion, upsertLocal, recordEdit, editFailed])
+    pushTile({ patch: [{ region: keep, points: geom.points, holes: geom.holes }], delete: drop }, 'Merge')
+    setMergeSet(new Set())
+    setSelectedId(keep.id)
+  }, [mergeSet, regions, tileW, tileH, flash, pushTile])
 
   // s arms the scissors on the selected traced line; the next click on the line cuts it.
   const toggleCut = useCallback(() => {
@@ -950,7 +967,7 @@ export function TileEditorPage() {
   }, [regions, selectedId, flash])
 
   const cutSelectedAt = useCallback(
-    async (pt: Pt) => {
+    (pt: Pt) => {
       setCutArmed(false)
       const sel = regions.find((r) => r.id === selectedId)
       if (!sel || !isLine(sel) || !page) return
@@ -959,19 +976,12 @@ export function TileEditorPage() {
         flash('Click on the line where it should be cut', 'error')
         return
       }
-      const spans: EditSpan[] = []
-      try {
-        const first = await saveRegion(sel, { points: halves[0] })
-        spans.push(first.span)
-        const second = await createRegion(page.id, sel.class_id, halves[1], [], 'polyline')
-        upsertLocal(first)
-        upsertLocal(second)
-        recordEdit(spanOf(first.span, second.span))
-      } catch (e) {
-        editFailed(e, spans)
-      }
+      pushTile({
+        patch: [{ region: sel, points: halves[0] }],
+        create: [{ temp: temporaryId(), class_id: sel.class_id, points: halves[1], kind: 'polyline' }],
+      }, 'Cut')
     },
-    [regions, selectedId, page, displayW, displayH, flash, saveRegion, upsertLocal, recordEdit, editFailed],
+    [regions, selectedId, page, displayW, displayH, flash, pushTile],
   )
 
   const onSvgClick = useCallback(
@@ -1046,7 +1056,8 @@ export function TileEditorPage() {
       swallowNextClick.current = false
       return
     }
-    if (e.altKey || e.button !== 0) return // alt-drag pans; the click that ends it is not a vertex
+    // The hand pans, and the click that ends an alt-drag is not a vertex either.
+    if (e.altKey || e.button !== 0 || panning) return
     placeVertex(e)
   }
 
@@ -1073,7 +1084,7 @@ export function TileEditorPage() {
     if (!drawingAnchored) return
     const outside = (t: EventTarget | null) => !paneRef.current?.contains(t as Node)
     const onClick = (e: MouseEvent) => {
-      if (e.button !== 0 || e.altKey || !outside(e.target)) return
+      if (e.button !== 0 || e.altKey || panning || !outside(e.target)) return
       // preventDefault as well as stopPropagation: a router <Link> navigates natively once
       // its own handler is cut off, which would take the whole draft down with the page.
       e.preventDefault()
@@ -1106,7 +1117,7 @@ export function TileEditorPage() {
       window.removeEventListener('contextmenu', onFinish, true)
       window.removeEventListener('mousemove', onMove)
     }
-  }, [drawingAnchored, placeVertex, finishDraft, setCursorAt])
+  }, [drawingAnchored, panning, placeVertex, finishDraft, setCursorAt])
 
   // Dragging a box: the ring is built on release, so both shapes reach runDetect the
   // same way.
@@ -1229,6 +1240,7 @@ export function TileEditorPage() {
           }
           changed = true
           s.touched.add(r.id)
+          if (!s.loaded.has(r.id)) s.loaded.set(r.id, r.revision)
           if (res.geom === null) {
             // Dropped from `regions`, so the rest of the stroke no longer sees it.
             s.deletedIds.add(r.id)
@@ -1245,30 +1257,22 @@ export function TileEditorPage() {
     [brushPx, showOnly, selectedId, displayW, displayH],
   )
 
+  // The whole stroke is one request and one step back; a shape it took whole is deleted
+  // softly, so undo brings it back.
   const persistStroke = useCallback(
-    async (s: EraseStroke) => {
+    (s: EraseStroke) => {
       if (s.touched.size === 0) return // swept empty space
-      const spans: EditSpan[] = []
-      try {
-        for (const id of s.touched) {
-          if (s.deletedIds.has(id)) {
-            spans.push((await deleteRegion(id)).span) // soft, so undo resurrects it
-            continue
-          }
-          const geom = s.after.get(id)
-          if (!geom) continue
-          const updated = await saveRegion(geom, { points: geom.points, holes: geom.holes })
-          upsertLocal(updated)
-          spans.push(updated.span)
-        }
-        // One span for the whole stroke: a sweep undoes in a single step.
-        if (spans.length) recordEdit(spanOf(...spans))
-        if (selectedId !== null && s.deletedIds.has(selectedId)) setSelectedId(null)
-      } catch (e) {
-        editFailed(e, spans)
-      }
+      const at = (id: number) => ({ id, revision: s.loaded.get(id) ?? 0 })
+      pushTile({
+        delete: [...s.deletedIds].map(at),
+        patch: [...s.touched].filter((id) => !s.deletedIds.has(id) && s.after.has(id)).map((id) => {
+          const geom = s.after.get(id)!
+          return { region: at(id), points: geom.points, holes: geom.holes }
+        }),
+      }, 'Erase')
+      if (selectedId !== null && s.deletedIds.has(selectedId)) setSelectedId(null)
     },
-    [selectedId, saveRegion, upsertLocal, recordEdit, editFailed],
+    [selectedId, pushTile],
   )
 
   const onEraseDown = (e: React.PointerEvent) => {
@@ -1280,7 +1284,7 @@ export function TileEditorPage() {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
     e.preventDefault()
     const pt = toNorm(e.clientX, e.clientY)
-    const stroke: EraseStroke = { touched: new Set(), after: new Map(), deletedIds: new Set(), last: pt }
+    const stroke: EraseStroke = { touched: new Set(), after: new Map(), deletedIds: new Set(), loaded: new Map(), last: pt }
     applyBrush(stroke, pt, pt)
     drag.begin(e, {
       onMove: (ev) => {
@@ -1295,16 +1299,6 @@ export function TileEditorPage() {
   }
 
   // --- vertex dragging ------------------------------------------------------
-
-  // A drag that could not be saved shows the shape as the server still has it, and says
-  // why. A refused one is already being replaced by the colleague's version.
-  const putBack = (r: Region) => (e: Error) => {
-    if (!conflictOf(e)) {
-      flash(e.message, 'error')
-      upsertLocal(r)
-    }
-    return null
-  }
 
   // The drag owns the ring it is reshaping: `regions` mirrors it for display, and the
   // release persists from the drag's copy rather than reading `regions` back.
@@ -1334,12 +1328,7 @@ export function TileEditorPage() {
           return
         }
         const reshaped = withRing(r, ringIdx, ring)
-        const updated = await saveRegion(r, { points: reshaped.points, holes: reshaped.holes })
-          .catch(putBack(r))
-        if (updated) {
-          upsertLocal(updated)
-          recordEdit(updated.span)
-        }
+        pushTile({ patch: [{ region: r, points: reshaped.points, holes: reshaped.holes }] }, 'Move corner')
       },
       onCancel: () => upsertLocal(r),
     })
@@ -1395,19 +1384,9 @@ export function TileEditorPage() {
           }
           return
         }
-        const spans: EditSpan[] = []
-        try {
-          for (const x of shifted(...shift)) {
-            const orig = before.find((b) => b.id === x.id)
-            if (!orig) continue
-            const updated = await saveRegion(orig, { points: x.points, holes: x.holes })
-            upsertLocal(updated)
-            spans.push(updated.span)
-          }
-          if (spans.length) recordEdit(spanOf(...spans))
-        } catch (err) {
-          editFailed(err, spans)
-        }
+        const moved = shifted(...shift)
+        pushTile({ patch: moved.map((x) => ({ region: before.find((b) => b.id === x.id)!, points: x.points, holes: x.holes })) },
+          'Move corners')
       },
       onCancel: () => {
         before.forEach(upsertLocal)
@@ -1437,31 +1416,22 @@ export function TileEditorPage() {
 
   // Delete with dots picked removes those dots, never the shape they sit on - unless one is
   // left too short to be a shape, exactly as removing them one by one would. One undo step.
-  const deletePicked = useCallback(async () => {
+  const deletePicked = useCallback(() => {
     if (readOnly || !livePicks.length) return
     const group = livePicks
     setPicks([])
-    const spans: EditSpan[] = []
-    try {
-      for (const id of new Set(group.map((p) => p.regionId))) {
-        const r = regions.find((x) => x.id === id)
-        if (!r) continue
-        const next = deleteVertices(r, isLine(r), group.filter((p) => p.regionId === id))
-        if (next === null) {
-          spans.push((await deleteRegion(id)).span) // soft, so undo resurrects it
-          removeLocal(id)
-          if (selectedId === id) setSelectedId(null)
-          continue
-        }
-        const updated = await saveRegion(r, { points: next.points, holes: next.holes })
-        upsertLocal(updated)
-        spans.push(updated.span)
-      }
-      if (spans.length) recordEdit(spanOf(...spans))
-    } catch (e) {
-      editFailed(e, spans)
+    const change: Required<Pick<TileChange, 'patch' | 'delete'>> = { patch: [], delete: [] }
+    for (const id of new Set(group.map((p) => p.regionId))) {
+      const r = regions.find((x) => x.id === id)
+      if (!r) continue
+      const next = deleteVertices(r, isLine(r), group.filter((p) => p.regionId === id))
+      if (next === null) {
+        change.delete.push(r) // soft, so undo resurrects it
+        if (selectedId === id) setSelectedId(null)
+      } else change.patch.push({ region: r, points: next.points, holes: next.holes })
     }
-  }, [readOnly, livePicks, regions, selectedId, saveRegion, upsertLocal, removeLocal, recordEdit, editFailed])
+    pushTile(change, 'Delete corners')
+  }, [readOnly, livePicks, regions, selectedId, pushTile])
 
   // A click on a vertex of the selected outline starts redrawing from it; a click on a
   // second vertex of the same ring ends the redraw there, and one on the start vertex again
@@ -1516,16 +1486,13 @@ export function TileEditorPage() {
           else setSelectedId(r.id)
           return
         }
-        const updated = await saveRegion(r, { points: moved.points, holes: moved.holes }).catch(putBack(r))
-        if (!updated) return
-        upsertLocal(updated)
-        recordEdit(updated.span)
+        pushTile({ patch: [{ region: r, points: moved.points, holes: moved.holes }] }, 'Move shape')
       },
       onCancel: () => upsertLocal(r),
     })
   }
 
-  const deleteVertex = async (e: React.MouseEvent, r: Region, ringIdx: number, index: number) => {
+  const deleteVertex = (e: React.MouseEvent, r: Region, ringIdx: number, index: number) => {
     e.preventDefault()
     e.stopPropagation()
     if (readOnly) return
@@ -1537,28 +1504,19 @@ export function TileEditorPage() {
     // (ringIdx > 0 is always a hole, so always a ring.)
     const floor = isLine(r) && ringIdx === 0 && !closed ? 2 : 3
     if (ring.length <= floor) {
-      if (ringIdx === 0) {
-        const gone = await deleteRegion(r.id)
-        removeLocal(r.id)
-        recordEdit(gone.span)
-      } else {
-        const holes = r.holes.filter((_, i) => i !== ringIdx - 1)
-        const updated = await saveRegion(r, { holes })
-        upsertLocal(updated)
-        recordEdit(updated.span)
-      }
+      if (ringIdx === 0) pushTile({ delete: [r] }, 'Delete shape')
+      else pushTile({ patch: [{ region: r, holes: r.holes.filter((_, i) => i !== ringIdx - 1) }] }, 'Delete hole')
       return
     }
     const dropped = ring.filter((_, i) => i !== index)
     const next = closed && index !== 0 ? closeRun(dropped) : dropped
-    const updated = await saveRegion(r, ringIdx === 0 ? { points: next } : { holes: withRing(r, ringIdx, next).holes })
-    upsertLocal(updated)
-    recordEdit(updated.span)
+    pushTile({ patch: [{ region: r, ...(ringIdx === 0 ? { points: next } : { holes: withRing(r, ringIdx, next).holes }) }] },
+      'Delete corner')
   }
 
   // `at` places the new vertex explicitly (double-click on the outline); without it the
   // edge's midpoint is used (the midpoint handles).
-  const insertVertex = async (e: React.MouseEvent, r: Region, ringIdx: number, edgeIndex: number, at?: Pt) => {
+  const insertVertex = (e: React.MouseEvent, r: Region, ringIdx: number, edgeIndex: number, at?: Pt) => {
     e.stopPropagation()
     if (readOnly) return
     const ring = toPoly(r)[ringIdx]
@@ -1568,9 +1526,7 @@ export function TileEditorPage() {
     const mid: Pt = at ?? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
     const next = [...ring.slice(0, edgeIndex + 1), mid, ...ring.slice(edgeIndex + 1)]
     const updatedRegion = withRing(r, ringIdx, next)
-    const updated = await saveRegion(r, { points: updatedRegion.points, holes: updatedRegion.holes })
-    upsertLocal(updated)
-    recordEdit(updated.span)
+    pushTile({ patch: [{ region: r, points: updatedRegion.points, holes: updatedRegion.holes }] }, 'Add corner')
   }
 
   // Double-click to add a vertex to the selected outline, rather than only at the
@@ -1581,7 +1537,7 @@ export function TileEditorPage() {
   // bend, so the intended target is never ambiguous, and pulling a vertex out to a distant
   // spot is exactly the fiddly drag this gesture replaces. A polygon keeps the radius —
   // sight-unseen, a double-click in open space should not reshape it.
-  const insertVertexAtCursor = async (e: React.MouseEvent) => {
+  const insertVertexAtCursor = (e: React.MouseEvent) => {
     const r = regions.find((x) => x.id === selectedId)
     if (readOnly || tool !== 'select' || !r) return
     const at = toNorm(e.clientX, e.clientY)
@@ -1590,121 +1546,98 @@ export function TileEditorPage() {
     // Double-clicking an existing vertex must not stack a duplicate on top of it - and
     // "on" a vertex means inside what its handle catches, not only inside the drawn dot.
     if (hit.vertexDistPx < VERTEX_HIT_PX) return
-    await insertVertex(e, r, hit.ringIdx, hit.edgeIndex, at)
+    insertVertex(e, r, hit.ringIdx, hit.edgeIndex, at)
   }
 
   // --- region-level actions -------------------------------------------------
 
   const reassignClass = useCallback(
-    async (regionId: number, classId: number) => {
+    (regionId: number, classId: number) => {
       const r = regions.find((x) => x.id === regionId)
       if (!r || r.class_id === classId) return
-      const updated = await saveRegion(r, { class_id: classId })
-      upsertLocal(updated)
-      recordEdit(updated.span)
+      pushTile({ patch: [{ region: r, class_id: classId }] }, 'Change class')
     },
-    [regions, saveRegion, upsertLocal, recordEdit],
+    [regions, pushTile],
   )
 
   const removeRegion = useCallback(
-    async (regionId: number) => {
+    (regionId: number) => {
       const r = regions.find((x) => x.id === regionId)
       if (!r) return
-      const gone = await deleteRegion(regionId)
-      removeLocal(regionId)
+      pushTile({ delete: [r] }, 'Delete shape')
       if (selectedId === regionId) setSelectedId(null)
-      recordEdit(gone.span)
     },
-    [regions, selectedId, removeLocal, recordEdit],
+    [regions, selectedId, pushTile],
   )
 
   // --- batch geometry operations (client-side, one compound history entry) ---
 
-  const reduceAll = useCallback(async () => {
+  const reduceAll = useCallback(() => {
     if (readOnly || busy || regions.length === 0) return
-    setBusy(true)
-    const spans: EditSpan[] = []
-    try {
-      const vBefore = countVertices(regions)
-      let vAfter = 0
-      for (const r of regions) {
-        const simplified = isLine(r)
-          ? (() => {
-              const points = simplifyPolyline(r.points, tolerance, tileW, tileH)
-              return points.length >= 2 ? { points, holes: [] as Ring[] } : null
-            })()
-          : simplifyRegionGeometry(r, tolerance, tileW, tileH)
-        if (simplified === null) {
-          spans.push((await deleteRegion(r.id)).span)
-          removeLocal(r.id)
-          continue
-        }
-        if (vertexCount(simplified) === vertexCount(r)) {
-          vAfter += vertexCount(r) // unchanged — keep original coords, no round-trip
-          continue
-        }
-        const updated = await saveRegion(r, { points: simplified.points, holes: simplified.holes })
-        upsertLocal(updated)
-        spans.push(updated.span)
-        vAfter += vertexCount(simplified)
+    const change: Required<Pick<TileChange, 'patch' | 'delete'>> = { patch: [], delete: [] }
+    const vBefore = countVertices(regions)
+    let vAfter = 0
+    for (const r of regions) {
+      const simplified = isLine(r)
+        ? (() => {
+            const points = simplifyPolyline(r.points, tolerance, tileW, tileH)
+            return points.length >= 2 ? { points, holes: [] as Ring[] } : null
+          })()
+        : simplifyRegionGeometry(r, tolerance, tileW, tileH)
+      if (simplified === null) {
+        change.delete.push(r)
+        continue
       }
-      if (spans.length) recordEdit(spanOf(...spans))
-      flash(`Reduced ${vBefore} → ${vAfter} vertices`)
-    } catch (e) {
-      editFailed(e, spans)
-    } finally {
-      setBusy(false)
+      vAfter += vertexCount(simplified)
+      // Unchanged keeps its own coordinates.
+      if (vertexCount(simplified) !== vertexCount(r)) change.patch.push({ region: r, ...simplified })
     }
-  }, [readOnly, busy, regions, tolerance, tileW, tileH, removeLocal, saveRegion, upsertLocal, recordEdit, flash, editFailed])
+    if (change.patch.length || change.delete.length) pushTile(change, 'Reduce all')
+    flash(`Reduced ${vBefore} → ${vAfter} vertices`)
+  }, [readOnly, busy, regions, tolerance, tileW, tileH, pushTile, flash])
 
-  const resolveOverlaps = useCallback(async () => {
+  const resolveOverlaps = useCallback(() => {
     if (readOnly || busy || regions.length === 0 || !page) return
-    setBusy(true)
-    const spans: EditSpan[] = []
-    try {
-      const prio = (r: Region) => classById.get(r.class_id)?.priority ?? Number.MAX_SAFE_INTEGER
-      // Area subtraction is meaningless for zero-area strokes: a traced line neither
-      // clips a polygon nor gets clipped by one.
-      const snapshot = regions.filter((r) => !isLine(r)) // winners from original geometry
-      let modified = 0
-      for (const r of snapshot) {
-        const winners = snapshot.filter((o) => o.id !== r.id && prio(o) < prio(r))
-        if (winners.length === 0) continue
-        const parts = subtractRegions(r, winners, tileW, tileH)
-        // No actual overlap leaves the total area unchanged (a half-clipped quad is still
-        // a quad, so vertex count can't tell) — skip to avoid a needless re-tessellation.
-        const origArea = regionAreaPx(r, tileW, tileH)
-        const newArea = parts.reduce((s, p) => s + regionAreaPx(p, tileW, tileH), 0)
-        if (Math.abs(origArea - newArea) < 0.5) continue
-        modified++
-        if (parts.length === 0) {
-          spans.push((await deleteRegion(r.id)).span)
-          removeLocal(r.id)
-          continue
-        }
-        const updated = await saveRegion(r, { points: parts[0].points, holes: parts[0].holes })
-        upsertLocal(updated)
-        spans.push(updated.span)
-        for (let k = 1; k < parts.length; k++) {
-          const created = await createRegion(page.id, r.class_id, parts[k].points, parts[k].holes)
-          upsertLocal(created)
-          spans.push(created.span)
-        }
+    const prio = (r: Region) => classById.get(r.class_id)?.priority ?? Number.MAX_SAFE_INTEGER
+    // Area subtraction is meaningless for zero-area strokes: a traced line neither
+    // clips a polygon nor gets clipped by one.
+    const snapshot = regions.filter((r) => !isLine(r)) // winners from original geometry
+    const change: Required<TileChange> = { patch: [], delete: [], create: [] }
+    for (const r of snapshot) {
+      const winners = snapshot.filter((o) => o.id !== r.id && prio(o) < prio(r))
+      if (winners.length === 0) continue
+      const parts = subtractRegions(r, winners, tileW, tileH)
+      // No actual overlap leaves the total area unchanged (a half-clipped quad is still
+      // a quad, so vertex count can't tell) - skip to avoid a needless re-tessellation.
+      const origArea = regionAreaPx(r, tileW, tileH)
+      const newArea = parts.reduce((sum, p) => sum + regionAreaPx(p, tileW, tileH), 0)
+      if (Math.abs(origArea - newArea) < 0.5) continue
+      if (parts.length === 0) {
+        change.delete.push(r)
+        continue
       }
-      if (spans.length) recordEdit(spanOf(...spans))
-      flash(modified === 0 ? 'No overlaps to resolve' : `Resolved overlaps: ${modified} region(s) modified`)
-    } catch (e) {
-      editFailed(e, spans)
-    } finally {
-      setBusy(false)
+      change.patch.push({ region: r, points: parts[0].points, holes: parts[0].holes })
+      for (const part of parts.slice(1)) {
+        change.create.push({ temp: temporaryId(), class_id: r.class_id, points: part.points, holes: part.holes })
+      }
     }
-  }, [readOnly, busy, regions, page, classById, tileW, tileH, removeLocal, saveRegion, upsertLocal, recordEdit, flash, editFailed])
+    const modified = change.patch.length + change.delete.length
+    if (modified) pushTile(change, 'Resolve overlaps')
+    flash(modified === 0 ? 'No overlaps to resolve' : `Resolved overlaps: ${modified} region(s) modified`)
+  }, [readOnly, busy, regions, page, classById, tileW, tileH, pushTile, flash])
 
+  // Flips at once; put back if the server refuses.
   const toggleReviewed = async () => {
     if (!page) return
     const next = !page.layout_checked
-    await setPageLayoutChecked(page.id, next)
     setPage({ ...page, layout_checked: next })
+    try {
+      const saved = await setPageLayoutChecked(page.id, next, book.of('page', page.id, page.revision))
+      book.note('page', page.id, saved.revision)
+    } catch (e) {
+      setPage((p) => (p ? { ...p, layout_checked: !next } : p))
+      flash(`Reviewed refused - ${(e as Error).message}`, 'error')
+    }
   }
 
   // --- class vocabulary editing ---------------------------------------------

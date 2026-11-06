@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from app import (blobs, caches, candidates, config, dataset_sync, geometry, layout_templates, llm_ocr, page_rows,
                  provenance, reading_order, renditions, revert, rotation, serializers, store, training)
 from app.deps import (IMMUTABLE_CACHE, current_user, get_db, get_user, require_job_access,
-                      require_page_access, require_role)
+                      require_page_access, require_role, require_unchanged)
 from app.routes.jobs import Note
 
 router = APIRouter(tags=['pages'])
@@ -132,7 +132,8 @@ def page_results(job_id: str, page_id: int, conn=Depends(get_db), user: dict = D
             'reading_order_template': layout_templates.order_set_by(conn, job_id),
             'provenance': provenance.page_provenance(conn, page),
             # Where a live view of this page starts listening for other people's edits.
-            'job_revision': store.job_revision(conn, job_id)}
+            'job_revision': store.job_revision(conn, job_id),
+            'revision': store.latest_revision(conn, 'page', page_id)}
 
 
 @router.get('/api/pages/{page_id}/events')
@@ -268,6 +269,8 @@ class PagePatch(BaseModel):
     # a leaf set in one column in a book set in two. 'auto' or '<leaves>x<columns>';
     # empty follows the dataset again. Setting it re-orders the page.
     reading_order: str | None = None
+    # The page revision the client loaded; refused with 409 if a person changed it since.
+    revision: int | None = None
 
 
 @router.put('/api/pages/{page_id}/note')
@@ -296,6 +299,8 @@ def patch_page(page_id: int, body: PagePatch, conn=Depends(get_db), user: str = 
         raise HTTPException(409, 'page is a duplicate of another')
     fields = body.model_fields_set
     snapshot = {'id': page_id}
+    store.write_lock(conn)
+    require_unchanged(conn, 'page', page_id, body.revision)
     mark = store.begin_span(conn)
     if 'layout_checked' in fields and body.layout_checked is not None:
         conn.execute('UPDATE pages SET layout_checked = ? WHERE id = ?', (int(body.layout_checked), page_id))
@@ -316,7 +321,8 @@ def patch_page(page_id: int, body: PagePatch, conn=Depends(get_db), user: str = 
     dataset_sync.enqueue(row['job_id'])
     row2 = conn.execute('SELECT layout_checked, lines_checked FROM pages WHERE id = ?', (page_id,)).fetchone()
     return {'id': page_id, 'layout_checked': bool(row2['layout_checked']),
-            'lines_checked': bool(row2['lines_checked']), 'span': span}
+            'lines_checked': bool(row2['lines_checked']), 'span': span,
+            'revision': store.latest_revision(conn, 'page', page_id)}
 
 
 class RevertBody(BaseModel):

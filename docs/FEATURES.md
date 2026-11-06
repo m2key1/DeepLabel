@@ -279,6 +279,13 @@ Press `e` to edit the page.
 - Delete a line straight from the text list with its trash can, without entering edit mode.
 - Ctrl+Z undoes and Ctrl+Shift+Z redoes any edit, including merges and splits, in or out of
   edit mode.
+- Edits never wait for the server, in the page editor and the tile editor: a box, line or
+  shape drawn, moved, reclassed, merged, split or deleted, and the Layout complete and Lines
+  complete switches, show the moment you make them, and undo does too. They are saved in the
+  background in the order you made them, and you can keep working on a shape that is still
+  being saved. Deleting a gathered set, a merge, an eraser stroke, Reduce all and Resolve
+  overlaps each go to the server as one request. Closing the tab while edits are still being
+  saved asks first.
 
 ## Review and correction
 
@@ -507,7 +514,11 @@ polygons) and *line tracing* (boundary lines, open or closed).
   hide others in Settings.
 - **Live edits:** a colleague's changes appear in your open page without a reload.
 - **Edit conflicts:** if someone saved a line, box or region after you loaded it, your save
-  is refused and both versions are shown, so you choose what to keep.
+  is refused and both versions are shown, so you choose what to keep. This holds for every
+  edit, deletes, merges, splits and the page's switches included: a refused edit is taken
+  back on screen with any edit that depended on it, the rest are still saved, and a message
+  names what was refused and who changed it. Reading-order renumbering and model readings
+  never count as someone's change.
 - **Undo** only takes back your own edit, and is refused if someone else has built on it.
 
 ## Accounts and permissions

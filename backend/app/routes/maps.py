@@ -373,12 +373,14 @@ def patch_region(region_id: int, body: RegionPatch, conn=Depends(get_db), user: 
 
 
 @router.delete('/api/regions/{region_id}')
-def delete_region(region_id: int, conn=Depends(get_db), user: str = Depends(get_user),
-                  auth: dict = Depends(current_user)):
+def delete_region(region_id: int, revision: int | None = None, conn=Depends(get_db),
+                  user: str = Depends(get_user), auth: dict = Depends(current_user)):
     """Soft-delete a region."""
     require_region_access(conn, region_id, auth)
     if conn.execute('SELECT id FROM regions WHERE id = ?', (region_id,)).fetchone() is None:
         raise HTTPException(404)
+    store.write_lock(conn)
+    require_unchanged(conn, 'region', region_id, revision, lambda: serializers.get_region(conn, region_id))
     store.ensure_origin(conn, 'region', region_id, user)
     mark = store.begin_span(conn)
     conn.execute('UPDATE regions SET deleted = 1 WHERE id = ?', (region_id,))
@@ -386,6 +388,92 @@ def delete_region(region_id: int, conn=Depends(get_db), user: str = Depends(get_
     span = store.end_span(conn, mark)
     conn.commit()
     return {'id': region_id, 'deleted': True, 'span': span}
+
+
+class RegionNew(BaseModel):
+    key: str
+    class_id: int
+    points: list[list[float]]
+    holes: list[list[list[float]]] = []
+    kind: Literal['polygon', 'polyline'] = 'polygon'
+
+
+class RegionChange(BaseModel):
+    id: int
+    revision: int | None = None
+    class_id: int | None = None
+    points: list[list[float]] | None = None
+    holes: list[list[list[float]]] | None = None
+
+
+class RegionAt(BaseModel):
+    id: int
+    revision: int | None = None
+
+
+class RegionBatch(BaseModel):
+    create: list[RegionNew] = []
+    patch: list[RegionChange] = []
+    delete: list[RegionAt] = []
+
+
+@router.post('/api/pages/{page_id}/regions/batch')
+def batch_regions(page_id: int, body: RegionBatch, conn=Depends(get_db), user: str = Depends(get_user),
+                  auth: dict = Depends(current_user)):
+    """Create, change and delete several shapes of one tile in one request and one span, so
+    a merge, an eraser stroke or Reduce all is one step back. A shape a person changed
+    since it was loaded refuses the whole batch. New shapes come back under the key the
+    client gave them."""
+    require_page_access(conn, page_id, auth)
+    page = conn.execute('SELECT deleted, job_id FROM pages WHERE id = ?', (page_id,)).fetchone()
+    if page is None:
+        raise HTTPException(404)
+    if page['deleted']:
+        raise HTTPException(409, 'page is deleted')
+    store.write_lock(conn)
+    kinds = {r['id']: r['kind'] for r in conn.execute(
+        'SELECT id, kind FROM regions WHERE page_id = ? AND deleted = 0', (page_id,))}
+    touched = [r.id for r in body.patch] + [r.id for r in body.delete]
+    if not set(touched) <= set(kinds) or len(set(touched)) != len(touched):
+        raise HTTPException(400, 'every shape must be a live one of this tile, named once')
+    for r in [*body.patch, *body.delete]:
+        require_unchanged(conn, 'region', r.id, r.revision, lambda i=r.id: serializers.get_region(conn, i))
+    created = [(r.key, _valid_class_id(conn, page['job_id'], r.class_id), r.kind,
+                *_valid_geometry(r.kind, r.points, r.holes)) for r in body.create]
+    for r in [*body.patch, *body.delete]:
+        store.ensure_origin(conn, 'region', r.id, user)
+    mark = store.begin_span(conn)
+    order_idx = conn.execute(
+        'SELECT COALESCE(MAX(order_idx), -1) + 1 n FROM regions WHERE page_id = ?', (page_id,)).fetchone()['n']
+    keys = {}
+    for offset, (key, class_id, kind, points, holes) in enumerate(created):
+        cur = conn.execute(
+            'INSERT INTO regions (page_id, order_idx, class_id, points, holes, kind, checked) '
+            'VALUES (?,?,?,?,?,?,1)',
+            (page_id, order_idx + offset, class_id, json.dumps(points), json.dumps(holes), kind))
+        store.log_region(conn, cur.lastrowid, user, 'create')
+        keys[key] = cur.lastrowid
+    for r in body.patch:
+        kind = kinds[r.id]
+        if r.class_id is not None:
+            conn.execute('UPDATE regions SET class_id = ? WHERE id = ?',
+                         (_valid_class_id(conn, page['job_id'], r.class_id), r.id))
+        if r.points is not None:
+            points = _valid_polyline(r.points) if kind == 'polyline' else _valid_ring(r.points)
+            conn.execute('UPDATE regions SET points = ? WHERE id = ?', (json.dumps(points), r.id))
+        if r.holes is not None:
+            if kind == 'polyline' and r.holes:
+                raise HTTPException(400, 'a polyline cannot have holes')
+            conn.execute('UPDATE regions SET holes = ? WHERE id = ?', (json.dumps(_valid_holes(r.holes)), r.id))
+        store.log_region(conn, r.id, user, 'update')
+    for r in body.delete:
+        conn.execute('UPDATE regions SET deleted = 1 WHERE id = ?', (r.id,))
+        store.log_region(conn, r.id, user, 'delete')
+    span = store.end_span(conn, mark)
+    conn.commit()
+    return {'created': {key: serializers.get_region(conn, i) for key, i in keys.items()},
+            'regions': [serializers.get_region(conn, r.id) for r in body.patch],
+            'removed': [r.id for r in body.delete], 'span': span}
 
 
 @router.get('/api/regions/{region_id}/revisions')

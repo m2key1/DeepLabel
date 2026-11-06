@@ -222,6 +222,7 @@ class LineSplit(BaseModel):
     cut_x: float | None = None
     cut_y: float | None = None
     cut_line: list[list[float]] | None = None  # two points; the line through them is the cut
+    revision: int | None = None
 
 
 @router.post('/api/lines/{line_id}/split')
@@ -238,6 +239,8 @@ def split_line(line_id: int, body: LineSplit, conn=Depends(get_db), user: str = 
         raise HTTPException(400, 'pass exactly one of cut_x, cut_y, cut_line')
     if body.cut_line is not None and (len(body.cut_line) != 2 or any(len(p) != 2 for p in body.cut_line)):
         raise HTTPException(400, 'cut_line must be two [x, y] points')
+    store.write_lock(conn)
+    require_unchanged(conn, 'line', line_id, body.revision, lambda: serializers.get_line(conn, line_id))
     poly = json.loads(row['polygon'])
     thin = False
     if len(poly) != 4:
@@ -295,6 +298,8 @@ def _cut_through(body: LineSplit) -> list:
 
 class LineMerge(BaseModel):
     ids: list[int]
+    # The revision each was loaded at; one a person changed since refuses the merge.
+    revisions: dict[int, int] | None = None
 
 
 @router.post('/api/lines/merge')
@@ -311,6 +316,10 @@ def merge_lines(body: LineMerge, conn=Depends(get_db), user: str = Depends(get_u
         raise HTTPException(404)
     if len({r['element_id'] for r in rows}) != 1:
         raise HTTPException(400, 'lines must share an element')
+    store.write_lock(conn)
+    for lid in body.ids:
+        require_unchanged(conn, 'line', lid, (body.revisions or {}).get(lid),
+                          lambda lid=lid: serializers.get_line(conn, lid))
     for row in rows:
         store.ensure_origin(conn, 'line', row['id'], user)
     mark = store.begin_span(conn)
