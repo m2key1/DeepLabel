@@ -95,6 +95,34 @@ test.describe("Scenario: a map tile's palette and the operations on its shapes",
       await expect(page.getByTestId('map-region')).toHaveCount(1)
     })
 
+  // Closing on the first corner leaves nothing in hand, so Enter after it saves nothing more.
+  test('a click on the first corner closes the shape, leaves nothing in hand, and Enter saves nothing more', async ({ page }) => {
+    const jobId = await seedMapJob(uniqueName('Palette click close'))
+    const [tileId] = await tileIds(jobId)
+    await openTileEditor(page, jobId, tileId)
+    const TRIANGLE = SQUARE.slice(0, 3)
+    const NEXT: NormPoint[] = [[0.7, 0.7], [0.9, 0.7], [0.9, 0.9]]
+
+    for (const point of TRIANGLE) await clickTile(page, point)
+    // A hand comes to rest on the corner before it presses, so nothing is left to render
+    // when the click lands.
+    const box = await canvasBox(page)
+    await page.mouse.move(box.x + box.width * TRIANGLE[0][0], box.y + box.height * TRIANGLE[0][1], { steps: 5 })
+    await expect(page.getByTestId('draft-close')).toHaveAttribute('data-armed', 'true')
+    await page.waitForTimeout(300)
+    await page.mouse.down()
+    await page.mouse.up()
+    await expect(page.getByTestId('map-region')).toHaveCount(1)
+    await expect(page.getByTestId('draft-dot')).toHaveCount(0)
+    await page.keyboard.press('Enter')
+    // A shape drawn after it is the marker: once it is saved, a second copy would be too.
+    await drawPolygon(page, NEXT)
+
+    await expect.poll(async () => (await tileRegions(jobId, tileId)).length).toBe(2)
+    expect((await tileRegions(jobId, tileId)).map((r) => roundPoints(r.points))).toEqual([TRIANGLE, NEXT])
+    await expect(page.getByTestId('map-region')).toHaveCount(2)
+  })
+
   // Back on the first corner, the click itself closes the shape. The dblclick that arrives
   // behind it must find nothing left in hand - not the same shape, still waiting on its
   // save, to be saved a second time.

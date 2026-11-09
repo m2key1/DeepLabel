@@ -807,12 +807,6 @@ export function TileEditorPage() {
     }
   }, [saveDraft])
 
-  // The first point taken as the way out. A ring's closing edge is implied; a traced line
-  // is written back to that point, which is what makes it a closed one.
-  const closeDraft = useCallback(() => {
-    if (draft) void commitDraft(draft, true)
-  }, [draft, commitDraft])
-
   // One placed vertex, wherever the click came from — the tile, the blank pane around it,
   // or (mid-shape) the page chrome. `toNorm` clamps to the tile, so a click past the edge
   // of the image lands on the nearest point of that edge: putting a vertex *on* the border
@@ -835,14 +829,11 @@ export function TileEditorPage() {
         // Outlining an area: the same gestures as drawing a polygon, but what it produces
         // is a query, not a region.
         if (areaShape !== 'polygon' || refuseWithoutClass()) return
-        setAreaDraft((ring) => {
-          if (!ring) return [pt]
-          if (ring.length >= 3 && nearFirst(ring[0], pt)) {
-            void runDetect(ring)
-            return ring
-          }
-          return [...ring, pt]
-        })
+        if (areaDraft && areaDraft.length >= 3 && nearFirst(areaDraft[0], pt)) {
+          void runDetect(areaDraft)
+          return
+        }
+        setAreaDraft((ring) => (ring ? [...ring, pt] : [pt]))
         return
       }
       if (tool !== 'draw' && !draft?.redraw) return
@@ -851,20 +842,22 @@ export function TileEditorPage() {
       // Drawn geometry snaps to what is already on the tile; the detect tool's outline
       // above does not, because it only says where to look and joins nothing.
       const { point: at, vertex } = snapTarget(pt)
+      // Back on the first vertex: that closes the shape, a traced line included - a line
+      // that ends where it began is exactly what closing one means. Decided here, not in
+      // the updater below: React may run an updater on the spot, and the save's own
+      // clearing of the draft would then be overwritten by the draft the updater returns.
+      if (draft && canClose(draft) && nearFirst(draft.pts[0], at)) {
+        void commitDraft(draft, true)
+        return
+      }
       setDraft((d) => {
         if (!d) return { pts: [at], holeFor: null, lastSnap: vertex }
-        // Back on the first vertex: that closes the shape, a traced line included - a
-        // line that ends where it began is exactly what closing one means.
-        if (canClose(d) && nearFirst(d.pts[0], at)) {
-          void closeDraft()
-          return d
-        }
         // Two snapped vertices in a row on one outline bring the outline between them
         // along, so a shared border is exact rather than a chord across the neighbour.
         return { ...d, pts: [...d.pts, ...contourFrom(d.lastSnap, vertex), at], lastSnap: vertex }
       })
     },
-    [tool, draft, readOnly, areaShape, canClose, toNorm, snapTarget, contourFrom, runDetect, closeDraft,
+    [tool, draft, areaDraft, readOnly, areaShape, canClose, toNorm, snapTarget, contourFrom, runDetect, commitDraft,
      refuseWithoutClass],
   )
 
