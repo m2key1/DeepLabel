@@ -192,6 +192,15 @@ const LINE_COLUMNS: Column[] = MAP_COLUMNS.map((c) =>
   c.key === 'regions' ? { key: 'regions', label: 'Lines', title: 'Traced lines on this tile' } : c,
 )
 
+// The columns a phone keeps in view while the rest of the table scrolls under them: fixed
+// widths, so each knows where the one before it ends.
+const PINNED = 'max-md:sticky max-md:z-10 max-md:bg-surface'
+const PIN = {
+  check: `${PINNED} max-md:left-0 max-md:w-11 max-md:min-w-11`,
+  image: `${PINNED} max-md:left-11 max-md:w-16 max-md:min-w-16`,
+  number: `${PINNED} max-md:left-27`,
+}
+
 function thumbWidth(page: PageSummary): number {
   return page.width && page.height ? Math.max(16, Math.round((56 * page.width) / page.height)) : 42
 }
@@ -1466,34 +1475,38 @@ export function JobDetailPage() {
       {pages.length === 0 ? (
         <p className="text-sm text-ink-subtle">No pages yet.</p>
       ) : (
-        <div className={`overflow-hidden ${cardChrome}`}>
+        // A phone scrolls the table inside its card, keeping the selection, the scan and the
+        // page number pinned at its left edge so a row stays recognisable.
+        <div data-testid="pages-table-card" className={`relative overflow-x-auto ${cardChrome}`}>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-line text-left text-xs text-ink-subtle">
-                <th className="select-none px-3 py-2 font-medium">
-                  <input
-                    type="checkbox"
-                    aria-label="Select every page shown"
-                    checked={pages.length > 0 && selected.size === pages.length}
-                    ref={(el) => {
-                      if (el) el.indeterminate = selected.size > 0 && selected.size < pages.length
-                    }}
-                    onChange={(e) =>
-                      setSelected(e.target.checked ? new Set(pages.map((p) => p.id)) : new Set())
-                    }
-                    className="cursor-pointer accent-accent"
-                  />
+                <th className={`select-none px-3 py-2 font-medium pointer-coarse:px-0 ${PIN.check}`}>
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      aria-label="Select every page shown"
+                      checked={pages.length > 0 && selected.size === pages.length}
+                      ref={(el) => {
+                        if (el) el.indeterminate = selected.size > 0 && selected.size < pages.length
+                      }}
+                      onChange={(e) =>
+                        setSelected(e.target.checked ? new Set(pages.map((p) => p.id)) : new Set())
+                      }
+                      className="cursor-pointer accent-accent"
+                    />
+                  </label>
                 </th>
-                <th className="px-3 py-2 font-medium">Image</th>
+                <th className={`px-3 py-2 font-medium ${PIN.image}`}>Image</th>
                 {columns.map((col) => (
                   <th
                     key={col.key}
                     onClick={() => toggleSort(col.key)}
                     title={col.title}
                     aria-sort={sort.key === col.key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}
-                    className={`cursor-pointer select-none px-3 py-2 font-medium ${
+                    className={`cursor-pointer select-none whitespace-nowrap px-3 py-2 font-medium ${
                       sort.key === col.key ? 'text-accent-ink' : ''
-                    }`}
+                    } ${col.key === 'idx' ? PIN.number : ''}`}
                   >
                     {col.label} {sort.key === col.key ? (sort.dir === 1 ? '↑' : '↓') : ''}
                   </th>
@@ -1512,20 +1525,24 @@ export function JobDetailPage() {
                     page.deleted ? 'opacity-50' : ''
                   } ${page.id === hoverId ? 'bg-accent-wash' : ''}`}
                 >
-                  <td className="select-none px-3 py-1">
-                    <Check
-                      aria-label={`Select ${page.filename}`}
-                      checked={selected.has(page.id)}
-                      onChange={() => undefined}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        if (e.shiftKey) window.getSelection()?.removeAllRanges()
-                        toggleRow(page, e.shiftKey)
-                      }}
-                      className="cursor-pointer"
-                    />
+                  <td className={`select-none px-3 py-1 pointer-coarse:px-0 ${PIN.check}`}>
+                    {/* The label takes a tap beside the box on a touch screen, and keeps it
+                        from reaching the row, which would open the page. */}
+                    <label onClick={(e) => e.stopPropagation()} className="flex items-center">
+                      <Check
+                        aria-label={`Select ${page.filename}`}
+                        checked={selected.has(page.id)}
+                        onChange={() => undefined}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (e.shiftKey) window.getSelection()?.removeAllRanges()
+                          toggleRow(page, e.shiftKey)
+                        }}
+                        className="cursor-pointer"
+                      />
+                    </label>
                   </td>
-                  <td className="px-3 py-1">
+                  <td className={`px-3 py-1 ${PIN.image}`}>
                     {/* A duplicate or an unreadable scan is never ingested, so it has no rendition. */}
                     {page.deleted || isUncounted(page) ? (
                       <div className="h-14 w-10 rounded-sm bg-raised" />
@@ -1539,7 +1556,7 @@ export function JobDetailPage() {
                         width={thumbWidth(page)}
                         height={56}
                         loading="lazy"
-                        className="h-14 w-auto rounded-sm bg-raised object-contain"
+                        className="h-14 w-auto rounded-sm bg-raised object-contain max-md:max-w-10"
                       />
                     )}
                   </td>
@@ -1547,7 +1564,8 @@ export function JobDetailPage() {
                     <td
                       key={col.key}
                       data-col={col.key}
-                      className={col.key === 'filename' ? 'max-w-0 truncate px-3 py-1' : 'px-3 py-1'}
+                      className={col.key === 'filename' ? 'max-w-0 truncate px-3 py-1 max-md:min-w-36'
+                        : `whitespace-nowrap px-3 py-1 ${col.key === 'idx' ? PIN.number : ''}`}
                     >
                       {renderCell(col.key, page)}
                     </td>

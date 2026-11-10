@@ -113,67 +113,69 @@ export function ConventionCatalog({ canManage, onError }: { canManage: boolean; 
         <p className="mb-3 text-xs text-ink-subtle">No convention flags yet.</p>
       )}
       {shown !== null && shown.length > 0 && (
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className={tableHeadRow}>
-              <th className={`${tableCell} py-1.5`}>Flag</th>
-              <th className={`${tableCell} text-right`}>Models that read it</th>
-              <th className={`${tableCell} text-right`}>Datasets that ask for it</th>
-              {canManage && <th className={`${tableCell} text-center`}>Offered</th>}
-              {canManage && <th className={tableCell} />}
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((flag) => draft && !draft.adding && draft.name === flag.name ? (
-              <tr key={flag.name} className="border-b border-line/60 bg-raised">
-                <td colSpan={5} className={`${tableCell} py-3`}>{form}</td>
+        <div className="relative overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className={tableHeadRow}>
+                <th className={`${tableCell} py-1.5`}>Flag</th>
+                <th className={`${tableCell} text-right`}>Models that read it</th>
+                <th className={`${tableCell} text-right`}>Datasets that ask for it</th>
+                {canManage && <th className={`${tableCell} text-center`}>Offered</th>}
+                {canManage && <th className={tableCell} />}
               </tr>
-            ) : (
-              <tr key={flag.name} data-testid="convention-row" data-flag={flag.name} data-offered={flag.offered}
-                  className="border-b border-line/60 align-top">
-                <td className={`${tableCell} py-2`}>
-                  <span className={`font-medium ${flag.offered ? 'text-ink' : 'text-ink-muted'}`}>{flag.label}</span>
-                  {flag.label !== flag.name && (
-                    <span className="ml-1.5 font-mono text-[11px] text-ink-subtle">{flag.name}</span>
-                  )}
-                  <span className="ml-2"><ConventionExample on={flag.example_on} off={flag.example_off} /></span>
-                  {!flag.description && <Badge tone="warn" className="ml-1.5">not described yet</Badge>}
-                  {flag.description ? (
-                    <p className="mt-0.5 text-xs text-ink-muted">{flag.description}</p>
-                  ) : flag.added_from && (
-                    <p className="mt-0.5 text-xs text-ink-subtle">Added from {flag.added_from}.</p>
-                  )}
-                </td>
-                <td className={`${tableCell} py-2 text-right tabular-nums text-ink-muted`}>{flag.models}</td>
-                <td className={`${tableCell} py-2 text-right tabular-nums text-ink-muted`}>{flag.datasets}</td>
-                {canManage && (
-                  <td className={`${tableCell} py-2 text-center`}>
-                    <label data-testid="convention-offer" className="inline-flex cursor-pointer"
-                           title={flag.offered ? 'Offered wherever a flag can be picked' : 'Not offered: reads send it as off'}>
-                      <input type="checkbox" role="switch" data-testid="convention-offered" className="peer sr-only"
-                             aria-label={`Offer ${flag.label}`} checked={flag.offered}
-                             onChange={(e) => void setOffered(flag.name, e.target.checked)} />
-                      <span className="mt-1 flex rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-accent">
-                        <SwitchKnob on={flag.offered} onColor="bg-accent" />
-                      </span>
-                    </label>
+            </thead>
+            <tbody>
+              {shown.map((flag) => draft && !draft.adding && draft.name === flag.name ? (
+                <tr key={flag.name} className="border-b border-line/60 bg-raised">
+                  <td colSpan={5} className={`${tableCell} py-3`}>{form}</td>
+                </tr>
+              ) : (
+                <tr key={flag.name} data-testid="convention-row" data-flag={flag.name} data-offered={flag.offered}
+                    className="border-b border-line/60 align-top">
+                  <td className={`${tableCell} py-2`}>
+                    <span className={`font-medium ${flag.offered ? 'text-ink' : 'text-ink-muted'}`}>{flag.label}</span>
+                    {flag.label !== flag.name && (
+                      <span className="ml-1.5 font-mono text-[11px] text-ink-subtle">{flag.name}</span>
+                    )}
+                    <span className="ml-2"><ConventionExample on={flag.example_on} off={flag.example_off} /></span>
+                    {!flag.description && <Badge tone="warn" className="ml-1.5">not described yet</Badge>}
+                    {flag.description ? (
+                      <p className="mt-0.5 text-xs text-ink-muted">{flag.description}</p>
+                    ) : flag.added_from && (
+                      <p className="mt-0.5 text-xs text-ink-subtle">Added from {flag.added_from}.</p>
+                    )}
                   </td>
-                )}
-                {canManage && (
-                  <td className={`${tableCell} py-2 text-right`}>
-                    <button type="button" data-testid="convention-edit"
-                            onClick={() => setDraft({ name: flag.name, label: flag.label, description: flag.description,
-                                                      example_on: flag.example_on, example_off: flag.example_off,
-                                                      adding: false })}
-                            className="text-xs text-ink-subtle hover:text-accent-ink">
-                      Edit
-                    </button>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  <td className={`${tableCell} py-2 text-right tabular-nums text-ink-muted`}>{flag.models}</td>
+                  <td className={`${tableCell} py-2 text-right tabular-nums text-ink-muted`}>{flag.datasets}</td>
+                  {canManage && (
+                    <td className={`${tableCell} py-2 text-center`}>
+                      <label data-testid="convention-offer" className="inline-flex cursor-pointer"
+                             title={flag.offered ? 'Offered wherever a flag can be picked' : 'Not offered: reads send it as off'}>
+                        <input type="checkbox" role="switch" data-testid="convention-offered" className="peer sr-only"
+                               aria-label={`Offer ${flag.label}`} checked={flag.offered}
+                               onChange={(e) => void setOffered(flag.name, e.target.checked)} />
+                        <span className="mt-1 flex rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-accent">
+                          <SwitchKnob on={flag.offered} onColor="bg-accent" />
+                        </span>
+                      </label>
+                    </td>
+                  )}
+                  {canManage && (
+                    <td className={`${tableCell} py-2 text-right`}>
+                      <button type="button" data-testid="convention-edit"
+                              onClick={() => setDraft({ name: flag.name, label: flag.label, description: flag.description,
+                                                        example_on: flag.example_on, example_off: flag.example_off,
+                                                        adding: false })}
+                              className="text-xs text-ink-subtle hover:text-accent-ink">
+                        Edit
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {canManage && (draft?.adding ? (
         <div className="mt-3 rounded-md border border-line bg-raised p-4">{form}</div>

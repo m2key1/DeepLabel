@@ -10,6 +10,7 @@ import { useAuth } from '../auth'
 import { useSettings } from '../settings'
 import { JobActions, menuItem } from '../components/job/JobActions'
 import { DatasetSidebar } from '../components/job/DatasetSidebar'
+import { useIsPhone } from '../hooks/useMediaQuery'
 import { DROP_LIT, useDatasetDrag } from '../components/job/datasetDrag'
 import { AccessStack, reachOf } from '../components/job/AccessStack'
 import { COLUMNS, DEFAULT_COLUMNS, NAME_MIN, columnWidths, columnsForWidth, loadColumns,
@@ -282,6 +283,8 @@ export function JobsPage() {
   const [columns, setColumns] = useState<string[]>(loadColumns)
   // Per browser, like the column picker: how much room one person gives the rail is not
   // everyone's business, and /api/settings is shared - see the note on collapsed groups.
+  const phone = useIsPhone()
+  const [drawer, setDrawer] = useState(false)
   const [railShut, setRailShutState] = useState(
     () => localStorage.getItem(RAIL_KEY) === '1')
   const setRailShut = (shut: boolean) => {
@@ -1088,7 +1091,7 @@ export function JobsPage() {
           </button>
         </span>
       ))}
-      <span className="ml-auto flex items-center gap-2">
+      <span className="ml-auto flex flex-wrap items-center justify-end gap-2">
         <span className="text-[11px] text-ink-subtle" data-testid="result-count">
           {visible.length} of {jobs?.length ?? 0}
         </span>
@@ -1127,7 +1130,7 @@ export function JobsPage() {
           </div>
           <div className="relative">
             <GroupButton data-testid="columns-menu" {...menuTrigger(toolbarMenu === 'columns')}
-                         onClick={openToolbarMenu('columns')}>
+                         onClick={openToolbarMenu('columns')} className="rounded-r">
               Columns <CaretIcon />
             </GroupButton>
             {toolbarMenu === 'columns' && (
@@ -1148,7 +1151,11 @@ export function JobsPage() {
               </div>
             )}
           </div>
-          <GroupButton on={view === 'table'} aria-label="Table view" title="Table" onClick={() => setView('table')}>
+        </div>
+        {/* Apart from the menus, so a phone can set the two on a line of their own. */}
+        <div role="group" aria-label="Layout" className={joined}>
+          <GroupButton on={view === 'table'} aria-label="Table view" title="Table" onClick={() => setView('table')}
+                       className="rounded-l">
             Rows
           </GroupButton>
           <GroupButton on={view === 'cards'} aria-label="Card view" title="Cards" onClick={() => setView('cards')}
@@ -1236,20 +1243,31 @@ export function JobsPage() {
     )
   }
 
+  const sidebar = (collapsed: boolean, onCollapse: (shut: boolean) => void, picked?: () => void) => (
+    <DatasetSidebar
+      groups={sidebarGroups}
+      jobs={reached.jobs}
+      scope={scope}
+      needsReview={reviewCount}
+      recent={recent}
+      collapsed={collapsed}
+      onCollapse={onCollapse}
+      onScope={(next) => { setScope(next); setSelected(new Set()); picked?.() }}
+      dragging={dragging}
+      dropZone={dropZone}
+    />
+  )
+
   return (
     <div className="flex h-full min-h-0">
-      <DatasetSidebar
-        groups={sidebarGroups}
-        jobs={reached.jobs}
-        scope={scope}
-        needsReview={reviewCount}
-        recent={recent}
-        collapsed={railShut}
-        onCollapse={setRailShut}
-        onScope={(next) => { setScope(next); setSelected(new Set()) }}
-        dragging={dragging}
-        dropZone={dropZone}
-      />
+      {/* A phone keeps the list's width for the list: the groups slide in over it and go
+          again once one is picked. */}
+      {!phone ? sidebar(railShut, setRailShut) : drawer ? (
+        <div className="fixed inset-0 z-40 flex">
+          <div className="flex h-full bg-surface shadow-lg">{sidebar(false, () => setDrawer(false), () => setDrawer(false))}</div>
+          <div aria-hidden="true" className="flex-1 bg-black/40" onClick={() => setDrawer(false)} />
+        </div>
+      ) : sidebar(true, (shut) => setDrawer(!shut))}
       <div className="flex min-w-0 flex-1 flex-col bg-surface">
         <div className="relative">
           <div className={selected.size > 0 ? 'invisible' : undefined}>{toolbar}</div>

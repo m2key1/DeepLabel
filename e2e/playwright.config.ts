@@ -1,4 +1,4 @@
-import { defineConfig } from '@playwright/test'
+import { defineConfig, devices } from '@playwright/test'
 import { FRONTEND } from './helpers/frontend'
 
 export default defineConfig({
@@ -21,9 +21,12 @@ export default defineConfig({
     launchOptions: { slowMo: Number(process.env.E2E_SLOWMO ?? 0) },
   },
   projects: [
-    { name: 'chromium', use: { browserName: 'chromium' } },
+    { name: 'chromium', use: { browserName: 'chromium' }, testIgnore: /small-screens\.spec\.ts/ },
     // Firefox draws text differently enough to break it where Chromium does not (#20), so
     // the specs about how text is drawn run in it too.
     { name: 'firefox', use: { browserName: 'firefox' }, testMatch: /composed-text\.spec\.ts/ },
+    // A phone and a tablet, touch and all, drawn by Chromium: the layout is what is tested.
+    { name: 'phone', use: { ...devices['iPhone 13'], browserName: 'chromium' }, testMatch: /small-screens\.spec\.ts/ },
+    { name: 'tablet', use: { ...devices['iPad (gen 7)'], browserName: 'chromium' }, testMatch: /small-screens\.spec\.ts/ },
   ],
 })

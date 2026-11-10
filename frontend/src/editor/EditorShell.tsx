@@ -18,16 +18,22 @@ export function EditorShell({ header, headerTestId, rail, wideRail = false, canv
   return (
     // h-full, not h-screen: the app shell already reserves the nav bar's height.
     <div className="flex h-full flex-col overflow-hidden" style={style}>
-      {/* One row, always: nothing here may grow the header, or the canvas would move
-          under the pointer whenever a name or a hint changed length. */}
+      {/* One row, always - two on a phone or a tablet, whose controls are sized for a
+          finger, the actions under the name: nothing here may grow the header, or the canvas
+          would move under the pointer whenever a name or a hint changed length. What does
+          not fit a row scrolls along it instead. */}
       <header
         data-testid={headerTestId}
-        className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-2"
+        className="flex shrink-0 items-center gap-x-3 gap-y-2 border-b border-line px-4 py-2 pointer-coarse:max-lg:flex-wrap"
       >
-        <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden whitespace-nowrap">
+        <div className="flex min-w-0 flex-1 items-center gap-3 overflow-x-auto whitespace-nowrap no-scrollbar pointer-coarse:max-lg:basis-full">
           {header.left}
         </div>
-        {header.actions && <div className="flex shrink-0 items-center gap-2">{header.actions}</div>}
+        {header.actions && (
+          <div className="flex shrink-0 items-center gap-2 pointer-coarse:max-lg:min-w-0 pointer-coarse:max-lg:shrink pointer-coarse:max-lg:basis-full pointer-coarse:max-lg:overflow-x-auto no-scrollbar">
+            {header.actions}
+          </div>
+        )}
       </header>
       <div className="flex min-h-0 flex-1">
         {rail && (

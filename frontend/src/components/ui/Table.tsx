@@ -30,41 +30,44 @@ export function Table<T>({ columns, rows, rowKey, rowProps, caption, fixed = fal
    *  the table past its page. Columns without a width share what is left. */
   fixed?: boolean
 }) {
+  // Wider than the screen - a phone's - it scrolls sideways on its own, not the page.
   return (
-    <table className={`w-full border-collapse text-sm ${fixed ? 'table-fixed' : ''}`.trim()}>
-      {caption && <caption className="sr-only">{caption}</caption>}
-      <thead>
-        <tr className={tableHeadRow}>
-          {columns.map((c) => (
-            <th
-              key={c.key}
-              data-col={c.key}
-              style={c.width ? { width: c.width } : undefined}
-              className={`px-2 py-1.5 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'}`}
-            >
-              {c.label}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => {
-          const extra = rowProps?.(row)
-          return (
-            <tr key={rowKey(row)} {...extra} className={`${tableRow} ${extra?.className ?? ''}`.trim()}>
-              {columns.map((c) => (
-                <td
-                  key={c.key}
-                  data-col={c.key}
-                  className={`${tableCell} ${c.align === 'right' ? 'text-right' : ''}`.trim()}
-                >
-                  {c.cell(row)}
-                </td>
-              ))}
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
+    <div className="relative overflow-x-auto">
+      <table className={`w-full border-collapse text-sm ${fixed ? 'table-fixed' : ''}`.trim()}>
+        {caption && <caption className="sr-only">{caption}</caption>}
+        <thead>
+          <tr className={tableHeadRow}>
+            {columns.map((c) => (
+              <th
+                key={c.key}
+                data-col={c.key}
+                style={c.width ? { width: c.width } : undefined}
+                className={`px-2 py-1.5 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'}`}
+              >
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const extra = rowProps?.(row)
+            return (
+              <tr key={rowKey(row)} {...extra} className={`${tableRow} ${extra?.className ?? ''}`.trim()}>
+                {columns.map((c) => (
+                  <td
+                    key={c.key}
+                    data-col={c.key}
+                    className={`${tableCell} ${c.align === 'right' ? 'text-right' : ''}`.trim()}
+                  >
+                    {c.cell(row)}
+                  </td>
+                ))}
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }

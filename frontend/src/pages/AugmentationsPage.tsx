@@ -159,7 +159,7 @@ function Workbench({ task: TASK, trains }: { task: ModelTask; trains: string }) 
           nothing here affects a training until you pick it on the training form.
         </p>
       )}
-      <div className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <div>
           <div className="mb-1 flex items-center justify-between">
             <span className="text-sm font-medium text-ink">Pipelines</span>

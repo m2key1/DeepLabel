@@ -199,3 +199,22 @@ body {
 .no-scrollbar::-webkit-scrollbar {
   display: none; /* Chrome, Safari, Edge */
 }
+
+/* A finger needs about 44px to land on what it aims at, so on a touch screen every control
+   is at least that big, and a checkbox big enough to see what it says; a mouse keeps the
+   dense layout. In the base layer, so a utility on a control still has the last word. */
+@layer base {
+  @media (pointer: coarse) {
+    button, select, summary, [role='button'], [role='tab'], [role='switch'], [role='menuitem'] {
+      min-height: 44px;
+      min-width: 44px;
+    }
+    /* The margin makes the label round a checkbox take a tap 44px across, whatever the
+       label holds; a checkbox with no label round it gets one where it stands. */
+    input[type='checkbox'], input[type='radio'] {
+      width: 20px;
+      height: 20px;
+      margin: 12px;
+    }
+  }
+}

@@ -11,9 +11,9 @@ export function PageHeader({ title, actions, children }: {
 }) {
   return (
     <header className={children ? 'mb-4' : 'mb-6'}>
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-serif text-xl font-semibold">{title}</h1>
-        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>
       {children && <p className="mt-1 max-w-3xl text-sm text-ink-muted">{children}</p>}
     </header>

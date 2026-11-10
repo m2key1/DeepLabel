@@ -6,7 +6,7 @@ export type ButtonSize = 'xs' | 'sm' | 'md' | 'icon'
 const BASE =
   'inline-flex items-center justify-center gap-1.5 rounded font-medium ' +
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ' +
-  'disabled:pointer-events-none disabled:opacity-40'
+  'disabled:pointer-events-none disabled:opacity-40 pointer-coarse:min-h-11'
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary: 'border border-transparent bg-accent text-on-accent hover:brightness-110',
@@ -19,7 +19,7 @@ const SIZES: Record<ButtonSize, string> = {
   xs: 'px-2 py-1 text-xs',
   sm: 'px-2.5 py-1 text-sm',
   md: 'px-3 py-1.5 text-sm',
-  icon: 'p-1.5',
+  icon: 'p-1.5 pointer-coarse:min-w-11',
 }
 
 interface ButtonStyle {

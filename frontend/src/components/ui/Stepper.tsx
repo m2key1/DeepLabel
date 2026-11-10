@@ -22,7 +22,8 @@ export function Stepper<T extends string>({ steps, current, onSelect }: {
       {steps.map((step, i) => {
         const on = step.id === current
         return (
-          <li key={step.id} className="flex-1">
+          // On a phone the steps not shown keep only their number, and the one shown its name.
+          <li key={step.id} className={`min-w-0 flex-1 ${on ? '' : 'max-sm:flex-none'}`}>
             <button
               type="button"
               data-testid={`wizard-step-${step.id}`}
@@ -46,7 +47,7 @@ export function Stepper<T extends string>({ steps, current, onSelect }: {
                       : 'border-line-strong bg-surface'}`}>
                 {step.done && !on && !step.skipped ? <CheckIcon /> : i + 1}
               </span>
-              <span className="min-w-0 truncate">{step.label}</span>
+              <span className={`min-w-0 truncate ${on ? '' : 'max-sm:sr-only'}`}>{step.label}</span>
             </button>
           </li>
         )

@@ -13,10 +13,12 @@ import type { HTMLAttributes, PointerEvent as ReactPointerEvent } from 'react'
  *  same room whatever state it is in, and nothing shifts when it lights up. */
 export type SplitterOrientation = 'vertical' | 'horizontal'
 
+// On a touch screen the grip reaches 44px across, over the panes' edges, without the bar
+// taking any more room.
 const HIT: Record<SplitterOrientation, string> = {
   // `vertical` describes the bar, which sits between two panes side by side.
-  vertical: 'w-3 cursor-col-resize flex-col',
-  horizontal: 'h-3 cursor-row-resize',
+  vertical: 'w-3 cursor-col-resize flex-col pointer-coarse:after:inset-y-0 pointer-coarse:after:-inset-x-4',
+  horizontal: 'h-3 cursor-row-resize pointer-coarse:after:inset-x-0 pointer-coarse:after:-inset-y-4',
 }
 
 const LINE: Record<SplitterOrientation, string> = {
@@ -57,8 +59,8 @@ export const Splitter = forwardRef<HTMLDivElement, SplitterProps>(function Split
         setDragging(true)
         onPointerDown?.(e)
       }}
-      className={`group flex shrink-0 items-center justify-center focus:outline-none ${
-        HIT[orientation]} ${className}`.trim()}
+      className={`group flex shrink-0 items-center justify-center focus:outline-none pointer-coarse:after:absolute pointer-coarse:after:z-20 ${
+        /\b(absolute|fixed|sticky)\b/.test(className) ? '' : 'relative'} ${HIT[orientation]} ${className}`.trim()}
       {...props}
     >
       <div

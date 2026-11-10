@@ -46,7 +46,8 @@ import { BarDivider, Button, ButtonGroup, GroupButton, Toggle } from '../compone
 import { Select } from '../components/ui/Field'
 import { Segmented } from '../components/ui/Segmented'
 import {
-  KeyboardIcon, PanelIcon, PenIcon, PolygonIcon, RereadIcon, RevertIcon, RotateIcon, TrashIcon, TurnedBoxIcon, UprightBoxIcon,
+  BoxZoomIcon, KeyboardIcon, PanelIcon, PenIcon, PolygonIcon, RereadIcon, RevertIcon, RotateIcon, TrashIcon, TurnedBoxIcon,
+  UprightBoxIcon,
 } from '../components/icons'
 import { boxChrome } from '../components/chrome'
 import { Splitter } from '../components/ui/Splitter'
@@ -60,6 +61,8 @@ import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
 import { RunMenu } from '../components/viewer/RunMenu'
 import { LlmReadDialog } from '../components/job/LlmReadDialog'
 import { CopyImageButton } from '../components/CopyImageButton'
+import { ScanSheet } from '../components/viewer/ScanSheet'
+import { useIsPhone } from '../hooks/useMediaQuery'
 import { OrderOverlay } from '../components/viewer/OrderOverlay'
 import { EditorShell } from '../editor/EditorShell'
 import { ObjectList } from '../editor/ObjectList'
@@ -298,6 +301,11 @@ export function PageViewerPage() {
   // Manual rotations not yet persisted; kept frontend-side and saved when the line is checked.
   const [pendingOrient, setPendingOrient] = useState<Map<number, number>>(new Map())
   const [editing, setEditing] = useState(false)
+  // A phone reads the page as its lines, without the scan beside them: a line opens its
+  // scan in a sheet instead. Editing keeps the scan, cramped as it is.
+  const phone = useIsPhone()
+  const textOnly = phone && !editing
+  const [sheetFor, setSheetFor] = useState<number | null>(null)
   // Which of selectedId / activeLine the one editor is currently acting on.
   const [selKind, setSelKind] = useState<'element' | 'line'>('element')
   const [mergeSet, setMergeSet] = useState<Set<number>>(new Set())
@@ -3053,7 +3061,7 @@ export function PageViewerPage() {
   const SLOT = 'flex shrink-0 items-center justify-end'
   // Narrow, nothing gives way: the row stacks instead, the reading on a line of its own and
   // the rail right-aligned under it, so the columns still line up down the panel.
-  const ACTION_SLOT = `${SLOT} w-5`
+  const ACTION_SLOT = `${SLOT} w-5 pointer-coarse:w-11`
   const RAIL_BUTTON = 'rounded text-ink-subtle group-data-[hot]:text-ink-muted'
 
   // Settled by the models agreeing, checked by nobody: review work, and badged as such.
@@ -3063,14 +3071,16 @@ export function PageViewerPage() {
 
   const lineContent = (line: Line, hot: boolean) => (
     <>
-      <input
-        type="checkbox"
-        checked={line.checked}
-        onChange={(e) => toggleLineChecked(line, e.target.checked)}
-        onClick={(e) => e.stopPropagation()}
-        title="Checked"
-        className="shrink-0 cursor-pointer accent-accent"
-      />
+      {/* In a label of its own, so a touch screen's margin round it takes the tap too. */}
+      <label onClick={(e) => e.stopPropagation()} className="flex shrink-0 cursor-pointer items-center">
+        <input
+          type="checkbox"
+          checked={line.checked}
+          onChange={(e) => toggleLineChecked(line, e.target.checked)}
+          title="Checked"
+          className="cursor-pointer accent-accent"
+        />
+      </label>
       {editingId === line.id ? (
         // A textarea, not an input: a long line is shown wrapped over as many rows as it
         // takes, and clicking into it must not collapse that into one scrolling row. It is
@@ -3258,6 +3268,16 @@ export function PageViewerPage() {
           : ''}`}
       >
         {lineContent(line, hot)}
+        {textOnly && (
+          <button type="button" data-testid="line-scan" aria-label="Show this line on the scan"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSheetFor(line.id)
+                  }}
+                  className={`${RAIL_BUTTON} flex shrink-0 items-center justify-center`}>
+            <BoxZoomIcon />
+          </button>
+        )}
         <span className={ACTION_SLOT}>
           {canEdit && (
             <button type="button" data-testid="delete-line"
@@ -3787,7 +3807,8 @@ export function PageViewerPage() {
           )}
         </>),
         actions: (<>
-            <ButtonGroup aria-label="Show on the scan">
+            {/* What the scan shows, which a phone reading the lines alone has no scan for. */}
+            {!textOnly && <ButtonGroup aria-label="Show on the scan">
               {editing ? (
                 <>
                   <GroupButton on={layoutShown} onClick={toggleLayoutClasses}>Layout</GroupButton>
@@ -3804,10 +3825,10 @@ export function PageViewerPage() {
                            title={editing ? 'Not shown while editing' : undefined}
                            onClick={() => setShowConfidence((v) => !v)}>Confidence</GroupButton>
               <GroupButton on={showOrder} onClick={() => setShowOrder((v) => !v)}>Order</GroupButton>
-            </ButtonGroup>
+            </ButtonGroup>}
             {canEdit && page && (
               <>
-                <BarDivider />
+                {!textOnly && <BarDivider />}
                 <RunMenu
                   pageId={page.id}
                   jobId={jobId}
@@ -3818,7 +3839,7 @@ export function PageViewerPage() {
                   onRemoveReadings={() => setRemoveOpen(true)}
                   onError={setError}
                 />
-                <ButtonGroup aria-label="Turn the scan">
+                {!textOnly && <ButtonGroup aria-label="Turn the scan">
                   {([[-90, 'anticlockwise'], [90, 'clockwise']] as const).map(([degrees, way]) => (
                     <GroupButton
                       key={degrees}
@@ -3832,7 +3853,7 @@ export function PageViewerPage() {
                       <RotateIcon way={way} />
                     </GroupButton>
                   ))}
-                </ButtonGroup>
+                </ButtonGroup>}
               </>
             )}
             <BarDivider />
@@ -3854,7 +3875,7 @@ export function PageViewerPage() {
                 <KeyboardIcon /> <span className="opacity-70">{hasKeys ? keyboardMode : 'none'}</span>
               </Button>
             )}
-            <Button
+            {!textOnly && <Button
               variant="ghost"
               size="icon"
               aria-pressed={ocrFrac <= 0.03}
@@ -3862,7 +3883,7 @@ export function PageViewerPage() {
               title={ocrFrac <= 0.03 ? 'Show the OCR panel' : 'Enlarge - collapse the OCR panel'}
             >
               <PanelIcon collapsed={ocrFrac <= 0.03} />
-            </Button>
+            </Button>}
             {canEdit && (
               <ButtonGroup aria-label="Mode">
                 <GroupButton on={!editing} onClick={() => setEditing(false)} title="Look and read - Esc">
@@ -3911,7 +3932,7 @@ export function PageViewerPage() {
           onError={setError}
         />
       )}
-      {(canLineNav || editing) && (
+      {(canLineNav || editing) && !textOnly && (
         <LineLoupe
           line={loupeLine}
           plan={loupeLine && page?.height ? cropPlan(loupeLine.polygon, aspect, loupeLine.orientation, page.height) : null}
@@ -3996,7 +4017,7 @@ export function PageViewerPage() {
       )}
       <div className="flex min-h-0 flex-1 gap-2 p-3" style={{ paddingBottom: 'calc(var(--vkbd-h) + 0.75rem)' }}>
       <div ref={contentRef} className="relative min-w-0 flex-1 overflow-hidden">
-        {page && stage !== 'enter' && (
+        {page && stage !== 'enter' && !textOnly && (
           <Splitter
             ref={divider}
             orientation="vertical"
@@ -4020,10 +4041,10 @@ export function PageViewerPage() {
           />
         )}
         <div
-          className="flex h-full w-[150%] transition-transform duration-300 ease-out"
-          style={{ transform: stripTransform, willChange: 'transform' }}
+          className={`flex h-full transition-transform duration-300 ease-out ${textOnly ? 'w-full' : 'w-[150%]'}`}
+          style={textOnly ? undefined : { transform: stripTransform, willChange: 'transform' }}
         >
-          <section className="h-full w-1/3 shrink-0 pr-1.5">
+          <section className={`h-full w-1/3 shrink-0 pr-1.5 ${textOnly ? 'hidden' : ''}`}>
             <div
               ref={plainPane}
               data-testid="scan-pane"
@@ -4042,7 +4063,7 @@ export function PageViewerPage() {
             style={{ width: `${(1 - ocrFrac) * (200 / 3)}%` }}
             className={`h-full shrink-0 px-1.5 transition-opacity duration-300 ease-out ${
               stage === 'enter' ? 'opacity-0' : 'opacity-100'
-            }`}
+            } ${textOnly ? 'hidden' : ''}`}
           >
             <div
               ref={overlayPane}
@@ -4056,12 +4077,13 @@ export function PageViewerPage() {
             >
               <div ref={overlayRefs.host} className="absolute inset-0" />
               {/* Pinned to the pane rather than to the scan: the scan is drawn on a canvas
-                  now, and a button riding it would be off-screen at any real zoom. */}
+                  now, and a button riding it would be off-screen at any real zoom. On a touch
+                  screen it keeps clear of the divider's grip, which reaches over this edge. */}
               {page && (
                 <CopyImageButton
                   url={renditionUrl(page.id, 'screen', page.rotation)}
                   onError={setError}
-                  className="absolute right-1.5 top-1.5 z-20"
+                  className="absolute right-1.5 top-1.5 z-20 pointer-coarse:right-4"
                 />
               )}
               <div ref={overlayBoxRef} data-testid="overlay-box" className={overlayBoxClass}>
@@ -4094,7 +4116,8 @@ export function PageViewerPage() {
               </div>
             </div>
           </section>
-          <section id="ocr-panel" style={{ width: `${ocrFrac * (200 / 3)}%` }} className="h-full shrink-0 pl-1.5">
+          <section id="ocr-panel" style={{ width: textOnly ? '100%' : `${ocrFrac * (200 / 3)}%` }}
+                   className={`h-full shrink-0 ${textOnly ? '' : 'pl-1.5'}`}>
             {!inElement ? (
               <div className={`flex h-full flex-col overflow-hidden p-3 ${boxChrome}`}>
                 <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2">
@@ -4236,7 +4259,7 @@ export function PageViewerPage() {
       </>}
       status={
         <StatusBar
-          zoom={{
+          zoom={textOnly ? null : {
             out: () => setScale(scaleRef.current / 1.25),
             in: () => setScale(scaleRef.current * 1.25),
             reset: () => setScale(1),
@@ -4251,6 +4274,16 @@ export function PageViewerPage() {
       }
     />
     {sheetOpen && <ShortcutSheet groups={shortcutGroups} onClose={() => setSheetOpen(false)} />}
+    {sheetFor !== null && page && (() => {
+      const i = pageLines.findIndex((l) => l.id === sheetFor)
+      if (i === -1) return null
+      const line = pageLines[i]
+      return (
+        <ScanSheet page={page} line={line.polygon} title={line.corrected_text ?? line.text ?? ''}
+                   above={pageLines[i - 1]?.polygon} below={pageLines[i + 1]?.polygon}
+                   onClose={() => setSheetFor(null)} />
+      )
+    })()}
     </>
   )
 }

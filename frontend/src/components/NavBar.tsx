@@ -1,15 +1,20 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { Link, Outlet, useMatch, useNavigate } from 'react-router-dom'
+import type { ReactNode } from 'react'
+import { Link, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import { getPendingCount, getQueue } from '../api'
 import type { QueueState } from '../api'
 import { useAuth } from '../auth'
 import { useCommand } from '../commands'
+import { useIsNarrow, useIsPhone } from '../hooks/useMediaQuery'
 import { profilePath } from '../people'
 import { AppFooter } from './AppFooter'
+import { MenuIcon } from './icons'
 import { PresencePill } from './presence/PresencePill'
 import { ThemeToggle, cycleTheme } from './ThemeToggle'
 import { Avatar } from './ui/Avatar'
-import { buttonClass } from './ui/Button'
+import { Button, buttonClass } from './ui/Button'
+import { popoverChrome } from './ui/Card'
+import { useDismiss } from './ui/menu'
 
 export interface Crumb {
   label: string
@@ -51,7 +56,7 @@ export function Shell() {
         <div className="shrink-0">
           <NavBar crumbs={crumbs} />
         </div>
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div data-testid="app-main" className="min-h-0 flex-1 overflow-auto">
           {fullHeight ? <Outlet /> : (
             <div className="flex min-h-full flex-col">
               <div className="flex-1"><Outlet /></div>
@@ -64,19 +69,33 @@ export function Shell() {
   )
 }
 
-function QueuePill({ queue }: { queue: QueueState | null }) {
+function queueSummary(queue: QueueState) {
+  const running = queue.gpu.running
+  return [running ? `running: ${running.name}` : 'idle', `${queue.gpu.queued.length} queued`,
+          ...(queue.cluster.length ? [`${queue.cluster.length} on cluster`] : [])].join(' · ')
+}
+
+/** The pipeline's state on the bar. Narrow, only its dot: the counts are in the menu. */
+function QueuePill({ queue, compact }: { queue: QueueState | null; compact: boolean }) {
   if (!queue) return null
   const running = queue.gpu.running
+  const dot = <span className={`h-1.5 w-1.5 rounded-full ${running ? 'animate-pulse bg-accent' : 'bg-line-strong'}`} />
+  if (compact) {
+    return (
+      <Link to="/queue" data-testid="queue-pill" aria-label={`Queue: ${queueSummary(queue)}`}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full pointer-coarse:h-11 pointer-coarse:w-11">
+        {dot}
+      </Link>
+    )
+  }
   return (
     <Link
       to="/queue"
       data-testid="queue-pill"
       title={running ? `running: ${running.name}` : 'pipeline idle'}
-      className="flex items-center gap-1.5 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-subtle hover:border-accent hover:text-accent-ink"
+      className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-subtle hover:border-accent hover:text-accent-ink"
     >
-      <span
-        className={`h-1.5 w-1.5 rounded-full ${running ? 'animate-pulse bg-accent' : 'bg-line-strong'}`}
-      />
+      {dot}
       {running ? <span className="max-w-48 truncate">{running.name}</span> : 'idle'}
       <span>· {queue.gpu.queued.length} queued</span>
       {queue.cluster.length > 0 && <span>· {queue.cluster.length} on cluster</span>}
@@ -120,6 +139,8 @@ export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
   const [queue, setQueue] = useState<QueueState | null>(null)
   const pending = usePendingCount(isAdmin)
   const navigate = useNavigate()
+  const narrow = useIsNarrow()
+  const phone = useIsPhone()
 
   // The nav is on every page, so these are the commands that work anywhere. Each is
   // offered only where its link is: a key must not reach a page its owner may not open.
@@ -138,14 +159,28 @@ export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
     return () => clearInterval(t)
   }, [])
 
+  const adminLink = (className: string) => (
+    <Link to="/admin" className={className}
+          title={pending ? `${pending} waiting for approval` : undefined}>
+      Admin
+      {pending > 0 && (
+        <span data-testid="admin-pending" aria-label={`${pending} waiting for approval`}
+              className="min-w-4 rounded-full bg-accent px-1 text-center text-[10px] font-semibold leading-4 text-on-accent">
+          {pending}
+        </span>
+      )}
+    </Link>
+  )
+
   return (
-    <header className="border-b border-line bg-surface">
+    <header className="relative border-b border-line bg-surface">
       <div className="flex h-12 items-center gap-3 px-4">
         <nav className="flex min-w-0 items-center gap-2 text-sm">
           <Link to="/" className="shrink-0 font-serif text-base font-semibold hover:text-accent-ink">
             DeepLabel
           </Link>
-          {crumbs.map((c, i) => (
+          {/* On a phone the page's own title says where you are. */}
+          {!phone && crumbs.map((c, i) => (
             <span key={i} className="flex min-w-0 items-center gap-2">
               <span className="text-line">/</span>
               {c.to ? (
@@ -165,36 +200,80 @@ export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
             </span>
           ))}
         </nav>
-        <QueuePill queue={queue} />
-        <PresencePill />
-        <div className="ml-auto flex items-center gap-2">
-          <Link to="/queue" className={buttonClass({ variant: 'ghost', size: 'sm' })}>
-            Queue
-          </Link>
-          <Link to="/models" className={buttonClass({ variant: 'ghost', size: 'sm' })}>
-            Models
-          </Link>
-          {isAdmin && (
-            <Link to="/admin" className={buttonClass({ variant: 'ghost', size: 'sm' }, 'gap-1.5')}
-                  title={pending ? `${pending} waiting for approval` : undefined}>
-              Admin
-              {pending > 0 && (
-                <span data-testid="admin-pending" aria-label={`${pending} waiting for approval`}
-                      className="min-w-4 rounded-full bg-accent px-1 text-center text-[10px] font-semibold leading-4 text-on-accent">
-                  {pending}
-                </span>
+        <QueuePill queue={queue} compact={narrow} />
+        {narrow ? (
+          <PhoneMenu queue={queue} adminLink={isAdmin ? adminLink : null} canEdit={canEdit} />
+        ) : (
+          <>
+            <PresencePill />
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <Link to="/queue" className={buttonClass({ variant: 'ghost', size: 'sm' }, 'whitespace-nowrap')}>
+                Queue
+              </Link>
+              <Link to="/models" className={buttonClass({ variant: 'ghost', size: 'sm' }, 'whitespace-nowrap')}>
+                Models
+              </Link>
+              {isAdmin && adminLink(buttonClass({ variant: 'ghost', size: 'sm' }, 'gap-1.5 whitespace-nowrap'))}
+              {canEdit && (
+                <Link to="/new" className={buttonClass({ variant: 'primary', size: 'md' }, 'whitespace-nowrap')}>
+                  New job
+                </Link>
               )}
-            </Link>
-          )}
+              <ThemeToggle />
+              <ProfileLink />
+            </div>
+          </>
+        )}
+      </div>
+    </header>
+  )
+}
+
+/** Everything the bar holds beyond the logo and the queue's dot, behind one button. It
+ *  shuts on a pick, on a tap elsewhere and on Escape, and whenever the page changes. */
+function PhoneMenu({ queue, adminLink, canEdit }: {
+  queue: QueueState | null
+  adminLink: ((className: string) => ReactNode) | null
+  canEdit: boolean
+}) {
+  const { user } = useAuth()
+  const [open, setOpen] = useState(false)
+  const { pathname } = useLocation()
+  useDismiss(open, () => setOpen(false))
+  useEffect(() => setOpen(false), [pathname])
+
+  const item = buttonClass({ variant: 'ghost', size: 'md' }, 'w-full justify-start')
+  return (
+    <div className="ml-auto">
+      <Button variant="ghost" size="icon" data-testid="nav-menu-button" aria-label="Menu" aria-expanded={open}
+              onClick={(e) => {
+                e.stopPropagation()
+                setOpen((o) => !o)
+              }}>
+        <MenuIcon />
+      </Button>
+      {open && (
+        <nav aria-label="Menu" data-testid="nav-menu"
+             onClick={(e) => e.stopPropagation()}
+             className={`absolute inset-x-2 top-12 z-40 flex flex-col gap-1 p-2 ${popoverChrome}`}>
+          <Link to="/queue" className={item}>
+            Queue
+            {queue && <span className="ml-auto text-xs font-normal text-ink-subtle">{queueSummary(queue)}</span>}
+          </Link>
+          <Link to="/models" className={item}>Models</Link>
+          {adminLink?.(`${item} gap-1.5`)}
           {canEdit && (
-            <Link to="/new" className={buttonClass({ variant: 'primary', size: 'md' })}>
+            <Link to="/new" className={buttonClass({ variant: 'primary', size: 'md' }, 'w-full')}>
               New job
             </Link>
           )}
-          <ThemeToggle />
-          <ProfileLink />
-        </div>
-      </div>
-    </header>
+          <div className="mt-1 flex items-center gap-2 border-t border-line pt-2">
+            <ProfileLink />
+            <Link to={profilePath(user)} className="truncate text-sm text-ink-muted">{user}</Link>
+            <span className="ml-auto"><ThemeToggle /></span>
+          </div>
+        </nav>
+      )}
+    </div>
   )
 }

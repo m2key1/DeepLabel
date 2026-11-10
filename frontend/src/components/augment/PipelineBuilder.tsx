@@ -218,7 +218,7 @@ function StepCard(props: CardProps) {
 
           {transform && transform.params.length > 0 && (
             // More columns as the window grows, rather than ever-wider fields.
-            <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
               {transform.params.map((param) => (
                 <ParamField
                   key={`${node.id}:${param.name}`}
@@ -317,7 +317,7 @@ export function PipelineBuilder({ catalog, nodes, onChange, readOnly = false }: 
   const shared = { byName, open, onOpen: setOpen, nodes, onChange, readOnly, target, onTarget: setTarget, catalog }
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_22rem]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="space-y-1">
         {nodes.length === 0 && (
           <p className="rounded border border-dashed border-line-strong p-3 text-sm text-ink-muted">

@@ -15,6 +15,9 @@ import { displayed } from '../lib/text'
 import { useSettings } from '../settings'
 import type { SearchMode } from '../lib/fuzzy'
 import { Splitter } from '../components/ui/Splitter'
+import { LineInk } from '../components/viewer/LineInk'
+import { ScanSheet } from '../components/viewer/ScanSheet'
+import { useIsPhone } from '../hooks/useMediaQuery'
 
 function lineText(line: TranscriptLine): string {
   return displayed(line.corrected_text ?? line.text ?? '')
@@ -110,41 +113,6 @@ function clampSplit(ratio: number): number {
  *  whole scan that has not been decoded yet is the frame that drops. Decoding one on the
  *  main thread takes long enough to swallow the wheel events arriving while it happens,
  *  which is what made a turn feel like the page had stopped listening. */
-
-const DIM = 'transcript-plate-dim'
-
-/** The line being read, drawn on the scan by taking the rest of the page down rather than
- *  by colouring the line in: a hole in a dimmed sheet reads as "look here", where a tinted
- *  box reads as a form field.
- *
- *  The polygons are page-normalised and the viewBox is the page's own size, so the scan
- *  (object-contain) and this (preserveAspectRatio, which is the same rule) letterbox
- *  identically inside the same box - and where the box lands cannot disagree with where the
- *  ink is. */
-function Ink({ size, polygon }: { size: [number, number]; polygon: number[][] }) {
-  const [w, h] = size
-  const points = polygon.map(([x, y]) => `${x},${y}`).join(' ')
-  return (
-    // Positioned, because the scan above carries a drop shadow: a filter makes its own
-    // stacking context, which paints over every plain sibling whatever the order of them.
-    <svg viewBox={`0 0 ${w} ${h}`}
-         className="pointer-events-none absolute inset-0 h-full w-full">
-      <defs>
-        <mask id={DIM}>
-          <rect width={w} height={h} fill="white" />
-          <g transform={`scale(${w} ${h})`}>
-            <polygon points={points} fill="black" />
-          </g>
-        </mask>
-      </defs>
-      <rect width={w} height={h} fill="rgb(9 9 11)" opacity="0.45" mask={`url(#${DIM})`} />
-      <g transform={`scale(${w} ${h})`} data-testid="transcript-highlight">
-        <polygon points={points} fill="none" stroke="rgb(129 140 248)" strokeWidth="1.5"
-                 vectorEffect="non-scaling-stroke" />
-      </g>
-    </svg>
-  )
-}
 
 /** Keyed by the dataset, so going from one volume's transcript to another's starts afresh:
  *  the router keeps the component when only the id changes, and with it the pages already
@@ -270,6 +238,11 @@ function Transcript({ jobId }: { jobId: string }) {
         return blocks
       }, []),
   [content, reviewedOnly, hitHere])
+
+  // A phone has no room for the scan beside the text: a line tapped there opens its scan.
+  const phone = useIsPhone()
+  const [sheetFor, setSheetFor] = useState<number | null>(null)
+  const pageLines = useMemo(() => blocks.flatMap((b) => b.lines.map((row) => row.line)), [blocks])
 
   // The open page and the ones either side of it, so a turn finds its text already here.
   useEffect(() => {
@@ -568,7 +541,7 @@ function Transcript({ jobId }: { jobId: string }) {
           aria-label="Every page along the foot"
           title="Every page along the foot"
           onClick={() => keepStrip(!strip)}
-          className={toolBtn(strip)}
+          className={`${toolBtn(strip)} ${phone ? 'hidden' : ''}`}
         >
           <PagesIcon />
         </button>
@@ -595,7 +568,7 @@ function Transcript({ jobId }: { jobId: string }) {
           id="transcript-scans"
           data-testid="transcript-scans"
           style={{ flexBasis: `${split * 100}%` }}
-          className="flex min-w-0 shrink-0 grow-0 flex-col overflow-hidden bg-ground"
+          className={`flex min-w-0 shrink-0 grow-0 flex-col overflow-hidden bg-ground ${phone ? 'hidden' : ''}`}
         >
           {page ? (
             <>
@@ -618,7 +591,7 @@ function Transcript({ jobId }: { jobId: string }) {
                 >
                   <div ref={scanRefs.host} className="absolute inset-0" />
                   <div ref={scanRefs.box} className="absolute left-0 top-0 z-10 origin-top-left invisible">
-                    {ink && <Ink size={pageSize} polygon={ink} />}
+                    {ink && <LineInk size={pageSize} polygon={ink} testId="transcript-highlight" />}
                   </div>
                 </div>
               </div>
@@ -687,6 +660,7 @@ function Transcript({ jobId }: { jobId: string }) {
 
         <Splitter
           orientation="vertical"
+          className={phone ? 'hidden' : ''}
           aria-label="Width of the scan"
           data-testid="transcript-divider"
           aria-valuemin={Math.round(SPLIT.least * 100)}
@@ -742,6 +716,7 @@ function Transcript({ jobId }: { jobId: string }) {
                         data-hit={words ? 'true' : 'false'}
                         data-at={currentHit?.line === line.id ? 'true' : 'false'}
                         onMouseEnter={() => setHover(line.polygon)}
+                        onClick={() => (phone ? setSheetFor(line.id) : setHover(line.polygon))}
                         title={line.checked ? 'reviewed' : 'not reviewed yet'}
                         className={`-ml-1.5 rounded pl-5 pr-1.5 -indent-3.5 text-[15px] leading-7 ${
                           line.checked
@@ -792,7 +767,7 @@ function Transcript({ jobId }: { jobId: string }) {
             if (by !== undefined) step(by)
             else step(e.key === 'Home' ? -shown.length : shown.length)
           }}
-          className="relative w-4 shrink-0 cursor-pointer border-l border-line bg-surface focus:outline-none"
+          className="relative w-4 shrink-0 cursor-pointer border-l border-line bg-surface focus:outline-none pointer-coarse:after:absolute pointer-coarse:after:inset-y-0 pointer-coarse:after:-left-7 pointer-coarse:after:right-0 pointer-coarse:after:z-20"
         >
           {/* Inset by half the largest tick, so the first and last pages' ticks stay inside
               the window rather than hanging over its edges. */}
@@ -816,6 +791,15 @@ function Transcript({ jobId }: { jobId: string }) {
           </div>
         </div>
       </div>
+      {sheetFor !== null && page && (() => {
+        const i = pageLines.findIndex((l) => l.id === sheetFor)
+        if (i === -1) return null
+        return (
+          <ScanSheet page={page} line={pageLines[i].polygon} title={lineText(pageLines[i])}
+                     above={pageLines[i - 1]?.polygon} below={pageLines[i + 1]?.polygon}
+                     onClose={() => setSheetFor(null)} />
+        )
+      })()}
     </div>
   )
 }

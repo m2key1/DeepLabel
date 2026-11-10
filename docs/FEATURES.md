@@ -26,6 +26,7 @@ overview and setup.
 - [Collaboration](#collaboration)
 - [Accounts and permissions](#accounts-and-permissions)
 - [Profile and settings](#profile-and-settings)
+- [Phones and tablets](#phones-and-tablets)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [API](#api)
 
@@ -575,6 +576,28 @@ in Authentik, which nobody has to see or visit.
 - Every page except the two editors and the transcript, which fill the window, ends with a
   footer naming the running version and commit, with links to the documentation, the source
   and a new issue.
+
+## Phones and tablets
+
+- Every page fits a phone or a tablet: nothing is cut off, and no page scrolls sideways.
+- Below tablet width the top bar shows the logo, the queue as a coloured dot and a menu
+  button. The menu holds Queue (with what is running and queued), Models, Admin, New job,
+  your profile and the theme.
+- A phone is a narrow touch screen. A narrow window on a computer gets the menu and the
+  fitting below, but keeps the scan beside the text and the groups beside the list.
+- On a phone the dataset groups slide in from the left with the button at the list's edge,
+  and slide out again once one is picked.
+- A table wider than the screen scrolls sideways inside its own card. On the dataset page
+  the checkbox, the scan and the page number stay pinned at its left edge.
+- On a phone the transcript and the page viewer show the text alone. Tap a line in the
+  transcript, or the scan button beside a line in the page viewer, for its scan: the line
+  magnified with the lines above and below it, and Whole page for the full scan with the
+  line outlined, to drag and pinch. Edit mode and the tile editor open as on a larger
+  screen.
+- On a touch screen every button, tab and switch is at least 44 px, checkboxes are larger,
+  and the splitters and the transcript's page spine take a tap well beside them. With a
+  mouse the layout is as dense as before.
+- On a tablet, tapping a transcript line outlines it on the scan, as hovering does.
 
 ## Keyboard shortcuts
 
