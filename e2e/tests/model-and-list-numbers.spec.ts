@@ -87,7 +87,7 @@ test.describe("Scenario: the dataset list's numbers match the dataset's own", ()
     await expect(link).toHaveAttribute('title', '2 of 2 tiles reviewed')
   })
 
-  test('lines inside a container box are not counted as lines to review', async () => {
+  test('a box made a container gives its lines to Unassigned, where they count as lines to review', async () => {
     const jobId = await seedCompletedJob(uniqueName('Container in the list'), 1)
     const [pageId] = await jobPageIds(jobId)
     const elements = (await getPageDetail(jobId, pageId)).elements as
@@ -103,12 +103,18 @@ test.describe("Scenario: the dataset list's numbers match the dataset's own", ()
       method: 'PATCH', headers: json, body: JSON.stringify({ class_name: 'Table' }),
     })
 
-    // The table's three lines are out of the reading, as the page table counts them.
+    // A container holds no lines, so the paragraph's three leave it for Unassigned: still
+    // unreviewed, and counted as such beside the header's three checked ones.
+    const after = (await getPageDetail(jobId, pageId)).elements as
+      { class_name: string; kind: string; lines: { id: number }[] }[]
+    expect(after.find((e) => e.class_name === 'Table')!.lines).toEqual([])
+    expect(after.find((e) => e.kind === 'orphan')!.lines.map((l) => l.id).sort())
+      .toEqual(paragraph.lines.map((l) => l.id).sort())
     await expect.poll(async () => {
       const row = (await listJobs()).find((j) => j.id === jobId) as unknown as
         { lines_total: number; lines_done: number }
       return { total: row.lines_total, done: row.lines_done }
-    }).toEqual({ total: 3, done: 3 })
+    }).toEqual({ total: 6, done: 3 })
   })
 
   test('a dataset can be picked from its card as it can from its row', async ({ page }) => {

@@ -510,6 +510,17 @@ export async function deleteElement(elementId: number) {
   return backendFetch(`/api/elements/${elementId}`, { method: 'DELETE' })
 }
 
+export async function deleteLine(lineId: number) {
+  return backendFetch(`/api/lines/${lineId}`, { method: 'DELETE' })
+}
+
+/** A page as layout leaves one it found nothing on: no box and no line. A deleted box keeps
+ *  its lines, so the lines go first. */
+export async function stripLayoutFrom(jobId: string, pageId: number) {
+  for (const line of await pageLines(jobId, pageId)) await deleteLine(line.id)
+  for (const element of (await getPageDetail(jobId, pageId)).elements) await deleteElement(element.id)
+}
+
 export async function setElementBbox(elementId: number, bbox: number[]) {
   return backendFetch(`/api/elements/${elementId}`, {
     method: 'PATCH',

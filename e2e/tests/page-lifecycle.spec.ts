@@ -1,23 +1,15 @@
 import { test, expect } from '../helpers/test'
 import {
-  OCR_AUTHOR, backendFetch, createJob, datasetInfo, deleteElement, getJob, getPageDetail,
+  OCR_AUTHOR, backendFetch, createJob, datasetInfo, getJob, getPageDetail,
   getReocrPreview, greedyLines, identity, jobPageIds, listRegistryModels, markLinesChecked,
   moveJobToGroup, pageDeletedFlags, pageLines, patchJob, seedCompletedJob, setPagesDeleted,
-  shareJob, uniqueName, waitForJobStatus,
+  shareJob, stripLayoutFrom, uniqueName, waitForJobStatus,
 } from '../helpers/api'
 import type { DatasetInfo } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { textPdf } from '../helpers/pdf'
 import { openViewer } from '../helpers/viewer'
 import { asSession, seedSession, useSession } from '../helpers/session'
-
-/** What a page layout found nothing on looks like: no content box, and with it no lines.
- *  Reached by deleting the boxes the stub drew, which takes their lines with them. */
-async function stripTheLayoutFrom(jobId: string, pageId: number) {
-  const detail = await getPageDetail(jobId, pageId)
-  for (const element of detail.elements) await deleteElement(element.id)
-  expect(await pageLines(jobId, pageId)).toHaveLength(0)
-}
 
 async function selectEveryRow(page: import('@playwright/test').Page, rows: number) {
   await expect(page.locator('tbody tr')).toHaveCount(rows)
@@ -63,7 +55,8 @@ test.describe('Scenario: a run over a selection where a page has nothing to do',
   test('a page with no lines is named and left alone, and the rest is re-read', async ({ page }) => {
     const jobId = await seedCompletedJob(uniqueName('Partly empty'), 2)
     const [first, second] = await jobPageIds(jobId)
-    await stripTheLayoutFrom(jobId, first)
+    await stripLayoutFrom(jobId, first)
+    expect(await pageLines(jobId, first)).toHaveLength(0)
     await patchJob(jobId, { ocr_decode: 'greedy' })
     expect(await greedyLines(jobId)).toBe(0)
 

@@ -27,7 +27,7 @@ test.describe('Scenario: what a box takes with it', () => {
     expect(after.map((e) => e.checked)).toEqual([false, false, false])
   })
 
-  test("deleting a box hands its lines' readings back, as deleting a line does", async () => {
+  test('deleting a box keeps its lines, and what was read on them stays with them', async () => {
     const jobId = await seedDistinctPagesJob(uniqueName('Box with readings'), 1, 85)
     const [pageId] = await jobPageIds(jobId)
     const connection = await seedLlmConnection(uniqueName('Reader'), ['stub-perfect'], DEV)
@@ -40,16 +40,20 @@ test.describe('Scenario: what a box takes with it', () => {
       .filter((c) => c.source === 'llm' && c.text.startsWith('Sample Paragraph'))
     await expect.poll(async () => (await paragraphReadings()).filter((c) => c.line_id !== null).length,
                       { timeout: 30_000 }).toBe(3)
+    const readOn = (await paragraphReadings()).map((c) => c.line_id).sort()
 
-    const paragraph = ((await getPageDetail(jobId, pageId)).elements as Element[])
+    const paragraph = ((await getPageDetail(jobId, pageId)).elements as (Element & { lines: { id: number }[] })[])
       .find((e) => e.class_name === 'Paragraph')!
     await deleteElement(paragraph.id)
-    expect((await pageLines(jobId, pageId)).map((l) => l.text)).toEqual([
-      'Sample Header line 1', 'Sample Header line 2', 'Sample Header line 3',
-    ])
 
-    // Nothing of what was read is lost: the three readings wait, unattached, for a line.
-    expect((await paragraphReadings()).map((c) => c.line_id)).toEqual([null, null, null])
+    // The box goes; its three lines fall to Unassigned, and the readings stay on them.
+    const after = (await getPageDetail(jobId, pageId)).elements as
+      { class_name: string; kind: string; lines: { id: number }[] }[]
+    expect(after.map((e) => e.class_name)).not.toContain('Paragraph')
+    expect(after.find((e) => e.kind === 'orphan')!.lines.map((l) => l.id).sort())
+      .toEqual(paragraph.lines.map((l) => l.id).sort())
+    expect(await pageLines(jobId, pageId)).toHaveLength(6)
+    expect((await paragraphReadings()).map((c) => c.line_id).sort()).toEqual(readOn)
   })
 })
 

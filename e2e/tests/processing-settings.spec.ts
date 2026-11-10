@@ -1,8 +1,8 @@
 import type { Page } from '@playwright/test'
 import { test, expect } from '../helpers/test'
 import {
-  UNASSIGNED_LINES, correctLine, deleteElement, getJob, getPageDetail, jobPageIds, pageCandidates, pageLines,
-  seedCompletedJob, uniqueName, waitForJobStatus,
+  UNASSIGNED_LINES, correctLine, getJob, getPageDetail, jobPageIds, pageCandidates, pageLines,
+  seedCompletedJob, stripLayoutFrom, uniqueName, waitForJobStatus,
 } from '../helpers/api'
 import { lineModeOption, openSettings, phaseBox, saveSettings } from '../helpers/dataset-settings'
 import { seedMapJob } from '../helpers/map'
@@ -116,20 +116,12 @@ test.describe('Scenario: changing how a dataset is processed', () => {
   })
 })
 
-/** What a page layout found nothing on looks like: no content box, so its lines can only
- *  be whatever detection scrapes off the whole scan. Reached by deleting the boxes the stub
- *  drew, which takes their lines with them. */
-async function stripTheLayoutFrom(jobId: string, pageId: number) {
-  const detail = await getPageDetail(jobId, pageId)
-  for (const element of detail.elements) await deleteElement(element.id)
-  expect(await pageLines(jobId, pageId)).toHaveLength(0)
-}
-
 test.describe('Scenario: the pages layout found nothing on', () => {
   test('they are filtered to, and given their lines back on their own', async ({ page }) => {
     const jobId = await seedCompletedJob(uniqueName('No layout pages'), 2)
     const [first, second] = await jobPageIds(jobId)
-    await stripTheLayoutFrom(jobId, first)
+    await stripLayoutFrom(jobId, first)
+    expect(await pageLines(jobId, first)).toHaveLength(0)
 
     await page.goto(`/jobs/${jobId}`)
     const chip = page.getByTestId('page-filter-no-layout')
