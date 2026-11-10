@@ -24,6 +24,7 @@ import { MoveToGroupDialog } from '../components/job/MoveToGroupDialog'
 import { groupSize } from '../components/job/groups'
 import { sharedPrefix } from '../components/job/sharedPrefix'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
+import { AppFooter } from '../components/AppFooter'
 import { StatusBadge } from '../components/StatusBadge'
 import { Button, GroupButton } from '../components/ui/Button'
 import { Check } from '../components/ui/Field'
@@ -1287,24 +1288,27 @@ export function JobsPage() {
             </button>
           </div>
         )}
-        <div ref={listRef} data-testid="jobs-scroller" className="min-h-0 flex-1 overflow-auto px-2 py-3">
-          {error && <p role="alert" className="mb-3 px-2 text-sm text-danger">{error}</p>}
-          {!jobs && <JobCardSkeletons />}
-          {jobs && jobs.length === 0 && groups.length === 0 && (
-            <p className="px-2 text-sm text-ink-subtle">No datasets yet.</p>
-          )}
-          {jobs && jobs.length > 0 && visible.length === 0 && (
-            <p className="px-2 text-sm text-ink-subtle">
-              No dataset matches.{' '}
-              <button className="text-accent-ink underline underline-offset-2"
-                      onClick={clearFilters}>
-                Clear the search and filters
-              </button>{' '}
-              to see the rest.
-            </p>
-          )}
-          {jobs && view === 'table' && visible.length > 0 && tableHead}
-          {sections.map(({ key, title, rows, group }) => renderSection(key, title, rows, group))}
+        <div data-testid="jobs-scroller" className="flex min-h-0 flex-1 flex-col overflow-auto">
+          <div ref={listRef} className="flex-1 px-2 py-3">
+            {error && <p role="alert" className="mb-3 px-2 text-sm text-danger">{error}</p>}
+            {!jobs && <JobCardSkeletons />}
+            {jobs && jobs.length === 0 && groups.length === 0 && (
+              <p className="px-2 text-sm text-ink-subtle">No datasets yet.</p>
+            )}
+            {jobs && jobs.length > 0 && visible.length === 0 && (
+              <p className="px-2 text-sm text-ink-subtle">
+                No dataset matches.{' '}
+                <button className="text-accent-ink underline underline-offset-2"
+                        onClick={clearFilters}>
+                  Clear the search and filters
+                </button>{' '}
+                to see the rest.
+              </p>
+            )}
+            {jobs && view === 'table' && visible.length > 0 && tableHead}
+            {sections.map(({ key, title, rows, group }) => renderSection(key, title, rows, group))}
+          </div>
+          <AppFooter />
         </div>
       </div>
       {pending && (

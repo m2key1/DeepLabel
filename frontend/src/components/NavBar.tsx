@@ -43,13 +43,15 @@ export function Shell() {
   const inPageEditor = !!useMatch('/jobs/:id/pages/:pageId')
   const inTileEditor = !!useMatch('/jobs/:id/tiles/:pageId')
   const inTranscript = !!useMatch('/jobs/:id/transcript')
-  const fullHeight = inPageEditor || inTileEditor || inTranscript
+  const inDatasetList = !!useMatch('/')
+  const fullHeight = inPageEditor || inTileEditor || inTranscript || inDatasetList
   // The shell owns the viewport and the page scrolls inside it, rather than the document
   // scrolling around a nav bar of its own height. A full-height page (the editors, the
-  // transcript) can then ask for h-full and get exactly the space left under the nav - as the
-  // document, it would overflow by the nav's height and raise a window scrollbar over the
-  // canvas edge. Under the footer's wrapper h-full has no height to fill, so its panes grow
-  // with their content instead of scrolling.
+  // transcript, the dataset list) can then ask for h-full and get exactly the space left under
+  // the nav - as the document, it would overflow by the nav's height and raise a window
+  // scrollbar over the canvas edge. Under the footer's wrapper h-full has no height to fill,
+  // so its panes grow with their content instead of scrolling; the dataset list, which
+  // scrolls its rows under a toolbar that stays, ends its own scroll with the footer.
   return (
     <CrumbContext.Provider value={setCrumbs}>
       <div className="flex h-screen flex-col">

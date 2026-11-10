@@ -32,7 +32,8 @@ overview and setup.
 
 ## Datasets and projects
 
-The start page lists every dataset you can open, as a table or as cards.
+The start page lists every dataset you can open, as a table or as cards. The list scrolls
+under its toolbar and the project rail, which stay in place, and ends with the footer.
 
 - Search, sort, filter to your own datasets or to those that need review, and pick which
   columns to show.
@@ -575,7 +576,7 @@ in Authentik, which nobody has to see or visit.
 - Settings are stored with your account and follow you to every device.
 - Every page except the two editors and the transcript, which fill the window, ends with a
   footer naming the running version and commit, with links to the documentation, the source
-  and a new issue.
+  and a new issue. On the dataset list it comes after the last dataset.
 
 ## Phones and tablets
 

@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test'
 import { test, expect } from '../helpers/test'
 import { openSettings, saveSettings } from '../helpers/dataset-settings'
 import { wizardStep } from '../helpers/new-dataset'
@@ -475,14 +476,40 @@ test.describe('Scenario: downloading from the list', () => {
 })
 
 test.describe('Scenario: the foot of a long list', () => {
-  test('the last dataset opens its info panel where it can be seen', async ({ page }) => {
-    const prefix = uniqueName('Foot of list')
+  /** Sixteen datasets, more than a 700 px window shows, and the list filtered to them. */
+  async function openLongList(page: Page, label: string) {
+    const prefix = uniqueName(label)
     for (let i = 1; i <= 16; i++) await createJob(`${prefix} ${String(i).padStart(2, '0')}`, 1)
     await page.setViewportSize({ width: 1280, height: 700 })
     await page.goto(`/?q=${encodeURIComponent(prefix)}`)
     const cards = page.getByTestId('job-card')
     await expect(cards).toHaveCount(16)
+    return cards
+  }
 
+  test('the list scrolls under the toolbar and the groups, and ends with the footer', async ({ page }) => {
+    const cards = await openLongList(page, 'Long list')
+    const toolbar = page.getByRole('textbox', { name: 'Search datasets' }).locator('..')
+    const sidebar = page.getByTestId('dataset-sidebar')
+    const before = { toolbar: await toolbar.boundingBox(), sidebar: await sidebar.boundingBox() }
+
+    await cards.first().hover()
+    await page.mouse.wheel(0, 4000)
+    await expect(cards.last()).toBeInViewport()
+    expect(await toolbar.boundingBox()).toEqual(before.toolbar)
+    expect(await sidebar.boundingBox()).toEqual(before.sidebar)
+    await expect(page.getByTestId('app-main')).toHaveJSProperty('scrollTop', 0)
+    await expect(page.getByTestId('jobs-scroller').getByTestId('app-footer')).toBeInViewport()
+
+    await cards.last().getByRole('checkbox').click()
+    const bar = page.getByTestId('bulk-bar')
+    await expect(bar).toContainText('1 selected')
+    expect((await bar.boundingBox())!.y).toBeCloseTo(before.toolbar!.y, 0)
+    await expect(cards.last()).toBeInViewport()
+  })
+
+  test('the last dataset opens its info panel where it can be seen', async ({ page }) => {
+    const cards = await openLongList(page, 'Foot of list')
     const last = cards.last()
     await last.scrollIntoViewIfNeeded()
     await last.getByTestId('job-info-toggle').click()
