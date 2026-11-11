@@ -57,19 +57,32 @@ class TestEveryDecodeIsScored:
     never show.
     """
 
-    def test_a_result_is_scored_in_every_mode(self, tmp_path):
+    def _result_modes(self, tmp_path, base_decoder):
         from app import evaluator, store
         conn = store.connect(tmp_path / 'app.db')
-        conn.execute("INSERT INTO models (id, task, name, source, checkpoint) "
-                     "VALUES (7, 'ocr', 'new', 'trained', '/m.pt')")
+        conn.execute("INSERT INTO models (id, task, name, source, checkpoint, decoder) "
+                     "VALUES (6, 'ocr', 'base', 'imported', '/b.pt', ?)", (base_decoder,))
+        conn.execute("INSERT INTO models (id, task, name, source, checkpoint, trained_from) "
+                     "VALUES (7, 'ocr', 'new', 'trained', '/m.pt', 6)")
         conn.execute("INSERT INTO trainings (id, task, name, target, owner) "
                      "VALUES (3, 'ocr', 't', 'slurm', 'root')")
         conn.commit()
         evaluator.create_result_eval(conn, {'id': 3, 'owner': 'root'}, 7)
         modes = [r[0] for r in conn.execute(
             'SELECT decode FROM evaluations WHERE model_id = 7 ORDER BY decode')]
-        assert modes == sorted(decode.OCR_DECODES)
         conn.close()
+        return modes
+
+    def test_a_result_is_scored_in_every_mode(self, tmp_path):
+        assert self._result_modes(tmp_path, 'token') == sorted(decode.OCR_DECODES)
+
+    def test_a_character_decoder_is_not_scored_on_its_own_reading(self, tmp_path):
+        """On a character decoder that reading is the plain greedy decoder, which the rerank
+        beats; scored, it would be the model's headline number."""
+        assert self._result_modes(tmp_path, 'char') == ['beam', 'greedy', 'rescored']
+
+    def test_a_model_not_loaded_yet_has_its_bases_decoder(self, tmp_path):
+        assert self._result_modes(tmp_path, None) == ['beam', 'greedy', 'rescored']
 
 
 class TestDomainLanguageModel:

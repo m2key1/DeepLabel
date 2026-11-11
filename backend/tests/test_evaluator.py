@@ -86,7 +86,16 @@ class TestTheBaselineScore:
 
         evaluator.create_baseline(conn, training)
 
-        assert sorted(e['decode'] for e in evaluations(conn)) == sorted(decode.OCR_DECODES)
+        assert sorted(e['decode'] for e in evaluations(conn)) == ['beam', 'greedy', 'rescored']
+
+    def test_a_token_decoder_base_is_scored_on_its_own_reading_too(self, conn, training, tmp_path):
+        write_split(tmp_path)
+        conn.execute("UPDATE models SET decoder = 'token' WHERE id = 1")
+        conn.commit()
+
+        evaluator.create_baseline(conn, training)
+
+        assert sorted(e['decode'] for e in evaluations(conn)) == ['beam', 'decoder', 'greedy', 'rescored']
 
     def test_it_scores_the_base_model_on_this_trainings_split(self, conn, training, tmp_path):
         write_split(tmp_path)
@@ -155,8 +164,7 @@ class TestNotPayingForTheSameScoreTwice:
 
         evaluator.create_baseline(conn, training)
 
-        assert [e['status'] for e in evaluations(conn) if e['training_id'] == 1] == \
-            ['queued'] * len(decode.OCR_DECODES)
+        assert [e['status'] for e in evaluations(conn) if e['training_id'] == 1] == ['queued'] * 3
 
     def test_a_split_that_cannot_be_fingerprinted_is_always_re_run(self, conn, training):
         """No snapshot on disk means nothing to compare, so nothing may be assumed equal."""
@@ -201,7 +209,7 @@ class TestScoringWhatCameOut:
 
         scored = evaluations(conn)
         assert {e['model_id'] for e in scored} == {2}
-        assert sorted(e['decode'] for e in scored) == sorted(decode.OCR_DECODES)
+        assert sorted(e['decode'] for e in scored) == ['beam', 'greedy', 'rescored']
 
     def test_the_pair_shares_a_fingerprint_so_the_two_numbers_are_comparable(
             self, conn, training, tmp_path):
@@ -240,8 +248,7 @@ class TestAnEmptyValidSplit:
         evaluator.create_baseline(conn, training)
         evaluator.create_result_eval(conn, training, new_model_id=2)
 
-        assert [e['model_id'] for e in evaluations(conn)] == \
-            [1] * len(decode.OCR_DECODES) + [2] * len(decode.OCR_DECODES)
+        assert [e['model_id'] for e in evaluations(conn)] == [1] * 3 + [2] * 3
 
     def test_a_held_out_test_set_is_still_scored(self, conn, tmp_path):
         """A test set is material of its own, not the valid split: an empty split says

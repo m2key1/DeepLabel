@@ -1,9 +1,10 @@
-import type { Evaluation } from '../../api'
+import type { Evaluation, OcrDecode } from '../../api'
 
-const DECODE_ORDER = ['beam', 'rescored', 'greedy'] as const
+const DECODE_ORDER: OcrDecode[] = ['decoder', 'beam', 'rescored', 'greedy']
 
-/** One model's scores on one dataset: the dot is its best decode on file (beam first),
- *  and the other decodes come along for the card. */
+/** One model's scores on one dataset: the dot is its best decode on file (a token decoder's
+ *  own reading first, which only such models are scored in, then beam), and the other
+ *  decodes come along for the card. */
 export interface ModelMark {
   modelId: number
   shown: Evaluation

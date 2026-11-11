@@ -68,6 +68,21 @@ def valid_split_is_empty(training: dict) -> bool:
     return counts is not None and not counts.get('val')
 
 
+def has_token_decoder(conn, model_id: int) -> bool:
+    """Whether a model reads lines with a token decoder of its own. A model no run has loaded yet
+    is taken to have its base's: a fine-tune keeps the decoder it started from."""
+    row = registry.get_model(conn, model_id)
+    while row is not None and not row['decoder'] and row['trained_from']:
+        row = registry.get_model(conn, row['trained_from'])
+    return row is not None and row['decoder'] == 'token'
+
+
+def decodes_for(conn, model_id: int) -> list[str]:
+    """The decodes a model is scored in. Its decoder's own reading counts only for a token
+    decoder; on a character decoder it is the plain greedy decoder, which the rerank beats."""
+    return [mode for mode in decode.OCR_DECODES if mode != 'decoder' or has_token_decoder(conn, model_id)]
+
+
 def create_baseline(conn, training: dict):
     """Queued as soon as the snapshot exists: scores the base model on the valid
     split while the training runs, so the number to beat is known early - and
@@ -80,7 +95,7 @@ def create_baseline(conn, training: dict):
     if registry.get_model(conn, training['base_model_id']) is None:
         return
     fingerprint = split_fingerprint(training['id'])
-    for mode in decode.OCR_DECODES:
+    for mode in decodes_for(conn, training['base_model_id']):
         prior = conn.execute(
             'SELECT id, cer, wer, line_count FROM evaluations '
             'WHERE model_id = ? AND decode = ? AND fingerprint = ? AND status = ? '
@@ -107,7 +122,7 @@ def create_result_eval(conn, training: dict, new_model_id: int):
     if valid_split_is_empty(training):
         return
     fingerprint = split_fingerprint(training['id'])
-    for mode in decode.OCR_DECODES:
+    for mode in decodes_for(conn, new_model_id):
         create(conn, new_model_id, {'snapshot': training['id']}, mode,
                training['owner'], training['id'], fingerprint)
 

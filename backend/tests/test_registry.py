@@ -58,12 +58,12 @@ def test_registering_a_result_scores_the_base_model_beside_it(conn, tmp_path, mo
     rows = conn.execute(
         'SELECT model_id, training_id, source, decode, status, owner FROM evaluations '
         'ORDER BY id').fetchall()
-    # Every decode is scored for both, so base and result are comparable in each mode.
-    from app import decode
+    # Every decode the model has is scored for both, so base and result are comparable in
+    # each mode; neither has a token decoder, so its own reading is not among them.
     assert [(r['model_id'], r['training_id'], r['source'], r['decode'], r['status'], r['owner'])
             for r in rows] == [
-        *[(base, 2, '{"snapshot": 2}', m, 'queued', 'eva') for m in decode.OCR_DECODES],
-        *[(new_model, 2, '{"snapshot": 2}', m, 'queued', 'eva') for m in decode.OCR_DECODES],
+        *[(base, 2, '{"snapshot": 2}', m, 'queued', 'eva') for m in ('beam', 'rescored', 'greedy')],
+        *[(new_model, 2, '{"snapshot": 2}', m, 'queued', 'eva') for m in ('beam', 'rescored', 'greedy')],
     ]
 
 
@@ -80,7 +80,7 @@ def _seed_training_with_valid_split(conn, tmp_path, training_id, base, pairs):
 
 
 def test_identical_valid_split_reuses_the_baseline_scores(conn, tmp_path, monkeypatch):
-    from app import decode, evaluator
+    from app import evaluator
 
     monkeypatch.setattr('app.config.TRAININGS_DIR', tmp_path)
     seed_defaults(conn)
@@ -103,8 +103,8 @@ def test_identical_valid_split_reuses_the_baseline_scores(conn, tmp_path, monkey
         (11, 'done', 0.09, 0.49, 2),
     ]
     # The modes with nothing to copy are queued to run, not silently skipped.
-    assert conn.execute("SELECT COUNT(*) FROM evaluations WHERE training_id = 11 "
-                        "AND status = 'queued'").fetchone()[0] == len(decode.OCR_DECODES) - 1
+    assert [r[0] for r in conn.execute("SELECT decode FROM evaluations WHERE training_id = 11 "
+                                       "AND status = 'queued' ORDER BY decode")] == ['greedy', 'rescored']
 
 
 def test_changed_valid_split_queues_a_fresh_baseline(conn, tmp_path, monkeypatch):
