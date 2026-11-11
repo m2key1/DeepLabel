@@ -17,7 +17,7 @@ import { EMPTY_STACK, isEmptyStack } from '../augment/pipeline'
 import { ClusterUnlock } from './ClusterUnlock'
 import { useAutoClear } from '../../messages'
 import { Textarea, controlClass } from '../ui/Field'
-import { fieldValue, tunedValues } from './tunables'
+import { fieldValue, knobDefault, tunedValues } from './tunables'
 import { PreflightPanel } from './PreflightReport'
 import { usePreflight } from './usePreflight'
 import type { PreflightRequest } from './usePreflight'
@@ -116,13 +116,14 @@ function groupTunables(tunables: Tunable[]): { name: string; knobs: Tunable[] }[
   return groups
 }
 
-function TunableField({ knob, value, onChange }: {
+function TunableField({ knob, value, baseDecoder, onChange }: {
   knob: Tunable
   value: string
+  baseDecoder: string | null | undefined
   onChange: (value: string) => void
 }) {
   const id = `training-knob-${knob.key}`
-  const placeholder = formatDefault(knob.default)
+  const placeholder = formatDefault(knobDefault(knob, baseDecoder))
   return (
     <div data-testid="tunable-field" data-tuned={value !== '' || undefined}>
       <div className="mb-1 flex items-center gap-1">
@@ -182,6 +183,8 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
     return defaultModel ? String(defaultModel.id) : ''
   })
   const [baseTouched, setBaseTouched] = useState(false)
+  // A token-decoder base fine-tunes with defaults of its own; the fields show those.
+  const baseDecoder = models.find((m) => String(m.id) === baseId)?.decoder
 
   // The dialog can open before the models list resolves; adopt the task default
   // when it arrives unless the user already made a choice. A rerun never adopts it:
@@ -912,6 +915,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
                       key={knob.key}
                       knob={knob}
                       value={tuned[knob.key] ?? ''}
+                      baseDecoder={baseDecoder}
                       onChange={(value) => setKnob(knob.key, value)}
                     />
                   ))}

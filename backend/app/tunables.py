@@ -39,9 +39,12 @@ def declared(train_info: dict) -> tuple[Tunable, ...]:
 
 def declared_options(train_info: dict, backend: str) -> dict:
     """The dialog's view of a run trained on a model backend: its knobs with the defaults
-    it declares, which are what an untuned run there uses."""
-    defaults_by_key = {t['key']: t.get('default') for t in train_info.get('tunables') or []}
-    return {'tunables': [{**t.public(), 'default': defaults_by_key.get(t.key)} for t in declared(train_info)],
+    it declares, which are what an untuned run there uses, and those a run uses instead when
+    its base model has a given kind of decoder."""
+    declared_by_key = {t['key']: t for t in train_info.get('tunables') or []}
+    return {'tunables': [{**t.public(), 'default': declared_by_key[t.key].get('default'),
+                          'defaults_by_decoder': declared_by_key[t.key].get('defaults_by_decoder') or {}}
+                         for t in declared(train_info)],
             'columns': {'epochs': train_info['default_epochs']} if train_info.get('default_epochs') else {},
             'source': f'model backend "{backend}"'}
 

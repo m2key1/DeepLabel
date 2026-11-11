@@ -5,6 +5,11 @@ export function fieldValue(value: TunableValue): string {
   return typeof value === 'boolean' ? (value ? 'on' : 'off') : String(value)
 }
 
+/** The value an untuned run uses, given the decoder of the model it starts from. */
+export function knobDefault(knob: Tunable, baseDecoder: string | null | undefined): TunableValue | null {
+  return (baseDecoder != null ? knob.defaults_by_decoder?.[baseDecoder] : undefined) ?? knob.default
+}
+
 /** The typed values of every knob the user filled in; blank ones stay the trainer's own. */
 export function tunedValues(tunables: Tunable[], fields: Record<string, string>): Record<string, TunableValue> {
   const values: Record<string, TunableValue> = {}

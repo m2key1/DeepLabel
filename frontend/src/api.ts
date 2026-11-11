@@ -2061,6 +2061,8 @@ export interface Tunable {
   choices: string[]
   /** The value an untuned run uses, read from the model repo; null while unknown. */
   default: TunableValue | null
+  /** The value an untuned run uses instead when its base model has this kind of decoder. */
+  defaults_by_decoder: Record<string, TunableValue>
 }
 
 export type LineShape = 'polygon' | 'rotated' | 'box'

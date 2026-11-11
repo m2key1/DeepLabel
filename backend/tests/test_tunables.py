@@ -8,7 +8,7 @@ TRAIN_INFO = {
     'default_epochs': 20,
     'tunables': [
         {'key': 'learning_rate', 'label': 'Learning rate', 'group': 'Schedule', 'kind': 'float',
-         'above': 0, 'default': 1e-4},
+         'above': 0, 'default': 1e-4, 'defaults_by_decoder': {'token': 1e-5}},
         {'key': 'warmup_epochs', 'label': 'Warmup epochs', 'group': 'Schedule', 'kind': 'float', 'min': 0},
         {'key': 'patience', 'label': 'Patience', 'group': 'Schedule', 'kind': 'int', 'min': 1},
         {'key': 'ema_decay', 'label': 'EMA decay', 'group': 'Model', 'kind': 'float', 'min': 0, 'max': 1},
@@ -60,3 +60,11 @@ def test_the_dialog_is_shown_each_knob_with_the_default_the_backend_declares():
     assert options['tunables'][5]['choices'] == ['tiny', 'small', 'medium']
     assert options['columns'] == {'epochs': 20}
     assert options['source'] == 'model backend "ocr"'
+
+
+def test_a_default_that_depends_on_the_base_models_decoder_reaches_the_dialog():
+    """A token-decoder base fine-tunes with other defaults, which the form shows once that
+    base is picked."""
+    options = tunables.declared_options(TRAIN_INFO, 'ocr')
+
+    assert [t['defaults_by_decoder'] for t in options['tunables']] == [{'token': 1e-5}, {}, {}, {}, {}, {}]
