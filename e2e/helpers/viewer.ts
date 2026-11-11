@@ -10,6 +10,10 @@ export type NormPoint = [number, number]
 // targets are always clickable without scrolling.
 export const LANDSCAPE = { width: 800, height: 600 }
 
+/** Frames the scan has to stay put before it counts as arrived. A pane resize is followed
+ *  by the scan's re-fit only a frame or two later, so a single still frame can be that gap. */
+const STILL_FRAMES = 6
+
 /** The overlay box, once the scan under it has stopped moving.
  *
  *  The scan is animated into place - a pane resize on entering edit mode, a zoom easing
@@ -18,18 +22,21 @@ export const LANDSCAPE = { width: 800, height: 600 }
 async function overlayBounds(page: Page) {
   const overlay = page.getByTestId('overlay-box')
   await expect(overlay).toHaveAttribute('data-scan', 'ready')
-  const box = await overlay.evaluate((el) => new Promise<
+  const box = await overlay.evaluate((el, stillFrames) => new Promise<
     { x: number; y: number; width: number; height: number }
   >((resolve, reject) => {
     let last = el.getBoundingClientRect()
+    let still = 0
     let frames = 0
     const tick = () => {
       const now = el.getBoundingClientRect()
-      if (now.x === last.x && now.y === last.y && now.width === last.width) {
+      const moved = now.x !== last.x || now.y !== last.y || now.width !== last.width || now.height !== last.height
+      still = moved ? 0 : still + 1
+      if (still >= stillFrames) {
         resolve({ x: now.x, y: now.y, width: now.width, height: now.height })
         return
       }
-      if (++frames > 120) {
+      if (++frames > 240) {
         reject(new Error('the scan never stopped moving'))
         return
       }
@@ -37,7 +44,7 @@ async function overlayBounds(page: Page) {
       requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
-  }))
+  }), STILL_FRAMES)
   if (!box.width || !box.height) throw new Error('overlay box is not measurable')
   return box
 }
