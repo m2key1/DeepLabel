@@ -25,11 +25,6 @@ function Tags({ version }: { version: Version }) {
   const tag = 'rounded px-1.5 py-px text-[10px] font-semibold tracking-wide whitespace-nowrap'
   return (
     <span className="flex shrink-0 gap-1">
-      {version.isDefault && <span data-testid="version-tag" className={`${tag} bg-accent-wash text-accent-ink`}>★ DEFAULT</span>}
-      {version.succeeds && (
-        <span data-testid="version-tag" title="A new version of the model it comes after, not trained from it"
-              className={`${tag} border border-accent/40 text-accent-ink`}>NEW VERSION</span>
-      )}
       {version.state === 'running' && (
         <span data-testid="version-tag" className={`${tag} border border-dashed border-accent text-accent-ink`}>RUNNING</span>
       )}
@@ -119,7 +114,8 @@ export function FamilyGraph({ family }: { family: Family }) {
   return (
     <div className="flex overflow-x-auto" data-testid="family-graph">
       <Graph versions={family.versions} path={path} />
-      <ol className="min-w-0 flex-1" onMouseLeave={() => setHovered(null)} onBlur={() => setHovered(null)}>
+      {/* Narrower than this, the rows scroll sideways in the card rather than squeeze the name out. */}
+      <ol className="min-w-[34rem] flex-1" onMouseLeave={() => setHovered(null)} onBlur={() => setHovered(null)}>
         {family.versions.map((v) => (
           <li key={v.key} data-testid="version-row" data-version={v.key} data-state={v.state}
               data-on-path={hovered ? onPath.has(v.key) : undefined}
@@ -129,10 +125,15 @@ export function FamilyGraph({ family }: { family: Family }) {
               style={{ height: ROW }}>
             <span className="w-16 shrink-0 font-mono tabular-nums text-ink-subtle">{v.ref}</span>
             <span className="flex min-w-0 flex-1 items-center gap-2">
+              {v.isDefault && (
+                <span data-testid="version-default" role="img" aria-label="Default"
+                      title="The default: new datasets use it" className="-mr-1 shrink-0 text-accent-ink">★</span>
+              )}
               <span className="truncate font-medium text-ink">{v.name}</span>
               <Tags version={v} />
             </span>
-            <span className="hidden w-36 shrink-0 truncate text-ink-subtle md:block">
+            {/* "after" is how a row says it is a new version rather than trained from its parent. */}
+            <span data-testid="version-parent" className="w-28 shrink-0 truncate text-ink-subtle md:w-36">
               {v.parentKey
                 ? `${v.succeeds ? 'after' : 'from'} ${nameOf.get(v.parentKey) ?? 'another family'}`
                 : 'root'}

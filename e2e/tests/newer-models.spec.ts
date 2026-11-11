@@ -42,7 +42,7 @@ test.describe('Scenario: a model gets a new version', () => {
       await expect(page.getByTestId('model-versions')).toHaveText(`New version of ${older}`)
       await expect.poll(async () => offered(jobId)).toEqual(['ocr'])
 
-      // The two are one family now, drawn on one line, the new one tagged as such.
+      // The two are one family now, drawn on one line, the new one following the old.
       await page.goto('/models?tab=ocr')
       const family = page.getByTestId('model-family').and(page.locator(`[data-root="${olderId}"]`))
       await expect(page.getByTestId('model-family').and(page.locator(`[data-root="${newerId}"]`))).toHaveCount(0)
@@ -50,9 +50,8 @@ test.describe('Scenario: a model gets a new version', () => {
         await family.getByTestId('family-toggle').click()
       }
       const versionRow = (id: number) => family.locator(`[data-testid="version-row"][data-version="m${id}"]`)
-      await expect(versionRow(newerId).getByTestId('version-tag')).toHaveText('NEW VERSION')
-      await expect(versionRow(olderId)).toBeVisible()
-      await expect(versionRow(olderId).getByTestId('version-tag')).toHaveCount(0)
+      await expect(versionRow(newerId).getByTestId('version-parent')).toHaveText(`after ${older}`)
+      await expect(versionRow(olderId).getByTestId('version-parent')).toHaveText('root')
       await expect(family.locator(`[data-testid="graph-dot"][data-version="m${newerId}"]`)).toHaveAttribute('data-lane', '0')
       await expect(family.locator(`[data-testid="graph-dot"][data-version="m${olderId}"]`)).toHaveAttribute('data-lane', '0')
 
@@ -103,5 +102,32 @@ test.describe('Scenario: a model gets a new version', () => {
     await backendFetch(`/api/models/${v3}`, { method: 'PATCH', headers: json, body: JSON.stringify({ supersedes: v2 }) })
     await page.reload()
     await expect(dialog.locator('[data-task="ocr"]').getByTestId('newer-model-to')).toHaveText(v3Name)
+  })
+
+  test('in its family a new version is named in full, beside the model it follows', async ({ page }) => {
+    const older = uniqueName('Kurrent reader v1')
+    const newer = uniqueName('Kurrent reader v2')
+    const olderId = importStubModel('ocr', older, 'stub-misread')
+    const newerId = importStubModel('ocr', newer, 'stub-misread')
+    await backendFetch(`/api/models/${newerId}`, { method: 'PATCH', headers: json, body: JSON.stringify({ supersedes: olderId }) })
+    expect((await backendFetch('/api/models')).models.find((m: { id: number }) => m.id === newerId).supersedes).toBe(olderId)
+
+    await page.setViewportSize({ width: 1024, height: 800 })
+    await page.goto('/models?tab=ocr')
+    const family = page.getByTestId('model-family').and(page.locator(`[data-root="${olderId}"]`))
+    if (await family.getByTestId('family-toggle').getAttribute('aria-expanded') === 'false') {
+      await family.getByTestId('family-toggle').click()
+    }
+    const row = family.locator(`[data-testid="version-row"][data-version="m${newerId}"]`)
+    const name = row.getByText(newer, { exact: true })
+    await expect(name).toBeVisible()
+    expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    // "after" is what says it is a new version rather than trained from the older one, so
+    // no chip has to say it again.
+    await expect(row.getByTestId('version-parent')).toHaveText(`after ${older}`)
+    await expect(row.getByTestId('version-tag')).toHaveCount(0)
+
+    await page.setViewportSize({ width: 640, height: 800 })
+    await expect(row.getByTestId('version-parent')).toBeVisible()
   })
 })

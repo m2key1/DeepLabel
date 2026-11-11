@@ -16,7 +16,8 @@ test.describe('Scenario: the model registry', () => {
       await expect(family).toContainText("its backend's own")
       // The family holding the default starts open, the default marked on its graph.
       const row = family.locator(`[data-testid="version-row"][data-version="m${builtin.id}"]`)
-      await expect(row.getByTestId('version-tag')).toHaveText('★ DEFAULT')
+      await expect(row.getByTestId('version-default')).toHaveAttribute('aria-label', 'Default')
+      await expect(row.getByTestId('version-tag')).toHaveCount(0)
     }
   })
 

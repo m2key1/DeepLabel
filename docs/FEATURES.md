@@ -414,7 +414,9 @@ backends up as described in [MODEL-BACKENDS.md](MODEL-BACKENDS.md).
 
 - The **Models** page has a tab per task (OCR, layout, lines) and a **Runs** tab. Models are
   grouped into families: a base model and everything fine-tuned from it, drawn as a
-  version graph with each version's score.
+  version graph with each version's score. Each row says what the version came from
+  ("from" a model it was trained from, "after" the one it is a new version of), and a star
+  marks the default.
 - Each model has its own page with its lineage, scores, decoding settings, evaluations,
   notes and the run that produced it, plus **Evaluate**, **Set default**, **Edit** and
   **Archive**.
