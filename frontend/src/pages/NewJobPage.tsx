@@ -43,6 +43,7 @@ const DECODE_CARDS: [OcrDecode, string, string][] = [
   ['beam', 'With language model', "Beam search with the model's language model"],
   ['rescored', 'Best quality', 'Beam search reranked by the decoder head, no language model'],
   ['greedy', 'Fast', 'Raw greedy CTC output'],
+  ['decoder', 'Token decoder', "The model's subword decoder reads the line, checked against the CTC head"],
 ]
 const TASK_LABEL: Record<Task, string> = {
   text: 'Text extraction', map_segmentation: 'Map segmentation', map_lines: 'Line tracing (maps)',
@@ -327,6 +328,14 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   const canvasesKept = (manifest?.canvases ?? []).filter((c) => !iiifExcluded.has(c.canvas))
   const sentFiles = files.filter((f) => !excluded.has(f))
   const ocrModel = models.find((m) => (picks.ocr === '' ? m.task === 'ocr' && m.is_default : m.id === Number(picks.ocr)))
+  // A token decoder was trained to read the line itself, so a new dataset on such a model is read
+  // that way; the card exists only for those models.
+  const tokenDecoder = ocrModel?.decoder === 'token'
+  useEffect(() => {
+    if (edit) return
+    setOcrDecode((held) => (tokenDecoder ? 'decoder' : held === 'decoder' ? 'rescored' : held))
+  }, [tokenDecoder, edit])
+  const decodeCards = DECODE_CARDS.filter(([value]) => value !== 'decoder' || tokenDecoder)
 
   const applies: Record<Step, boolean> = {
     source: !edit,
@@ -1332,7 +1341,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
                   OCR decoding
                 </label>
                 <div className="flex gap-2">
-                  {DECODE_CARDS.map(([value, label, hint]) => (
+                  {decodeCards.map(([value, label, hint]) => (
                     <button
                       key={value}
                       type="button"

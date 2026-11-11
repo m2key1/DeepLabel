@@ -7,11 +7,11 @@ import pytest
 from app import decode
 
 
-def test_the_three_modes_are_offered():
-    assert decode.OCR_DECODES == ('beam', 'rescored', 'greedy')
+def test_the_four_modes_are_offered():
+    assert decode.OCR_DECODES == ('beam', 'rescored', 'greedy', 'decoder')
 
 
-@pytest.mark.parametrize('asked', ['greedy', 'beam', 'rescored'])
+@pytest.mark.parametrize('asked', ['greedy', 'beam', 'rescored', 'decoder'])
 def test_a_mode_is_performed_as_asked(asked):
     assert decode.resolve(asked, lm_on=True, use_decoder=True) == asked
 
@@ -25,6 +25,26 @@ def test_beam_without_an_lm_falls_back_rather_than_decoding_blind():
 def test_rescoring_without_a_decoder_head_falls_back():
     assert decode.resolve('rescored', lm_on=True, use_decoder=False) == 'beam'
     assert decode.resolve('rescored', lm_on=False, use_decoder=False) == 'greedy'
+
+
+def test_the_decoder_reading_without_a_decoder_head_falls_back():
+    assert decode.resolve('decoder', lm_on=True, use_decoder=False) == 'beam'
+    assert decode.resolve('decoder', lm_on=False, use_decoder=False) == 'greedy'
+
+
+def test_a_backend_reporting_a_token_decoder_marks_the_model(tmp_path):
+    """The job form offers the decoder's own reading, and picks it, only for a model whose
+    backend said it has a token decoder; nothing on the API side can open the weights."""
+    from app import registry, store
+    conn = store.connect(tmp_path / 'app.db')
+    conn.execute("INSERT INTO models (id, task, name, source, checkpoint) VALUES (1, 'ocr', 'tok', 'trained', '/t.pt')")
+    conn.execute("INSERT INTO models (id, task, name, source, checkpoint) VALUES (2, 'ocr', 'old', 'trained', '/o.pt')")
+    conn.commit()
+    registry.note_model_facts(conn, 1, {'decoder': 'token'}, [])
+    registry.note_model_facts(conn, 2, {}, [])
+    assert registry.model_payload(registry.get_model(conn, 1))['decoder'] == 'token'
+    assert registry.model_payload(registry.get_model(conn, 2))['decoder'] is None
+    conn.close()
 
 
 def test_greedy_is_never_overridden():

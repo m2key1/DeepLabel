@@ -559,7 +559,7 @@ export interface Phases {
 }
 
 // Raw CTC output or the full beam-search-plus-LM/decoder rescoring path.
-export type OcrDecode = 'beam' | 'rescored' | 'greedy'
+export type OcrDecode = 'beam' | 'rescored' | 'greedy' | 'decoder'
 
 // Per-task model picks for a job; null means the task default.
 export interface ModelPicks {
@@ -599,6 +599,9 @@ export interface RegistryModel {
   max_width: number | null
   /** The convention flags an OCR model is conditioned on. Null until a run has loaded it. */
   conventions: string[] | null
+  /** An OCR model's decoder head: 'token' reads lines itself in the 'decoder' decode. Null
+   *  until a run has loaded it. */
+  decoder: 'token' | 'char' | null
   /** The family's own name, set on its root; null when it is called after the root. */
   family_name: string | null
   /** A layout model's template, whose reading order the datasets it reads follow. */

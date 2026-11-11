@@ -316,6 +316,9 @@ CREATE TABLE IF NOT EXISTS models (
     -- JSON list of the transcription-convention flags an OCR model is conditioned on, in
     -- its own order. Null until a run has loaded the checkpoint and said so.
     conventions TEXT,
+    -- An OCR model's decoder head: 'token' (subword, read in the 'decoder' decode) or 'char'.
+    -- Null until a run has loaded the checkpoint and said so.
+    decoder TEXT,
     -- A family's own name, kept on its root (the model trained from scratch or brought in).
     -- Null: the family is called after the root.
     family_name TEXT,
@@ -1079,7 +1082,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE models ADD COLUMN target_height INTEGER')
         conn.execute('ALTER TABLE models ADD COLUMN max_width INTEGER')
     for column, kind in (('backend', 'TEXT'), ('model_type', 'TEXT'), ('classes', 'TEXT'),
-                         ('input_size', 'INTEGER'), ('ref', 'TEXT'), ('conventions', 'TEXT'),
+                         ('input_size', 'INTEGER'), ('ref', 'TEXT'), ('conventions', 'TEXT'), ('decoder', 'TEXT'),
                          ('family_name', 'TEXT'), ('supersedes', 'INTEGER REFERENCES models(id)')):
         if column not in model_cols:
             conn.execute(f'ALTER TABLE models ADD COLUMN {column} {kind}')
