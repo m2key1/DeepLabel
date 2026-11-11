@@ -4,7 +4,7 @@ import { seedSession, useSession } from '../helpers/session'
 import {
   atLifeSize, JSON_HEADERS,
   type NormPoint, TILE, canvasBox, clickAt, clickTile, detectInBox, detectInOutline, dragVertex,
-  drawPolygon, eraseStroke, jobClasses, openTileEditor, rightClickTile, roundPoints, seedMapJob,
+  drawPolygon, eraseStroke, jobClasses, openTileEditor, reviewedTiles, rightClickTile, roundPoints, seedMapJob,
   seedRegion, strokeTile, stubLineFor, tileIds, tileRegions,
 } from '../helpers/map'
 
@@ -1305,4 +1305,30 @@ test.describe('Scenario: the tile editor when something goes wrong', () => {
       await expect.poll(async () => (await tileRegions(jobId, tileId)).length).toBe(1)
       expect(roundPoints((await tileRegions(jobId, tileId))[0].points)).toEqual(OTHER)
     })
+})
+
+test.describe('Scenario: leaving a tile right after marking it reviewed', () => {
+  test('a reload while the save of Reviewed is on its way does not lose it', async ({ page }) => {
+    const jobId = await seedMapJob(uniqueName('Tile reload'))
+    const [tileId] = await tileIds(jobId)
+    await openTileEditor(page, jobId, tileId)
+    expect(await reviewedTiles(jobId)).toEqual([])
+
+    // The save is held on its way, so the reload is sure to come while it is in flight.
+    let held = 0
+    await page.route(`**/api/pages/${tileId}`, async (route) => {
+      if (route.request().method() !== 'PATCH') return route.fallback()
+      held++
+      await new Promise((r) => setTimeout(r, 1500))
+      await route.continue().catch(() => undefined)
+    })
+    await page.getByTestId('tile-reviewed').click()
+    await expect(page.getByTestId('tile-reviewed')).toBeChecked()
+    await expect.poll(() => held).toBe(1)
+    await page.reload()
+
+    await expect.poll(() => reviewedTiles(jobId), { timeout: 10_000 }).toEqual([tileId])
+    await page.reload()
+    await expect(page.getByTestId('tile-reviewed')).toBeChecked()
+  })
 })

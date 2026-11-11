@@ -124,6 +124,19 @@ export async function openTileEditor(page: Page, jobId: string, pageId: number) 
   await expect(page.getByTestId('tile-canvas')).toBeVisible()
 }
 
+/** The tiles the server has as reviewed. */
+export async function reviewedTiles(jobId: string): Promise<number[]> {
+  return (await backendFetch(`/api/jobs/${jobId}/page-rows?filter=reviewed`)).rows.map((r: { id: number }) => r.id)
+}
+
+/** Ticks Reviewed in the open tile editor and waits for the server to have it: the tick
+ *  shows at once and its save follows in the background. */
+export async function markReviewed(page: Page, jobId: string, tileId: number) {
+  await page.getByTestId('tile-reviewed').click()
+  await expect(page.getByTestId('tile-reviewed')).toBeChecked()
+  await expect.poll(() => reviewedTiles(jobId)).toContain(tileId)
+}
+
 /** The tile's box in viewport coordinates. Exported so a test can aim past its edges:
  *  a click outside the image is clamped onto the nearest point of it. */
 export async function canvasBox(page: Page) {

@@ -287,7 +287,8 @@ Press `e` to edit the page.
   background in the order you made them, and you can keep working on a shape that is still
   being saved. Deleting a gathered set, a merge, an eraser stroke, Reduce all and Resolve
   overlaps each go to the server as one request. Closing the tab while edits are still being
-  saved asks first.
+  saved asks first, and a save already on its way when the page is left - a reload, a closed
+  tab - still reaches the server.
 
 ## Review and correction
 

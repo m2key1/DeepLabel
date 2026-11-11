@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test'
 import { test, expect } from '../helpers/test'
 import { BACKEND, backendFetch, uniqueName } from '../helpers/api'
 import {
-  type NormPoint, drawPolygon, openTileEditor, seedMapJob, tileIds, tileRegions,
+  type NormPoint, drawPolygon, markReviewed, openTileEditor, seedMapJob, tileIds, tileRegions,
 } from '../helpers/map'
 import { zipEntries } from '../helpers/zip'
 
@@ -40,8 +40,7 @@ test.describe('Scenario: exporting a mask set for training', () => {
 
     // Review exactly one tile.
     await openTileEditor(page, jobId, first)
-    await page.getByTestId('tile-reviewed').click()
-    await expect(page.getByTestId('tile-reviewed')).toBeChecked()
+    await markReviewed(page, jobId, first)
     await expect.poll(async () => (await backendFetch(`/api/jobs/${jobId}/maskset/preview`)).tiles).toBe(1)
 
     // The dialog reports the same scope the backend would write.
@@ -75,8 +74,7 @@ test.describe('Scenario: exporting a mask set for training', () => {
     await expect(page.getByTitle(/mark tiles reviewed/i)).toBeVisible()
 
     await openTileEditor(page, jobId, tileId)
-    await page.getByTestId('tile-reviewed').click()
-    await expect(page.getByTestId('tile-reviewed')).toBeChecked()
+    await markReviewed(page, jobId, tileId)
 
     // Now it downloads - the app stays where it was, and the file is named after the job.
     await page.goto(`/jobs/${jobId}`)
@@ -118,8 +116,7 @@ test.describe('Scenario: exporting a mask set for training', () => {
     await expect(masks).toBeDisabled()
 
     await openTileEditor(page, jobId, tileId)
-    await page.getByTestId('tile-reviewed').click()
-    await expect(page.getByTestId('tile-reviewed')).toBeChecked()
+    await markReviewed(page, jobId, tileId)
 
     await page.goto('/')
     await card.getByRole('button', { name: 'Download' }).click()
@@ -138,8 +135,7 @@ test.describe('Scenario: exporting a mask set for training', () => {
     const [first] = await tileIds(jobId)
 
     await openTileEditor(page, jobId, first)
-    await page.getByTestId('tile-reviewed').click()
-    await expect(page.getByTestId('tile-reviewed')).toBeChecked()
+    await markReviewed(page, jobId, first)
 
     await page.goto('/')
     await page.getByTestId('job-card').filter({ hasText: name })

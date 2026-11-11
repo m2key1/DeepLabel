@@ -950,9 +950,31 @@ export const CLIENT_ID = Array.from(crypto.getRandomValues(new Uint8Array(16)),
 export async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   headers.set('X-Client-Id', CLIENT_ID)
-  const res = await fetch(url, { ...init, headers })
+  const res = await send(url, { ...init, headers })
   if (!res.ok) return failed<T>(res, `${init?.method ?? 'GET'} ${url} failed`)
   return res.json() as Promise<T>
+}
+
+// Browsers hold all of a page's keepalive requests to 64 KiB of body at once; this stays
+// under that with room for the presence beacon sent as the tab closes.
+const KEEPALIVE_BUDGET = 48 * 1024
+let keepaliveInFlight = 0
+
+/** A write is sent with keepalive, so one still on its way when the page is left - a
+ *  reload, a closed tab - is completed by the browser rather than cancelled. Edits are
+ *  saved in the background, so leaving right after one is ordinary. A write that does not
+ *  fit what keepalive may carry goes out as a plain request. */
+async function send(url: string, init: RequestInit): Promise<Response> {
+  const size = init.body == null ? 0 : typeof init.body === 'string' ? new Blob([init.body]).size : null
+  if (!init.method || init.method === 'GET' || size === null || keepaliveInFlight + size > KEEPALIVE_BUDGET) {
+    return fetch(url, init)
+  }
+  keepaliveInFlight += size
+  try {
+    return await fetch(url, { ...init, keepalive: true })
+  } finally {
+    keepaliveInFlight -= size
+  }
 }
 
 const FILENAME_RE = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i
