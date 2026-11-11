@@ -1,4 +1,5 @@
 import { execSync } from 'node:child_process'
+import { test } from '@playwright/test'
 import { scanPng } from './image'
 
 // Talks to the backend directly, bypassing nginx and the auth service, so tests can
@@ -85,16 +86,55 @@ export async function jobPageIds(jobId: string): Promise<number[]> {
   return [...job.pages].sort((a, b) => a.idx - b.idx).map((p: { id: number }) => p.id)
 }
 
+const ENDED = new Set(['done', 'error', 'cancelled'])
+const QUEUED_AT_MOST = 5 * 60_000
+
+/** Waits for a job to reach `status` within `timeoutMs` of its own time. Time it spends queued
+ *  behind other work, which earlier tests on this stack can leave running, is not counted, and
+ *  the running test is given as much more time, up to QUEUED_AT_MOST. A job that ends in any
+ *  other status fails the wait at once, with its reason. */
 export async function waitForJobStatus(jobId: string, status: string, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs
+  const started = Date.now()
+  let last = started
+  let queued = 0
   for (;;) {
     const job = await getJob(jobId)
     if (job.status === status) return job
-    if (Date.now() > deadline) {
+    if (ENDED.has(job.status)) {
+      throw new Error(`job ${jobId} ended "${job.status}", expected "${status}"${job.error ? `: ${job.error}` : ''}`)
+    }
+    const now = Date.now()
+    if (job.status === 'queued') {
+      queued += now - last
+      giveTheTestMore(now - last)
+    }
+    last = now
+    if (queued > QUEUED_AT_MOST) {
+      throw new Error(`job ${jobId} is still queued after ${QUEUED_AT_MOST}ms, behind ${await queuedAhead(jobId)}`)
+    }
+    if (now - started - queued > timeoutMs) {
       throw new Error(`job ${jobId} is "${job.status}", expected "${status}" within ${timeoutMs}ms`)
     }
     await new Promise((r) => setTimeout(r, 300))
   }
+}
+
+function giveTheTestMore(ms: number) {
+  let info
+  try {
+    info = test.info()
+  } catch {
+    return
+  }
+  if (info.timeout > 0) info.setTimeout(info.timeout + ms)
+}
+
+async function queuedAhead(jobId: string): Promise<string> {
+  const { gpu } = await backendFetch('/api/queue')
+  const order: { id: string | number; kind: string; name: string }[] = [gpu.running, ...gpu.queued].filter(Boolean)
+  const mine = order.findIndex((entry) => entry.id === jobId)
+  return (mine < 0 ? order : order.slice(0, mine)).map((entry) => `${entry.kind} "${entry.name}"`).join(', ')
+    || 'nothing'
 }
 
 export async function seedCompletedJob(name: string, pageCount = 2, size?: ScanSize): Promise<string> {
