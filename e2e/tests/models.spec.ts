@@ -609,14 +609,17 @@ test.describe('Scenario: the model registry', () => {
       const row = page.getByTestId('training-row').filter({ hasText: name })
       await expect(row.getByText('done')).toBeVisible({ timeout: 30_000 })
       const id = (await listTrainings()).find((t) => t.name === name)!.id
-      // The band only renders once the score exists, so wait on the score, not the run.
+      const model = (await listRegistryModels()).find((m) => m.name === name)!
+      // Each band only renders once its score exists, and the base model is scored after the
+      // new one, so wait on every score the chart shows, not the run or the first score.
+      const scored = [model.id, ...(baseModelId ? [baseModelId] : [])].sort()
       await expect
         .poll(async () => (await listEvaluations()).filter(
-          (e) => e.training_id === id && e.source.jobs?.[0] === testJob && e.status === 'done').length,
-              { timeout: 30_000 })
-        .toBeGreaterThan(0)
+          (e) => e.training_id === id && e.source.jobs?.[0] === testJob && e.status === 'done')
+          .map((e) => e.model_id).sort(), { timeout: 60_000 })
+        .toEqual(scored)
       await row.getByTestId('training-open').click()
-      return { row, id }
+      return { id, model }
     }
     const pct = (cer: number) => `${(cer * 100).toFixed(2)}%`
     const testScore = async (trainingId: number, modelId: number) =>
@@ -628,20 +631,18 @@ test.describe('Scenario: the model registry', () => {
     // base whose score on this material would mean anything.
     const nameA = uniqueName('OCR testchart A')
     const first = await start(nameA, null)
-    const firstModel = (await listRegistryModels()).find((m) => m.name === nameA)!
     await expect(page.getByTestId('score-test-new'))
-      .toContainText(pct(await testScore(first.id, firstModel.id)))
+      .toContainText(pct(await testScore(first.id, first.model.id)))
     await expect(page.getByTestId('score-test-base')).toHaveCount(0)
 
     // Warm-started from it: both scores, on material neither run ever trained on, so the
     // chart answers "did it help?" where the run is read.
     const nameB = uniqueName('OCR testchart B')
-    const second = await start(nameB, firstModel.id)
-    const secondModel = (await listRegistryModels()).find((m) => m.name === nameB)!
+    const second = await start(nameB, first.model.id)
     await expect(page.getByTestId('score-test-base'))
-      .toContainText(pct(await testScore(second.id, firstModel.id)))
+      .toContainText(pct(await testScore(second.id, first.model.id)))
     await expect(page.getByTestId('score-test-new'))
-      .toContainText(pct(await testScore(second.id, secondModel.id)))
+      .toContainText(pct(await testScore(second.id, second.model.id)))
   })
 
   test('a multi-dataset valid split charts per-dataset CER curves', async ({ page }) => {
