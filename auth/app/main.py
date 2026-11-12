@@ -1,6 +1,7 @@
 import json
 import re
 from contextlib import asynccontextmanager
+from typing import Literal
 from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
@@ -33,7 +34,7 @@ def _session_user(request: Request):
 
 def _bearer_user(request: Request):
     """The account behind an Authorization: Bearer token, for clients that have no
-    cookie to send. Returns (user, readonly) or None."""
+    cookie to send. Returns (user, readonly, scope) or None."""
     header = request.headers.get('Authorization', '')
     scheme, _, raw = header.partition(' ')
     if scheme.lower() != 'bearer' or not raw.strip():
@@ -44,20 +45,23 @@ def _bearer_user(request: Request):
         if row is None:
             return None
         store.touch_api_token(conn, row['token_id'])
-        return row, bool(row['readonly'])
+        return row, bool(row['readonly']), row['scope']
     finally:
         conn.close()
 
 
 def _caller(request: Request):
-    """The session cookie first, then an API token. Returns (user, readonly) or None."""
+    """The session cookie first, then an API token. Returns (user, readonly, scope) or None."""
     user = _session_user(request)
     if user is not None:
-        return user, False
+        return user, False, 'all'
     return _bearer_user(request)
 
 
 READ_METHODS = {'GET', 'HEAD', 'OPTIONS'}
+# A token of this scope reaches the backend's recognition routes and nothing else; the
+# backend refuses it everywhere else, and so does every route here.
+RECOGNITION_ONLY = 'recognize'
 
 
 def present_user(request: Request) -> dict:
@@ -66,7 +70,9 @@ def present_user(request: Request) -> dict:
     found = _caller(request)
     if found is None:
         raise HTTPException(401, 'not authenticated')
-    user, readonly = found
+    user, readonly, scope = found
+    if scope == RECOGNITION_ONLY:
+        raise HTTPException(403, 'recognition-only API token')
     if readonly and request.method not in READ_METHODS:
         raise HTTPException(403, 'read-only API token')
     return dict(user)
@@ -896,6 +902,7 @@ class TokenCreate(BaseModel):
     name: str = ''
     readonly: bool = False
     expires_days: int | None = None
+    scope: Literal['all', 'recognize'] = 'all'
 
 
 def _token_payload(row) -> dict:
@@ -939,12 +946,14 @@ def post_token(body: TokenCreate, user: dict = Depends(session_user)):
         raise HTTPException(400, 'name must not be empty')
     if body.expires_days is not None and body.expires_days < 1:
         raise HTTPException(400, 'expires_days must be at least 1')
+    if body.scope == RECOGNITION_ONLY and 'recognize' not in store.effective_caps(user):
+        raise HTTPException(403, 'not permitted: recognize')
     token = auth.new_api_token()
     conn = store.connect(config.DB_PATH)
     try:
         row = store.create_api_token(conn, user['id'], name, auth.hash_api_token(token),
                                      auth.api_token_prefix(token), body.readonly,
-                                     auth.api_token_expiry(body.expires_days))
+                                     auth.api_token_expiry(body.expires_days), body.scope)
     finally:
         conn.close()
     return {**_token_payload(row), 'token': token}
@@ -971,13 +980,15 @@ def validate(request: Request):
     found = _caller(request)
     if found is None:
         return Response(status_code=401)
-    user, readonly = found
+    user, readonly, scope = found
     if _held_back(user):
         return Response(status_code=403)
     username = (user['username'] or user['subject']).replace('\n', ' ').replace('\r', ' ')
     headers = {'X-Auth-User': username, 'X-Auth-Role': user['role']}
     if readonly:
         headers['X-Auth-Readonly'] = '1'
+    if scope != 'all':
+        headers['X-Auth-Scope'] = scope
     # What this person may do, resolved here so the backend never has to know which role
     # implies what. Space-separated: the names are dotted ASCII and nothing else.
     caps = store.effective_caps(user)

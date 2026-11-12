@@ -215,7 +215,9 @@ def _run_edge_backend(client: BackendClient, method: dict, image: Path, area: li
     with Image.open(image) as opened:
         tile = scan_image(str(image), opened.convert('RGB'))
     try:
-        response = client.predict('edges', None, params, [Item('tile', tile)])
+        # Someone is waiting on this one tile, and it loads no weights that could unload
+        # anybody else's, so it does not wait for the card's turn behind a dataset's batch.
+        response = client.predict('edges', None, params, [Item('tile', tile)], takes_turn=False)
     except BackendError as error:
         raise HTTPException(502, f'edge detection failed: {error.message}') from None
     result = (response.get('results') or [{}])[0]

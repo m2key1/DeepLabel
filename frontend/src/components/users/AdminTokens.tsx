@@ -5,6 +5,7 @@ import { useAutoClear } from '../../messages'
 import { EmptyState } from '../ui/EmptyState'
 import { Section } from '../ui/Section'
 import { tableCell, tableHeadRow } from '../ui/Table'
+import { tokenAccess } from '../ApiTokens'
 
 const stamp = (value: string | null) => (value ? formatDate(value) : '-')
 
@@ -66,7 +67,7 @@ export function AdminTokens() {
                 <td className="py-1.5">{t.username}</td>
                 <td className="py-1.5">{t.name}</td>
                 <td className="py-1.5 font-mono text-xs text-ink-muted">{t.prefix}…</td>
-                <td className="py-1.5">{t.readonly ? 'read-only' : 'read/write'}</td>
+                <td className="py-1.5">{tokenAccess(t)}</td>
                 <td className="py-1.5 text-ink-muted">{stamp(t.last_used_at)}</td>
                 <td className="py-1.5 text-ink-muted">{t.expired ? `expired ${stamp(t.expires_at)}` : stamp(t.expires_at)}</td>
                 <td className="py-1.5 text-right">

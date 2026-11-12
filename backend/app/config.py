@@ -72,6 +72,10 @@ PDF_RENDER_DPI = _number('PDF_RENDER_DPI', 400, int)
 # Upload guards against a runaway file; 0 switches one off. See .env.backend.example.
 MAX_ZIP_EXTRACT_GB = _number('MAX_ZIP_EXTRACT_GB', 50, float)
 MAX_IMAGE_PIXELS = _number('MAX_IMAGE_PIXELS', 1_000_000_000, int)
+# What one request to the recognition API may carry; see .env.backend.example.
+RECOGNIZE_MAX_PAGES = _number('RECOGNIZE_MAX_PAGES', 10, int)
+RECOGNIZE_MAX_LINES = _number('RECOGNIZE_MAX_LINES', 500, int)
+RECOGNIZE_MAX_MB = _number('RECOGNIZE_MAX_MB', 100, int)
 # Where a server-path dataset may be read from; empty means anywhere. See .env.backend.example.
 INGEST_ROOTS = _folders('INGEST_ROOTS')
 PDF_EXTRACT_COVERAGE = _number('PDF_EXTRACT_COVERAGE', 0.9, float)

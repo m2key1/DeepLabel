@@ -21,7 +21,7 @@ def _has_alpha(img: Image.Image) -> bool:
     return img.mode in ALPHA_MODES or 'transparency' in img.info
 
 
-def _needs_normalising(img: Image.Image) -> bool:
+def needs_normalising(img: Image.Image) -> bool:
     orientation = img.getexif().get(ORIENTATION_TAG)
     return orientation not in (None, 1) or img.mode in HIGH_BIT_MODES or _has_alpha(img)
 
@@ -56,7 +56,7 @@ def open_scan(source: str, display: str) -> tuple[Image.Image, str | None]:
     try:
         with Image.open(path) as img:
             img.load()
-            rewrite = SAVE_AS.get(img.format, img.format) if _needs_normalising(img) else None
+            rewrite = SAVE_AS.get(img.format, img.format) if needs_normalising(img) else None
             return normalised(img), rewrite
     except (OSError, ValueError, SyntaxError) as error:
         raise UnreadableScan(f'{display} could not be read: {_reason(path, error)}') from error
@@ -121,7 +121,7 @@ def normalised_map(source: str, display: str, job_path: Path, map_id: int) -> st
     cannot open is left to the tiler's own reader."""
     try:
         with Image.open(source) as img:
-            if not _needs_normalising(img):
+            if not needs_normalising(img):
                 return source
     except (OSError, ValueError, SyntaxError):
         return source

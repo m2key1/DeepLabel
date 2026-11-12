@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from app import (blobs, caches, config, consensus, conventions, corpus, data_use, decode, evaluator, geometry,
                  iiif, imports, ingest, jobs, layout_shapes, layout_templates, llm, map_classes, model_registry,
-                 page_rows, queue_eta, reading_order, registry, schemas, store, trainer)
+                 page_rows, queue_eta, reading_order, recognize, registry, schemas, store, trainer)
 from app.deps import (can_access_job, can_reach_group, check_capability, current_user, get_db, get_user,
                       require_job_access, require_job_owner, require_role)
 
@@ -1451,4 +1451,4 @@ def queue(conn=Depends(get_db), user: dict = Depends(current_user)):
         else:
             entry['eta'] = queue_eta.evaluation(conn, entry['id'], now)
     return {'gpu': {'running': running[0] if running else None, 'queued': queued},
-            'cluster': cluster, 'pending_reocr': pending_reocr}
+            'cluster': cluster, 'pending_reocr': pending_reocr, 'recognition': recognize.in_flight()}

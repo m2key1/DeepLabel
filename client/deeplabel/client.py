@@ -15,13 +15,18 @@ BATCH_SCANS = 200
 BATCH_BYTES = 512 * 1024 * 1024
 TEXTS_PER_REQUEST = 1000
 POLL_SECONDS = 3
+# A recognition request turned away while the account has another one running is sent
+# again after the wait the deployment names, this many times at most.
+BUSY_RETRIES = 120
+BUSY_RETRY_SECONDS = 5
 FINISHED = ('done', 'error', 'cancelled')
 
 
 class DeepLabelError(RuntimeError):
-    def __init__(self, status: int, detail: str):
+    def __init__(self, status: int, detail: str, retry_after: float | None = None):
         self.status = status
         self.detail = detail
+        self.retry_after = retry_after
         super().__init__(f'{status}: {detail}')
 
 
@@ -58,7 +63,7 @@ class DeepLabel:
             with urllib.request.urlopen(request, timeout=timeout or self.timeout) as response:
                 payload = response.read()
         except urllib.error.HTTPError as error:
-            raise DeepLabelError(error.code, _detail(error.read()))
+            raise DeepLabelError(error.code, _detail(error.read()), _seconds(error.headers.get('Retry-After')))
         except urllib.error.URLError as error:
             raise DeepLabelError(0, f'cannot reach {self.url}: {error.reason}')
         if raw:
@@ -242,6 +247,50 @@ class DeepLabel:
                 raise TimeoutError(f'{job_id} still reading after {timeout}s')
             time.sleep(poll)
 
+    # Recognition
+
+    def recognition_offer(self) -> dict:
+        """The models a recognition request can name, the formats, and the limits of one request."""
+        return self._request('GET', '/api/recognize')
+
+    def recognize_pages(self, paths: list[Path], *, lines: dict | None = None, **options) -> dict:
+        """The lines of whole pages, found and read, without a dataset. Any number of
+        pages: they go in requests of the size the deployment allows, one after another,
+        and the answers are joined. `lines` gives a page, by file name, its own outlines to
+        read instead. Options: lines_model, ocr_model, decode, convention, format."""
+        limits = self.recognition_offer()['limits']
+        answer = {'models': {}, 'pages': []}
+        for batch in _recognition_batches(_expand(paths), limits['pages'], limits['megabytes']):
+            fields = _fields(options)
+            own = {p.name: lines[p.name] for p in batch if lines and p.name in lines}
+            if own:
+                fields['lines'] = json.dumps(own)
+            part = self._recognize('/api/recognize/pages', fields, batch)
+            answer['models'].update(part['models'])
+            answer['pages'] += part['pages']
+        return answer
+
+    def recognize_lines(self, paths: list[Path], **options) -> dict:
+        """The text of line images, in the order given, in requests of the allowed size.
+        Options: ocr_model, decode, convention."""
+        limits = self.recognition_offer()['limits']
+        answer = {'models': {}, 'lines': []}
+        for batch in _recognition_batches(_expand(paths), limits['lines'], limits['megabytes']):
+            part = self._recognize('/api/recognize/lines', _fields(options), batch)
+            answer['models'].update(part['models'])
+            answer['lines'] += part['lines']
+        return answer
+
+    def _recognize(self, path: str, fields: dict, files: list[Path]) -> dict:
+        for attempt in range(BUSY_RETRIES):
+            try:
+                return self._send_files(path, fields, files)
+            except DeepLabelError as error:
+                if error.status != 429 or attempt == BUSY_RETRIES - 1:
+                    raise
+                time.sleep(BUSY_RETRY_SECONDS if error.retry_after is None else error.retry_after)
+        raise AssertionError('unreachable')
+
     # Models and training
 
     def models(self) -> dict:
@@ -267,6 +316,31 @@ def _detail(body: bytes) -> str:
 
 def _form_value(value) -> str:
     return str(value).lower() if isinstance(value, bool) else str(value)
+
+
+def _fields(options: dict) -> dict:
+    return {key: _form_value(value) for key, value in options.items() if value is not None}
+
+
+def _seconds(value: str | None) -> float | None:
+    try:
+        return float(value) if value else None
+    except ValueError:
+        return None
+
+
+def _recognition_batches(files: list[Path], per_request: int, megabytes: int) -> list[list[Path]]:
+    """Requests within a recognition request's limits, with room for the form around the files."""
+    budget = megabytes * 1024 * 1024 * 0.95 if megabytes else float('inf')
+    batches, batch, size = [], [], 0
+    for path in files:
+        cost = path.stat().st_size
+        if batch and ((per_request and len(batch) >= per_request) or size + cost > budget):
+            batches.append(batch)
+            batch, size = [], 0
+        batch.append(path)
+        size += cost
+    return batches + [batch] if batch else batches
 
 
 def _expand(paths: list[Path]) -> list[Path]:

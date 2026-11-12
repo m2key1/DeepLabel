@@ -2,6 +2,7 @@
 reads what comes back, against a small backend served from the test itself."""
 import json
 import threading
+import time
 from email.parser import BytesParser
 from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,6 +24,11 @@ class FakeBackend(BaseHTTPRequestHandler):
     calls: ClassVar[list] = []
     script: ClassVar[dict] = {}
     builtin = False
+    # How long a predict takes, and the most predicts it was ever answering at once.
+    predict_seconds = 0.0
+    busy = 0
+    most_busy = 0
+    busy_lock = threading.Lock()
 
     def log_message(self, *args):
         pass
@@ -67,6 +73,13 @@ class FakeBackend(BaseHTTPRequestHandler):
         parts = {part.get_param('name', header='content-disposition'): part.get_content()
                  for part in message.iter_parts()}
         request = json.loads(parts['request'])
+        if FakeBackend.predict_seconds:
+            with FakeBackend.busy_lock:
+                FakeBackend.busy += 1
+                FakeBackend.most_busy = max(FakeBackend.most_busy, FakeBackend.busy)
+            time.sleep(FakeBackend.predict_seconds)
+            with FakeBackend.busy_lock:
+                FakeBackend.busy -= 1
         asked = request['params'].get('convention', {})
         honoured = [name for name in ('long_s', 'oblique_hyphen') if asked.get(name)]
         self.answer(200, {'decode': 'rescored', 'conventions': honoured, 'results': [
@@ -77,8 +90,10 @@ class FakeBackend(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def backend(monkeypatch):
+def backend(monkeypatch, tmp_path):
     FakeBackend.calls, FakeBackend.script, FakeBackend.builtin = [], {}, False
+    FakeBackend.predict_seconds, FakeBackend.busy, FakeBackend.most_busy = 0.0, 0, 0
+    monkeypatch.setattr(config, 'DATA_DIR', tmp_path)
     server = ThreadingHTTPServer(('127.0.0.1', 0), FakeBackend)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     described = config.ModelBackend('ocr', f'http://127.0.0.1:{server.server_port}', SECRET, 'default')
@@ -275,3 +290,73 @@ def test_the_engine_keeps_text_composed_whatever_form_the_backend_returns(conn, 
     texts, _, _ = engine.predict_batch([Image.new('RGB', (10, 8), 'white')])
 
     assert texts == ['März']
+
+
+NOT_LOADED = (409, {'error': {'code': 'weights_not_loaded', 'retryable': False,
+                              'message': f'weights {SHA} are not loaded; call /v1/weights/load first'}})
+
+
+def test_a_predict_whose_weights_were_unloaded_under_it_loads_them_again(conn, backend):
+    """Another backend on the card - a recognition request, an evaluation - unloaded them
+    between two batches of a running job; the job's next batch must not fail for it."""
+    client = BackendClient(backend)
+    weights, _ = client.load(conn, 1)
+    first_load = next(c for c in FakeBackend.calls if c[1] == '/v1/weights/load')
+    FakeBackend.calls = []
+    FakeBackend.script = {'/v1/predict/ocr': [NOT_LOADED]}
+
+    answer = client.predict('ocr', weights, {}, [Item('0', Image.new('RGB', (40, 10)))])
+
+    assert [r['text'] for r in answer['results']] == ['read None of 1']
+    assert [c[1] for c in FakeBackend.calls] == ['/v1/predict/ocr', '/v1/weights/load',
+                                                 f'/v1/weights/{SHA}', '/v1/predict/ocr']
+    assert json.loads(FakeBackend.calls[1][3]) == json.loads(first_load[3])
+
+
+def test_a_predict_refused_again_after_reloading_fails(conn, backend):
+    client = BackendClient(backend)
+    weights, _ = client.load(conn, 1)
+    FakeBackend.script = {'/v1/predict/ocr': [NOT_LOADED, NOT_LOADED]}
+
+    with pytest.raises(BackendError) as raised:
+        client.predict('ocr', weights, {}, [Item('0', Image.new('RGB', (40, 10)))])
+    assert raised.value.code == 'weights_not_loaded'
+    assert [c[1] for c in FakeBackend.calls].count('/v1/weights/load') == 2
+
+
+def _predict_in_turns(clients: list[BackendClient], batches: int):
+    def read(client):
+        for _ in range(batches):
+            client.predict('ocr', None, {}, [Item('0', Image.new('RGB', (40, 10)))])
+    threads = [threading.Thread(target=read, args=(client,)) for client in clients]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+
+def test_backends_on_one_card_take_turns_batch_by_batch(backend):
+    FakeBackend.predict_seconds = 0.05
+    beside = config.ModelBackend('lines', backend.url, SECRET, 'default')
+
+    _predict_in_turns([BackendClient(backend), BackendClient(beside)], batches=3)
+
+    assert FakeBackend.most_busy == 1
+    assert [c[1] for c in FakeBackend.calls].count('/v1/predict/ocr') == 6
+
+
+def test_backends_on_different_cards_do_not_wait_for_each_other(backend):
+    FakeBackend.predict_seconds = 0.2
+    elsewhere = config.ModelBackend('lines', backend.url, SECRET, 'second-card')
+
+    _predict_in_turns([BackendClient(backend), BackendClient(elsewhere)], batches=1)
+
+    assert FakeBackend.most_busy == 2
+
+
+def test_a_predict_that_takes_no_turn_runs_while_another_has_the_card(backend):
+    """The tile editor's area detect: someone waits on it, and it loads nothing."""
+    with backend_client.card_turn('default'):
+        answer = BackendClient(backend).predict('ocr', None, {}, [Item('0', Image.new('RGB', (40, 10)))],
+                                                takes_turn=False)
+    assert [r['text'] for r in answer['results']] == ['read None of 1']

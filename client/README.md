@@ -43,6 +43,23 @@ deeplabel corpus-add <job-id> ./transcriptions   # one .txt per document, any na
 deeplabel cut <job-id>                           # cut the corpus onto the pages
 deeplabel reference <job-id>                     # per-page span, anchors and score
 deeplabel groundtruth <job-id> --wait            # read each page against its own span
+deeplabel recognize pages ./scans -o answer.json # lines and text, no dataset
+deeplabel recognize pages ./scans --format page -o page-xml/   # one PAGE XML per scan
+deeplabel recognize lines ./line-images          # text of each line image
+```
+
+## Reading without a dataset
+
+`recognize_pages` and `recognize_lines` use the recognition API: nothing is stored, and
+any number of files is sent in requests of the size the deployment allows. It needs the
+recognize permission; a token made **Recognition only** is the one to give a script that
+should do nothing else.
+
+```python
+answer = dl.recognize_pages([Path('scans')], format='alto')
+for page in answer['pages']:
+    print(page['id'], [line['text'] for line in page['lines']])
+texts = dl.recognize_lines([Path('line-images')])['lines']
 ```
 
 ## A corpus that is not cut up by hand

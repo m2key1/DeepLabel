@@ -15,7 +15,7 @@ curl -H "Authorization: Bearer $DEEPLABEL_TOKEN" $DEEPLABEL_URL/api/jobs
 ```
 
 `GET /docs` renders the full schema grouped by area (datasets, pages, lines, exports,
-pipeline, maps, models, training, augmentations), `GET /openapi.json` is the machine-readable form -
+pipeline, maps, models, training, augmentations, recognition), `GET /openapi.json` is the machine-readable form -
 both behind the same login as everything else. Every operation carries a one-line
 summary; the endpoints a script leans on (`/api/jobs`, `/api/jobs/{id}`, `/api/models`)
 also declare their response shape, and a test keeps those declarations honest against
@@ -62,3 +62,52 @@ A read-only token refuses every write with `403 read-only API token`, so it is t
 thing to paste into a notebook or a CI job. Managing tokens and administering accounts answer
 `403 needs a signed-in session, not an API token` whatever the token's owner may do.
 
+## Recognition
+
+Scans in, lines and text out, without a dataset: nothing of a request is stored. It needs
+the **recognize** permission, which admins have and grant per person. A token made with
+the access **Recognition only** reaches these routes and nothing else, which makes it the
+one to give a service outside; a read-only token may call them too, as they write nothing.
+
+- `POST /api/recognize/pages` - whole pages as `files` parts. Each comes back with the
+  lines found on it, in reading order, each with its text, confidence and outline in pixels
+  of the image (upright, as its EXIF orientation says). `lines` (JSON, by file name) gives
+  a page its own outlines to read instead, in the order given.
+- `POST /api/recognize/lines` - line images as `files` parts, read as they are, in the
+  order sent.
+- `GET /api/recognize` - the line and OCR models a request can name, their decodes and
+  conventions, the formats, and the limits.
+
+Both take `ocr_model`, `decode` and `convention` (comma-separated); pages also take
+`lines_model` and `format`: `page`, `alto`, `hocr` or `txt` add each page's document beside
+its lines. Without them the deployment's default models read, the way a new dataset would.
+
+```bash
+curl -H "Authorization: Bearer $DEEPLABEL_TOKEN" \
+  -F files=@folio_1.jpg -F files=@folio_2.jpg -F format=page \
+  $DEEPLABEL_URL/api/recognize/pages
+# {"models": {"lines": {"id": 12, "name": "..."}, "ocr": {"id": 38, "name": "...", "decode": "rescored"}},
+#  "pages": [{"id": "folio_1.jpg", "width": 2480, "height": 3508, "document": "<?xml ...",
+#             "lines": [{"polygon": [[112, 340], [1890, 338], [1891, 402], [113, 404]],
+#                        "text": "...", "confidence": 0.97}, ...]}, ...]}
+```
+
+An image that cannot be read comes back as `{"id": ..., "error": ...}` and the rest of the
+request is still answered. One request carries at most 10 pages, 500 lines and 100 MB by
+default (`RECOGNIZE_MAX_*` in `.env`), and an account runs one request at a time: a second
+is answered `429` with `Retry-After`. The request takes the GPU between the batches of
+whatever else runs and shows on the **Queue** page while it does, without its owner.
+
+The client splits any number of files into requests of the allowed size and sends them one
+after another:
+
+```bash
+deeplabel recognize pages ./scans --format page -o page-xml/   # one PAGE XML per scan
+deeplabel recognize lines ./line-images -o lines.json
+```
+
+```python
+answer = dl.recognize_pages([Path('scans')], format='alto')
+for page in answer['pages']:
+    print(page['id'], len(page['lines']))
+```

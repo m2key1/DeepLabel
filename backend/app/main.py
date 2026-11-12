@@ -9,7 +9,7 @@ from app import (augmentations, caches, config, dataset_sync, geometry, jobs, ll
                  llm_queue, store, trainer, training, weights)
 from app.routes import (augmentations as augmentation_routes, backend_api, bulk, contributors, conventions, elements,
                         evaluations, exports, groups, lines, llm, maps, models, pages, people, pipeline, presence,
-                        reference as reference_routes, trainings, transcript)
+                        recognize, reference as reference_routes, trainings, transcript)
 from app.routes import jobs as job_routes
 from app.routes import layout_templates as layout_template_routes
 
@@ -48,6 +48,7 @@ async def invalid_geometry(_request: Request, exc: geometry.InvalidGeometry) -> 
 
 WRITE_METHODS = ('POST', 'PATCH', 'PUT', 'DELETE')
 CLIENT_ID = re.compile(r'[A-Za-z0-9-]{1,64}')
+RECOGNITION = re.compile(r'/api/recognize(/[a-z]+)?')
 
 
 @app.middleware('http')
@@ -59,7 +60,12 @@ async def auth_gate(request: Request, call_next):
         role = request.headers.get('X-Auth-Role')
         if not username or not role:
             return JSONResponse({'detail': 'not authenticated'}, status_code=401)
-        if request.method in WRITE_METHODS:
+        recognition = RECOGNITION.fullmatch(request.url.path) is not None
+        if request.headers.get('X-Auth-Scope') == 'recognize' and not recognition:
+            return JSONResponse({'detail': 'recognition-only API token'}, status_code=403)
+        # Recognition posts images and stores nothing, so it is not a write: the recognize
+        # capability decides who may, read-only token or not.
+        if request.method in WRITE_METHODS and not recognition:
             if role == 'viewer':
                 return JSONResponse({'detail': 'read-only account'}, status_code=403)
             # A token the user marked read-only keeps their role for reads, so it is the
@@ -122,3 +128,4 @@ app.include_router(contributors.router)
 app.include_router(people.router)
 app.include_router(presence.router)
 app.include_router(backend_api.router)
+app.include_router(recognize.router)

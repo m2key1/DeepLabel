@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { cancelEvaluation, cancelJob, cancelTraining, getQueue } from '../api'
-import type { PendingReocr, QueueEntry, QueueState } from '../api'
+import type { PendingReocr, QueueEntry, QueueState, RecognitionRequest } from '../api'
 import { useAuth } from '../auth'
 import { useCrumb } from '../components/NavBar'
 import { Button } from '../components/ui/Button'
@@ -226,6 +226,34 @@ function PendingReocrRow({ pending }: { pending: PendingReocr }) {
   )
 }
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+function recognitionProgress(request: RecognitionRequest): string {
+  const size = request.pages > 0 ? plural(request.pages, 'page') : plural(request.lines_total, 'line image')
+  if (request.state === 'reading') return `${size} · reading ${request.lines_read} of ${plural(request.lines_total, 'line')}`
+  if (request.state === 'finding lines' && request.lines_total) {
+    return `${size} · finding lines · ${plural(request.lines_total, 'line')} so far`
+  }
+  return `${size} · ${request.state}`
+}
+
+/** A recognition API request while it runs. It takes the GPU between the batches of the
+ *  work above rather than waiting its turn in that order, and whose it is stays unsaid. */
+function RecognitionRow({ request, now }: { request: RecognitionRequest; now: number }) {
+  const seconds = (now - parseStamp(request.started_at).getTime()) / 1000
+  const reading = request.state === 'reading' && request.lines_total > 0
+  return (
+    <div data-testid="queue-recognition"
+         className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line px-3 py-2 text-sm">
+      <Badge tone="neutral">api</Badge>
+      <span className="font-medium">Recognition request</span>
+      <span className="text-[11px] text-ink-muted">{recognitionProgress(request)}</span>
+      {reading && <div className="w-24"><Bar fraction={request.lines_read / request.lines_total} /></div>}
+      <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums text-ink">{formatRunTime(seconds)}</span>
+    </div>
+  )
+}
+
 export function QueuePage() {
   useCrumb('Queue')
   const { isAdmin, user } = useAuth()
@@ -261,6 +289,7 @@ export function QueuePage() {
     ? () => { CANCEL[entry.kind](entry.id).then(refresh).catch((e: Error) => setError(e.message)) }
     : undefined
   const { running, queued } = queue.gpu
+  const recognition = queue.recognition ?? []
   const localBars = placeLocal(running, queued)
   const clusterBars = placeCluster(queue.cluster)
   const startOf = (i: number) => {
@@ -293,13 +322,13 @@ export function QueuePage() {
       {failure}
       {lanes.length > 0 && <QueueTimeline lanes={lanes} now={now} user={user} pageOf={pageOf} />}
       <Section title="Local GPU">
-        {local.length === 0
-          ? (
-            <EmptyState>
-              <span data-testid="queue-idle">The GPU is idle - nothing running.</span>
-            </EmptyState>
-          )
-          : <QueueTable rows={local} caption="The local GPU queue" />}
+        {local.length > 0 && <QueueTable rows={local} caption="The local GPU queue" />}
+        {local.length === 0 && recognition.length === 0 && (
+          <EmptyState>
+            <span data-testid="queue-idle">The GPU is idle - nothing running.</span>
+          </EmptyState>
+        )}
+        {recognition.map((request) => <RecognitionRow key={request.id} request={request} now={now} />)}
         {queue.pending_reocr && <PendingReocrRow pending={queue.pending_reocr} />}
       </Section>
       {cluster.length > 0 && (

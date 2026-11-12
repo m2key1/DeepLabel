@@ -30,7 +30,7 @@ const training = (id: number, name: string, status: string) => ({
               snapshot_progress: null },
 })
 
-const EMPTY = { gpu: { running: null, queued: [] }, cluster: [], pending_reocr: null }
+const EMPTY = { gpu: { running: null, queued: [] }, cluster: [], pending_reocr: null, recognition: [] }
 
 test.describe('Scenario: what the shared GPU is doing', () => {
   test('an idle instance says so rather than showing an empty table', async ({ page }) => {
@@ -225,15 +225,35 @@ test.describe('Scenario: lines waiting to be read again', () => {
   })
 })
 
+test.describe('Scenario: a recognition request on the GPU', () => {
+  test('it has a row of its own that says how far it is, and the GPU no longer reads as idle',
+    async ({ page }) => {
+      await serveQueue(page, { ...EMPTY, recognition: [
+        { id: 'r1', pages: 10, lines_total: 500, lines_read: 230, state: 'reading', started_at: '2026-01-01 00:00:00' },
+        { id: 'r2', pages: 0, lines_total: 120, lines_read: 0, state: 'waiting for the GPU',
+          started_at: '2026-01-01 00:00:00' },
+      ] })
+      await page.goto('/queue')
+
+      await expect(page.getByTestId('queue-recognition')).toHaveText([
+        /^apiRecognition request10 pages · reading 230 of 500 lines/,
+        /^apiRecognition request120 line images · waiting for the GPU/,
+      ])
+      await expect(page.getByTestId('queue-idle')).toHaveCount(0)
+      await expect(page.getByTestId('queue-pill')).toContainText('recognition request')
+    })
+})
+
 test.describe('Scenario: the queue payload itself', () => {
   test('the live endpoint has the shape the page is built on', async () => {
     /** Guards the served payloads above: if the real response changed, they would keep
      *  passing against a shape the app no longer produces. */
     const queue = await backendFetch('/api/queue', { headers: DEV })
 
-    expect(Object.keys(queue).sort()).toEqual(['cluster', 'gpu', 'pending_reocr'])
+    expect(Object.keys(queue).sort()).toEqual(['cluster', 'gpu', 'pending_reocr', 'recognition'])
     expect(Object.keys(queue.gpu).sort()).toEqual(['queued', 'running'])
     expect(Array.isArray(queue.cluster)).toBe(true)
+    expect(Array.isArray(queue.recognition)).toBe(true)
     for (const entry of [...queue.gpu.queued, ...(queue.gpu.running ? [queue.gpu.running] : []), ...queue.cluster]) {
       expect(entry).toHaveProperty('started_at')
     }

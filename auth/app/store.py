@@ -100,7 +100,9 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     readonly INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_used_at TEXT,
-    expires_at TEXT
+    expires_at TEXT,
+    -- 'all', or 'recognize': only the recognition API, nothing else of either service.
+    scope TEXT NOT NULL DEFAULT 'all'
 );
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
 """
@@ -118,6 +120,7 @@ CAPABILITIES = (
     'models.manage',     # register, rename, retire and default a model
     'train.local',
     'train.cluster',
+    'recognize',         # read scans through the recognition API, which costs GPU time
 )
 
 # A role is a name for a set of these. Everyone starts from their role and an admin can
@@ -259,6 +262,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE users ADD COLUMN last_login_at TEXT')
     if 'last_seen_at' not in columns:
         conn.execute('ALTER TABLE users ADD COLUMN last_seen_at TEXT')
+    if 'scope' not in {r[1] for r in conn.execute('PRAGMA table_info(api_tokens)')}:
+        conn.execute("ALTER TABLE api_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT 'all'")
     if 'must_change_password' not in {r[1] for r in conn.execute('PRAGMA table_info(sessions)')}:
         conn.execute('ALTER TABLE sessions ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0')
     if 'pending' not in columns:
@@ -485,11 +490,11 @@ def set_user_active(conn: sqlite3.Connection, user_id: int, active: bool):
 
 
 def create_api_token(conn: sqlite3.Connection, user_id: int, name: str, token_hash: str,
-                     prefix: str, readonly: bool, expires_at: str | None):
+                     prefix: str, readonly: bool, expires_at: str | None, scope: str = 'all'):
     cur = conn.execute(
-        'INSERT INTO api_tokens (user_id, name, token_hash, prefix, readonly, expires_at) '
-        'VALUES (?, ?, ?, ?, ?, ?)',
-        (user_id, name, token_hash, prefix, int(readonly), expires_at))
+        'INSERT INTO api_tokens (user_id, name, token_hash, prefix, readonly, expires_at, scope) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (user_id, name, token_hash, prefix, int(readonly), expires_at, scope))
     conn.commit()
     return conn.execute('SELECT * FROM api_tokens WHERE id = ?', (cur.lastrowid,)).fetchone()
 
@@ -500,7 +505,7 @@ def get_user_by_api_token(conn: sqlite3.Connection, token_hash: str | None):
     if not token_hash:
         return None
     row = conn.execute(
-        'SELECT u.*, t.id token_id, t.readonly FROM api_tokens t JOIN users u ON u.id = t.user_id '
+        'SELECT u.*, t.id token_id, t.readonly, t.scope FROM api_tokens t JOIN users u ON u.id = t.user_id '
         "WHERE t.token_hash = ? AND u.active = 1 "
         "AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))",
         (token_hash,)).fetchone()
@@ -521,7 +526,7 @@ def list_api_tokens(conn: sqlite3.Connection, user_id: int | None = None):
     where = 'WHERE t.user_id = ?' if user_id is not None else ''
     args = (user_id,) if user_id is not None else ()
     return conn.execute(
-        'SELECT t.id, t.user_id, t.name, t.prefix, t.readonly, t.created_at, t.last_used_at, '
+        'SELECT t.id, t.user_id, t.name, t.prefix, t.readonly, t.scope, t.created_at, t.last_used_at, '
         "t.expires_at, t.expires_at <= datetime('now') AS expired, u.username, u.subject "
         'FROM api_tokens t JOIN users u ON u.id = t.user_id '
         f'{where} ORDER BY t.created_at DESC', args).fetchall()

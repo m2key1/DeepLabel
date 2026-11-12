@@ -213,7 +213,9 @@ source and pages. Changes apply to the next run; nothing already recognised is t
   progress, else from how long the same kind of work took recently: a dataset is measured
   against recent datasets read by the same OCR model (or, without OCR, against others
   without it, and a map dataset against map datasets), and against all recent ones when
-  there are none yet. Their owner, or an admin, can cancel them there.
+  there are none yet. Their owner, or an admin, can cancel them there. A recognition API
+  request shows there too while it waits for the GPU or reads, with its pages and how many
+  lines it has read, but never whose it is.
 
 ## Reading order
 
@@ -546,8 +548,9 @@ in Authentik, which nobody has to see or visit.
   DeepLabel by itself once approved. So does anyone signing in for the first time who was
   not invited.
 - Each account has a role - admin, member or viewer - which sets its permissions:
-  re-running phases, discarding checked work, deleting datasets, managing models and
-  training. Admins can grant or remove single permissions per person on the **Admin** page.
+  re-running phases, discarding checked work, deleting datasets, managing models,
+  training and the recognition API (admins only, unless granted). Admins can grant or
+  remove single permissions per person on the **Admin** page.
   Buttons you cannot use are not shown.
 - The Admin page shows everyone in one table, grouped by role, with a dot per permission.
   Each role's own line shows what its people get, and an amber dot marks an exception made
@@ -636,3 +639,10 @@ Everything the interface does is available over HTTP. Create a token under your 
 be made read-only, and expires when you choose. The schema is at `/docs` on a running
 deployment, and [API.md](API.md) has examples, including the Python client and the
 `deeplabel` command-line tool.
+
+The recognition API reads scans without a dataset: send a batch of pages and get the
+lines found on each, in reading order, with their text and outlines in pixels - or send
+line images, or a page with its own line outlines, and get only the text. PAGE XML, ALTO,
+hOCR and plain text can come with the lines. Nothing is stored. It needs the recognize
+permission, and a token made **Recognition only** reaches it and nothing else, so it can
+be given to a service outside without opening anyone's datasets to it.

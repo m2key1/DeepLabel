@@ -25,9 +25,7 @@ async function mintToken(page: import('@playwright/test').Page, name: string, re
   await expect(secretBox).toHaveCount(0)
 
   await page.getByLabel('Token name').fill(name)
-  const checkbox = page.getByTestId('token-readonly')
-  if (readonly) await checkbox.check()
-  else await checkbox.uncheck()
+  await page.getByLabel('Access').selectOption({ label: readonly ? 'Read-only' : 'Read/write' })
   await page.getByRole('button', { name: 'Create token' }).click()
 
   await expect(secretBox).toHaveCount(1)

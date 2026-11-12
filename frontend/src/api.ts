@@ -534,10 +534,24 @@ export interface PendingReocr {
   next_pass_in: number | null
 }
 
+/** A recognition API request while it runs. It takes the GPU between the batches of
+ *  whatever else runs, so it has no place in the queue's order - and never a name. */
+export interface RecognitionRequest {
+  id: string
+  /** 0 for a request of line images. */
+  pages: number
+  lines_total: number
+  lines_read: number
+  state: 'finding lines' | 'reading' | 'waiting for the GPU'
+  started_at: string
+}
+
 export interface QueueState {
   gpu: { running: QueueEntry | null; queued: QueueEntry[] }
   cluster: QueueEntry[]
   pending_reocr: PendingReocr | null
+  /** Absent from a backend older than the recognition API. */
+  recognition?: RecognitionRequest[]
 }
 
 export interface JobEvent {
@@ -1029,12 +1043,16 @@ function uploadForm<T>(url: string, form: FormData, onProgress: (loaded: number,
   })
 }
 
+export type TokenScope = 'all' | 'recognize'
+
 export interface ApiToken {
   id: number
   user_id: number
   name: string
   prefix: string
   readonly: boolean
+  /** 'recognize': the recognition API and nothing else. */
+  scope: TokenScope
   created_at: string
   last_used_at: string | null
   expires_at: string | null
@@ -1051,6 +1069,7 @@ export function listApiTokens(): Promise<{ tokens: ApiToken[] }> {
 export function createApiToken(body: {
   name: string
   readonly: boolean
+  scope: TokenScope
   expires_days: number | null
 }): Promise<ApiToken & { token: string }> {
   return request('/api/tokens', json('POST', body))

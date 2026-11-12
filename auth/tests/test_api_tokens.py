@@ -2,6 +2,8 @@
 alternative was forging the identity headers the frontend sets, which needs a secret
 that grants any username and any role.
 """
+import sqlite3
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -235,3 +237,67 @@ def test_a_token_reads_the_people_pickers(client):
 def test_an_unknown_token_is_not_authenticated(client):
     assert client.get('/api/me', headers=_bearer('dlp_nope')).status_code == 401
     assert client.get('/api/tokens', headers=_bearer('dlp_nope')).status_code == 401
+
+
+def test_recognize_is_an_admin_right_by_default():
+    assert 'recognize' in store.CAPABILITIES
+    assert 'recognize' in store.role_caps('admin')
+    assert 'recognize' not in store.role_caps('member')
+    assert 'recognize' not in store.role_caps('viewer')
+
+
+def test_a_recognition_token_is_scoped_for_the_backend(client):
+    scoped = client.get('/validate', headers=_bearer(_mint(client, 'root', scope='recognize')))
+    assert scoped.status_code == 200
+    assert scoped.headers['X-Auth-Scope'] == 'recognize'
+    assert 'recognize' in scoped.headers['X-Auth-Caps'].split()
+    full = client.get('/validate', headers=_bearer(_mint(client, 'root')))
+    assert full.status_code == 200
+    assert 'X-Auth-Scope' not in full.headers
+
+
+def test_a_recognition_token_reaches_nothing_of_the_auth_service(client):
+    token = _mint(client, 'root', scope='recognize')
+    refused = [client.get('/api/me', headers=_bearer(token)),
+               client.get('/api/settings', headers=_bearer(token)),
+               client.get('/api/users/names', headers=_bearer(token))]
+    assert [r.status_code for r in refused] == [403] * 3
+    assert {r.json()['detail'] for r in refused} == {'recognition-only API token'}
+    assert client.get('/api/me', headers=_bearer(_mint(client, 'root'))).status_code == 200
+
+
+def test_only_someone_who_may_recognize_mints_a_recognition_token(client):
+    refused = client.post('/api/tokens', json={'name': 'ocr', 'scope': 'recognize'}, cookies=_session('alice'))
+    assert refused.status_code == 403
+    assert refused.json()['detail'] == 'not permitted: recognize'
+    assert client.get('/api/tokens', cookies=_session('alice')).json()['tokens'] == []
+
+
+def test_the_token_list_says_which_are_recognition_only(client):
+    _mint(client, 'root', name='everything')
+    _mint(client, 'root', name='ocr', scope='recognize')
+    listed = {t['name']: t['scope'] for t in client.get('/api/tokens', cookies=_session('root')).json()['tokens']}
+    assert listed == {'everything': 'all', 'ocr': 'recognize'}
+    admin = {t['name']: t['scope'] for t in client.get('/api/admin/tokens', cookies=_session('root')).json()['tokens']}
+    assert admin == {'everything': 'all', 'ocr': 'recognize'}
+
+
+def test_a_scope_other_than_all_or_recognize_is_refused(client):
+    refused = client.post('/api/tokens', json={'name': 'x', 'scope': 'admin'}, cookies=_session('root'))
+    assert refused.status_code == 422
+    assert client.get('/api/tokens', cookies=_session('root')).json()['tokens'] == []
+
+
+def test_tokens_made_before_scopes_reach_everything(tmp_path):
+    db = tmp_path / 'old.db'
+    conn = sqlite3.connect(db)
+    conn.execute('CREATE TABLE api_tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, '
+                 "name TEXT NOT NULL DEFAULT '', token_hash TEXT UNIQUE NOT NULL, prefix TEXT NOT NULL DEFAULT '', "
+                 "readonly INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), "
+                 'last_used_at TEXT, expires_at TEXT)')
+    conn.execute("INSERT INTO api_tokens (user_id, name, token_hash) VALUES (1, 'old', 'h')")
+    conn.commit()
+    conn.close()
+    migrated = store.connect(db)
+    assert [tuple(r) for r in migrated.execute('SELECT name, scope FROM api_tokens')] == [('old', 'all')]
+    store.connect(db).close()

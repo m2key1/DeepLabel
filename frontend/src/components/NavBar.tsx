@@ -71,17 +71,23 @@ export function Shell() {
   )
 }
 
+/** What has the GPU: a dataset, training or evaluation by name, else a recognition request. */
+function busyWith(queue: QueueState): string | null {
+  if (queue.gpu.running) return queue.gpu.running.name
+  return queue.recognition?.length ? 'recognition request' : null
+}
+
 function queueSummary(queue: QueueState) {
-  const running = queue.gpu.running
-  return [running ? `running: ${running.name}` : 'idle', `${queue.gpu.queued.length} queued`,
+  const busy = busyWith(queue)
+  return [busy ? `running: ${busy}` : 'idle', `${queue.gpu.queued.length} queued`,
           ...(queue.cluster.length ? [`${queue.cluster.length} on cluster`] : [])].join(' · ')
 }
 
 /** The pipeline's state on the bar. Narrow, only its dot: the counts are in the menu. */
 function QueuePill({ queue, compact }: { queue: QueueState | null; compact: boolean }) {
   if (!queue) return null
-  const running = queue.gpu.running
-  const dot = <span className={`h-1.5 w-1.5 rounded-full ${running ? 'animate-pulse bg-accent' : 'bg-line-strong'}`} />
+  const busy = busyWith(queue)
+  const dot = <span className={`h-1.5 w-1.5 rounded-full ${busy ? 'animate-pulse bg-accent' : 'bg-line-strong'}`} />
   if (compact) {
     return (
       <Link to="/queue" data-testid="queue-pill" aria-label={`Queue: ${queueSummary(queue)}`}
@@ -94,11 +100,11 @@ function QueuePill({ queue, compact }: { queue: QueueState | null; compact: bool
     <Link
       to="/queue"
       data-testid="queue-pill"
-      title={running ? `running: ${running.name}` : 'pipeline idle'}
+      title={busy ? `running: ${busy}` : 'pipeline idle'}
       className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-subtle hover:border-accent hover:text-accent-ink"
     >
       {dot}
-      {running ? <span className="max-w-48 truncate">{running.name}</span> : 'idle'}
+      {busy ? <span className="max-w-48 truncate">{busy}</span> : 'idle'}
       <span>· {queue.gpu.queued.length} queued</span>
       {queue.cluster.length > 0 && <span>· {queue.cluster.length} on cluster</span>}
     </Link>

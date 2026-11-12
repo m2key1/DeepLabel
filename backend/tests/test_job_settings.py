@@ -351,7 +351,7 @@ class TestTheQueue:
         body = client.get('/api/queue', headers=ALICE).json()
 
         assert body == {'gpu': {'running': None, 'queued': []}, 'cluster': [],
-                        'pending_reocr': None}
+                        'pending_reocr': None, 'recognition': []}
 
     def test_the_queue_is_global_but_names_are_not(self, client, conn):
         """One GPU, so everybody sees how busy it is - without being told what other

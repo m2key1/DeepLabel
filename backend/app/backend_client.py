@@ -1,10 +1,14 @@
+import fcntl
 import hashlib
 import io
 import json
+import re
 import time
 import urllib.error
 import urllib.request
 import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from PIL import Image
@@ -62,6 +66,30 @@ def _multipart(request: dict, images: dict[str, Encoded]) -> tuple[bytes, str]:
     return b''.join(parts), f'multipart/form-data; boundary={boundary}'
 
 
+@contextmanager
+def card_turn(gpu_group: str, waiting: Callable[[bool], None] | None = None) -> Iterator[None]:
+    """One turn on a GPU group's card. Everything that loads or predicts on a model backend
+    takes it - job runners, evaluations, recognition requests - so they take turns batch by
+    batch instead of unloading each other's weights halfway through a run. A file lock,
+    because the runners are processes of their own. `waiting` hears True when the turn has
+    to be waited for and False once it is ours."""
+    directory = config.DATA_DIR / 'gpu-turns'
+    directory.mkdir(parents=True, exist_ok=True)
+    with open(directory / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', gpu_group)}.lock", 'a') as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            if waiting:
+                waiting(True)
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            if waiting:
+                waiting(False)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 class BackendClient:
     """One configured model backend, spoken to over the contract in docs/MODEL-BACKENDS.md.
 
@@ -70,6 +98,13 @@ class BackendClient:
     def __init__(self, backend: config.ModelBackend):
         self.backend = backend
         self._info: dict | None = None
+        # The load request of every weights this client loaded, to load them again when
+        # something else on the card unloaded them in between.
+        self._loads: dict[str, dict] = {}
+        self.on_wait: Callable[[bool], None] | None = None
+
+    def _turn(self):
+        return card_turn(self.backend.gpu_group, self.on_wait)
 
     def _call(self, method: str, path: str, body: bytes | None = None, content_type: str | None = None,
               timeout: float = CONNECT_TIMEOUT) -> dict:
@@ -125,12 +160,13 @@ class BackendClient:
         """Make a model's weights ready on the backend. Returns the weights block predict
         requests carry (None for a backend with builtin weights and no files stored) and the
         facts the backend reports about them."""
-        self.free_card()
         files = weights.model_files(conn, model_id)
         weights_file = next((f for f in files if f['role'] == 'weights'), None)
         if weights_file is None:
             if self.info().get('weights', {}).get('builtin'):
-                return None, self._call('GET', '/v1/weights/builtin').get('facts') or {}
+                with self._turn():
+                    self.free_card()
+                    return None, self._call('GET', '/v1/weights/builtin').get('facts') or {}
             raise BackendError('weights_unavailable',
                                f'model {model_id} has no files in the weight store - run python -m app.weights '
                                'import-existing')
@@ -139,6 +175,16 @@ class BackendClient:
         request = {'sha256': sha, 'model_type': (row['model_type'] if row else None) or self.info().get('model_type'),
                    'files': {f['role']: {'sha256': f['sha256'], 'size': f['size'], 'url': weights.file_url(f['sha256'])}
                              for f in files}}
+        self._loads[sha] = request
+        with self._turn():
+            state = self._load(request)
+        return {'sha256': sha, 'files': {f['role']: f['sha256'] for f in files if f['role'] != 'weights'}}, \
+            state.get('facts') or {}
+
+    def _load(self, request: dict) -> dict:
+        """Load weights and wait until they are; the caller holds the card's turn."""
+        self.free_card()
+        sha = request['sha256']
         state = self._call('POST', '/v1/weights/load', json.dumps(request).encode(), 'application/json', timeout=30)
         deadline = time.monotonic() + config.MODEL_BACKEND_LOAD_TIMEOUT
         while state.get('state') != 'loaded':
@@ -150,17 +196,18 @@ class BackendClient:
                                               f'{config.MODEL_BACKEND_LOAD_TIMEOUT:.0f} s')
             time.sleep(LOAD_POLL_SECONDS)
             state = self._call('GET', f'/v1/weights/{sha}')
-        return {'sha256': sha, 'files': {f['role']: f['sha256'] for f in files if f['role'] != 'weights'}}, \
-            state.get('facts') or {}
+        return state
 
-    def predict(self, task: str, weights_block: dict | None, params: dict, items: list[Item]) -> dict:
+    def predict(self, task: str, weights_block: dict | None, params: dict, items: list[Item],
+                takes_turn: bool = True) -> dict:
         """One batch. Retried once on a connection error or a transient refusal, since a
-        predict changes nothing on the backend (3.6)."""
+        predict changes nothing on the backend (3.6). `takes_turn=False` runs it beside
+        whatever has the card, for a call someone is waiting on that loads nothing."""
         encoded: dict[int, Encoded] = {}
         for item in items:
             if id(item.image) not in encoded:
                 encoded[id(item.image)] = _encode(item.image)
-        return self._predict(task, weights_block, params, items, encoded)
+        return self._predict(task, weights_block, params, items, encoded, takes_turn)
 
     def predict_all(self, task: str, weights_block: dict | None, params: dict, items: list[Item]) -> dict:
         """Any number of items, split into requests by the backend's item and byte limits.
@@ -189,7 +236,7 @@ class BackendClient:
         return response
 
     def _predict(self, task: str, weights_block: dict | None, params: dict, items: list[Item],
-                 encoded: dict[int, Encoded]) -> dict:
+                 encoded: dict[int, Encoded], takes_turn: bool = True) -> dict:
         images, names = {}, {}
         for item in items:
             key = id(item.image)
@@ -200,6 +247,20 @@ class BackendClient:
                    'items': [{'id': item.id, 'image': names[id(item.image)],
                               **({'context': item.context} if item.context else {})} for item in items]}
         body, content_type = _multipart(request, images)
+        if not takes_turn:
+            return self._send(task, body, content_type)
+        with self._turn():
+            try:
+                return self._send(task, body, content_type)
+            except BackendError as error:
+                # Something else on the card unloaded these weights since they were loaded.
+                load = self._loads.get((weights_block or {}).get('sha256'))
+                if error.code != 'weights_not_loaded' or load is None:
+                    raise
+                self._load(load)
+                return self._send(task, body, content_type)
+
+    def _send(self, task: str, body: bytes, content_type: str) -> dict:
         for attempt in (1, 2):
             try:
                 return self._call('POST', f'/v1/predict/{task}', body, content_type,

@@ -15,6 +15,10 @@ RECORDED = []
 
 
 class Handler(BaseHTTPRequestHandler):
+    # How many recognition requests to answer 429 first, as a deployment does while the
+    # account has one running already.
+    busy = 0
+
     def log_message(self, *_args):
         pass
 
@@ -34,6 +38,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self._record()
+        if self.path == '/api/recognize':
+            return self._reply(200, {'models': {'lines': [], 'ocr': []}, 'formats': ['json', 'page'],
+                                     'limits': {'pages': 2, 'lines': 3, 'megabytes': 1}})
         if self.path.startswith('/api/jobs/denied'):
             return self._reply(403, {'detail': 'read-only API token'})
         if self.path.startswith('/api/jobs/j1/export'):
@@ -64,7 +71,21 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(200, {'documents': 0})
 
     def do_POST(self):
-        self._record()
+        sent = self._record()
+        if self.path.startswith('/api/recognize/'):
+            if Handler.busy:
+                Handler.busy -= 1
+                self.send_response(429)
+                self.send_header('Retry-After', '0')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
+            names = sent_files(sent)
+            if self.path.endswith('/pages'):
+                return self._reply(200, {'models': {'ocr': {'id': 38, 'name': 'reader', 'decode': 'beam'}},
+                                         'pages': [{'id': name, 'lines': []} for name in names]})
+            return self._reply(200, {'models': {'ocr': {'id': 38, 'name': 'reader', 'decode': 'beam'}},
+                                     'lines': [{'id': name, 'text': name.upper()} for name in names]})
         if self.path.endswith('/reference/cut'):
             return self._reply(200, {'documents': 1, 'pages': 3, 'placed': 3, 'unanchored': 0})
         if self.path.endswith('/groundtruth/read'):
@@ -384,3 +405,58 @@ class TestSettingLineTexts:
         assert len(RECORDED) == 3
         assert [len(json.loads(r['body'])) for r in RECORDED] == [2, 2, 1]
         assert result == {'written': [1, 2, 4, 5], 'failed': [{'id': 3, 'reason': 'deleted'}]}
+
+
+class TestRecognition:
+    """Any number of files, sent in the requests the deployment's own limits allow."""
+
+    def test_pages_go_in_requests_of_the_stated_size_and_the_answers_are_joined(self, client, tmp_path):
+        scans = []
+        for name in ('a.png', 'b.png', 'c.png'):
+            (tmp_path / name).write_bytes(b'PNG')
+            scans.append(tmp_path / name)
+
+        answer = client.recognize_pages(scans, ocr_model=38, format='page',
+                                        lines={'c.png': [[[0, 0], [9, 0], [9, 3]]]})
+
+        posts = [r for r in RECORDED if r['method'] == 'POST']
+        assert [r['path'] for r in posts] == ['/api/recognize/pages'] * 2
+        assert [sent_files(r) for r in posts] == [['a.png', 'b.png'], ['c.png']]
+        assert [form_field(r, 'ocr_model') for r in posts] == ['38', '38']
+        assert [form_field(r, 'format') for r in posts] == ['page', 'page']
+        assert [form_field(r, 'lines') for r in posts] == [None, '{"c.png": [[[0, 0], [9, 0], [9, 3]]]}']
+        assert answer == {'models': {'ocr': {'id': 38, 'name': 'reader', 'decode': 'beam'}},
+                          'pages': [{'id': 'a.png', 'lines': []}, {'id': 'b.png', 'lines': []},
+                                    {'id': 'c.png', 'lines': []}]}
+
+    def test_line_images_go_in_requests_of_the_stated_size(self, client, tmp_path):
+        for i in range(4):
+            (tmp_path / f'l{i}.png').write_bytes(b'PNG')
+
+        answer = client.recognize_lines([tmp_path])
+
+        posts = [r for r in RECORDED if r['method'] == 'POST']
+        assert [sent_files(r) for r in posts] == [['l0.png', 'l1.png', 'l2.png'], ['l3.png']]
+        assert [line['text'] for line in answer['lines']] == ['L0.PNG', 'L1.PNG', 'L2.PNG', 'L3.PNG']
+
+    def test_a_request_turned_away_while_the_account_is_busy_is_sent_again(self, client, tmp_path):
+        (tmp_path / 'a.png').write_bytes(b'PNG')
+        Handler.busy = 2
+
+        answer = client.recognize_pages([tmp_path / 'a.png'])
+
+        assert [r['path'] for r in RECORDED if r['method'] == 'POST'] == ['/api/recognize/pages'] * 3
+        assert answer['pages'] == [{'id': 'a.png', 'lines': []}]
+
+    def test_the_cli_writes_each_pages_document_into_a_folder(self, server, tmp_path, monkeypatch):
+        from deeplabel import cli
+        RECORDED.clear()
+        monkeypatch.setenv('DEEPLABEL_URL', server)
+        monkeypatch.setenv('DEEPLABEL_TOKEN', 'dlp_test')
+        (tmp_path / 'leaf.png').write_bytes(b'PNG')
+        monkeypatch.setattr(DeepLabel, 'recognize_pages', lambda self, paths, **options: {
+            'models': {}, 'pages': [{'id': 'leaf.png', 'lines': [], 'document': f"<{options['format']}/>"}]})
+
+        assert cli.main(['recognize', 'pages', str(tmp_path / 'leaf.png'), '--format', 'alto',
+                         '-o', str(tmp_path / 'out')]) == 0
+        assert (tmp_path / 'out' / 'leaf.xml').read_text() == '<alto/>'

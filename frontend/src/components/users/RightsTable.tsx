@@ -8,12 +8,14 @@ const ROLE_ORDER: Role[] = ['admin', 'member', 'viewer']
 const ROLE_TITLE: Record<Role, string> = { admin: 'Admins', member: 'Members', viewer: 'Viewers' }
 const ROLE_NOTE: Partial<Record<Role, string>> = { admin: 'may do everything', viewer: 'read only' }
 
-// The columns read as a sentence: run a step, throw something away, manage models, train.
+// The columns read as a sentence: run a step, throw something away, manage models, train,
+// use the API.
 const GROUPS: { title: string; caps: string[] }[] = [
   { title: 'run', caps: ['pipeline.layout', 'pipeline.lines', 'pipeline.ocr'] },
   { title: 'throw away', caps: ['pipeline.discard', 'dataset.delete'] },
   { title: 'models', caps: ['models.manage'] },
   { title: 'train', caps: ['train.local', 'train.cluster'] },
+  { title: 'API', caps: ['recognize'] },
 ]
 
 function groupsFor(capabilities: string[]) {

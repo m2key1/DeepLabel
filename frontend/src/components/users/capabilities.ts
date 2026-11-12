@@ -13,6 +13,7 @@ const LABELS: Record<string, { short: string; hint: string }> = {
   'models.manage': { short: 'Models', hint: 'Register, rename, retire and default a model' },
   'train.local': { short: 'Train locally', hint: 'Train on the shared local GPU' },
   'train.cluster': { short: 'Train cluster', hint: 'Submit trainings to the cluster' },
+  recognize: { short: 'Recognize', hint: 'Read scans through the recognition API, which uses the GPU' },
 }
 
 export const capabilityLabel = (cap: string) => LABELS[cap]?.short ?? cap

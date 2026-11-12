@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createApiToken, deleteApiToken, listApiTokens } from '../api'
 import type { ApiToken } from '../api'
+import { useAuth } from '../auth'
 import { useAutoClear } from '../messages'
 import { Section } from './ui/Section'
 import { Button } from './ui/Button'
-import { Check, Input, Select } from './ui/Field'
+import { Input, Select } from './ui/Field'
 import { EmptyState } from './ui/EmptyState'
 
 const EXPIRY_CHOICES: { label: string; days: number | null }[] = [
@@ -17,10 +18,22 @@ const EXPIRY_CHOICES: { label: string; days: number | null }[] = [
 
 const stamp = (value: string | null) => (value ? value.slice(0, 10) : '-')
 
+type Access = 'all' | 'readonly' | 'recognize'
+
+const ACCESS_CHOICES: { value: Access; label: string }[] = [
+  { value: 'all', label: 'Read/write' },
+  { value: 'readonly', label: 'Read-only' },
+  { value: 'recognize', label: 'Recognition only' },
+]
+
+export const tokenAccess = (t: ApiToken) =>
+  t.scope === 'recognize' ? 'recognition only' : t.readonly ? 'read-only' : 'read/write'
+
 export function ApiTokens() {
   const [tokens, setTokens] = useState<ApiToken[]>([])
   const [name, setName] = useState('')
-  const [readonly, setReadonly] = useState(false)
+  const { can } = useAuth()
+  const [access, setAccess] = useState<Access>('all')
   const [expiryDays, setExpiryDays] = useState<number | null>(90)
   const [minted, setMinted] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -39,7 +52,10 @@ export function ApiTokens() {
     setBusy(true)
     setError(null)
     try {
-      const created = await createApiToken({ name: name.trim(), readonly, expires_days: expiryDays })
+      const created = await createApiToken({
+        name: name.trim(), readonly: access === 'readonly', scope: access === 'recognize' ? 'recognize' : 'all',
+        expires_days: expiryDays,
+      })
       setMinted(created.token)
       setName('')
       refresh()
@@ -70,6 +86,10 @@ export function ApiTokens() {
         API this page uses. A token acts as you, so it can never do more than your role allows.
         These are yours alone - nobody else sees them here, not even an admin.
         The full list of endpoints is at <a href="/docs" className="underline underline-offset-2">/docs</a>.
+        {can('recognize') && <>
+          {' '}A recognition-only token reads scans through <code>/api/recognize</code> and reaches nothing
+          else - the one to give a service outside.
+        </>}
       </>}
     >
 
@@ -96,11 +116,17 @@ export function ApiTokens() {
             </option>
           ))}
         </Select>
-        <label className="flex items-center gap-1.5 text-sm text-ink">
-          <Check checked={readonly} onChange={(e) => setReadonly(e.target.checked)}
-                 data-testid="token-readonly" />
-          Read-only
-        </label>
+        <Select
+          size="md"
+          value={access}
+          onChange={(e) => setAccess(e.target.value as Access)}
+          aria-label="Access"
+          className="cursor-pointer"
+        >
+          {ACCESS_CHOICES.filter((c) => c.value !== 'recognize' || can('recognize')).map((c) => (
+            <option key={c.value} value={c.value}>{c.label}</option>
+          ))}
+        </Select>
         <Button variant="primary" size="md" onClick={create} disabled={busy || !name.trim()}>
           {busy ? 'Creating…' : 'Create token'}
         </Button>
@@ -151,7 +177,7 @@ export function ApiTokens() {
                   className={`border-b border-line ${t.expired ? 'text-ink-subtle opacity-60' : ''}`}>
                 <td className="py-1.5">{t.name}</td>
                 <td className="py-1.5 font-mono text-xs text-ink-muted">{t.prefix}…</td>
-                <td className="py-1.5">{t.readonly ? 'read-only' : 'read/write'}</td>
+                <td className="py-1.5">{tokenAccess(t)}</td>
                 <td className="py-1.5 text-ink-muted">{stamp(t.last_used_at)}</td>
                 <td className="py-1.5 text-ink-muted">{t.expired ? `expired ${stamp(t.expires_at)}` : stamp(t.expires_at)}</td>
                 <td className="py-1.5 text-right">

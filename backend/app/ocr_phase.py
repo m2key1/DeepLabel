@@ -16,15 +16,19 @@ Read = Callable[[list[Image.Image], list[dict]], tuple[list[str], list[float], l
 VERTICAL_RATIO = 2.0
 
 
-def _orientations(line, width: int, height: int) -> tuple[int, ...]:
-    """The orientations a line is read at: its own, and for an unturned vertical line also
-    the opposite direction. An orientation a person set is never second-guessed."""
-    if line['orientation']:
-        return (line['orientation'],)
-    points = json.loads(line['polygon'])
-    xs, ys = [p[0] * width for p in points], [p[1] * height for p in points]
+def orientations(outline: list, orientation: int = 0) -> tuple[int, ...]:
+    """The orientations a line is read at, from its outline in pixels: its own, and for an
+    unturned vertical line also the opposite direction. An orientation a person set is
+    never second-guessed."""
+    if orientation:
+        return (orientation,)
+    xs, ys = [p[0] for p in outline], [p[1] for p in outline]
     tall = (max(ys) - min(ys)) >= VERTICAL_RATIO * max(1.0, max(xs) - min(xs))
     return (0, 180) if tall else (0,)
+
+
+def _orientations(line, width: int, height: int) -> tuple[int, ...]:
+    return orientations([[x * width, y * height] for x, y in json.loads(line['polygon'])], line['orientation'])
 
 
 def is_cancelled(conn, job_id: str) -> bool:

@@ -8,6 +8,7 @@ from deeplabel.client import DeepLabel, DeepLabelError
 
 EXPORT_SUFFIX = {'json': 'json', 'md': 'md', 'txt': 'txt', 'zip': 'zip',
                  'page': 'page.zip', 'alto': 'alto.zip', 'hocr': 'hocr.zip', 'tei': 'tei.zip'}
+DOCUMENT_SUFFIX = {'page': 'xml', 'alto': 'xml', 'hocr': 'hocr', 'txt': 'txt'}
 
 
 def _client(args) -> DeepLabel:
@@ -62,6 +63,30 @@ def cmd_export(args, client):
     destination = Path(args.output or f'{args.job_id}.{EXPORT_SUFFIX[args.format]}')
     destination.write_bytes(body)
     print(f'{destination} ({len(body)} bytes)')
+
+
+def cmd_recognize(args, client):
+    paths = [Path(p) for p in args.paths]
+    options = {'ocr_model': args.ocr_model, 'decode': args.decode}
+    if args.what == 'lines':
+        answer = client.recognize_lines(paths, **options)
+    else:
+        answer = client.recognize_pages(paths, lines_model=args.lines_model, format=args.format, **options)
+    if args.what == 'pages' and args.format != 'json' and args.output:
+        folder = Path(args.output)
+        folder.mkdir(parents=True, exist_ok=True)
+        for page in answer['pages']:
+            if 'document' in page:
+                target = folder / f"{Path(page['id']).stem}.{DOCUMENT_SUFFIX[args.format]}"
+                target.write_text(page['document'], encoding='utf-8')
+            else:
+                print(f"{page['id']}: {page.get('error')}", file=sys.stderr)
+        return
+    text = json.dumps(answer, indent=2, ensure_ascii=False)
+    if args.output:
+        Path(args.output).write_text(text + '\n', encoding='utf-8')
+    else:
+        print(text)
 
 
 def cmd_wait(args, client):
@@ -231,6 +256,18 @@ def build_parser() -> argparse.ArgumentParser:
     cancel.set_defaults(run=cmd_cancel)
 
     sub.add_parser('models', help='list registered models').set_defaults(run=cmd_models)
+
+    recognize = sub.add_parser('recognize', help='read pages or line images without a dataset')
+    recognize.add_argument('what', choices=['pages', 'lines'])
+    recognize.add_argument('paths', nargs='+', help='image files, or a directory of them')
+    recognize.add_argument('--format', choices=['json', *DOCUMENT_SUFFIX], default='json',
+                           help='pages only: a PAGE XML, ALTO, hOCR or text document per page')
+    recognize.add_argument('--lines-model', type=int, help='line model id (pages only); default: the default')
+    recognize.add_argument('--ocr-model', type=int, help='OCR model id; default: the default')
+    recognize.add_argument('--decode', help='how the OCR model decodes, e.g. beam or greedy')
+    recognize.add_argument('-o', '--output',
+                           help='file for the JSON answer; with --format, a folder for the documents')
+    recognize.set_defaults(run=cmd_recognize)
     return parser
 
 

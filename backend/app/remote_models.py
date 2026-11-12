@@ -84,7 +84,7 @@ class RemoteLines:
         self.weights, self.facts = client.load(conn, model_id)
         self.author = f'model:lines@{_model_name(conn, model_id)}'
 
-    def detect(self, images: list[Image.Image], scope: str) -> list[list[list[list[float]]]]:
+    def detect(self, images: list[Image.Image | Encoded], scope: str) -> list[list[list[list[float]]]]:
         response = self.client.predict_all('lines', self.weights, {'scope': scope},
                                            [Item(str(i), image) for i, image in enumerate(images)])
         found = []
