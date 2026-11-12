@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { test, expect } from '../helpers/test'
-import { OCR_READER, backendFetch, createGroup, createJob, createTraining, getTrainingProgress, identity, importStubModel, listEvaluations, listRegistryModels, listTrainings, markLinesChecked, markTestPages, moveJobToGroup, seedCompletedJob, seedDistinctPagesJob, TEST_SCAN_WIDTH, uniqueName, waitForJobStatus } from '../helpers/api'
+import { OCR_READER, backendFetch, createGroup, createJob, createTraining, getTrainingProgress, identity, importStubModel, listEvaluations, listRegistryModels, listTrainings, markLinesChecked, markTestPages, moveJobToGroup, seedCompletedJob, seedDistinctPagesJob, setModelColumn, TEST_SCAN_WIDTH, uniqueName, waitForJobStatus } from '../helpers/api'
 import { seedSession, useSession } from '../helpers/session'
 import { cancelledRun, datasetOption, pickDataset, startTraining, taskSection, testSetOption, versionRow } from '../helpers/training'
 
@@ -834,6 +834,29 @@ test.describe('Scenario: the model registry', () => {
                                   dataset_job_ids: [jobId], build_lm: true }))
       .rejects.toThrow(/400 .*a language model is only fitted for an OCR run/)
   })
+
+  test('a base that reads with its own decoder says what a fitted language model is for',
+    async ({ page }) => {
+      const reader = importStubModel('ocr', uniqueName('Token reader'), 'stub-misread')
+      const tuned = importStubModel('ocr', uniqueName('Tuned token reader'), 'stub-misread')
+      const plain = importStubModel('ocr', uniqueName('Plain reader'), 'stub-misread')
+      setModelColumn(reader, 'decoder', 'token')
+      // A fine-tune reports no decoder until it is loaded; it reads with its base's.
+      setModelColumn(tuned, 'trained_from', reader)
+
+      await page.goto('/models/train?task=ocr')
+      const box = page.getByTestId('build-lm')
+      const hint = page.getByTestId('build-lm-hint')
+      for (const base of [reader, tuned]) {
+        await page.getByLabel('Base model').selectOption(String(base))
+        await expect(box).not.toBeChecked()
+        await expect(hint).toHaveText('This model reads with its own decoder, which does not use a language '
+          + 'model. A fitted one only changes the beam and rescored readings.')
+      }
+      await page.getByLabel('Base model').selectOption(String(plain))
+      await expect(hint).toHaveText('The shipped one is built from every corpus at once, which costs accuracy '
+        + "on a hand it was not built for. Beam search then uses this run's own text instead.")
+    })
 
   test('a cluster run starts on the card its backend prefers, until one is picked', async ({ page }) => {
     // The options are served with a preference: the stub backend declares none, and the

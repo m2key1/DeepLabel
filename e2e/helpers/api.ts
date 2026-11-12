@@ -282,6 +282,15 @@ export function importStubModel(task: 'layout' | 'lines' | 'ocr', name: string,
   return JSON.parse(out.toString()).model_id
 }
 
+/** A registry column only a model backend fills in, such as the decoder it reports on load,
+ *  or the model a fine-tune was trained from. */
+export function setModelColumn(modelId: number, column: 'decoder' | 'trained_from', value: string | number): void {
+  const literal = typeof value === 'number' ? String(value) : `'${value}'`
+  const script = 'from app import config, store; conn = store.connect(config.DB_PATH); '
+    + `conn.execute(\\"UPDATE models SET ${column} = ${literal} WHERE id = ${modelId}\\"); conn.commit()`
+  execSync(`docker compose -f ../compose.e2e.yml exec -T backend python -c "${script}"`)
+}
+
 /** A model registered on a backend this deployment does not configure, so the step that
  *  needs it fails the run with a reason - the only failure a scenario can cause at will. */
 export function importUnservedModel(task: 'layout' | 'lines' | 'ocr', name: string): number {

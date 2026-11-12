@@ -445,8 +445,9 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   agreement.
 - Tune epochs, batch size, learning rate, early stopping and every other setting the
   trainer offers; empty fields use the trainer's defaults, which are shown.
-- For OCR, optionally fit a language model to the training text. For line models, choose
-  the line shape to train on.
+- For OCR, optionally fit a language model to the training text. A model that reads with its
+  own decoder never consults one, so for such a base the form says it only changes the beam
+  and rescored readings. For line models, choose the line shape to train on.
 - An OCR run trains each line under its dataset's convention flags. It keeps every flag its
   base model knew and can teach it new ones; the pre-flight names what the run teaches, how
   many training lines carry each flag, and warns when a new one has too few to be learned.
