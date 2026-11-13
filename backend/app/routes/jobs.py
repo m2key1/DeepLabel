@@ -129,7 +129,7 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
                run_tile: bool = Form(False), tile_size: int = Form(512), tile_skip_blank: bool = Form(True),
                line_width: int = Form(3),
                model_layout_id: int | None = Form(None), model_lines_id: int | None = Form(None),
-               model_ocr_id: int | None = Form(None), ocr_decode: str = Form(decode.DEFAULT_DECODE),
+               model_ocr_id: int | None = Form(None), ocr_decode: str = Form(decode.DATASET_DEFAULT),
                gt_autocheck: bool = Form(False), gt_ordered: bool = Form(False),
                gt_from_pdf: bool = Form(False), layout_template_id: int | None = Form(None),
                hold: bool = Form(False), as_test: bool = Form(False),
@@ -298,8 +298,8 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str
         shutil.rmtree(config.job_dir(job_id), ignore_errors=True)
         raise HTTPException(e.status_code, e.detail)
     try:
-        conn.execute('INSERT INTO jobs (id, name, owner, line_mode, run_layout, run_lines, run_ocr) '
-                     "VALUES (?,?,?,'per_page',0,0,0)", (job_id, name, user))
+        conn.execute('INSERT INTO jobs (id, name, owner, line_mode, run_layout, run_lines, run_ocr, ocr_decode) '
+                     "VALUES (?,?,?,'per_page',0,0,0,?)", (job_id, name, user, decode.DATASET_DEFAULT))
         _set_data_use(conn, job_id, uses)
         layout_templates.copy_into(conn, job_id)
         # An import may bring classes this instance's template lacks; they join the
@@ -338,7 +338,7 @@ class JobOptions(BaseModel):
     model_layout_id: int | None = None
     model_lines_id: int | None = None
     model_ocr_id: int | None = None
-    ocr_decode: str = decode.DEFAULT_DECODE
+    ocr_decode: str = decode.DATASET_DEFAULT
     gt_autocheck: bool = False
     gt_ordered: bool = False
     gt_from_pdf: bool = False
@@ -936,12 +936,9 @@ async def job_events(job_id: str, user: dict = Depends(current_user)):
     return StreamingResponse(stream(), media_type='text/event-stream')
 
 
-OCR_DECODES = decode.OCR_DECODES
-
-
 def _valid_ocr_decode(value: str) -> str:
-    if value not in OCR_DECODES:
-        raise HTTPException(400, f'ocr_decode must be one of {OCR_DECODES}')
+    if value not in decode.DATASET_DECODES:
+        raise HTTPException(400, f'ocr_decode must be one of {", ".join(decode.DATASET_DECODES)}')
     return value
 
 

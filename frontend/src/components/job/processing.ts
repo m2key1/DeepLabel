@@ -1,4 +1,4 @@
-import type { LayoutShape, LayoutShapeChanges, LineMode, OcrDecode } from '../../api'
+import type { DatasetDecode, LayoutShape, LayoutShapeChanges, LineMode, OcrDecode } from '../../api'
 
 /** The text pipeline's phases as a person picks them, in the order they run. One list so
  *  creating a dataset and changing one afterwards describe the same thing. */
@@ -43,6 +43,12 @@ export const NEEDS_LAYOUT = 'Needs layout detection'
 /** How the OCR head turns its output into text, worded once for every dialog that offers it. */
 export const DECODE_CHOICES: readonly (readonly [OcrDecode, string])[] = [
   ['beam', "Beam search with the model's language model"],
-  ['rescored', 'Beam search reranked by the decoder head (no language model)'],
+  ['rescored', 'Reranked - beam search with the language model, the best candidates reranked by the decoder head'],
   ['greedy', 'Fast - raw greedy CTC output'],
+]
+
+/** What a dataset can read with: the modes above, or whichever suits its model at the time. */
+export const DATASET_DECODE_CHOICES: readonly (readonly [DatasetDecode, string])[] = [
+  ['auto', "Automatic - the model's own best"],
+  ...DECODE_CHOICES,
 ]

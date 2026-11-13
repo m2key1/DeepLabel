@@ -68,19 +68,10 @@ def valid_split_is_empty(training: dict) -> bool:
     return counts is not None and not counts.get('val')
 
 
-def has_token_decoder(conn, model_id: int) -> bool:
-    """Whether a model reads lines with a token decoder of its own. A model no run has loaded yet
-    is taken to have its base's: a fine-tune keeps the decoder it started from."""
-    row = registry.get_model(conn, model_id)
-    while row is not None and not row['decoder'] and row['trained_from']:
-        row = registry.get_model(conn, row['trained_from'])
-    return row is not None and row['decoder'] == 'token'
-
-
 def decodes_for(conn, model_id: int) -> list[str]:
     """The decodes a model is scored in. Its decoder's own reading counts only for a token
     decoder; on a character decoder it is the plain greedy decoder, which the rerank beats."""
-    return [mode for mode in decode.OCR_DECODES if mode != 'decoder' or has_token_decoder(conn, model_id)]
+    return [mode for mode in decode.OCR_DECODES if mode != 'decoder' or registry.has_token_decoder(conn, model_id)]
 
 
 def create_baseline(conn, training: dict):

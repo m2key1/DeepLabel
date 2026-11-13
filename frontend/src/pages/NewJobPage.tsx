@@ -7,7 +7,7 @@ import {
   setJobModels, setJobProcessing, setNewPagesTest, uploadJob,
 } from '../api'
 import type {
-  ConventionFlag, DataUse, JobOptions, JobWithoutPages, LayoutShape, LayoutShapeChanges, LlmModel, ReocrPreview, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, OcrDecode,
+  ConventionFlag, DataUse, JobOptions, JobWithoutPages, LayoutShape, LayoutShapeChanges, LlmModel, ReocrPreview, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, DatasetDecode,
   Phases, RegistryModel, Task,
 } from '../api'
 import { useAuth } from '../auth'
@@ -39,9 +39,10 @@ const STEP_LABEL: Record<Step, string> = {
 }
 const STEPS = Object.keys(STEP_LABEL) as Step[]
 const NAME_CHECK_MS = 250
-const DECODE_CARDS: [OcrDecode, string, string][] = [
+const DECODE_CARDS: [DatasetDecode, string, string][] = [
+  ['auto', 'Automatic', "The model's own best: its token decoder if it has one, else Reranked"],
   ['beam', 'With language model', "Beam search with the model's language model"],
-  ['rescored', 'Best quality', 'Beam search reranked by the decoder head, no language model'],
+  ['rescored', 'Reranked', 'Beam search with the language model, the best candidates reranked by the decoder head'],
   ['greedy', 'Fast', 'Raw greedy CTC output'],
   ['decoder', 'Token decoder', "The model's subword decoder reads the line, checked against the CTC head"],
 ]
@@ -170,7 +171,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   const [picks, setPicks] = useState<Record<ModelTask, string>>({
     layout: pickOf(edit?.model_layout_id), lines: pickOf(edit?.model_lines_id), ocr: pickOf(edit?.model_ocr_id),
   })
-  const [ocrDecode, setOcrDecode] = useState<OcrDecode>(edit?.ocr_decode ?? 'rescored')
+  const [ocrDecode, setOcrDecode] = useState<DatasetDecode>(edit?.ocr_decode ?? 'auto')
   const [gtAutocheck, setGtAutocheck] = useState(edit?.gt_autocheck ?? false)
   const [asTest, setAsTest] = useState(edit?.new_pages_test ?? false)
   const [gtOrdered, setGtOrdered] = useState(edit?.gt_ordered ?? false)
@@ -328,12 +329,12 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   const canvasesKept = (manifest?.canvases ?? []).filter((c) => !iiifExcluded.has(c.canvas))
   const sentFiles = files.filter((f) => !excluded.has(f))
   const ocrModel = models.find((m) => (picks.ocr === '' ? m.task === 'ocr' && m.is_default : m.id === Number(picks.ocr)))
-  // A token decoder was trained to read the line itself, so a new dataset on such a model is read
-  // that way; the card exists only for those models.
+  // Only a model with a token decoder reads the line with it, so the card exists only for those;
+  // a new dataset that picked it and then a model without one goes back to Automatic.
   const tokenDecoder = ocrModel?.decoder === 'token'
   useEffect(() => {
     if (edit) return
-    setOcrDecode((held) => (tokenDecoder ? 'decoder' : held === 'decoder' ? 'rescored' : held))
+    setOcrDecode((held) => (!tokenDecoder && held === 'decoder' ? 'auto' : held))
   }, [tokenDecoder, edit])
   const decodeCards = DECODE_CARDS.filter(([value]) => value !== 'decoder' || tokenDecoder)
 
@@ -1340,7 +1341,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
                 <label className="mb-1 block text-sm font-medium text-ink">
                   OCR decoding
                 </label>
-                <div className="flex gap-2">
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-2">
                   {decodeCards.map(([value, label, hint]) => (
                     <button
                       key={value}

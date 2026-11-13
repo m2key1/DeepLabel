@@ -124,7 +124,7 @@ test.describe('Scenario: one change applied to a whole group', () => {
     const second = await seedCompletedJob(uniqueName('Bulk second'), 1)
     const outside = await seedCompletedJob(uniqueName('Bulk outside'), 1)
     for (const jobId of [first, second]) await moveJobToGroup(jobId, group.id)
-    expect(await getJob(first)).toMatchObject({ ocr_decode: 'beam', line_mode: 'per_crop' })
+    expect(await getJob(first)).toMatchObject({ ocr_decode: 'auto', line_mode: 'per_crop' })
 
     await page.goto('/')
     const section = page.locator('section').filter({ hasText: groupName })
@@ -145,7 +145,7 @@ test.describe('Scenario: one change applied to a whole group', () => {
       }).toEqual({ decode: 'greedy', mode: 'per_page' })
     }
     // A dataset that is not in the group is not in the change.
-    expect(await getJob(outside)).toMatchObject({ ocr_decode: 'beam', line_mode: 'per_crop' })
+    expect(await getJob(outside)).toMatchObject({ ocr_decode: 'auto', line_mode: 'per_crop' })
   })
 
   test('nothing is written until something is picked', async ({ page }) => {

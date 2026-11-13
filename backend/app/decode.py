@@ -15,6 +15,12 @@ OCR_DECODES = ('beam', 'rescored', 'greedy', 'decoder')
 
 DEFAULT_DECODE = 'beam'
 
+# A dataset may also stand on 'auto': whichever of these suits its model, worked out each
+# time it is read (app.auto_decode), so a dataset following the default model reads the
+# next default its own best way too. A score is always of one mode, so evaluations never take it.
+DATASET_DECODES = ('auto', *OCR_DECODES)
+DATASET_DEFAULT = 'auto'
+
 
 def resolve(decode: str, lm_on: bool, use_decoder: bool) -> str:
     """The mode that will actually run, given what this model carries. A mode whose

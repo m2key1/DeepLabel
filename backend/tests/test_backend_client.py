@@ -11,7 +11,7 @@ from typing import ClassVar
 import pytest
 from PIL import Image
 
-from app import backend_client, config, store
+from app import backend_client, config, store, text_job
 from app.backend_client import BackendClient, BackendError, Item
 from app.remote_models import RemoteOcrEngine
 
@@ -360,3 +360,17 @@ def test_a_predict_that_takes_no_turn_runs_while_another_has_the_card(backend):
         answer = BackendClient(backend).predict('ocr', None, {}, [Item('0', Image.new('RGB', (40, 10)))],
                                                 takes_turn=False)
     assert [r['text'] for r in answer['results']] == ['read None of 1']
+
+
+def test_a_dataset_on_auto_reads_with_the_models_own_decoder(conn, backend):
+    conn.execute("UPDATE models SET decoder = 'token' WHERE id = 1")
+    conn.execute("INSERT INTO jobs (id, name, owner, status, ocr_decode) VALUES ('j1', 'set', 'o', 'running', 'auto')")
+
+    stage = text_job._remote_ocr(conn, 'j1', BackendClient(backend), 1)
+    stage.read([Image.new('RGB', (10, 8), 'white')], [{}])
+
+    sent = [json.loads(BytesParser(policy=default).parsebytes(
+        b'Content-Type: ' + b'multipart/form-data; boundary=' + c[3].split(b'\r\n')[0][2:] + b'\r\n\r\n' + c[3])
+        .get_payload()[0].get_content()) for c in FakeBackend.calls if c[1] == '/v1/predict/ocr']
+    assert sent[0]['params']['decode'] == 'decoder'
+    assert stage.author == 'model:ocr@DeepOCR v12'

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { getGroupLayoutShapeChanges, listModels, listUsableLlmModels, setGroupJobs } from '../../api'
 import type {
-  Group, GroupJobsOutcome, GroupJobsPatch, LayoutShape, LayoutShapeChanges, LineMode, LlmModel, ModelTask, OcrDecode,
-  RegistryModel,
+  DatasetDecode, Group, GroupJobsOutcome, GroupJobsPatch, LayoutShape, LayoutShapeChanges, LineMode, LlmModel,
+  ModelTask, RegistryModel,
 } from '../../api'
 import { Modal, modalBtn, modalPrimaryBtn } from '../Modal'
 import {
-  DECODE_CHOICES, LAYOUT_SHAPE_CHOICES, LINE_MODE_CHOICES, NEEDS_LAYOUT, PHASE_CHOICES, shapeChangesText,
+  DATASET_DECODE_CHOICES, LAYOUT_SHAPE_CHOICES, LINE_MODE_CHOICES, NEEDS_LAYOUT, PHASE_CHOICES, shapeChangesText,
 } from './processing'
 import { controlClass } from '../ui/Field'
 
@@ -41,7 +41,7 @@ export function GroupSettingsDialog({ group, count, onClose, onDone, onError }:
   const [picks, setPicks] = useState<Record<ModelTask, string>>({
     layout: KEEP, lines: KEEP, ocr: KEEP,
   })
-  const [decode, setDecode] = useState<OcrDecode | typeof KEEP>(KEEP)
+  const [decode, setDecode] = useState<DatasetDecode | typeof KEEP>(KEEP)
   const [pinReaders, setPinReaders] = useState(false)
   const [readWith, setReadWith] = useState<number[]>([])
   const [pinPhases, setPinPhases] = useState(false)
@@ -177,11 +177,11 @@ export function GroupSettingsDialog({ group, count, onClose, onDone, onError }:
           id="group-pick-decode"
           data-testid="group-pick-decode"
           value={decode}
-          onChange={(e) => setDecode(e.target.value as OcrDecode | typeof KEEP)}
+          onChange={(e) => setDecode(e.target.value as DatasetDecode | typeof KEEP)}
           className={inputClass}
         >
           <option value={KEEP}>Leave as it is</option>
-          {DECODE_CHOICES.map(([value, label]) => (
+          {DATASET_DECODE_CHOICES.map(([value, label]) => (
             <option key={value} value={value}>{label}</option>
           ))}
         </select>

@@ -171,7 +171,13 @@ class TestChoosingModels:
         assert job(conn)['model_ocr_id'] is None
 
     def test_a_decode_mode_nobody_offers_is_refused(self, client):
-        assert patch(client, {'ocr_decode': 'telepathy'}).status_code == 400
+        refused = patch(client, {'ocr_decode': 'telepathy'})
+        assert refused.status_code == 400
+        assert refused.json()['detail'] == 'ocr_decode must be one of auto, beam, rescored, greedy, decoder'
+
+    def test_a_dataset_can_read_with_whatever_suits_its_model(self, client, conn):
+        assert patch(client, {'ocr_decode': 'auto'}).status_code == 200
+        assert job(conn)['ocr_decode'] == 'auto'
 
 
 class TestTheLanguageModelSettings:

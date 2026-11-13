@@ -75,3 +75,13 @@ configured with the `SLURM_*` variables and one cluster image per model backend
 
 Map tiling and pre-annotation are optional (`MAPSEG_*`); without them, map datasets are
 annotation-only.
+
+Datasets created before the Automatic OCR decoding existed keep the decode they stored, so
+those following the default OCR model go on reading the next default with it. After a
+backup, move them onto Automatic - the first command only counts, `--apply` moves them;
+datasets with a model of their own keep their decode:
+
+```bash
+docker compose -f compose.backend.yml exec backend python -m app.auto_decode
+docker compose -f compose.backend.yml exec backend python -m app.auto_decode --apply
+```

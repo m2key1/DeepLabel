@@ -8,8 +8,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageStat
 
-from app import (align, backend_client, candidates, config, conventions, corpus, geometry, iiif, layout_classes,
-                 layout_shapes, layout_templates, ocr_phase, pdf, registry, scans, store)
+from app import (align, auto_decode, backend_client, candidates, config, conventions, corpus, geometry, iiif,
+                 layout_classes, layout_shapes, layout_templates, ocr_phase, pdf, registry, scans, store)
 from app.caches import counted_page
 from app.ocr_phase import is_cancelled
 from app.remote_models import RemoteLayout, RemoteLines, RemoteOcrEngine, scan_image
@@ -36,8 +36,9 @@ class OcrStage:
 
 def _remote_ocr(conn, job_id: str, client, model_id: int) -> OcrStage:
     job = conn.execute('SELECT ocr_decode, ocr_convention FROM jobs WHERE id = ?', (job_id,)).fetchone()
-    engine = RemoteOcrEngine(conn, client, model_id, job['ocr_decode'], conventions.parse(job['ocr_convention']))
-    return OcrStage(author=ocr_author(conn, model_id, job['ocr_decode']), model_id=model_id,
+    mode = auto_decode.resolve(conn, model_id, job['ocr_decode'])
+    engine = RemoteOcrEngine(conn, client, model_id, mode, conventions.parse(job['ocr_convention']))
+    return OcrStage(author=ocr_author(conn, model_id, mode), model_id=model_id,
                     read=lambda images, contexts: engine.predict_batch(images, contexts=contexts),
                     honoured=lambda: engine.honoured)
 

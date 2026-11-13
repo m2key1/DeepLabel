@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 
 from PIL import Image, UnidentifiedImageError
 
-from app import backend_client, config, conventions, decode, evaluator, formats, linecrop, ocr_phase, reading_order, \
-    registry, scans
+from app import auto_decode, backend_client, config, conventions, decode, evaluator, formats, linecrop, ocr_phase, \
+    reading_order, registry, scans
 from app.backend_client import Encoded
 from app.remote_models import RemoteLines, RemoteOcrEngine
 
@@ -80,9 +80,8 @@ def in_flight() -> list[dict]:
 
 
 def default_decode(conn, model_id: int) -> str:
-    """What the New job form starts a dataset on: a token decoder reads by itself, any
-    other model's beams are reranked by its decoder head."""
-    return 'decoder' if evaluator.has_token_decoder(conn, model_id) else 'rescored'
+    """What a dataset on 'auto' reads this model with."""
+    return auto_decode.resolve(conn, model_id, 'auto')
 
 
 def _served(conn, task: str) -> list:

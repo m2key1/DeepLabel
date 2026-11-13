@@ -54,3 +54,11 @@ def test_a_mode_nobody_offers_is_still_refused(client):
     response = api.post('/api/evaluations', headers=ADMIN,
                         json={'model_id': 9, 'job_ids': ['j1'], 'decode': 'telepathy'})
     assert response.status_code == 400
+
+
+def test_an_evaluation_names_the_mode_it_scores_never_auto(client):
+    """A score is of one reading; 'auto' is a dataset's standing choice, not a reading."""
+    api, _ = client
+    response = api.post('/api/evaluations', headers=ADMIN,
+                        json={'model_id': 9, 'job_ids': ['j1'], 'decode': 'auto'})
+    assert response.status_code == 400

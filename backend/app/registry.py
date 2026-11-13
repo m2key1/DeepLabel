@@ -52,6 +52,15 @@ def chosen_models(conn, job: dict) -> dict:
     return env
 
 
+def has_token_decoder(conn, model_id: int) -> bool:
+    """Whether a model reads lines with a token decoder of its own. A model no run has loaded yet
+    is taken to have its base's: a fine-tune keeps the decoder it started from."""
+    row = get_model(conn, model_id)
+    while row is not None and not row['decoder'] and row['trained_from']:
+        row = get_model(conn, row['trained_from'])
+    return row is not None and row['decoder'] == 'token'
+
+
 def running_model_id(task: str) -> int | None:
     """Inside a job's process: the id of the model chosen_models chose for this task."""
     return int(os.environ[MODEL_ID_ENV[task]]) if os.environ.get(MODEL_ID_ENV[task]) else None

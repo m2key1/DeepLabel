@@ -212,7 +212,7 @@ test.describe('Scenario: one change applied to a group holding a dataset that is
     await moveJobToGroup(own, group.id)
     await moveJobToGroup(theirs, group.id)
     await waitForJobStatus(own, 'done')
-    expect([(await getJob(own)).ocr_decode, (await getJob(theirs)).ocr_decode]).toEqual(['beam', 'beam'])
+    expect([(await getJob(own)).ocr_decode, (await getJob(theirs)).ocr_decode]).toEqual(['auto', 'auto'])
 
     const context = await browser.newContext()
     await useSession(context, session)
@@ -238,7 +238,7 @@ test.describe('Scenario: one change applied to a group holding a dataset that is
     // Backend oracle: the member's own dataset changed, the one merely shared with them
     // did not.
     await expect.poll(async () => (await getJob(own)).ocr_decode).toBe('greedy')
-    expect((await getJob(theirs)).ocr_decode).toBe('beam')
+    expect((await getJob(theirs)).ocr_decode).toBe('auto')
     await context.close()
   })
 })

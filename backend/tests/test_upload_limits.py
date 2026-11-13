@@ -194,6 +194,13 @@ class TestHeldUpload:
         assert api.post(f'/api/jobs/{job_id}/start', headers=bob).status_code in (403, 404)
         assert self.status(conn, job_id) == 'uploading'
 
+    def test_a_dataset_created_without_a_decode_reads_with_what_suits_its_model(self, client):
+        api, conn = client
+        res = api.post('/api/jobs', data={'name': 'unsaid'}, headers=EDITOR,
+                       files=[('files', ('p.png', png_bytes(), 'image/png'))])
+        job_id = res.json()['job_id']
+        assert conn.execute('SELECT ocr_decode FROM jobs WHERE id = ?', (job_id,)).fetchone()[0] == 'auto'
+
     def test_a_dataset_created_without_hold_is_queued_at_once(self, client):
         api, conn = client
         res = api.post('/api/jobs', data={'name': 'small'}, headers=EDITOR,

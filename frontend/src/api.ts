@@ -107,7 +107,7 @@ export interface Job {
   model_layout_id: number | null
   model_lines_id: number | null
   model_ocr_id: number | null
-  ocr_decode: OcrDecode
+  ocr_decode: DatasetDecode
   /** The transcription-convention flags this dataset asks its OCR model for. */
   ocr_convention?: OcrConvention
   /** The flags the last OCR run could honour; null before any run recorded them. */
@@ -574,6 +574,8 @@ export interface Phases {
 
 // Raw CTC output or the full beam-search-plus-LM/decoder rescoring path.
 export type OcrDecode = 'beam' | 'rescored' | 'greedy' | 'decoder'
+/** What a dataset reads with: a mode, or 'auto' - whichever suits its model when it reads. */
+export type DatasetDecode = 'auto' | OcrDecode
 
 // Per-task model picks for a job; null means the task default.
 export interface ModelPicks {
@@ -1169,7 +1171,7 @@ export function uploadJob(
   skipBlank = true,
   lineWidth = 3,
   models?: ModelPicks,
-  ocrDecode?: OcrDecode,
+  ocrDecode?: DatasetDecode,
   gtAutocheck?: boolean,
   gtOrdered?: boolean,
   gtFromPdf?: boolean,
@@ -1243,7 +1245,7 @@ export interface JobOptions {
   model_layout_id: number | null
   model_lines_id: number | null
   model_ocr_id: number | null
-  ocr_decode: OcrDecode
+  ocr_decode: DatasetDecode
   gt_autocheck: boolean
   gt_ordered: boolean
   gt_from_pdf: boolean
@@ -1517,7 +1519,7 @@ export interface GroupJobsPatch {
   model_layout_id?: number | null
   model_lines_id?: number | null
   model_ocr_id?: number | null
-  ocr_decode?: OcrDecode
+  ocr_decode?: DatasetDecode
   llm_model_ids?: number[]
   line_mode?: string
   run_layout?: boolean
@@ -1723,7 +1725,7 @@ export function getModelUsage(modelId: number): Promise<ModelUsage> {
 }
 
 export function setJobModels(
-  jobId: string, models: ModelPicks, ocrDecode: OcrDecode, ocrConvention: OcrConvention,
+  jobId: string, models: ModelPicks, ocrDecode: DatasetDecode, ocrConvention: OcrConvention,
 ): Promise<Job> {
   return request(`/api/jobs/${jobId}`, json('PATCH', {
     model_layout_id: models.layout,

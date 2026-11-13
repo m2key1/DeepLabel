@@ -76,8 +76,10 @@ another of your datasets already has stops the Source step, with a link to that 
 - Choose which phases run: layout detection, line detection and OCR. Layout is off by
   default; lines are then detected on the whole page. With layout on, lines can be detected
   inside each layout box instead.
-- Pick the model for each phase, the OCR decoding (beam search with a language model, beam
-  search reranked by the decoder, or fast greedy), and the transcription convention flags
+- Pick the model for each phase, the OCR decoding (Automatic, the default, reads each model
+  its own best way: with its own decoder where it has a token decoder, else Reranked - or
+  fix one: beam search with a language model, Reranked, the token decoder, or fast greedy),
+  and the transcription convention flags
   (for example long s or typographic punctuation). Every flag is offered with what it means;
   one the chosen OCR model ignores stays set on the dataset as a rule for annotators and
   for a later model.
