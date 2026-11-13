@@ -16,9 +16,11 @@ BATCH_BYTES = 512 * 1024 * 1024
 TEXTS_PER_REQUEST = 1000
 POLL_SECONDS = 3
 # A recognition request turned away while the account has another one running is sent
-# again after the wait the deployment names, this many times at most.
+# again after the wait the deployment names, this many times at most. A longer wait - an
+# account past its monthly cap - is reported instead of waited out.
 BUSY_RETRIES = 120
 BUSY_RETRY_SECONDS = 5
+BUSY_WAIT_LIMIT = 60
 FINISHED = ('done', 'error', 'cancelled')
 
 
@@ -286,7 +288,7 @@ class DeepLabel:
             try:
                 return self._send_files(path, fields, files)
             except DeepLabelError as error:
-                if error.status != 429 or attempt == BUSY_RETRIES - 1:
+                if error.status != 429 or attempt == BUSY_RETRIES - 1 or (error.retry_after or 0) > BUSY_WAIT_LIMIT:
                     raise
                 time.sleep(BUSY_RETRY_SECONDS if error.retry_after is None else error.retry_after)
         raise AssertionError('unreachable')

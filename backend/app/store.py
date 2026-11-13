@@ -738,6 +738,22 @@ CREATE INDEX IF NOT EXISTS idx_revisions_person_days ON revisions(author, id, cr
 CREATE INDEX IF NOT EXISTS idx_job_assignees_user ON job_assignees(username);
 CREATE INDEX IF NOT EXISTS idx_group_assignees_user ON group_assignees(username);
 CREATE INDEX IF NOT EXISTS idx_model_files_sha ON model_files(sha256);
+-- What the recognition API read for each account, per day (UTC): counts only, never the
+-- images or their text.
+CREATE TABLE IF NOT EXISTS recognition_usage (
+    account TEXT NOT NULL,
+    day TEXT NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    pages INTEGER NOT NULL DEFAULT 0,
+    lines INTEGER NOT NULL DEFAULT 0,
+    seconds REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (account, day)
+);
+-- An account's monthly cap on lines read through the recognition API; no row, no cap.
+CREATE TABLE IF NOT EXISTS recognition_caps (
+    account TEXT PRIMARY KEY,
+    monthly_lines INTEGER NOT NULL
+);
 """
 
 

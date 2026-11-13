@@ -4,6 +4,7 @@ import { getSlurmAccounts, getUsers, patchUser, type AppUser, type Role } from '
 import { useAuth } from '../auth'
 import { useCrumb } from '../components/NavBar'
 import { Button } from '../components/ui/Button'
+import { RecognitionUsage } from '../components/users/RecognitionUsage'
 import { AdminTokens } from '../components/users/AdminTokens'
 import { InvitePerson } from '../components/users/InvitePerson'
 import { PendingApprovals } from '../components/users/PendingApprovals'
@@ -94,8 +95,9 @@ export function AdminPage() {
   const [capabilities, setCapabilities] = useState<string[]>([])
   const [roles, setRoles] = useState<Record<string, string[]>>({})
   const [params, setParams] = useSearchParams()
-  const tab = params.get('tab') === 'tokens' ? 'tokens' : 'people'
-  const setTab = (next: 'people' | 'tokens') => setParams(next === 'people' ? {} : { tab: next }, { replace: true })
+  const asked = params.get('tab')
+  const tab = asked === 'tokens' || asked === 'usage' ? asked : 'people'
+  const setTab = (next: 'people' | 'tokens' | 'usage') => setParams(next === 'people' ? {} : { tab: next }, { replace: true })
   const [invitations, setInvitations] = useState(false)
   const [accounts, setAccounts] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -161,7 +163,7 @@ export function AdminPage() {
       {error && <p className="mb-3 text-sm text-danger">{error}</p>}
       <Tabs label="Admin" className="mb-4" active={tab} onSelect={setTab}
             items={[{ id: 'people', label: `People${users ? ` ${users.filter((u) => !u.pending).length}` : ''}` },
-                    { id: 'tokens', label: 'API tokens' }]} />
+                    { id: 'tokens', label: 'API tokens' }, { id: 'usage', label: 'API usage' }]} />
       <datalist id={ACCOUNT_LIST_ID}>
         {accounts.map((a) => (
           <option key={a} value={a} />
@@ -196,6 +198,11 @@ export function AdminPage() {
       {tab === 'tokens' && (
         <div role="tabpanel" id={panelId('tokens')} aria-labelledby={tabId('tokens')}>
           <AdminTokens />
+        </div>
+      )}
+      {tab === 'usage' && (
+        <div role="tabpanel" id={panelId('usage')} aria-labelledby={tabId('usage')}>
+          <RecognitionUsage users={users} />
         </div>
       )}
     </div>

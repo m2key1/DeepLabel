@@ -1,11 +1,12 @@
 import io
 import json
 import threading
+import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from PIL import Image, UnidentifiedImageError
 
@@ -19,12 +20,17 @@ SENT_AS_IS = {'JPEG': 'image/jpeg', 'PNG': 'image/png'}
 
 
 class Refused(Exception):
-    """A request the recognition API will not run, with its status and the reason."""
+    """A request the recognition API will not run, with its status, the reason, and for a
+    429 how many seconds until it is worth asking again."""
 
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, retry_after: int | None = None):
         super().__init__(message)
         self.status = status
         self.message = message
+        self.retry_after = retry_after
+
+
+BUSY_RETRY_SECONDS = 5
 
 
 @dataclass
@@ -44,9 +50,20 @@ class InFlight:
     stage: str = 'finding lines'
     waiting: bool = False
     started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+    started: float = field(default_factory=time.monotonic)
+    waited: float = 0.0
+    wait_began: float = 0.0
 
     def wait(self, waiting: bool) -> None:
         self.waiting = waiting
+        if waiting:
+            self.wait_began = time.monotonic()
+        else:
+            self.waited += time.monotonic() - self.wait_began
+
+    def held(self) -> float:
+        """How long it had the card: its time so far, less what it spent waiting for a turn."""
+        return time.monotonic() - self.started - self.waited
 
     def public(self) -> dict:
         """Never whose it is, nor what its images are called."""
@@ -64,7 +81,7 @@ def admitted(account: str, pages: int = 0, lines: int = 0) -> Iterator[InFlight]
     outlives the request."""
     with _running_lock:
         if any(r.account == account for r in _running.values()):
-            raise Refused(429, 'this account has a recognition request running already')
+            raise Refused(429, 'this account has a recognition request running already', BUSY_RETRY_SECONDS)
         request = InFlight(uuid.uuid4().hex[:12], account, pages, lines_total=lines)
         _running[request.id] = request
     try:
@@ -79,6 +96,73 @@ def in_flight() -> list[dict]:
         return [r.public() for r in sorted(_running.values(), key=lambda r: r.started_at)]
 
 
+def _month(moment: datetime) -> str:
+    return moment.strftime('%Y-%m')
+
+
+def _next_month(moment: datetime) -> datetime:
+    year, month = divmod(moment.year * 12 + moment.month, 12)
+    return datetime(year, month + 1, 1, tzinfo=timezone.utc)
+
+
+def record_usage(conn, account: str, pages: int, lines: int, seconds: float, day: str | None = None) -> None:
+    """One answered request, added to its account's row for the day."""
+    day = day or datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    conn.execute('INSERT INTO recognition_usage (account, day, requests, pages, lines, seconds) VALUES (?,?,1,?,?,?) '
+                 'ON CONFLICT (account, day) DO UPDATE SET requests = requests + 1, pages = pages + excluded.pages, '
+                 'lines = lines + excluded.lines, seconds = seconds + excluded.seconds',
+                 (account, day, pages, lines, seconds))
+    conn.commit()
+
+
+def month_usage(conn, account: str, month: str) -> dict:
+    row = conn.execute('SELECT COALESCE(SUM(requests), 0) requests, COALESCE(SUM(pages), 0) pages, '
+                       'COALESCE(SUM(lines), 0) lines, COALESCE(SUM(seconds), 0) seconds '
+                       "FROM recognition_usage WHERE account = ? AND day LIKE ? || '-%'", (account, month)).fetchone()
+    return {'requests': row['requests'], 'pages': row['pages'], 'lines': row['lines'],
+            'seconds': round(float(row['seconds']), 3)}
+
+
+def cap_of(conn, account: str) -> int | None:
+    row = conn.execute('SELECT monthly_lines FROM recognition_caps WHERE account = ?', (account,)).fetchone()
+    return row['monthly_lines'] if row else None
+
+
+def set_cap(conn, account: str, monthly_lines: int | None) -> None:
+    if monthly_lines is None:
+        conn.execute('DELETE FROM recognition_caps WHERE account = ?', (account,))
+    else:
+        conn.execute('INSERT INTO recognition_caps (account, monthly_lines) VALUES (?, ?) '
+                     'ON CONFLICT (account) DO UPDATE SET monthly_lines = excluded.monthly_lines',
+                     (account, monthly_lines))
+    conn.commit()
+
+
+def check_cap(conn, account: str, now: datetime | None = None) -> None:
+    """Refuses an account whose lines read this month have reached its cap, until the 1st of
+    next month. A request that starts below the cap is let finish."""
+    now = now or datetime.now(timezone.utc)
+    cap = cap_of(conn, account)
+    if cap is None or month_usage(conn, account, _month(now))['lines'] < cap:
+        return
+    resets = _next_month(now)
+    raise Refused(429, f'this account has read its {cap:,} lines for this month; it can read again from '
+                       f'{resets:%Y-%m-%d}', int((resets - now).total_seconds()))
+
+
+def usage_report(conn) -> dict:
+    """Every account that read this month or last, or has a cap, with both months and its cap."""
+    now = datetime.now(timezone.utc)
+    this, last = _month(now), _month(now.replace(day=1) - timedelta(days=1))
+    accounts = sorted({row['account'] for row in conn.execute(
+        "SELECT DISTINCT account FROM recognition_usage WHERE day LIKE ? || '-%' OR day LIKE ? || '-%' "
+        'UNION SELECT account FROM recognition_caps', (this, last))})
+    return {'month': this, 'last_month': last,
+            'accounts': [{'account': account, 'cap': cap_of(conn, account),
+                          'this_month': month_usage(conn, account, this),
+                          'last_month': month_usage(conn, account, last)} for account in accounts]}
+
+
 def default_decode(conn, model_id: int) -> str:
     """What a dataset on 'auto' reads this model with."""
     return auto_decode.resolve(conn, model_id, 'auto')
@@ -89,7 +173,7 @@ def _served(conn, task: str) -> list:
     return [row for row in rows if backend_client.client_for(conn, row['id']) is not None]
 
 
-def offered(conn) -> dict:
+def offered(conn, account: str) -> dict:
     def entry(row) -> dict:
         model = {'id': row['id'], 'name': row['name'], 'default': bool(row['is_default'])}
         if row['task'] != 'ocr':
@@ -97,10 +181,13 @@ def offered(conn) -> dict:
         return {**model, 'decodes': evaluator.decodes_for(conn, row['id']),
                 'default_decode': default_decode(conn, row['id']),
                 'conventions': json.loads(row['conventions']) if row['conventions'] else []}
+    this_month = _month(datetime.now(timezone.utc))
     return {'models': {task: [entry(row) for row in _served(conn, task)] for task in ('lines', 'ocr')},
             'limits': {'pages': config.RECOGNIZE_MAX_PAGES, 'lines': config.RECOGNIZE_MAX_LINES,
                        'megabytes': config.RECOGNIZE_MAX_MB},
-            'formats': list(FORMATS)}
+            'formats': list(FORMATS),
+            'usage': {'month': this_month, 'lines': month_usage(conn, account, this_month)['lines'],
+                      'cap': cap_of(conn, account)}}
 
 
 def _model(conn, task: str, raw_id: str | None):
@@ -242,6 +329,7 @@ def pages(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
     """Find the lines of whole pages - or take the outlines the caller sent for a page -
     and read them. Pages are decoded one at a time and only their line crops are kept, so
     a request of large scans never holds them all at once."""
+    check_cap(conn, account)
     fmt = fields.get('format') or 'json'
     if fmt not in FORMATS:
         raise Refused(400, f'format must be one of {", ".join(FORMATS)}')
@@ -277,6 +365,8 @@ def pages(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
             answered.append({'id': upload.name, 'width': image.width, 'height': image.height, 'lines': outlines})
             request.lines_total = len(lines)
         read, models['ocr'] = _read(conn, reading, request, lines) if lines else ({}, None)
+    record_usage(conn, account, pages=sum('error' not in page for page in answered), lines=len(lines),
+                 seconds=request.held())
     for i, page in enumerate(answered):
         if 'error' in page:
             continue
@@ -291,6 +381,7 @@ def pages(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
 
 def lines(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
     """Read line images as they were sent, in the order sent."""
+    check_cap(conn, account)
     reading = _reading(conn, fields)
     with admitted(account, lines=len(uploads)) as request:
         errors, crops = {}, []
@@ -301,6 +392,7 @@ def lines(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
             else:
                 crops.append((i, [(0, decoded[0])], {'line_index': i}))
         read, model = _read(conn, reading, request, crops) if crops else ({}, None)
+    record_usage(conn, account, pages=0, lines=len(crops), seconds=request.held())
     answered = [{'id': upload.name, 'error': errors[i]} if i in errors
                 else {'id': upload.name, 'text': read[i][0], 'confidence': read[i][1]}
                 for i, upload in enumerate(uploads)]

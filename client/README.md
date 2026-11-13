@@ -53,7 +53,9 @@ deeplabel recognize lines ./line-images          # text of each line image
 `recognize_pages` and `recognize_lines` use the recognition API: nothing is stored, and
 any number of files is sent in requests of the size the deployment allows. It needs the
 recognize permission; a token made **Recognition only** is the one to give a script that
-should do nothing else.
+should do nothing else. While the account has another request running, a request is sent
+again once the deployment says to; once the account has reached its monthly cap, the
+refusal is raised as a `DeepLabelError` (429) with the date reading resumes.
 
 ```python
 answer = dl.recognize_pages([Path('scans')], format='alto')

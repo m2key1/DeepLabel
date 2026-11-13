@@ -18,6 +18,8 @@ class Handler(BaseHTTPRequestHandler):
     # How many recognition requests to answer 429 first, as a deployment does while the
     # account has one running already.
     busy = 0
+    # Answer every recognition request as an account past its monthly cap.
+    capped = False
 
     def log_message(self, *_args):
         pass
@@ -73,6 +75,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         sent = self._record()
         if self.path.startswith('/api/recognize/'):
+            if Handler.capped:
+                body = json.dumps({'detail': 'this account has read its 6 lines for this month'}).encode()
+                self.send_response(429)
+                self.send_header('Retry-After', '3600')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if Handler.busy:
                 Handler.busy -= 1
                 self.send_response(429)
@@ -460,3 +470,15 @@ class TestRecognition:
         assert cli.main(['recognize', 'pages', str(tmp_path / 'leaf.png'), '--format', 'alto',
                          '-o', str(tmp_path / 'out')]) == 0
         assert (tmp_path / 'out' / 'leaf.xml').read_text() == '<alto/>'
+
+    def test_a_refusal_that_lasts_beyond_a_minute_is_reported_rather_than_waited_out(self, client, tmp_path):
+        (tmp_path / 'a.png').write_bytes(b'PNG')
+        Handler.capped = True
+        try:
+            with pytest.raises(DeepLabelError) as raised:
+                client.recognize_pages([tmp_path / 'a.png'])
+        finally:
+            Handler.capped = False
+        assert (raised.value.status, raised.value.detail) == (429, 'this account has read its 6 lines for this month')
+        assert [r['path'] for r in RECORDED if r['method'] == 'POST'] == ['/api/recognize/pages']
+

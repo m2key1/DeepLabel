@@ -1,15 +1,16 @@
 from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app import config, recognize
 from app.backend_client import BackendError
-from app.deps import get_db, require_capability
+from app.deps import get_db, require_capability, require_role
 
 router = APIRouter(tags=['recognition'])
 may_recognize = require_capability('recognize')
-RETRY_AFTER_SECONDS = 5
+admin_only = require_role('admin')
 
 
 async def _uploads(request: Request, limit: int, unit: str) -> tuple[list[recognize.Upload], dict]:
@@ -40,17 +41,18 @@ async def _answer(work: Callable[[], dict]) -> dict:
     try:
         return await run_in_threadpool(work)
     except recognize.Refused as refused:
-        headers = {'Retry-After': str(RETRY_AFTER_SECONDS)} if refused.status == 429 else None
+        headers = {'Retry-After': str(refused.retry_after)} if refused.retry_after is not None else None
         raise HTTPException(refused.status, refused.message, headers=headers) from None
     except BackendError as error:
         raise HTTPException(502, f'the model backend failed: {error.message}') from None
 
 
 @router.get('/api/recognize')
-def offered(conn=Depends(get_db), _user: dict = Depends(may_recognize)):
+def offered(conn=Depends(get_db), user: dict = Depends(may_recognize)):
     """The line and OCR models a recognition request can name, their decodes and
-    conventions, the formats, and the limits of one request."""
-    return recognize.offered(conn)
+    conventions, the formats, the limits of one request, and the caller's lines read this
+    month against its cap."""
+    return recognize.offered(conn, user['username'])
 
 
 @router.post('/api/recognize/pages')
@@ -70,3 +72,24 @@ async def recognize_lines(request: Request, conn=Depends(get_db), user: dict = D
     `ocr_model`, `decode` and `convention`. Nothing of the request is stored."""
     uploads, fields = await _uploads(request, config.RECOGNIZE_MAX_LINES, 'lines')
     return await _answer(lambda: recognize.lines(conn, user['username'], uploads, fields))
+
+
+@router.get('/api/recognition-usage')
+def usage(conn=Depends(get_db), _admin: dict = Depends(admin_only)):
+    """What every account read through the recognition API this month and last, and its cap."""
+    return recognize.usage_report(conn)
+
+
+class CapChange(BaseModel):
+    account: str
+    monthly_lines: int | None = None
+
+
+@router.put('/api/recognition-caps')
+def set_cap(body: CapChange, conn=Depends(get_db), _admin: dict = Depends(admin_only)):
+    """Set an account's monthly cap on lines read, or lift it with null."""
+    if body.monthly_lines is not None and body.monthly_lines < 0:
+        raise HTTPException(400, 'a cap is a number of lines, 0 or more')
+    recognize.set_cap(conn, body.account, body.monthly_lines)
+    return {'account': body.account, 'cap': recognize.cap_of(conn, body.account)}
+

@@ -263,3 +263,32 @@ test.describe('Scenario: a recognition request on the queue', () => {
       await expect(row).toHaveCount(0)
     })
 })
+
+test.describe('Scenario: what an account read, and a cap on it', () => {
+  test('a request counts on the API usage tab, and a cap set there stops the next one', async ({ page, browser }) => {
+    // An account of its own, so no other scenario's requests add to what it read.
+    const account = `usage-${Date.now()}`
+    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+    await useSession(context, seedSession('admin', account))
+    const token = await mint(await context.newPage(), uniqueName('usage'))
+
+    expect((await recognize(token, 'pages', [{ name: 'u.png', png: scanPng(500, 400, 20) }])).status).toBe(200)
+
+    await page.goto('/admin?tab=usage')
+    const row = page.getByTestId('usage-row').filter({ hasText: account })
+    await expect(row.locator('[data-stat]')).toHaveText(['1', '1', '6', /^\d/, '0', '0', '0', /^-$/])
+    await row.getByLabel(`Monthly cap for ${account}`).fill('6')
+    await row.getByLabel(`Monthly cap for ${account}`).press('Enter')
+    await expect.poll(async () => (await backendFetch('/api/recognition-usage')).accounts
+      .find((a: { account: string }) => a.account === account)?.cap).toBe(6)
+
+    const offered = await (await asToken(token, '/api/recognize')).json()
+    expect(offered.usage).toEqual({ month: expect.stringMatching(/^\d{4}-\d{2}$/), lines: 6, cap: 6 })
+    const refused = await recognize(token, 'lines', [{ name: 'one.png', png: scanPng(400, 40, 21) }])
+    expect(refused.status).toBe(429)
+    expect((await refused.json()).detail)
+      .toMatch(/^this account has read its 6 lines for this month; it can read again from \d{4}-\d{2}-01$/)
+    await context.close()
+  })
+})
+

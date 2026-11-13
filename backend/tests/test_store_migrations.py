@@ -177,6 +177,8 @@ class TestMigrations:
         'groups': ['created_at', 'id', 'name', 'owner'],
         'gt_reads': ['completion_tokens', 'created_at', 'error', 'finished_at', 'id', 'job_id', 'label', 'llm_model_id', 'model', 'page_id', 'prompt_hash', 'prompt_tokens', 'raw_text', 'requested_by', 'status'],
         'job_assignees': ['job_id', 'username'],
+        'recognition_caps': ['account', 'monthly_lines'],
+        'recognition_usage': ['account', 'day', 'lines', 'pages', 'requests', 'seconds'],
         'job_classes': ['class_id', 'color', 'job_id', 'name', 'priority_rank'],
         'job_documents': ['created_at', 'id', 'idx', 'job_id', 'name', 'text'],
         'job_log': ['action', 'created_at', 'detail', 'id', 'job_id', 'username'],

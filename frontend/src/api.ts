@@ -546,6 +546,31 @@ export interface RecognitionRequest {
   started_at: string
 }
 
+export interface RecognitionCounts {
+  requests: number
+  pages: number
+  /** Lines read - what a cap counts. */
+  lines: number
+  /** How long its requests held the GPU, not counting their wait for a turn. */
+  seconds: number
+}
+
+export interface RecognitionUsage {
+  /** YYYY-MM, UTC. */
+  month: string
+  last_month: string
+  accounts: { account: string; cap: number | null; this_month: RecognitionCounts; last_month: RecognitionCounts }[]
+}
+
+export function getRecognitionUsage(): Promise<RecognitionUsage> {
+  return request('/api/recognition-usage')
+}
+
+/** null lifts the cap. */
+export function setRecognitionCap(account: string, monthlyLines: number | null): Promise<{ account: string; cap: number | null }> {
+  return request('/api/recognition-caps', json('PUT', { account, monthly_lines: monthlyLines }))
+}
+
 export interface QueueState {
   gpu: { running: QueueEntry | null; queued: QueueEntry[] }
   cluster: QueueEntry[]

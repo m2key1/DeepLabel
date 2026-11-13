@@ -98,6 +98,13 @@ default (`RECOGNIZE_MAX_*` in `.env`), and an account runs one request at a time
 is answered `429` with `Retry-After`. The request takes the GPU between the batches of
 whatever else runs and shows on the **Queue** page while it does, without its owner.
 
+Each answered request counts towards its account's month: requests, pages, lines read and
+GPU time, kept as counts only. An admin can cap an account's lines read per month on the
+Admin page's **API usage** tab; once the cap is reached, requests are answered `429` with
+the date reading resumes (the 1st of next month, UTC) and `Retry-After` until then. A
+request that starts below the cap finishes. `GET /api/recognize` says where the caller
+stands: `"usage": {"month": "2026-11", "lines": 1240, "cap": 5000}`.
+
 The client splits any number of files into requests of the allowed size and sends them one
 after another:
 

@@ -569,6 +569,9 @@ in Authentik, which nobody has to see or visit.
   details gives the same kind of link for a forgotten password. Links work once, for 7
   days, and a new one cancels the last. See [AUTHENTIK.md](../AUTHENTIK.md).
 - Admins can see and revoke every API token.
+- The Admin page's **API usage** tab lists what each account read through the recognition
+  API this month and last - requests, pages, lines and GPU time - and takes an optional
+  monthly cap on lines read per account. Only the counts are kept.
 
 ## Profile and settings
 
