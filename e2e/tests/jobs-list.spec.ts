@@ -53,9 +53,9 @@ test.describe('Scenario: managing datasets from the list', () => {
 
     await openSettings(page, name, 'models')
 
-    // Fresh datasets follow the task defaults for every stage, and the LM beam decode.
+    // Fresh datasets follow the task defaults for every stage, and read each model its own best way.
     await expect(page.getByTestId('new-model-ocr')).toHaveValue('')
-    await expect(page.getByTestId('ocr-decode-beam')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('ocr-decode-auto')).toHaveAttribute('aria-pressed', 'true')
     await page.getByTestId('new-model-ocr').selectOption(String(builtinOcr.id))
     await page.getByTestId('ocr-decode-greedy').click()
 
