@@ -15,6 +15,7 @@ import { Hint } from '../ui/Hint'
 import { AugmentOverlay } from './AugmentOverlay'
 import { EMPTY_STACK, isEmptyStack } from '../augment/pipeline'
 import { ClusterUnlock } from './ClusterUnlock'
+import { readsWithOwnDecoder } from './families'
 import { useAutoClear } from '../../messages'
 import { Textarea, controlClass } from '../ui/Field'
 import { fieldValue, knobDefault, tunedValues } from './tunables'
@@ -116,17 +117,6 @@ function groupTunables(tunables: Tunable[]): { name: string; knobs: Tunable[] }[
   return groups
 }
 
-/** Whether a model reads lines with a token decoder of its own. A fine-tune no run has
- *  loaded yet reports no decoder; it reads with the one it was trained from. */
-function readsWithOwnDecoder(modelId: string, models: RegistryModel[]): boolean {
-  let model = models.find((m) => String(m.id) === modelId)
-  while (model && !model.decoder && model.trained_from !== null) {
-    const from = model.trained_from
-    model = models.find((m) => m.id === from)
-  }
-  return model?.decoder === 'token'
-}
-
 function TunableField({ knob, value, baseDecoder, onChange }: {
   knob: Tunable
   value: string
@@ -196,7 +186,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
   const [baseTouched, setBaseTouched] = useState(false)
   // A token-decoder base fine-tunes with defaults of its own; the fields show those.
   const baseDecoder = models.find((m) => String(m.id) === baseId)?.decoder
-  const baseReadsItself = readsWithOwnDecoder(baseId, models)
+  const baseReadsItself = readsWithOwnDecoder(models.find((m) => String(m.id) === baseId), models)
 
   // The dialog can open before the models list resolves; adopt the task default
   // when it arrives unless the user already made a choice. A rerun never adopts it:

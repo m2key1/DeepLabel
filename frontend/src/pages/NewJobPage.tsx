@@ -24,6 +24,7 @@ import { LAYOUT_SHAPE_CHOICES, LINE_MODE_CHOICES, NEEDS_LAYOUT, PHASE_CHOICES, l
 import { Stepper } from '../components/ui/Stepper'
 import { SkippedSymlinks } from '../components/job/SkippedSymlinks'
 import { useCrumb } from '../components/NavBar'
+import { readsWithOwnDecoder } from '../components/models/families'
 import { readerName } from '../components/viewer/readers'
 import { humanBytes } from '../util'
 import { UploadProgress, type UploadState } from '../components/ui/UploadProgress'
@@ -331,7 +332,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   const ocrModel = models.find((m) => (picks.ocr === '' ? m.task === 'ocr' && m.is_default : m.id === Number(picks.ocr)))
   // Only a model with a token decoder reads the line with it, so the card exists only for those;
   // a new dataset that picked it and then a model without one goes back to Automatic.
-  const tokenDecoder = ocrModel?.decoder === 'token'
+  const tokenDecoder = readsWithOwnDecoder(ocrModel, models)
   useEffect(() => {
     if (edit) return
     setOcrDecode((held) => (!tokenDecoder && held === 'decoder' ? 'auto' : held))

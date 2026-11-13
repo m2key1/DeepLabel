@@ -274,3 +274,13 @@ export function buildFamilies(models: RegistryModel[], trainings: Training[], ev
     return b.newest.localeCompare(a.newest)
   })
 }
+
+/** Whether a model reads lines with a token decoder of its own. A fine-tune no run has
+ *  loaded yet reports no decoder; it reads with the one it was trained from. */
+export function readsWithOwnDecoder(model: RegistryModel | undefined, models: RegistryModel[]): boolean {
+  while (model && !model.decoder && model.trained_from !== null) {
+    const from = model.trained_from
+    model = models.find((m) => m.id === from)
+  }
+  return model?.decoder === 'token'
+}

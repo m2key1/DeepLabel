@@ -1,5 +1,7 @@
 import { test, expect } from '../helpers/test'
-import { createGroup, getJob, moveJobToGroup, patchJob, seedCompletedJob, uniqueName } from '../helpers/api'
+import {
+  createGroup, getJob, importStubModel, moveJobToGroup, patchJob, seedCompletedJob, setModelColumn, uniqueName,
+} from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { createDataset, withLayoutPerCrop, wizardStep } from '../helpers/new-dataset'
 
@@ -45,4 +47,28 @@ test.describe("Scenario: a dataset reads with what suits its model", () => {
 
     for (const jobId of datasets) await expect.poll(async () => (await getJob(jobId)).ocr_decode).toBe('auto')
   })
+
+  test('a fine-tune no run has loaded yet offers its token decoder, as the model it was trained from does',
+    async ({ page }) => {
+      const reader = importStubModel('ocr', uniqueName('Token reader'), 'stub-misread')
+      const tuned = importStubModel('ocr', uniqueName('Unloaded fine-tune'), 'stub-misread')
+      const plain = importStubModel('ocr', uniqueName('Plain reader'), 'stub-misread')
+      setModelColumn(reader, 'decoder', 'token')
+      setModelColumn(tuned, 'trained_from', reader)
+
+      await page.goto('/new')
+      await page.getByLabel('Job name').fill(uniqueName('Decoder card'))
+      await page.locator('input[type="file"]').setInputFiles([{ name: 'leaf.png', mimeType: 'image/png', buffer: scanPng() }])
+      await withLayoutPerCrop(page)
+      await wizardStep(page, 'models')
+
+      const card = page.getByTestId('ocr-decode-decoder')
+      for (const model of [reader, tuned]) {
+        await page.getByTestId('new-model-ocr').selectOption(String(model))
+        await expect(card).toBeVisible()
+      }
+      await page.getByTestId('new-model-ocr').selectOption(String(plain))
+      await expect(page.getByTestId('ocr-decode-auto')).toBeVisible()
+      await expect(card).toHaveCount(0)
+    })
 })

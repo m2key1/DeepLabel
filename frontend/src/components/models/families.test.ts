@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Evaluation, RegistryModel, Training } from '../../api'
-import { buildFamilies, lineage } from './families'
+import { buildFamilies, lineage, readsWithOwnDecoder } from './families'
 
 const model = (id: number, over: Partial<RegistryModel> = {}): RegistryModel => ({
   id, task: 'ocr', name: `m${id}`, source: 'trained', checkpoint: `/m${id}.ckpt`, trained_from: null,
@@ -151,5 +151,26 @@ describe('model families', () => {
     expect(lineage(family.versions, 'r6').map((v) => v.key)).toEqual(['r6', 'm4', 'm2', 'm1'])
     expect(lineage(family.versions, 'm5').map((v) => v.key)).toEqual(['m5', 'm1'])
     expect(lineage(family.versions, 'gone')).toEqual([])
+  })
+})
+
+describe('readsWithOwnDecoder', () => {
+  const reader = model(1, { decoder: 'token' })
+  const tuned = model(2, { trained_from: 1 })
+  const tunedAgain = model(3, { trained_from: 2 })
+  const plain = model(4, { decoder: 'char' })
+  const unknown = model(5)
+  const models = [reader, tuned, tunedAgain, plain, unknown]
+
+  it('a model reporting a token decoder reads with it, and so does every fine-tune not yet loaded', () => {
+    expect([reader, tuned, tunedAgain].map((m) => readsWithOwnDecoder(m, models))).toEqual([true, true, true])
+  })
+
+  it('a character decoder, a model nothing is known of, and no model at all do not', () => {
+    expect([plain, unknown, undefined].map((m) => readsWithOwnDecoder(m, models))).toEqual([false, false, false])
+  })
+
+  it('a fine-tune that has reported its own decoder is taken at its word', () => {
+    expect(readsWithOwnDecoder(model(6, { trained_from: 1, decoder: 'char' }), models)).toBe(false)
   })
 })
