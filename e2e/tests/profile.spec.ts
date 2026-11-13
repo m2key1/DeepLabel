@@ -232,6 +232,29 @@ test.describe('Scenario: a person\'s profile', () => {
     })
 })
 
+test.describe('Scenario: your profile on a phone', () => {
+  test("below a tablet's width a section is picked from one menu on top and has the whole width",
+    async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 800 })
+      await page.goto('/settings?section=tokens')
+
+      const picker = page.getByTestId('section-picker')
+      await expect(picker).toHaveValue('tokens')
+      await expect(page.getByTestId('section-nav')).toHaveCount(0)
+      expect((await page.getByTestId('api-tokens').boundingBox())!.width).toBeGreaterThan(340)
+      await expect(page.getByTestId('logout')).toBeVisible()
+
+      await picker.selectOption({ label: 'Working together' })
+      await expect(page).toHaveURL(/\?section=together$/)
+      await expect(page.getByTestId('share-activity')).toBeVisible()
+
+      // From a tablet's width up the sections are a menu beside the page again.
+      await page.setViewportSize({ width: 1024, height: 800 })
+      await expect(page.getByTestId('section-nav')).toBeVisible()
+      await expect(picker).toHaveCount(0)
+    })
+})
+
 test.describe('Scenario: cropping your picture', () => {
   // The dev user's picture is shared state for every spec that follows.
   test.afterEach(async ({ page }) => {

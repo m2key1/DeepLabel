@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Select } from './Field'
 
 export interface NavItem {
   id: string
@@ -65,4 +66,29 @@ export function SectionNavAction({ onClick, children, ...rest }: {
   'data-testid'?: string
 }) {
   return <button type="button" onClick={onClick} className={`${itemClass} ${idleClass}`} {...rest}>{children}</button>
+}
+
+/** The same sections as one menu on top, for a screen too narrow to give the rail a column
+ *  of its own beside the page. */
+export function SectionPicker({ items, active, onSelect, label, footer }: {
+  items: (NavItem & { label: string })[]
+  active: string
+  onSelect: (id: string) => void
+  label: string
+  footer?: ReactNode
+}) {
+  const option = (item: NavItem & { label: string }) => <option key={item.id} value={item.id}>{item.label}</option>
+  const groups = [...new Set(items.map((item) => item.group))]
+  return (
+    <div className="flex items-center gap-2">
+      <Select size="md" aria-label={label} data-testid="section-picker" value={active}
+              onChange={(e) => onSelect(e.target.value)} className="min-w-0 flex-1 cursor-pointer">
+        {groups.map((group) => {
+          const inGroup = items.filter((item) => item.group === group)
+          return group ? <optgroup key={group} label={group}>{inGroup.map(option)}</optgroup> : inGroup.map(option)
+        })}
+      </Select>
+      {footer}
+    </div>
+  )
 }

@@ -6,6 +6,7 @@ import { Link, Navigate, useLocation, useParams, useSearchParams } from 'react-r
 import { ApiError, getPerson, getPersonProfile, logout } from '../api'
 import type { Person, PersonProfile, PersonStats } from '../api'
 import { useAuth } from '../auth'
+import { useIsNarrow } from '../hooks/useMediaQuery'
 import { profilePath } from '../people'
 import { useSettings } from '../settings'
 import { formatRelative, parseStamp } from '../util'
@@ -16,9 +17,10 @@ import { ActivityCalendar } from '../components/users/ActivityCalendar'
 import { ProfilePicture } from '../components/users/ProfilePicture'
 import { Avatar } from '../components/ui/Avatar'
 import { Badge } from '../components/ui/Badge'
+import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { Section } from '../components/ui/Section'
-import { SectionNav, SectionNavAction } from '../components/ui/SectionNav'
+import { SectionNav, SectionNavAction, SectionPicker } from '../components/ui/SectionNav'
 import { StatRow, StatTile } from '../components/ui/StatTile'
 import { pageShell } from '../components/ui/page'
 import { NotFoundPage } from './NotFoundPage'
@@ -134,6 +136,7 @@ function OwnTabs({ profile }: { profile: PersonProfile | null }) {
   const { user, passwordChange } = useAuth()
   const [params, setParams] = useSearchParams()
   const panels = useSettingsPanels()
+  const narrow = useIsNarrow()
   const tabs = [
     { id: OVERVIEW, label: 'Overview', node: <Overview profile={profile} /> },
     ...(passwordChange ? [{ id: 'password', label: 'Password', node: <ChangePassword /> }] : []),
@@ -141,18 +144,30 @@ function OwnTabs({ profile }: { profile: PersonProfile | null }) {
   ]
   const asked = params.get('section')
   const active = tabs.some((t) => t.id === asked) ? (asked as string) : OVERVIEW
+  const sections = {
+    label: `${user} - profile and settings`,
+    items: tabs.map(({ id, label }) => ({ id, label, group: SECTION_GROUP[id] })),
+    active,
+    onSelect: (id: string) => setParams(id === OVERVIEW ? {} : { section: id }, { replace: true }),
+  }
+  const shown = <div className="min-w-0 flex-1">{tabs.find((t) => t.id === active)?.node}</div>
+  // On a narrow screen the section gets the width, and the sections become one menu on top.
+  if (narrow) {
+    return (
+      <div className="flex flex-col gap-4">
+        <SectionPicker {...sections} footer={
+          <Button variant="ghost" size="md" data-testid="logout" onClick={() => void logOut()}>Log out</Button>} />
+        {shown}
+      </div>
+    )
+  }
   return (
     <div className="flex gap-6">
       <div className="sticky top-0 self-start">
-        <SectionNav
-          label={`${user} - profile and settings`}
-          items={tabs.map(({ id, label }) => ({ id, label, group: SECTION_GROUP[id] }))}
-          active={active}
-          onSelect={(id) => setParams(id === OVERVIEW ? {} : { section: id }, { replace: true })}
-          footer={<SectionNavAction data-testid="logout" onClick={() => void logOut()}>Log out</SectionNavAction>}
-        />
+        <SectionNav {...sections}
+          footer={<SectionNavAction data-testid="logout" onClick={() => void logOut()}>Log out</SectionNavAction>} />
       </div>
-      <div className="min-w-0 flex-1">{tabs.find((t) => t.id === active)?.node}</div>
+      {shown}
     </div>
   )
 }

@@ -597,6 +597,8 @@ in Authentik, which nobody has to see or visit.
   fitting below, but keeps the scan beside the text.
 - Below a tablet's width, on a phone or in a narrow window, the dataset groups slide in from
   the left with the button at the list's edge, and slide out again once one is picked.
+- Below a tablet's width your profile's sections are picked from one menu on top, with Log
+  out beside it, and the section has the whole width.
 - A table wider than the screen scrolls sideways inside its own card. On the dataset page
   the checkbox, the scan and the page number stay pinned at its left edge.
 - On a phone the transcript and the page viewer show the text alone. Tap a line in the

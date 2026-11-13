@@ -159,7 +159,8 @@ export function ApiTokens() {
       {tokens.length === 0 ? (
         <EmptyState>No tokens yet. One minted here reaches the same API this page uses.</EmptyState>
       ) : (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full whitespace-nowrap text-sm [&_td]:pr-3 [&_th]:pr-3">
           <thead>
             <tr className="border-b border-line text-left text-xs text-ink-muted">
               <th className="py-1 font-medium">Name</th>
@@ -190,6 +191,7 @@ export function ApiTokens() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </Section>
   )
