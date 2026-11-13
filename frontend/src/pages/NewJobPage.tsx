@@ -20,7 +20,9 @@ import { AlignmentChoice, LayoutShapeChoice, LlmReaders } from '../components/jo
 import { IiifSource, NO_IIIF } from '../components/job/IiifSource'
 import type { IiifChoice } from '../components/job/IiifSource'
 import { PagePicker, useFileItems } from '../components/job/PagePicker'
-import { LAYOUT_SHAPE_CHOICES, LINE_MODE_CHOICES, NEEDS_LAYOUT, PHASE_CHOICES, lowersShape, shapeChangesText } from '../components/job/processing'
+import {
+  DECODE_NAMES, LAYOUT_SHAPE_CHOICES, LINE_MODE_CHOICES, NEEDS_LAYOUT, PHASE_CHOICES, lowersShape, shapeChangesText,
+} from '../components/job/processing'
 import { Stepper } from '../components/ui/Stepper'
 import { SkippedSymlinks } from '../components/job/SkippedSymlinks'
 import { useCrumb } from '../components/NavBar'
@@ -40,12 +42,12 @@ const STEP_LABEL: Record<Step, string> = {
 }
 const STEPS = Object.keys(STEP_LABEL) as Step[]
 const NAME_CHECK_MS = 250
-const DECODE_CARDS: [DatasetDecode, string, string][] = [
-  ['auto', 'Automatic', "The model's own best: its token decoder if it has one, else Reranked"],
-  ['beam', 'With language model', "Beam search with the model's language model"],
-  ['rescored', 'Reranked', 'Beam search with the language model, the best candidates reranked by the decoder head'],
-  ['greedy', 'Fast', 'Raw greedy CTC output'],
-  ['decoder', 'Token decoder', "The model's subword decoder reads the line, checked against the CTC head"],
+const DECODE_CARDS: [DatasetDecode, string][] = [
+  ['auto', "The model's own best: its token decoder if it has one, else Reranked"],
+  ['beam', "Beam search with the model's language model"],
+  ['rescored', 'Beam search with the language model, the best candidates reranked by the decoder head'],
+  ['greedy', 'Raw greedy CTC output'],
+  ['decoder', "The model's subword decoder reads the line, checked against the CTC head"],
 ]
 const TASK_LABEL: Record<Task, string> = {
   text: 'Text extraction', map_segmentation: 'Map segmentation', map_lines: 'Line tracing (maps)',
@@ -1343,7 +1345,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
                   OCR decoding
                 </label>
                 <div className="grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-2">
-                  {decodeCards.map(([value, label, hint]) => (
+                  {decodeCards.map(([value, hint]) => (
                     <button
                       key={value}
                       type="button"
@@ -1356,7 +1358,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
                           : 'border-line-strong'
                       }`}
                     >
-                      <span className="block font-medium text-ink">{label}</span>
+                      <span className="block font-medium text-ink">{DECODE_NAMES[value]}</span>
                       <span className="block text-xs text-ink-muted">{hint}</span>
                     </button>
                   ))}

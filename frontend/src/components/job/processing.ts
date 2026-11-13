@@ -47,6 +47,11 @@ export const DECODE_CHOICES: readonly (readonly [OcrDecode, string])[] = [
   ['greedy', 'Fast - raw greedy CTC output'],
 ]
 
+/** What each decode is called wherever a person picks one or reads which a model offers. */
+export const DECODE_NAMES: Record<DatasetDecode, string> = {
+  auto: 'Automatic', decoder: 'Token decoder', beam: 'With language model', rescored: 'Reranked', greedy: 'Fast',
+}
+
 /** What a dataset can read with: the modes above, or whichever suits its model at the time. */
 export const DATASET_DECODE_CHOICES: readonly (readonly [DatasetDecode, string])[] = [
   ['auto', "Automatic - the model's own best"],

@@ -1,4 +1,4 @@
-import type { Evaluation, RegistryModel, Training } from '../../api'
+import type { Evaluation, OcrDecode, RegistryModel, Training } from '../../api'
 
 export const DEFAULT_DECODE = 'beam'
 
@@ -283,4 +283,9 @@ export function readsWithOwnDecoder(model: RegistryModel | undefined, models: Re
     model = models.find((m) => m.id === from)
   }
   return model?.decoder === 'token'
+}
+
+/** What a dataset on Automatic reads this model with, as the backend works it out. */
+export function automaticDecode(model: RegistryModel | undefined, models: RegistryModel[]): OcrDecode {
+  return readsWithOwnDecoder(model, models) ? 'decoder' : 'rescored'
 }

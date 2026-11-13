@@ -4,13 +4,13 @@ import {
   cancelEvaluation, getLayoutTemplates, getModelUsage, listConventionFlags, listEvaluations, listModels, listTrainings,
   patchModel, retryEvaluation,
 } from '../api'
-import type { ConventionFlag, Evaluation, LayoutTemplate, ModelUsage, RegistryModel, Training } from '../api'
+import type { ConventionFlag, Evaluation, LayoutTemplate, ModelUsage, OcrDecode, RegistryModel, Training } from '../api'
 import { conventionLabel } from '../components/conventionLabel'
 import { useAuth } from '../auth'
 import { useCrumb } from '../components/NavBar'
 import { EditModelDialog } from '../components/models/EditModelDialog'
 import { EvaluateDialog } from '../components/models/EvaluateDialog'
-import { buildFamilies } from '../components/models/families'
+import { automaticDecode, buildFamilies, readsWithOwnDecoder } from '../components/models/families'
 import type { Family, Version } from '../components/models/families'
 import { formatScore } from '../components/models/FamilyGraph'
 import { ReportedMetrics } from '../components/models/ReportedMetrics'
@@ -24,7 +24,7 @@ import { pageShell } from '../components/ui/page'
 import { usePolling } from '../hooks/usePolling'
 import { useAutoClear } from '../messages'
 import { formatDate, humanBytes } from '../util'
-import { DECODE_CHOICES } from '../components/job/processing'
+import { DECODE_NAMES } from '../components/job/processing'
 
 const STAGE: Record<string, string> = { layout: 'Layout detection', lines: 'Line segmentation', ocr: 'OCR' }
 
@@ -104,6 +104,17 @@ function EvaluationLine({ ev, canRun, onRetry, onCancel }: {
       ))}
     </div>
   )
+}
+
+/** The decodes a model reads with, by the names New job offers them under, marking the one a
+ *  dataset on Automatic gets. */
+function decodesOf(model: RegistryModel, models: RegistryModel[]): string {
+  const offered: OcrDecode[] = [...(readsWithOwnDecoder(model, models) ? ['decoder' as const] : []),
+                                'beam', 'rescored', 'greedy']
+  const automatic = automaticDecode(model, models)
+  return offered
+    .map((mode) => (mode === automatic ? `${DECODE_NAMES[mode]} (what Automatic reads with)` : DECODE_NAMES[mode]))
+    .join(', ')
 }
 
 function StoredFiles({ model }: { model: RegistryModel }) {
@@ -243,7 +254,7 @@ export function ModelPage() {
         <dl className="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-1 text-sm">
           {model.task === 'ocr' && <>
             <dt className="text-ink-muted">Decodes</dt>
-            <dd>{DECODE_CHOICES.map(([value]) => value).join(', ')} (beam by default)</dd>
+            <dd data-testid="model-decodes">{decodesOf(model, models ?? [])}</dd>
             <dt className="text-ink-muted">Beam LM</dt>
             <dd>{model.lm_path ? model.lm_path.split('/').pop() : 'none - decodes by decoder rescoring'}</dd>
             <dt className="text-ink-muted">Input size</dt>

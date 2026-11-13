@@ -71,4 +71,21 @@ test.describe("Scenario: a dataset reads with what suits its model", () => {
       await expect(page.getByTestId('ocr-decode-auto')).toBeVisible()
       await expect(card).toHaveCount(0)
     })
+
+  test("a model's page names the decodes it reads with, and which Automatic picks", async ({ page }) => {
+    const reader = importStubModel('ocr', uniqueName('Token reader'), 'stub-misread')
+    const tuned = importStubModel('ocr', uniqueName('Unloaded fine-tune'), 'stub-misread')
+    const plain = importStubModel('ocr', uniqueName('Plain reader'), 'stub-misread')
+    setModelColumn(reader, 'decoder', 'token')
+    setModelColumn(tuned, 'trained_from', reader)
+
+    for (const model of [reader, tuned]) {
+      await page.goto(`/models/${model}`)
+      await expect(page.getByTestId('model-decodes'))
+        .toHaveText('Token decoder (what Automatic reads with), With language model, Reranked, Fast')
+    }
+    await page.goto(`/models/${plain}`)
+    await expect(page.getByTestId('model-decodes'))
+      .toHaveText('With language model, Reranked (what Automatic reads with), Fast')
+  })
 })
