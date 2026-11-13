@@ -10,7 +10,7 @@ import { useAuth } from '../auth'
 import { useSettings } from '../settings'
 import { JobActions, menuItem } from '../components/job/JobActions'
 import { DatasetSidebar } from '../components/job/DatasetSidebar'
-import { useIsPhone } from '../hooks/useMediaQuery'
+import { useIsNarrow } from '../hooks/useMediaQuery'
 import { DROP_LIT, useDatasetDrag } from '../components/job/datasetDrag'
 import { AccessStack, reachOf } from '../components/job/AccessStack'
 import { COLUMNS, DEFAULT_COLUMNS, NAME_MIN, columnWidths, columnsForWidth, loadColumns,
@@ -284,7 +284,7 @@ export function JobsPage() {
   const [columns, setColumns] = useState<string[]>(loadColumns)
   // Per browser, like the column picker: how much room one person gives the rail is not
   // everyone's business, and /api/settings is shared - see the note on collapsed groups.
-  const phone = useIsPhone()
+  const narrow = useIsNarrow()
   const [drawer, setDrawer] = useState(false)
   const [railShut, setRailShutState] = useState(
     () => localStorage.getItem(RAIL_KEY) === '1')
@@ -1261,9 +1261,9 @@ export function JobsPage() {
 
   return (
     <div className="flex h-full min-h-0">
-      {/* A phone keeps the list's width for the list: the groups slide in over it and go
-          again once one is picked. */}
-      {!phone ? sidebar(railShut, setRailShut) : drawer ? (
+      {/* Below a tablet's width, mouse or finger, the list keeps its width: the groups slide
+          in over it and go again once one is picked. */}
+      {!narrow ? sidebar(railShut, setRailShut) : drawer ? (
         <div className="fixed inset-0 z-40 flex">
           <div className="flex h-full bg-surface shadow-lg">{sidebar(false, () => setDrawer(false), () => setDrawer(false))}</div>
           <div aria-hidden="true" className="flex-1 bg-black/40" onClick={() => setDrawer(false)} />

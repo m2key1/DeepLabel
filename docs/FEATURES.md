@@ -594,9 +594,9 @@ in Authentik, which nobody has to see or visit.
   button. The menu holds Queue (with what is running and queued), Models, Admin, New job,
   your profile and the theme.
 - A phone is a narrow touch screen. A narrow window on a computer gets the menu and the
-  fitting below, but keeps the scan beside the text and the groups beside the list.
-- On a phone the dataset groups slide in from the left with the button at the list's edge,
-  and slide out again once one is picked.
+  fitting below, but keeps the scan beside the text.
+- Below a tablet's width, on a phone or in a narrow window, the dataset groups slide in from
+  the left with the button at the list's edge, and slide out again once one is picked.
 - A table wider than the screen scrolls sideways inside its own card. On the dataset page
   the checkbox, the scan and the page number stay pinned at its left edge.
 - On a phone the transcript and the page viewer show the text alone. Tap a line in the

@@ -395,26 +395,56 @@ test.describe('Scenario: the row fits the column it is in', () => {
 })
 
 test.describe('Scenario: a narrow window', () => {
-  test('the groups are still reachable, folded rather than gone', async ({ page }) => {
+  test("below a tablet's width the groups fold to a strip and open over the list", async ({ page }) => {
     const name = uniqueName('Narrow')
-    await seedCompletedJob(name, 1)
-    await page.setViewportSize({ width: 640, height: 800 })
+    const groupName = uniqueName('Narrow group')
+    const group = await createGroup(groupName)
+    await moveJobToGroup(await seedCompletedJob(name, 1), group.id)
+    await page.setViewportSize({ width: 390, height: 800 })
     await page.goto('/')
 
-    // It used to be display:none below the medium breakpoint, with nothing anywhere to
-    // bring it back - the groups were simply unreachable on a small window.
     const rail = page.getByTestId('dataset-sidebar')
-    await expect(rail).toBeVisible()
-    await expect(page.getByTestId('job-card').filter({ hasText: name })).toHaveCount(1)
+    await expect(rail).toHaveAttribute('data-collapsed', '')
+    const strip = (await rail.boundingBox())!
+    expect(strip.width).toBeLessThan(60)
+    // The toolbar has the list's width to itself: none of it reaches over the strip or past the window.
+    for (const id of ['groupby-menu', 'sort-menu', 'columns-menu']) {
+      const box = (await page.getByTestId(id).boundingBox())!
+      expect(box.x, id).toBeGreaterThanOrEqual(strip.x + strip.width)
+      expect(box.x + box.width, id).toBeLessThanOrEqual(390)
+    }
 
-    // And it folds, so the table can have the room back without losing the way in.
+    // Opened, the groups lie over the list, which keeps the whole window behind them.
+    const list = page.getByTestId('jobs-scroller')
+    expect((await list.boundingBox())!.width).toBe(390 - strip.width)
+    await rail.getByTestId('sidebar-expand').click()
+    const opened = page.getByTestId('dataset-sidebar')
+    const pick = opened.getByRole('button', { name: new RegExp(`^${groupName}`) })
+    await expect(pick).toBeVisible()
+    expect((await list.boundingBox())!.width).toBe(390)
+
+    // Picking a group shows it and folds the groups away again.
+    await pick.click()
+    await expect(page.getByTestId('dataset-sidebar')).toHaveAttribute('data-collapsed', '')
+    await expect(page.getByTestId('job-card').filter({ hasText: name })).toHaveCount(1)
+  })
+
+  test("from a tablet's width up the groups stay beside the list, and fold by hand", async ({ page }) => {
+    await seedCompletedJob(uniqueName('Wide enough'), 1)
+    await page.setViewportSize({ width: 800, height: 800 })
+    await page.goto('/')
+
+    const rail = page.getByTestId('dataset-sidebar')
+    await expect(rail.getByTestId('sidebar-collapse')).toBeVisible()
+    await expect(rail).not.toHaveAttribute('data-collapsed', '')
+    const open = (await rail.boundingBox())!.width
+    expect(open).toBeGreaterThan(150)
     await rail.getByTestId('sidebar-collapse').click()
     await expect(rail).toHaveAttribute('data-collapsed', '')
-    const folded = (await rail.boundingBox())!.width
-    expect(folded).toBeLessThan(60)
+    expect((await rail.boundingBox())!.width).toBeLessThan(60)
     await rail.getByTestId('sidebar-expand').click()
     await expect(rail.getByTestId('sidebar-collapse')).toBeVisible()
-    expect((await rail.boundingBox())!.width).toBeGreaterThan(folded)
+    expect((await rail.boundingBox())!.width).toBe(open)
   })
 })
 
