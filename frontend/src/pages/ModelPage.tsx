@@ -15,7 +15,7 @@ import type { Family, Version } from '../components/models/families'
 import { formatScore } from '../components/models/FamilyGraph'
 import { ReportedMetrics } from '../components/models/ReportedMetrics'
 import { Badge } from '../components/ui/Badge'
-import { Button } from '../components/ui/Button'
+import { Button, buttonClass } from '../components/ui/Button'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Section } from '../components/ui/Section'
 import { StatRow, StatTile } from '../components/ui/StatTile'
@@ -212,6 +212,9 @@ export function ModelPage() {
           </span>
           <StoredFiles model={model} /></span>}
         actions={<>
+          {can('recognize') && model.task === 'ocr' && !model.archived && (
+            <Link to={`/try?ocr=${model.id}`} className={buttonClass({ size: 'xs' })}>Try this model</Link>
+          )}
           {canEdit && model.task === 'ocr' && !model.archived && (
             <Button size="xs" onClick={() => setEvaluating(true)}>Evaluate…</Button>
           )}

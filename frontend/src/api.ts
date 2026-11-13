@@ -546,6 +546,47 @@ export interface RecognitionRequest {
   started_at: string
 }
 
+export interface OfferedModel {
+  id: number
+  name: string
+  default: boolean
+  /** OCR models only. */
+  decodes?: OcrDecode[]
+}
+
+export interface RecognitionOffer {
+  models: { lines: OfferedModel[]; ocr: OfferedModel[] }
+  limits: { pages: number; lines: number; megabytes: number }
+  usage: { month: string; lines: number; cap: number | null }
+}
+
+export interface RecognizedPage {
+  id: string
+  width?: number
+  height?: number
+  lines?: { polygon: [number, number][]; text: string; confidence: number | null }[]
+  /** The document asked for with `format`. */
+  document?: string
+  error?: string
+}
+
+export interface Recognized {
+  models: { lines?: { id: number; name: string }; ocr?: { id: number; name: string; decode: OcrDecode } }
+  pages: RecognizedPage[]
+}
+
+export function getRecognitionOffer(): Promise<RecognitionOffer> {
+  return request('/api/recognize')
+}
+
+/** One scan read through the recognition API; `fields` are its form fields (ocr_model, format...). */
+export function recognizePage(file: File, fields: Record<string, string>): Promise<Recognized> {
+  const form = new FormData()
+  form.append('files', file, file.name)
+  for (const [key, value] of Object.entries(fields)) form.append(key, value)
+  return request('/api/recognize/pages', { method: 'POST', body: form })
+}
+
 export interface RecognitionCounts {
   requests: number
   pages: number
@@ -1031,7 +1072,12 @@ export async function downloadFile(url: string, fallbackName: string): Promise<v
   const res = await fetch(url)
   if (!res.ok) return failed<void>(res, `GET ${url} failed`)
   const name = FILENAME_RE.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? fallbackName
-  const href = URL.createObjectURL(await res.blob())
+  saveBlob(await res.blob(), name)
+}
+
+/** Hand a blob to the browser as a download under this name. */
+export function saveBlob(blob: Blob, name: string): void {
+  const href = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = href
   a.download = name

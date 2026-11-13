@@ -28,6 +28,7 @@ import { TileEditorPage } from './pages/TileEditorPage'
 import { AdminPage } from './pages/AdminPage'
 import { OwnProfileRedirect, ProfilePage } from './pages/ProfilePage'
 import { ModelsPage } from './pages/ModelsPage'
+import { TryPage } from './pages/TryPage'
 import { ModelPage } from './pages/ModelPage'
 import { TrainingNewPage } from './pages/TrainingNewPage'
 import { TrainingRunPage } from './pages/TrainingRunPage'
@@ -64,6 +65,7 @@ const router = createBrowserRouter([
           { path: '/profile', element: <OwnProfileRedirect /> },
           { path: '/people/:username', element: <ProfilePage /> },
           { path: '/models', element: <ModelsPage /> },
+          { path: '/try', element: <TryPage /> },
           { path: '/models/train', element: <TrainingNewPage /> },
           { path: '/models/runs/:id', element: <TrainingRunPage /> },
           { path: '/models/evaluations', element: <EvaluationsPage /> },

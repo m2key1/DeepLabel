@@ -654,3 +654,10 @@ line images, or a page with its own line outlines, and get only the text. PAGE X
 hOCR and plain text can come with the lines. Nothing is stored. It needs the recognize
 permission, and a token made **Recognition only** reaches it and nothing else, so it can
 be given to a service outside without opening anyone's datasets to it.
+
+**Try** in the top bar (or **Try this model** on an OCR model's page) does the same in the
+browser: drop up to 10 scans, pick the line and OCR models, and each scan comes back with
+its lines outlined and numbered in reading order beside their text. Hovering a line marks it
+on both sides, lines under your review threshold are tinted as unsure, the text can be copied
+and the PAGE XML downloaded, and the matching `curl` call is shown. Nothing is kept; the
+reads count towards your usage like any API request.

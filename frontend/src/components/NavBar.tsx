@@ -143,7 +143,7 @@ function usePendingCount(isAdmin: boolean): number {
 }
 
 export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
-  const { user, isAdmin, canEdit } = useAuth()
+  const { user, isAdmin, canEdit, can } = useAuth()
   const [queue, setQueue] = useState<QueueState | null>(null)
   const pending = usePendingCount(isAdmin)
   const navigate = useNavigate()
@@ -210,7 +210,7 @@ export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
         </nav>
         <QueuePill queue={queue} compact={narrow} />
         {narrow ? (
-          <PhoneMenu queue={queue} adminLink={isAdmin ? adminLink : null} canEdit={canEdit} />
+          <PhoneMenu queue={queue} adminLink={isAdmin ? adminLink : null} canEdit={canEdit} canTry={can('recognize')} />
         ) : (
           <>
             <PresencePill />
@@ -221,6 +221,11 @@ export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
               <Link to="/models" className={buttonClass({ variant: 'ghost', size: 'sm' }, 'whitespace-nowrap')}>
                 Models
               </Link>
+              {can('recognize') && (
+                <Link to="/try" className={buttonClass({ variant: 'ghost', size: 'sm' }, 'whitespace-nowrap')}>
+                  Try
+                </Link>
+              )}
               {isAdmin && adminLink(buttonClass({ variant: 'ghost', size: 'sm' }, 'gap-1.5 whitespace-nowrap'))}
               {canEdit && (
                 <Link to="/new" className={buttonClass({ variant: 'primary', size: 'md' }, 'whitespace-nowrap')}>
@@ -239,10 +244,11 @@ export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
 
 /** Everything the bar holds beyond the logo and the queue's dot, behind one button. It
  *  shuts on a pick, on a tap elsewhere and on Escape, and whenever the page changes. */
-function PhoneMenu({ queue, adminLink, canEdit }: {
+function PhoneMenu({ queue, adminLink, canEdit, canTry }: {
   queue: QueueState | null
   adminLink: ((className: string) => ReactNode) | null
   canEdit: boolean
+  canTry: boolean
 }) {
   const { user } = useAuth()
   const [open, setOpen] = useState(false)
@@ -269,6 +275,7 @@ function PhoneMenu({ queue, adminLink, canEdit }: {
             {queue && <span className="ml-auto text-xs font-normal text-ink-subtle">{queueSummary(queue)}</span>}
           </Link>
           <Link to="/models" className={item}>Models</Link>
+          {canTry && <Link to="/try" className={item}>Try</Link>}
           {adminLink?.(`${item} gap-1.5`)}
           {canEdit && (
             <Link to="/new" className={buttonClass({ variant: 'primary', size: 'md' }, 'w-full')}>
