@@ -1,5 +1,5 @@
 import { test, expect } from '../helpers/test'
-import { signInSite, signedInAs, submit } from '../helpers/signIn'
+import { signIn, signInSite, signedInAs, submit } from '../helpers/signIn'
 
 let site = ''
 
@@ -21,6 +21,27 @@ test.describe('Scenario: signing in on DeepLabel\'s own page', () => {
     await expect(page).toHaveURL(`${site}/models`)
     await expect.poll(() => signedInAs(page)).toBe('root@example.org')
     await expect(page.getByTestId('user-menu')).toBeVisible()
+  })
+
+  test('a test signed in by the helper is already past the sign-in page, so its next step cannot race it',
+       async ({ page }) => {
+    // A busy browser: the page takes its time over the sign-in answer before moving on,
+    // which is when a test's own navigation used to be overtaken by that move.
+    await page.addInitScript(() => {
+      const fetchNow = window.fetch.bind(window)
+      window.fetch = async (input, init) => {
+        const answer = await fetchNow(input, init)
+        if (String(input).endsWith('/api/sign-in')) await new Promise((r) => setTimeout(r, 1500))
+        return answer
+      }
+    })
+
+    await signIn(page, 'root@example.org', 'copper willow tandem fjord')
+
+    expect(page.url()).toBe(`${site}/`)
+    await page.goto(`${site}/admin`)
+    await expect(page).toHaveURL(`${site}/admin`)
+    await expect(page.getByRole('heading', { name: 'Admin' })).toBeVisible()
   })
 
   test('a wrong password says so, keeps the email, empties the password and signs nobody in',

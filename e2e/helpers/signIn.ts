@@ -45,8 +45,16 @@ export async function submit(page: Page, email: string, password: string) {
 export async function signedInPage(browser: Browser, email: string, password: string): Promise<Page> {
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } })
   const page = await context.newPage()
+  await signIn(page, email, password)
+  return page
+}
+
+/** Sign this page in on the sign-in page, and wait until the page has moved on to the
+ *  dataset list as it does by itself: a test that navigated before then could be overtaken
+ *  by that move. */
+export async function signIn(page: Page, email: string, password: string) {
   await page.goto(`${site}/sign-in`)
   expect(await submit(page, email, password)).toBe(200)
   await expect.poll(() => signedInAs(page)).toBe(email)
-  return page
+  await expect(page).toHaveURL(`${site}/`)
 }
