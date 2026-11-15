@@ -64,10 +64,11 @@ thing to paste into a notebook or a CI job. Managing tokens and administering ac
 
 ## Recognition
 
-Scans in, lines and text out, without a dataset: nothing of a request is stored. It needs
-the **recognize** permission, which admins have and grant per person. A token made with
-the access **Recognition only** reaches these routes and nothing else, which makes it the
-one to give a service outside; a read-only token may call them too, as they write nothing.
+Scans in, lines and text out, without a dataset: nothing of a request is stored unless it
+asks to keep its pages. It needs the **recognize** permission, which admins have and grant
+per person. A token made with the access **Recognition only** reaches these routes and
+nothing else, which makes it the one to give a service outside; a read-only token may call
+them too, as they write nothing, but cannot keep.
 
 - `POST /api/recognize/pages` - whole pages as `files` parts. Each comes back with the
   lines found on it, in reading order, each with its text, confidence and outline in pixels
@@ -91,6 +92,17 @@ curl -H "Authorization: Bearer $DEEPLABEL_TOKEN" \
 #             "lines": [{"polygon": [[112, 340], [1890, 338], [1891, 402], [113, 404]],
 #                        "text": "...", "confidence": 0.97}, ...]}, ...]}
 ```
+
+Pages sent with `keep=<name>` are also filed into your dataset of that name (in any letter
+case), or into a new one if no dataset has the name, so their lines can be corrected there
+and used for training. They arrive read and unchecked, as a dataset that skips layout holds
+them, and nothing of the pipeline runs on them; a new dataset takes the request's models,
+decode and convention, so pages added to it in the app later are read the same way. A scan
+the dataset holds already lands as a duplicate, without its lines. The answer says where:
+`"kept": {"dataset": "3f9c...", "name": "Letters 1848", "created": true, "pages": 2,
+"duplicates": []}`. A name another account holds is refused `409`, as is a dataset that is
+queued or running; keeping needs an account that may make datasets and a token that is not
+read-only (`403`). Line images have no page to keep.
 
 An image that cannot be read comes back as `{"id": ..., "error": ...}` and the rest of the
 request is still answered. One request carries at most 10 pages, 500 lines and 100 MB by

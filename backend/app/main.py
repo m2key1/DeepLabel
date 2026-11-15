@@ -64,7 +64,8 @@ async def auth_gate(request: Request, call_next):
         if request.headers.get('X-Auth-Scope') == 'recognize' and not recognition:
             return JSONResponse({'detail': 'recognition-only API token'}, status_code=403)
         # Recognition posts images and stores nothing, so it is not a write: the recognize
-        # capability decides who may, read-only token or not.
+        # capability decides who may, read-only token or not. Its `keep`, which does
+        # store, is gated by the route.
         if request.method in WRITE_METHODS and not recognition:
             if role == 'viewer':
                 return JSONResponse({'detail': 'read-only account'}, status_code=403)

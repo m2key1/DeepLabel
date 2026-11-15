@@ -46,12 +46,15 @@ deeplabel groundtruth <job-id> --wait            # read each page against its ow
 deeplabel recognize pages ./scans -o answer.json # lines and text, no dataset
 deeplabel recognize pages ./scans --format page -o page-xml/   # one PAGE XML per scan
 deeplabel recognize lines ./line-images          # text of each line image
+deeplabel recognize pages ./scans --keep "Letters 1848"        # ...and keep them as a dataset
 ```
 
 ## Reading without a dataset
 
 `recognize_pages` and `recognize_lines` use the recognition API: nothing is stored, and
-any number of files is sent in requests of the size the deployment allows. It needs the
+any number of files is sent in requests of the size the deployment allows. Pages sent with
+`keep='<name>'` are filed with their lines into your dataset of that name, made by the first
+request if no dataset has the name; `answer['kept']` says where, over all the requests. It needs the
 recognize permission; a token made **Recognition only** is the one to give a script that
 should do nothing else. While the account has another request running, a request is sent
 again once the deployment says to; once the account has reached its monthly cap, the

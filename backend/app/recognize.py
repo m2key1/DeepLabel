@@ -7,11 +7,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
-from app import auto_decode, backend_client, config, conventions, decode, evaluator, formats, linecrop, ocr_phase, \
-    reading_order, registry, scans
+from app import auto_decode, backend_client, config, conventions, decode, evaluator, formats, ingest, \
+    layout_templates, linecrop, ocr_phase, reading_order, registry, scans, store, text_job
 from app.backend_client import Encoded
 from app.remote_models import RemoteLines, RemoteOcrEngine
 
@@ -278,6 +279,14 @@ def _within_line_limit(count: int) -> None:
 Crops = list[tuple[int, Image.Image]]
 
 
+@dataclass
+class LineRead:
+    text: str
+    confidence: float | None
+    profile: list | None = None
+    orientation: int = 0
+
+
 def _read(conn, reading: Reading, request: InFlight, lines: list[tuple[object, Crops, dict]]) -> tuple[dict, dict]:
     """Read every line, each at the orientations it was cut at, keeping the more confident
     reading. Sorted by width, as a dataset's lines are, since a batch of like widths reads
@@ -285,16 +294,17 @@ def _read(conn, reading: Reading, request: InFlight, lines: list[tuple[object, C
     reading.client.on_wait = request.wait
     engine = RemoteOcrEngine(conn, reading.client, reading.model['id'], reading.decode, reading.convention)
     request.stage = 'reading'
-    items = sorted(((key, crop, context) for key, crops, context in lines for _, crop in crops),
-                   key=lambda item: item[1].width)
-    best: dict = {key: ('', None) for key, crops, _ in lines if not crops}
+    items = sorted(((key, orientation, crop, context) for key, crops, context in lines for orientation, crop in crops),
+                   key=lambda item: item[2].width)
+    best: dict[object, LineRead] = {key: LineRead('', None) for key, crops, _ in lines if not crops}
     chunk = reading.client.max_items('ocr')
     for start in range(0, len(items), chunk):
         part = items[start:start + chunk]
-        texts, confidences, _ = engine.predict_batch([crop for _, crop, _ in part], [context for *_, context in part])
-        for (key, _, _), text, confidence in zip(part, texts, confidences):
-            if key not in best or confidence > (best[key][1] or 0):
-                best[key] = (text.strip(), confidence)
+        texts, confidences, profiles = engine.predict_batch([crop for _, _, crop, _ in part],
+                                                            [context for *_, context in part])
+        for (key, orientation, _, _), text, confidence, profile in zip(part, texts, confidences, profiles):
+            if key not in best or confidence > (best[key].confidence or 0):
+                best[key] = LineRead(text.strip(), confidence, profile, orientation)
         request.lines_read = len(best)
     model = {'id': reading.model['id'], 'name': reading.model['name'], 'decode': engine.decode}
     if reading.convention:
@@ -325,14 +335,127 @@ def _document(fmt: str, idx: int, name: str, width: int, height: int, lines: lis
     return {'page': formats.page_xml, 'alto': formats.alto, 'hocr': lambda p: formats.hocr(p, name)}[fmt](page)
 
 
+@dataclass
+class Keeping:
+    """Where a request's pages are kept: the caller's dataset of that name, or the name a
+    new one will take."""
+    name: str
+    job_id: str | None
+
+
+def keeping(conn, account: str, name: str, uploads: list[Upload]) -> Keeping:
+    """The dataset `keep` names, settled before anything is read, as is every file name the
+    pages will be kept under."""
+    for upload in uploads:
+        try:
+            ingest.require_short_name(_kept_name(upload.name))
+        except ingest.IngestError as error:
+            raise Refused(error.status_code, error.detail) from None
+    holder = ingest.name_holder(conn, name)
+    if holder is None:
+        return Keeping(name, None)
+    job = store.get_job(conn, holder)
+    if job['owner'] != account:
+        raise Refused(409, f'a dataset named "{name}" belongs to another account; keep needs a name of your own')
+    if ingest.is_tile_task(job['task']):
+        raise Refused(400, f'"{job["name"]}" is a map dataset; pages are kept in a text dataset')
+    if job['status'] in ('queued', 'running'):
+        raise Refused(409, f'"{job["name"]}" is queued or running; keep into it once it has finished')
+    return Keeping(job['name'], holder)
+
+
+def _kept_name(sent: str) -> str:
+    """A page is kept under the file's own name, without any folders the request gave it."""
+    return Path(sent).name or 'page'
+
+
+def _new_dataset(conn, account: str, name: str, fields: dict, finder, reading: Reading) -> str:
+    """A text dataset that reads pages added to it later as this request read its own: lines
+    found on the whole page, then read, with the models, decode and convention it named."""
+    job_id = uuid.uuid4().hex[:12]
+    conn.execute('INSERT INTO jobs (id, name, owner, task, line_mode, run_layout, run_lines, run_ocr, '
+                 "model_lines_id, model_ocr_id, ocr_decode, status) VALUES (?,?,?,'text','per_page',0,1,1,?,?,?,'done')",
+                 (job_id, name, account, finder[0]['id'] if finder and fields.get('lines_model') else None,
+                  reading.model['id'] if fields.get('ocr_model') else None,
+                  fields.get('decode') or decode.DATASET_DEFAULT))
+    if reading.convention:
+        conn.execute('UPDATE jobs SET ocr_convention = ? WHERE id = ?', (json.dumps(reading.convention), job_id))
+        conventions.note(conn, list(reading.convention))
+    layout_templates.copy_into(conn, job_id)
+    return job_id
+
+
+def _keep_lines(conn, page_id: int, page: dict, reads: list[LineRead], lines_by: str, read_by: str,
+                ocr_model_id: int) -> None:
+    """A page's lines as a dataset that skips layout holds them: in the page's Unassigned
+    bucket, in reading order, read and unchecked."""
+    outlines = [[[x / page['width'], y / page['height']] for x, y in line['polygon']] for line in page['lines']]
+    if not outlines:
+        return
+    xs = [x for outline in outlines for x, _ in outline]
+    ys = [y for outline in outlines for _, y in outline]
+    bucket = conn.execute("INSERT INTO elements (page_id, order_idx, class_name, bbox, conf, kind) "
+                          "VALUES (?, 0, 'Unassigned', ?, NULL, 'orphan')",
+                          (page_id, json.dumps([min(xs), min(ys), max(xs), max(ys)]))).lastrowid
+    store.log_element(conn, bucket, lines_by, 'create')
+    for order_idx, (outline, read) in enumerate(zip(outlines, reads)):
+        line_id = conn.execute(
+            'INSERT INTO lines (element_id, order_idx, polygon, text, confidence, conf_profile, orientation, '
+            "ocr_model_id, ocr_run_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'))",
+            (bucket, order_idx, json.dumps(outline), read.text, read.confidence,
+             json.dumps(read.profile) if read.profile else None, read.orientation, ocr_model_id)).lastrowid
+        store.log_line(conn, line_id, read_by, 'create')
+
+
+def _keep(conn, account: str, target: Keeping, uploads: list[Upload], answered: list[dict], read: dict,
+          fields: dict, own: dict, finder, reading: Reading) -> dict:
+    """File every page that was read into the dataset, as done: nothing of the pipeline
+    runs on it. A scan the dataset holds already lands as a duplicate, as an upload of it
+    would, without its lines."""
+    kept = {'dataset': target.job_id, 'name': target.name, 'created': False, 'pages': 0, 'duplicates': []}
+    readable = [i for i, page in enumerate(answered) if 'error' not in page]
+    if not readable:
+        return kept
+    job_id = target.job_id or _new_dataset(conn, account, target.name, fields, finder, reading)
+    kept.update(dataset=job_id, created=target.job_id is None)
+    job_path = config.job_dir(job_id)
+    (job_path / 'uploads').mkdir(parents=True, exist_ok=True)
+    seen = store.taken_hashes(conn, 'pages', job_id)
+    lines_by = f'model:lines@{finder[0]["name"]}' if finder else f'import:{account}'
+    read_by = text_job.ocr_author(conn, reading.model['id'], reading.decode)
+    for i in readable:
+        page = answered[i]
+        name = _kept_name(page['id'])
+        source = job_path / 'uploads' / f'{ingest.page_count(conn, job_id):05d}_{name}'
+        source.write_bytes(uploads[i].data)
+        page_id = ingest.insert_pages(conn, job_id, [(name, str(source))])[str(source)]
+        row = conn.execute('SELECT * FROM pages WHERE id = ?', (page_id,)).fetchone()
+        outcome = scans.ingest_page(conn, row, job_path, seen, config.BLOBS_DIR, 'done')
+        if outcome == 'duplicate':
+            kept['duplicates'].append(page['id'])
+        if outcome != 'done':
+            continue
+        _keep_lines(conn, page_id, page, [read[(i, n)] for n in range(len(page['lines']))], lines_by, read_by,
+                    reading.model['id'])
+        if page['id'] not in own:
+            store.note_page_model(conn, page_id, 'lines', finder[0]['id'])
+        conn.commit()
+        kept['pages'] += 1
+    store.recount_pages(conn, job_id)
+    return kept
+
+
 def pages(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
     """Find the lines of whole pages - or take the outlines the caller sent for a page -
     and read them. Pages are decoded one at a time and only their line crops are kept, so
-    a request of large scans never holds them all at once."""
+    a request of large scans never holds them all at once. With `keep`, the pages and what
+    was read on them are filed into a dataset of the caller's."""
     check_cap(conn, account)
     fmt = fields.get('format') or 'json'
     if fmt not in FORMATS:
         raise Refused(400, f'format must be one of {", ".join(FORMATS)}')
+    keep_name = (fields.get('keep') or '').strip()
+    target = keeping(conn, account, keep_name, uploads) if keep_name else None
     own = _own_lines(fields.get('lines'), [u.name for u in uploads])
     finder = _model(conn, 'lines', fields.get('lines_model')) if any(u.name not in own for u in uploads) else None
     reading = _reading(conn, fields)
@@ -370,13 +493,16 @@ def pages(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
     for i, page in enumerate(answered):
         if 'error' in page:
             continue
-        page['lines'] = [{'polygon': outline, 'text': read[(i, n)][0], 'confidence': read[(i, n)][1]}
+        page['lines'] = [{'polygon': outline, 'text': read[(i, n)].text, 'confidence': read[(i, n)].confidence}
                          for n, outline in enumerate(page['lines'])]
         if fmt != 'json':
             page['document'] = _document(fmt, i, page['id'], page['width'], page['height'], page['lines'])
     if models.get('ocr') is None:
         models.pop('ocr', None)
-    return {'models': models, 'pages': answered}
+    answer = {'models': models, 'pages': answered}
+    if target:
+        answer['kept'] = _keep(conn, account, target, uploads, answered, read, fields, own, finder, reading)
+    return answer
 
 
 def lines(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
@@ -394,6 +520,6 @@ def lines(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
         read, model = _read(conn, reading, request, crops) if crops else ({}, None)
     record_usage(conn, account, pages=0, lines=len(crops), seconds=request.held())
     answered = [{'id': upload.name, 'error': errors[i]} if i in errors
-                else {'id': upload.name, 'text': read[i][0], 'confidence': read[i][1]}
+                else {'id': upload.name, 'text': read[i].text, 'confidence': read[i].confidence}
                 for i, upload in enumerate(uploads)]
     return {'models': {'ocr': model} if model else {}, 'lines': answered}

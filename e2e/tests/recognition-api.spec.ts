@@ -1,9 +1,10 @@
 import { test, expect } from '../helpers/test'
 import type { Page } from '@playwright/test'
-import { backendFetch, slowOcrModelId, uniqueName } from '../helpers/api'
+import { backendFetch, getJob, jobPageIds, pageLines, slowOcrModelId, uniqueName } from '../helpers/api'
 import { FRONTEND } from '../helpers/frontend'
 import { scanPng } from '../helpers/image'
 import { seedSession, useSession } from '../helpers/session'
+import { openViewer } from '../helpers/viewer'
 
 // The stub finds three lines in each of its two layout boxes, full width, so a page comes
 // back as six lines top to bottom, and it reads a line as "Sample Text line <n>" from the
@@ -292,3 +293,65 @@ test.describe('Scenario: what an account read, and a cap on it', () => {
   })
 })
 
+
+test.describe('Scenario: keeping what a request read as a dataset', () => {
+  test('pages read with keep become a dataset of that name, read and unchecked, and the next request adds to it',
+    async ({ page }) => {
+      const me = (await (await page.request.get('/api/me')).json()).user as string
+      const token = await mint(page, uniqueName('keep'))
+      const used = await defaults(token)
+      const name = uniqueName('Kept pages')
+      const scanB = { name: 'scan_b.png', png: scanPng(500, 400, 31) }
+
+      const first = await recognize(token, 'pages', [{ name: 'scan_a.png', png: scanPng(600, 800, 30) }, scanB],
+                                    { keep: name })
+      expect(first.status).toBe(200)
+      const answer = await first.json()
+      expect(answer).toEqual({
+        models: used,
+        pages: [pageOf('scan_a.png', 600, 800, LINES_600x800), pageOf('scan_b.png', 500, 400, LINES_500x400)],
+        kept: { dataset: expect.any(String), name, created: true, pages: 2, duplicates: [] },
+      })
+
+      const jobId = answer.kept.dataset as string
+      const job = await getJob(jobId)
+      // What the request chose, so pages added in the app later are read the same way.
+      expect(job).toMatchObject({
+        name, owner: me, status: 'done', task: 'text', line_mode: 'per_page',
+        run_layout: false, run_lines: true, run_ocr: true,
+        model_lines_id: null, model_ocr_id: null, ocr_decode: 'auto',
+      })
+      expect(job.counters).toMatchObject({ pages_total: 2, lines_total: 12, lines_ocr_done: 12 })
+      expect(job.pages.map((p: { filename: string; status: string }) => [p.filename, p.status]))
+        .toEqual([['scan_a.png', 'done'], ['scan_b.png', 'done']])
+
+      const [pageA, pageB] = await jobPageIds(jobId)
+      const keptLines = async (pageId: number, width: number, height: number, outlines: number[][][]) =>
+        expect((await pageLines(jobId, pageId)).map((l) => ({
+          text: l.text, confidence: l.confidence, checked: l.checked, reader: l.text_author, polygon: l.polygon,
+        }))).toEqual(outlines.map((outline, i) => ({
+          text: `Sample Text line ${i + 1}`, confidence: STUB_CONFIDENCE, checked: false,
+          reader: `model:ocr@${used.ocr.name}`, polygon: outline.map(([x, y]) => [x / width, y / height]),
+        })))
+      await keptLines(pageA, 600, 800, LINES_600x800)
+      await keptLines(pageB, 500, 400, LINES_500x400)
+
+      await openViewer(page, jobId, pageA)
+      await expect(page.getByTestId('line-text')).toHaveText(READ(6))
+
+      // In any letter case the name finds the same dataset; a scan it holds already lands
+      // as a duplicate, as an upload of it would, and only the new one is read into it.
+      const second = await recognize(token, 'pages', [scanB, { name: 'scan_c.png', png: scanPng(500, 400, 32) }],
+                                     { keep: name.toUpperCase() })
+      expect(second.status).toBe(200)
+      expect((await second.json()).kept).toEqual({
+        dataset: jobId, name, created: false, pages: 1, duplicates: ['scan_b.png'],
+      })
+      const grown = await getJob(jobId)
+      expect(grown.pages.map((p: { filename: string; status: string }) => [p.filename, p.status])).toEqual([
+        ['scan_a.png', 'done'], ['scan_b.png', 'done'], ['scan_b.png', 'duplicate'], ['scan_c.png', 'done'],
+      ])
+      expect(grown.counters).toMatchObject({ pages_total: 3, lines_total: 18, lines_ocr_done: 18 })
+      await keptLines((await jobPageIds(jobId))[3], 500, 400, LINES_500x400)
+    })
+})

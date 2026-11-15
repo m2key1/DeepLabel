@@ -55,14 +55,25 @@ def offered(conn=Depends(get_db), user: dict = Depends(may_recognize)):
     return recognize.offered(conn, user['username'])
 
 
+def _may_keep(request: Request, user: dict) -> None:
+    """Keeping writes a dataset, so it asks what writing one asks."""
+    if user['role'] not in ('admin', 'member'):
+        raise HTTPException(403, 'keeping writes a dataset, which a read-only account may not do')
+    if request.headers.get('X-Auth-Readonly') == '1':
+        raise HTTPException(403, 'keeping writes a dataset, which a read-only token may not do')
+
+
 @router.post('/api/recognize/pages')
 async def recognize_pages(request: Request, conn=Depends(get_db), user: dict = Depends(may_recognize)):
     """Whole pages in, as `files` parts; the lines found on each, in reading order, with
     their text and outlines in the pixels of the upright image. `lines` (JSON, by file
     name) gives a page its own outlines to read instead. Also `lines_model`, `ocr_model`,
     `decode`, `convention` (comma-separated) and `format` (json, page, alto, hocr, txt).
-    Nothing of the request is stored."""
+    Nothing of the request is stored, unless `keep` names a dataset of the caller's to
+    file the pages and their lines in, which is created if no dataset has that name."""
     uploads, fields = await _uploads(request, config.RECOGNIZE_MAX_PAGES, 'pages')
+    if (fields.get('keep') or '').strip():
+        _may_keep(request, user)
     return await _answer(lambda: recognize.pages(conn, user['username'], uploads, fields))
 
 
@@ -71,6 +82,8 @@ async def recognize_lines(request: Request, conn=Depends(get_db), user: dict = D
     """Line images in, as `files` parts; their text out, in the order sent. Also
     `ocr_model`, `decode` and `convention`. Nothing of the request is stored."""
     uploads, fields = await _uploads(request, config.RECOGNIZE_MAX_LINES, 'lines')
+    if (fields.get('keep') or '').strip():
+        raise HTTPException(400, 'keep works on pages: send them to /api/recognize/pages')
     return await _answer(lambda: recognize.lines(conn, user['username'], uploads, fields))
 
 

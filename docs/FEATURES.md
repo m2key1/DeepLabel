@@ -651,9 +651,11 @@ deployment, and [API.md](API.md) has examples, including the Python client and t
 The recognition API reads scans without a dataset: send a batch of pages and get the
 lines found on each, in reading order, with their text and outlines in pixels - or send
 line images, or a page with its own line outlines, and get only the text. PAGE XML, ALTO,
-hOCR and plain text can come with the lines. Nothing is stored. It needs the recognize
-permission, and a token made **Recognition only** reaches it and nothing else, so it can
-be given to a service outside without opening anyone's datasets to it.
+hOCR and plain text can come with the lines. Nothing is stored, unless a request asks to
+keep its pages: `keep=<name>` files them, read and unchecked, into your dataset of that
+name, made if no dataset has it, so what the API read can be corrected and trained on. It
+needs the recognize permission, and a token made **Recognition only** reaches it and nothing
+else, so it can be given to a service outside without opening anyone's datasets to it.
 
 **Try** in the top bar (or **Try this model** on an OCR model's page) does the same in the
 browser: drop up to 10 scans, pick the line and OCR models, and each scan comes back with

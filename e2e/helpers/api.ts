@@ -598,6 +598,9 @@ export interface PageLine {
   check_source: 'human' | 'align' | 'llm' | null
   /** How many distinct language models read this line the same way. */
   llm_agree_count: number
+  confidence: number | null
+  /** Who last read the line, e.g. 'model:ocr@<model name>'. */
+  text_author: string
   polygon: number[][]
 }
 

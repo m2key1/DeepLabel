@@ -65,13 +65,23 @@ def cmd_export(args, client):
     print(f'{destination} ({len(body)} bytes)')
 
 
+def _kept_summary(kept: dict) -> str:
+    if kept['dataset'] is None:
+        return 'nothing kept: no page could be read'
+    where = 'the new dataset' if kept['created'] else 'the dataset'
+    pages = f"{kept['pages']} page{'' if kept['pages'] == 1 else 's'}"
+    summary = f'kept {pages} in {where} "{kept["name"]}" ({kept["dataset"]})'
+    return summary + (f"; already there: {', '.join(kept['duplicates'])}" if kept['duplicates'] else '')
+
+
 def cmd_recognize(args, client):
     paths = [Path(p) for p in args.paths]
     options = {'ocr_model': args.ocr_model, 'decode': args.decode}
     if args.what == 'lines':
         answer = client.recognize_lines(paths, **options)
     else:
-        answer = client.recognize_pages(paths, lines_model=args.lines_model, format=args.format, **options)
+        answer = client.recognize_pages(paths, lines_model=args.lines_model, format=args.format, keep=args.keep,
+                                        **options)
     if args.what == 'pages' and args.format != 'json' and args.output:
         folder = Path(args.output)
         folder.mkdir(parents=True, exist_ok=True)
@@ -81,6 +91,8 @@ def cmd_recognize(args, client):
                 target.write_text(page['document'], encoding='utf-8')
             else:
                 print(f"{page['id']}: {page.get('error')}", file=sys.stderr)
+        if 'kept' in answer:
+            print(_kept_summary(answer['kept']))
         return
     text = json.dumps(answer, indent=2, ensure_ascii=False)
     if args.output:
@@ -265,6 +277,9 @@ def build_parser() -> argparse.ArgumentParser:
     recognize.add_argument('--lines-model', type=int, help='line model id (pages only); default: the default')
     recognize.add_argument('--ocr-model', type=int, help='OCR model id; default: the default')
     recognize.add_argument('--decode', help='how the OCR model decodes, e.g. beam or greedy')
+    recognize.add_argument('--keep', metavar='DATASET',
+                           help='pages only: file them and what was read into this dataset of yours, '
+                                'made if no dataset has the name')
     recognize.add_argument('-o', '--output',
                            help='file for the JSON answer; with --format, a folder for the documents')
     recognize.set_defaults(run=cmd_recognize)

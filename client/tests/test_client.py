@@ -92,8 +92,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             names = sent_files(sent)
             if self.path.endswith('/pages'):
-                return self._reply(200, {'models': {'ocr': {'id': 38, 'name': 'reader', 'decode': 'beam'}},
-                                         'pages': [{'id': name, 'lines': []} for name in names]})
+                answer = {'models': {'ocr': {'id': 38, 'name': 'reader', 'decode': 'beam'}},
+                          'pages': [{'id': name, 'lines': []} for name in names]}
+                keep = form_field(sent, 'keep')
+                if keep:
+                    # The dataset holds b.png already, and is made by the request that brings a.png.
+                    duplicates = [name for name in names if name == 'b.png']
+                    answer['kept'] = {'dataset': 'k1', 'name': keep, 'created': 'a.png' in names,
+                                      'pages': len(names) - len(duplicates), 'duplicates': duplicates}
+                return self._reply(200, answer)
             return self._reply(200, {'models': {'ocr': {'id': 38, 'name': 'reader', 'decode': 'beam'}},
                                      'lines': [{'id': name, 'text': name.upper()} for name in names]})
         if self.path.endswith('/reference/cut'):
@@ -439,6 +446,20 @@ class TestRecognition:
                           'pages': [{'id': 'a.png', 'lines': []}, {'id': 'b.png', 'lines': []},
                                     {'id': 'c.png', 'lines': []}]}
 
+    def test_pages_kept_over_several_requests_are_reported_as_one_dataset(self, client, tmp_path):
+        scans = []
+        for name in ('a.png', 'b.png', 'c.png'):
+            (tmp_path / name).write_bytes(b'PNG')
+            scans.append(tmp_path / name)
+
+        answer = client.recognize_pages(scans, keep='Letters')
+
+        posts = [r for r in RECORDED if r['method'] == 'POST']
+        assert [form_field(r, 'keep') for r in posts] == ['Letters', 'Letters']
+        assert answer['kept'] == {'dataset': 'k1', 'name': 'Letters', 'created': True, 'pages': 2,
+                                  'duplicates': ['b.png']}
+        assert 'kept' not in client.recognize_pages(scans)
+
     def test_line_images_go_in_requests_of_the_stated_size(self, client, tmp_path):
         for i in range(4):
             (tmp_path / f'l{i}.png').write_bytes(b'PNG')
@@ -470,6 +491,19 @@ class TestRecognition:
         assert cli.main(['recognize', 'pages', str(tmp_path / 'leaf.png'), '--format', 'alto',
                          '-o', str(tmp_path / 'out')]) == 0
         assert (tmp_path / 'out' / 'leaf.xml').read_text() == '<alto/>'
+
+    def test_the_cli_keeps_the_pages_and_says_where(self, server, tmp_path, monkeypatch, capsys):
+        from deeplabel import cli
+        monkeypatch.setenv('DEEPLABEL_URL', server)
+        monkeypatch.setenv('DEEPLABEL_TOKEN', 'dlp_test')
+        (tmp_path / 'a.png').write_bytes(b'PNG')
+        (tmp_path / 'b.png').write_bytes(b'PNG')
+        RECORDED.clear()
+
+        assert cli.main(['recognize', 'pages', str(tmp_path), '--format', 'page', '--keep', 'Letters',
+                         '-o', str(tmp_path / 'out')]) == 0
+        assert [form_field(r, 'keep') for r in RECORDED if r['method'] == 'POST'] == ['Letters']
+        assert capsys.readouterr().out.strip() == 'kept 1 page in the new dataset "Letters" (k1); already there: b.png'
 
     def test_a_refusal_that_lasts_beyond_a_minute_is_reported_rather_than_waited_out(self, client, tmp_path):
         (tmp_path / 'a.png').write_bytes(b'PNG')
