@@ -81,4 +81,32 @@ test.describe('Scenario: trying recognition on a scan of your own', () => {
     expect(xml).toContain('<Page imageFilename="leaf.png" imageWidth="500" imageHeight="400">')
     expect(xml.match(/<TextLine /g)).toHaveLength(6)
   })
+
+  test('a layout model draws the regions behind the lines and groups the text under each region',
+    async ({ page }) => {
+      const layout = (await listRegistryModels()).find((m) => m.task === 'layout' && m.is_default)!
+      await page.goto('/try')
+      await expect(page.getByTestId('try-layout-model')).toHaveValue('')
+      await page.getByTestId('try-files').setInputFiles({ name: 'leaf.png', mimeType: 'image/png', buffer: scanPng(600, 800, 43) })
+      await expect(page.getByTestId('try-text')).toHaveText(READ(6))
+      await expect(page.getByTestId('try-region')).toHaveCount(0)
+      await expect(page.getByTestId('try-region-label')).toHaveCount(0)
+
+      await page.getByTestId('try-layout-model').selectOption(String(layout.id))
+      await expect(page.getByTestId('try-text')).toHaveText([
+        ...[1, 2, 3].map((n) => `Sample Header line ${n}`), ...[1, 2, 3].map((n) => `Sample Paragraph line ${n}`)])
+      await expect(page.getByTestId('try-region')).toHaveCount(2)
+      expect(await page.getByTestId('try-region').evaluateAll((regions) => regions.map((r) => r.getAttribute('data-class'))))
+        .toEqual(['Header', 'Paragraph'])
+      await expect(page.getByTestId('try-region-label')).toHaveText(['Header', 'Paragraph'])
+      // Lines are still numbered through the page, not per region.
+      await expect(page.getByTestId('try-line')).toHaveCount(6)
+      await expect(page.locator('[data-testid="try-text-line"]').last()).toHaveAttribute('data-line', '6')
+      await expect(page.getByTestId('try-api')).toContainText(`-F layout_model=${layout.id}`)
+
+      await page.getByTestId('try-layout-model').selectOption('')
+      await expect(page.getByTestId('try-text')).toHaveText(READ(6))
+      await expect(page.getByTestId('try-region')).toHaveCount(0)
+      await expect(page.getByTestId('try-api')).not.toContainText('layout_model')
+    })
 })

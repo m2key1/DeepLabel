@@ -552,26 +552,42 @@ export interface OfferedModel {
   default: boolean
   /** OCR models only. */
   decodes?: OcrDecode[]
+  /** Layout models only: the template whose classes and reading order the model's pages follow. */
+  template?: string
 }
 
 export interface RecognitionOffer {
-  models: { lines: OfferedModel[]; ocr: OfferedModel[] }
+  models: { layout: OfferedModel[]; lines: OfferedModel[]; ocr: OfferedModel[] }
   limits: { pages: number; lines: number; megabytes: number }
   usage: { month: string; lines: number; cap: number | null }
+}
+
+export interface RecognizedRegion {
+  class: string
+  role: 'content' | 'container'
+  polygon: [number, number][]
+  confidence: number | null
 }
 
 export interface RecognizedPage {
   id: string
   width?: number
   height?: number
-  lines?: { polygon: [number, number][]; text: string; confidence: number | null }[]
+  /** With a layout model: content regions in reading order, then the containers. */
+  regions?: RecognizedRegion[]
+  /** `region` indexes `regions`, with a layout model. */
+  lines?: { polygon: [number, number][]; text: string; confidence: number | null; region?: number | null }[]
   /** The document asked for with `format`. */
   document?: string
   error?: string
 }
 
 export interface Recognized {
-  models: { lines?: { id: number; name: string }; ocr?: { id: number; name: string; decode: OcrDecode } }
+  models: {
+    layout?: { id: number; name: string }
+    lines?: { id: number; name: string }
+    ocr?: { id: number; name: string; decode: OcrDecode }
+  }
   pages: RecognizedPage[]
 }
 

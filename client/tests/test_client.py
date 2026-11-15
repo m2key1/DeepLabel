@@ -505,6 +505,17 @@ class TestRecognition:
         assert [form_field(r, 'keep') for r in RECORDED if r['method'] == 'POST'] == ['Letters']
         assert capsys.readouterr().out.strip() == 'kept 1 page in the new dataset "Letters" (k1); already there: b.png'
 
+    def test_the_cli_runs_the_layout_model_it_is_given_before_the_lines(self, server, tmp_path, monkeypatch):
+        from deeplabel import cli
+        monkeypatch.setenv('DEEPLABEL_URL', server)
+        monkeypatch.setenv('DEEPLABEL_TOKEN', 'dlp_test')
+        (tmp_path / 'a.png').write_bytes(b'PNG')
+        RECORDED.clear()
+
+        assert cli.main(['recognize', 'pages', str(tmp_path), '--layout-model', '7',
+                         '-o', str(tmp_path / 'answer.json')]) == 0
+        assert [form_field(r, 'layout_model') for r in RECORDED if r['method'] == 'POST'] == ['7']
+
     def test_a_refusal_that_lasts_beyond_a_minute_is_reported_rather_than_waited_out(self, client, tmp_path):
         (tmp_path / 'a.png').write_bytes(b'PNG')
         Handler.capped = True

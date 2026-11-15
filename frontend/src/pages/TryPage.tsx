@@ -8,15 +8,18 @@ import { DECODE_NAMES } from '../components/job/processing'
 import { useCrumb } from '../components/NavBar'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
+import { RegionLabel } from '../components/viewer/RegionLabel'
 import { Select } from '../components/ui/Field'
 import { PageHeader } from '../components/ui/PageHeader'
 import { pageShell } from '../components/ui/page'
-import { getReviewConf, plural } from '../util'
+import { classColor, getReviewConf, plural } from '../util'
 
 const MAX_SCANS = 10
 let scanCount = 0
 
 interface Picks {
+  /** '' runs no layout model: the lines are found on the whole page. */
+  layout: string
   lines: string
   ocr: string
   /** 'auto' leaves the reading to the model, as a dataset on Automatic does. */
@@ -33,11 +36,24 @@ interface Scan {
   reading: boolean
 }
 
+/** Consecutive lines of one region - or of none, without layout - each run shown under its region. */
+function runsOf(lines: { region?: number | null }[]) {
+  const runs: { region: number | null; start: number; count: number }[] = []
+  lines.forEach((line, i) => {
+    const region = line.region ?? null
+    const last = runs.at(-1)
+    if (last && last.region === region) last.count += 1
+    else runs.push({ region, start: i, count: 1 })
+  })
+  return runs
+}
+
 const defaultOf = (models: OfferedModel[]) => String(models.find((m) => m.default)?.id ?? models[0]?.id ?? '')
 
 function fieldsOf(picks: Picks): Record<string, string> {
   return {
     format: 'page',
+    ...(picks.layout ? { layout_model: picks.layout } : {}),
     ...(picks.lines ? { lines_model: picks.lines } : {}),
     ...(picks.ocr ? { ocr_model: picks.ocr } : {}),
     ...(picks.decode !== 'auto' ? { decode: picks.decode } : {}),
@@ -57,7 +73,7 @@ export function TryPage() {
   const { can } = useAuth()
   const [params] = useSearchParams()
   const [offer, setOffer] = useState<RecognitionOffer | null>(null)
-  const [picks, setPicks] = useState<Picks>({ lines: '', ocr: params.get('ocr') ?? '', decode: 'auto' })
+  const [picks, setPicks] = useState<Picks>({ layout: '', lines: '', ocr: params.get('ocr') ?? '', decode: 'auto' })
   const [scans, setScans] = useState<Scan[]>([])
   const [shown, setShown] = useState(0)
   const [hover, setHover] = useState<number | null>(null)
@@ -138,6 +154,7 @@ export function TryPage() {
   const scan = scans[shown] as Scan | undefined
   const page = scan?.answer?.pages[0]
   const lines = page?.lines ?? []
+  const regions = page?.regions ?? []
   const threshold = getReviewConf()
   const ocrModel = offer?.models.ocr.find((m) => String(m.id) === picks.ocr)
   const used = scan?.answer?.models
@@ -161,6 +178,8 @@ export function TryPage() {
       {error && <p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
 
       <div className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-line bg-surface p-3">
+        {pick('Layout', 'layout', 'try-layout-model', [['', 'None'],
+              ...(offer?.models.layout ?? []).map((m): [string, string] => [String(m.id), m.default ? `${m.name} (default)` : m.name])])}
         {pick('Lines', 'lines', 'try-lines-model',
               (offer?.models.lines ?? []).map((m) => [String(m.id), m.default ? `${m.name} (default)` : m.name]))}
         {pick('OCR', 'ocr', 'try-ocr-model',
@@ -175,14 +194,34 @@ export function TryPage() {
           <section aria-label="Scan" className="min-w-0 flex-[999_1_480px] rounded-md border border-line bg-surface p-3">
             <div className="relative">
               <img src={scan.url} alt={scan.file.name} className="block h-auto w-full rounded" />
+              {page?.width && page.height && regions.map((region, r) => {
+                const xs = region.polygon.map(([px]) => px)
+                // A container is tagged at its top right, clear of the box it holds at its top
+                // left; a box far to the right too, so its tag stays on the scan.
+                const end = region.role === 'container' || Math.min(...xs) / page.width! > 0.7
+                return (
+                  <RegionLabel key={`t${r}`} className={region.class} container={region.role === 'container'} end={end}
+                               x={(end ? Math.max(...xs) : Math.min(...xs)) / page.width!}
+                               y={Math.min(...region.polygon.map(([, py]) => py)) / page.height!} />
+                )
+              })}
               {page?.width && page.height && (
                 <svg viewBox={`0 0 ${page.width} ${page.height}`} className="absolute inset-0 h-full w-full"
                      aria-label={`${plural(lines.length, 'line')} found`}>
+                  {regions.map((region, r) => (
+                    <polygon key={`r${r}`} data-testid="try-region" data-class={region.class} data-role={region.role}
+                             points={region.polygon.map(([px, py]) => `${px},${py}`).join(' ')}
+                             vectorEffect="non-scaling-stroke" strokeWidth={1.5} pointerEvents="none"
+                             stroke={classColor(region.class)} strokeDasharray={region.role === 'container' ? '4 3' : undefined}
+                             fill={region.role === 'container' ? 'none' : classColor(region.class, 0.08)} />
+                  ))}
                   {lines.map((line, i) => {
                     const n = i + 1
                     const unsure = line.confidence !== null && line.confidence < threshold
                     const [x, y] = line.polygon.reduce(([mx, my], [px, py]) => [Math.min(mx, px), Math.min(my, py)], [Infinity, Infinity])
                     const r = Math.max(page.width!, page.height!) / 70
+                    // Left of the line, but never off the scan, where a margin's lines start.
+                    const badge = Math.max(r * 1.1, x - r * 1.4)
                     return (
                       <g key={n}>
                         <polygon data-testid="try-line" data-line={n} data-active={hover === n || undefined}
@@ -191,8 +230,8 @@ export function TryPage() {
                                  onMouseEnter={() => setHover(n)} onMouseLeave={() => setHover(null)}
                                  className={`cursor-pointer ${unsure ? 'stroke-warn' : 'stroke-accent'} ${
                                    hover === n ? 'fill-accent/25' : unsure ? 'fill-warn/25' : 'fill-transparent'}`} />
-                        <circle cx={x - r * 1.4} cy={y + r * 0.6} r={r} className={unsure ? 'fill-warn' : 'fill-accent'} />
-                        <text x={x - r * 1.4} y={y + r * 0.6} dy="0.35em" textAnchor="middle" fontSize={r * 1.15}
+                        <circle cx={badge} cy={y + r * 0.6} r={r} className={unsure ? 'fill-warn' : 'fill-accent'} />
+                        <text x={badge} y={y + r * 0.6} dy="0.35em" textAnchor="middle" fontSize={r * 1.15}
                               className="fill-on-accent font-mono">{n}</text>
                       </g>
                     )
@@ -208,33 +247,50 @@ export function TryPage() {
               <p className="text-xs text-ink-muted">
                 {scan.reading ? 'reading…' : scan.error ? 'not read'
                   : `${plural(lines.length, 'line')} · read in ${scan.seconds?.toFixed(1)} s · ${
-                    [used?.lines?.name, used?.ocr && `${used.ocr.name}, ${DECODE_NAMES[used.ocr.decode]}`].filter(Boolean).join(', ')}`}
+                    [used?.layout && `layout ${used.layout.name}`, used?.lines && `lines ${used.lines.name}`,
+                     used?.ocr && `OCR ${used.ocr.name} (${DECODE_NAMES[used.ocr.decode]})`].filter(Boolean).join(', ')}`}
               </p>
             </div>
             {scan.error && <p role="alert" className="text-sm text-danger">{scan.error}</p>}
             {!scan.error && (
-              <ol className="border-t border-line text-sm">
-                {lines.map((line, i) => {
-                  const n = i + 1
-                  const unsure = line.confidence !== null && line.confidence < threshold
+              <div className="border-t border-line text-sm">
+                {runsOf(lines).map(({ region, start, count }) => {
+                  const heading = region === null ? undefined : regions[region]
                   return (
-                    <li key={n} data-testid="try-text-line" data-line={n} data-unsure={unsure || undefined}
-                        data-active={hover === n || undefined}
-                        onMouseEnter={() => setHover(n)} onMouseLeave={() => setHover(null)}
-                        className={`flex gap-2.5 border-b border-line px-2 py-1.5 ${
-                          hover === n ? 'bg-accent-wash text-accent-ink shadow-[inset_3px_0_0_var(--color-accent)]'
-                            : unsure ? 'bg-warn/15' : ''}`}>
-                      <span className={`w-5 flex-none pt-px text-right font-mono text-xs ${unsure ? 'text-warn' : 'text-ink-subtle'}`}>{n}</span>
-                      <span data-testid="try-text">{line.text}</span>
-                      {unsure && (
-                        <span className="ml-auto whitespace-nowrap text-xs text-warn">
-                          unsure · {Math.round((line.confidence ?? 0) * 100)} %
-                        </span>
+                    <section key={start}>
+                      {heading && (
+                        <h3 data-testid="try-region-label"
+                            className="flex items-center gap-1.5 px-2 pb-1 pt-3 text-xs font-medium text-ink-muted">
+                          <span aria-hidden className="size-2 flex-none rounded-sm" style={{ backgroundColor: classColor(heading.class) }} />
+                          {heading.class}
+                        </h3>
                       )}
-                    </li>
+                      <ol start={start + 1}>
+                        {lines.slice(start, start + count).map((line, k) => {
+                          const n = start + k + 1
+                          const unsure = line.confidence !== null && line.confidence < threshold
+                          return (
+                            <li key={n} data-testid="try-text-line" data-line={n} data-unsure={unsure || undefined}
+                                data-active={hover === n || undefined}
+                                onMouseEnter={() => setHover(n)} onMouseLeave={() => setHover(null)}
+                                className={`flex gap-2.5 border-b border-line px-2 py-1.5 ${
+                                  hover === n ? 'bg-accent-wash text-accent-ink shadow-[inset_3px_0_0_var(--color-accent)]'
+                                    : unsure ? 'bg-warn/15' : ''}`}>
+                              <span className={`w-5 flex-none pt-px text-right font-mono text-xs ${unsure ? 'text-warn' : 'text-ink-subtle'}`}>{n}</span>
+                              <span data-testid="try-text">{line.text}</span>
+                              {unsure && (
+                                <span className="ml-auto whitespace-nowrap text-xs text-warn">
+                                  unsure · {Math.round((line.confidence ?? 0) * 100)} %
+                                </span>
+                              )}
+                            </li>
+                          )
+                        })}
+                      </ol>
+                    </section>
                   )
                 })}
-              </ol>
+              </div>
             )}
             {page?.lines && (
               <div className="flex flex-wrap gap-2">

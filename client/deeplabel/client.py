@@ -259,7 +259,8 @@ class DeepLabel:
         """The lines of whole pages, found and read, without a dataset. Any number of
         pages: they go in requests of the size the deployment allows, one after another,
         and the answers are joined. `lines` gives a page, by file name, its own outlines to
-        read instead. Options: lines_model, ocr_model, decode, convention, format, and keep:
+        read instead. Options: layout_model (regions first, the lines found inside each),
+        lines_model, ocr_model, decode, convention, format, and keep:
         the name of a dataset of yours to file the pages in, made if none has the name."""
         limits = self.recognition_offer()['limits']
         answer = {'models': {}, 'pages': []}

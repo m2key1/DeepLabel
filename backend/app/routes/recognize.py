@@ -49,9 +49,10 @@ async def _answer(work: Callable[[], dict]) -> dict:
 
 @router.get('/api/recognize')
 def offered(conn=Depends(get_db), user: dict = Depends(may_recognize)):
-    """The line and OCR models a recognition request can name, their decodes and
-    conventions, the formats, the limits of one request, and the caller's lines read this
-    month against its cap."""
+    """The layout, line and OCR models a recognition request can name - each layout model
+    with the template it reads by, each OCR model with its decodes and conventions - the
+    formats, the limits of one request, and the caller's lines read this month against
+    its cap."""
     return recognize.offered(conn, user['username'])
 
 
@@ -67,8 +68,10 @@ def _may_keep(request: Request, user: dict) -> None:
 async def recognize_pages(request: Request, conn=Depends(get_db), user: dict = Depends(may_recognize)):
     """Whole pages in, as `files` parts; the lines found on each, in reading order, with
     their text and outlines in the pixels of the upright image. `lines` (JSON, by file
-    name) gives a page its own outlines to read instead. Also `lines_model`, `ocr_model`,
-    `decode`, `convention` (comma-separated) and `format` (json, page, alto, hocr, txt).
+    name) gives a page its own outlines to read instead. `layout_model` finds each page's
+    regions first and its lines inside each; the answer then carries the regions, and
+    each line the region it was found in. Also `lines_model`, `ocr_model`, `decode`,
+    `convention` (comma-separated) and `format` (json, page, alto, hocr, txt).
     Nothing of the request is stored, unless `keep` names a dataset of the caller's to
     file the pages and their lines in, which is created if no dataset has that name."""
     uploads, fields = await _uploads(request, config.RECOGNIZE_MAX_PAGES, 'pages')

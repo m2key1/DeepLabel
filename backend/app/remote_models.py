@@ -34,6 +34,14 @@ class Detection:
     confidence: float | None
 
 
+class PageRefused(RuntimeError):
+    """A model backend's refusal of one page of a batch, with its reason."""
+
+    def __init__(self, task: str, reason: str | None):
+        super().__init__(f'{task} backend refused a page: {reason}')
+        self.reason = reason
+
+
 @dataclass
 class PageLayout:
     """A page's boxes. `ordered` says the content boxes are already in reading order;
@@ -55,13 +63,16 @@ class RemoteLayout:
         self.author = f'model:layout@{_model_name(conn, model_id)}'
 
     def detect(self, images: list[Image.Image], sources: list[str]) -> list[PageLayout]:
-        sent = [scan_image(source, image) for image, source in zip(images, sources)]
+        return self.detect_sent([scan_image(source, image) for image, source in zip(images, sources)])
+
+    def detect_sent(self, sent: list[Image.Image | Encoded]) -> list[PageLayout]:
+        """The boxes of pages given as they are to be sent."""
         response = self.client.predict_all('layout', self.weights, {},
                                            [Item(str(i), image) for i, image in enumerate(sent)])
         pages = []
         for result in response['results']:
             if 'error' in result:
-                raise RuntimeError(f"layout backend refused a page: {result['error'].get('message')}")
+                raise PageRefused('layout', result['error'].get('message'))
             content, containers = [], []
             for found in result.get('detections', []):
                 class_name, raw, kind = self.vocabulary.resolve(found['label'])

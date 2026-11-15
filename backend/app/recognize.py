@@ -11,10 +11,10 @@ from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
-from app import auto_decode, backend_client, config, conventions, decode, evaluator, formats, ingest, \
-    layout_templates, linecrop, ocr_phase, reading_order, registry, scans, store, text_job
+from app import auto_decode, backend_client, config, conventions, decode, evaluator, formats, geometry, ingest, \
+    layout_shapes, layout_templates, linecrop, ocr_phase, reading_order, registry, scans, store, text_job
 from app.backend_client import Encoded
-from app.remote_models import RemoteLines, RemoteOcrEngine
+from app.remote_models import Detection, PageLayout, PageRefused, RemoteLayout, RemoteLines, RemoteOcrEngine
 
 FORMATS = ('json', 'page', 'alto', 'hocr', 'txt')
 SENT_AS_IS = {'JPEG': 'image/jpeg', 'PNG': 'image/png'}
@@ -177,13 +177,15 @@ def _served(conn, task: str) -> list:
 def offered(conn, account: str) -> dict:
     def entry(row) -> dict:
         model = {'id': row['id'], 'name': row['name'], 'default': bool(row['is_default'])}
+        if row['task'] == 'layout':
+            return {**model, 'template': _layout_template(conn, row['id'])[1]['name']}
         if row['task'] != 'ocr':
             return model
         return {**model, 'decodes': evaluator.decodes_for(conn, row['id']),
                 'default_decode': default_decode(conn, row['id']),
                 'conventions': json.loads(row['conventions']) if row['conventions'] else []}
     this_month = _month(datetime.now(timezone.utc))
-    return {'models': {task: [entry(row) for row in _served(conn, task)] for task in ('lines', 'ocr')},
+    return {'models': {task: [entry(row) for row in _served(conn, task)] for task in ('layout', 'lines', 'ocr')},
             'limits': {'pages': config.RECOGNIZE_MAX_PAGES, 'lines': config.RECOGNIZE_MAX_LINES,
                        'megabytes': config.RECOGNIZE_MAX_MB},
             'formats': list(FORMATS),
@@ -230,6 +232,80 @@ def _reading(conn, fields: dict) -> Reading:
     except ValueError as error:
         raise Refused(400, str(error)) from None
     return Reading(row, client, mode, convention)
+
+
+def _layout_template(conn, model_id: int):
+    """A layout model's own template (None for a model without one), and the template whose
+    classes its pages are read in: its own, else the default."""
+    own = layout_templates.model_template(conn, model_id)
+    return own, own or layout_templates.template_row(conn, layout_templates.default_template(conn))
+
+
+@dataclass
+class Layout:
+    """The layout model a request runs before the lines, the template whose classes it
+    reads in, and how a page it lays out reads - all as a dataset of that template
+    running that model has them."""
+    model: object
+    client: backend_client.BackendClient
+    template: object
+    vocabulary: layout_templates.Vocabulary
+    rules: reading_order.Rules
+
+
+def _layout(conn, raw_id: str) -> Layout:
+    row, client = _model(conn, 'layout', raw_id)
+    own, template = _layout_template(conn, row['id'])
+    vocabulary = layout_templates.Vocabulary(layout_templates.template_classes(conn, template['id']), template['rules'])
+    return Layout(row, client, template, vocabulary, vocabulary.reading_rules(own))
+
+
+@dataclass
+class LaidOut:
+    """A page's regions in reading order - the content regions, then the containers - and
+    the lines found inside each content region; `loose` are a page's own lines, in
+    reading order, when it has no content region. Outlines normalised to the page."""
+    regions: list[tuple[Detection, str]]
+    lines: list[list]
+    loose: list
+
+
+def _page_order(found: PageLayout, rules: reading_order.Rules, loose: list) -> reading_order.PageOrder:
+    """How the page reads, as geometry.resequence_page orders a dataset's page."""
+    boxes = found.content + found.containers
+    structure = (1, 1) if rules.pipeline else reading_order.detect(
+        loose + [geometry.bbox_ring(d.bbox) for d in found.content])
+    return reading_order.page_order([d.bbox for d in boxes], [d.class_name for d in boxes], loose, *structure,
+                                    rules=rules)
+
+
+def _lay_out(found: PageLayout, found_lines: RemoteLines, rules: reading_order.Rules, image: Image.Image,
+             sent: Image.Image | Encoded) -> LaidOut:
+    """Lines inside each content region of a page whose regions were found. A region's role
+    is the template's: the reading order may read a container that holds nothing, like a
+    divider, among the content, but no line is looked for in it."""
+    boxes = found.content + found.containers
+    order = _page_order(found, rules, [])
+    content = [boxes[i] for i in order.content + order.containers if i < len(found.content)]
+    loose = []
+    if content:
+        lines, _ = text_job.lines_in_elements(found_lines, image, [{'class_name': d.class_name} for d in content],
+                                              [d.bbox for d in content])
+    else:
+        lines, page_lines = [], found_lines.detect([sent], 'page')[0]
+        order = _page_order(found, rules, page_lines)
+        loose = [page_lines[j] for run in order.runs for j in run]
+    containers = [boxes[i] for i in order.containers + order.content if i >= len(found.content)]
+    return LaidOut([(d, 'content') for d in content] + [(d, 'container') for d in containers], lines, loose)
+
+
+def _in_pixels(outline: list, width: int, height: int) -> list:
+    return [[round(x * width), round(y * height)] for x, y in outline]
+
+
+def _swept(outlines: list) -> list:
+    """Lines in the order the column sweep reads them."""
+    return [outlines[j] for j in reading_order.order(outlines, *reading_order.detect(outlines))]
 
 
 def _decoded(upload: Upload) -> tuple[Image.Image, Image.Image | Encoded] | str:
@@ -312,26 +388,33 @@ def _read(conn, reading: Reading, request: InFlight, lines: list[tuple[object, C
     return best, model
 
 
-def _export_page(idx: int, name: str, width: int, height: int, lines: list[dict]) -> dict:
-    """A page as the exporters take it: its lines in one region, in the order read."""
-    page = {'idx': idx, 'filename': name, 'width': width, 'height': height, 'elements': []}
-    if not lines:
-        return page
-    norm = [[[x / width, y / height] for x, y in line['polygon']] for line in lines]
-    xs = [x for poly in norm for x, _ in poly]
-    ys = [y for poly in norm for _, y in poly]
-    page['elements'] = [{
-        'order_idx': 0, 'class_name': 'Text', 'bbox': [min(xs), min(ys), max(xs), max(ys)], 'conf': None,
-        'kind': 'content',
-        'lines': [{'polygon': poly, 'text': line['text'], 'corrected_text': None,
-                   'confidence': line['confidence'], 'checked': False} for poly, line in zip(norm, lines)]}]
-    return page
+def _export_page(idx: int, name: str, width: int, height: int, lines: list[dict], regions: list[dict]) -> dict:
+    """A page as the exporters take it: each region with the lines read in it, and any line
+    outside every region in one region of its own, in the order read."""
+    def normalised(polygon):
+        return [[x / width, y / height] for x, y in polygon]
+
+    def element(order_idx: int, class_name: str, kind: str, bbox: list, conf, held: list[dict]) -> dict:
+        return {'order_idx': order_idx, 'class_name': class_name, 'bbox': bbox, 'conf': conf, 'kind': kind,
+                'lines': [{'polygon': normalised(line['polygon']), 'text': line['text'], 'corrected_text': None,
+                           'confidence': line['confidence'], 'checked': False} for line in held]}
+
+    elements = [element(r, region['class'], region['role'], geometry.ring_bounds(normalised(region['polygon'])),
+                        region['confidence'], [line for line in lines if line.get('region') == r])
+                for r, region in enumerate(regions)]
+    loose = [line for line in lines if line.get('region') is None]
+    if loose:
+        elements.append(element(len(elements), 'Text', 'content',
+                                geometry.ring_bounds([pt for line in loose for pt in normalised(line['polygon'])]),
+                                None, loose))
+    return {'idx': idx, 'filename': name, 'width': width, 'height': height, 'elements': elements}
 
 
-def _document(fmt: str, idx: int, name: str, width: int, height: int, lines: list[dict]) -> str:
+def _document(fmt: str, idx: int, name: str, width: int, height: int, lines: list[dict],
+              regions: list[dict] = ()) -> str:
     if fmt == 'txt':
         return '\n'.join(line['text'] for line in lines)
-    page = _export_page(idx, name, width, height, lines)
+    page = _export_page(idx, name, width, height, lines, regions)
     return {'page': formats.page_xml, 'alto': formats.alto, 'hocr': lambda p: formats.hocr(p, name)}[fmt](page)
 
 
@@ -369,46 +452,95 @@ def _kept_name(sent: str) -> str:
     return Path(sent).name or 'page'
 
 
-def _new_dataset(conn, account: str, name: str, fields: dict, finder, reading: Reading) -> str:
+def _new_dataset(conn, account: str, name: str, fields: dict, finder, reading: Reading, layout: Layout | None) -> str:
     """A text dataset that reads pages added to it later as this request read its own: lines
-    found on the whole page, then read, with the models, decode and convention it named."""
+    found on the whole page - or with layout, inside each region of the layout model's
+    template - then read, with the models, decode and convention it named."""
     job_id = uuid.uuid4().hex[:12]
-    conn.execute('INSERT INTO jobs (id, name, owner, task, line_mode, run_layout, run_lines, run_ocr, '
-                 "model_lines_id, model_ocr_id, ocr_decode, status) VALUES (?,?,?,'text','per_page',0,1,1,?,?,?,'done')",
-                 (job_id, name, account, finder[0]['id'] if finder and fields.get('lines_model') else None,
+    conn.execute('INSERT INTO jobs (id, name, owner, task, line_mode, run_layout, run_lines, run_ocr, model_layout_id, '
+                 "model_lines_id, model_ocr_id, ocr_decode, status) VALUES (?,?,?,'text',?,?,1,1,?,?,?,?,'done')",
+                 (job_id, name, account, 'per_crop' if layout else 'per_page', int(layout is not None),
+                  layout.model['id'] if layout else None,
+                  finder[0]['id'] if finder and fields.get('lines_model') else None,
                   reading.model['id'] if fields.get('ocr_model') else None,
                   fields.get('decode') or decode.DATASET_DEFAULT))
     if reading.convention:
         conn.execute('UPDATE jobs SET ocr_convention = ? WHERE id = ?', (json.dumps(reading.convention), job_id))
         conventions.note(conn, list(reading.convention))
-    layout_templates.copy_into(conn, job_id)
+    layout_templates.copy_into(conn, job_id, layout.template['id'] if layout else None)
     return job_id
 
 
-def _keep_lines(conn, page_id: int, page: dict, reads: list[LineRead], lines_by: str, read_by: str,
-                ocr_model_id: int) -> None:
-    """A page's lines as a dataset that skips layout holds them: in the page's Unassigned
-    bucket, in reading order, read and unchecked."""
-    outlines = [[[x / page['width'], y / page['height']] for x, y in line['polygon']] for line in page['lines']]
+@dataclass
+class KeptBy:
+    """Who a kept page's elements and lines are logged as."""
+    lines: str
+    read: str
+    layout: str | None
+    ocr_model_id: int
+
+
+def _keep_line(conn, element_id: int, order_idx: int, outline: list, read: LineRead, by: KeptBy) -> None:
+    line_id = conn.execute(
+        'INSERT INTO lines (element_id, order_idx, polygon, text, confidence, conf_profile, orientation, '
+        "ocr_model_id, ocr_run_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'))",
+        (element_id, order_idx, json.dumps(outline), read.text, read.confidence,
+         json.dumps(read.profile) if read.profile else None, read.orientation, by.ocr_model_id)).lastrowid
+    store.log_line(conn, line_id, by.read, 'create')
+
+
+def _keep_unassigned(conn, page_id: int, order_idx: int, outlines: list, reads: list[LineRead], by: KeptBy) -> None:
+    """Lines in a bucket of the page's Unassigned, read and unchecked."""
     if not outlines:
         return
-    xs = [x for outline in outlines for x, _ in outline]
-    ys = [y for outline in outlines for _, y in outline]
     bucket = conn.execute("INSERT INTO elements (page_id, order_idx, class_name, bbox, conf, kind) "
-                          "VALUES (?, 0, 'Unassigned', ?, NULL, 'orphan')",
-                          (page_id, json.dumps([min(xs), min(ys), max(xs), max(ys)]))).lastrowid
-    store.log_element(conn, bucket, lines_by, 'create')
-    for order_idx, (outline, read) in enumerate(zip(outlines, reads)):
-        line_id = conn.execute(
-            'INSERT INTO lines (element_id, order_idx, polygon, text, confidence, conf_profile, orientation, '
-            "ocr_model_id, ocr_run_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'))",
-            (bucket, order_idx, json.dumps(outline), read.text, read.confidence,
-             json.dumps(read.profile) if read.profile else None, read.orientation, ocr_model_id)).lastrowid
-        store.log_line(conn, line_id, read_by, 'create')
+                          "VALUES (?, ?, 'Unassigned', ?, NULL, 'orphan')",
+                          (page_id, order_idx, json.dumps(geometry.ring_bounds([pt for o in outlines for pt in o])))
+                          ).lastrowid
+    store.log_element(conn, bucket, by.lines, 'create')
+    for n, (outline, read) in enumerate(zip(outlines, reads)):
+        _keep_line(conn, bucket, n, outline, read, by)
+
+
+def _keep_regions(conn, job_id: str, page_id: int, outlines: list, reads: list[LineRead], held_in: list,
+                  regions: list[tuple[Detection, str]], layout: Layout, by: KeptBy) -> None:
+    """Each region as a layout element of the dataset's class for its label, as a run of the
+    layout model files it, with the lines read in it. A region whose label the dataset has
+    no class for is left out, and its lines - like those of any region that holds none
+    there - go to Unassigned. The page is then ordered by the dataset's own rules."""
+    vocabulary = layout_templates.vocabulary(conn, job_id, layout.model['id'])
+    drawn = layout_shapes.outlines(store.get_job(conn, job_id)['layout_shape'])
+    numbered = {'content': 0, 'container': 0}
+    unassigned = [n for n, r in enumerate(held_in) if r is None]
+    for r, (found, role) in enumerate(regions):
+        held = [n for n, at in enumerate(held_in) if at == r]
+        placed = vocabulary.place(found.raw_class_name)
+        if placed is None:
+            unassigned += held
+            continue
+        class_name, raw, kind = vocabulary.resolve(placed)
+        side = 'content' if kind == 'content' else 'container'
+        element_id = conn.execute(
+            'INSERT INTO elements (page_id, order_idx, class_name, raw_class_name, bbox, conf, kind, polygon, lines_bbox) '
+            'VALUES (?,?,?,?,?,?,?,?,?)',
+            (page_id, numbered[side], class_name, raw, json.dumps(found.bbox), found.confidence, kind,
+             json.dumps(geometry.bbox_ring(found.bbox)) if drawn else None,
+             # A box the request looked for no lines in is left for a run to detect them.
+             json.dumps(found.bbox) if side == 'content' and role == 'content' else None)).lastrowid
+        numbered[side] += 1
+        store.log_element(conn, element_id, by.layout, 'create')
+        if side == 'content':
+            for k, n in enumerate(held):
+                _keep_line(conn, element_id, k, outlines[n], reads[n], by)
+        else:
+            unassigned += held
+    _keep_unassigned(conn, page_id, numbered['content'], [outlines[n] for n in unassigned],
+                     [reads[n] for n in unassigned], by)
+    geometry.resequence_page(conn, page_id)
 
 
 def _keep(conn, account: str, target: Keeping, uploads: list[Upload], answered: list[dict], read: dict,
-          fields: dict, own: dict, finder, reading: Reading) -> dict:
+          fields: dict, own: dict, finder, reading: Reading, layout: Layout | None, laid_out: dict) -> dict:
     """File every page that was read into the dataset, as done: nothing of the pipeline
     runs on it. A scan the dataset holds already lands as a duplicate, as an upload of it
     would, without its lines."""
@@ -416,13 +548,14 @@ def _keep(conn, account: str, target: Keeping, uploads: list[Upload], answered: 
     readable = [i for i, page in enumerate(answered) if 'error' not in page]
     if not readable:
         return kept
-    job_id = target.job_id or _new_dataset(conn, account, target.name, fields, finder, reading)
+    job_id = target.job_id or _new_dataset(conn, account, target.name, fields, finder, reading, layout)
     kept.update(dataset=job_id, created=target.job_id is None)
     job_path = config.job_dir(job_id)
     (job_path / 'uploads').mkdir(parents=True, exist_ok=True)
     seen = store.taken_hashes(conn, 'pages', job_id)
-    lines_by = f'model:lines@{finder[0]["name"]}' if finder else f'import:{account}'
-    read_by = text_job.ocr_author(conn, reading.model['id'], reading.decode)
+    by = KeptBy(f'model:lines@{finder[0]["name"]}' if finder else f'import:{account}',
+                text_job.ocr_author(conn, reading.model['id'], reading.decode),
+                f'model:layout@{layout.model["name"]}' if layout else None, reading.model['id'])
     for i in readable:
         page = answered[i]
         name = _kept_name(page['id'])
@@ -435,8 +568,14 @@ def _keep(conn, account: str, target: Keeping, uploads: list[Upload], answered: 
             kept['duplicates'].append(page['id'])
         if outcome != 'done':
             continue
-        _keep_lines(conn, page_id, page, [read[(i, n)] for n in range(len(page['lines']))], lines_by, read_by,
-                    reading.model['id'])
+        outlines = [[[x / page['width'], y / page['height']] for x, y in line['polygon']] for line in page['lines']]
+        reads = [read[(i, n)] for n in range(len(page['lines']))]
+        if i in laid_out:
+            _keep_regions(conn, job_id, page_id, outlines, reads, [line['region'] for line in page['lines']],
+                          laid_out[i].regions, layout, by)
+            store.note_page_model(conn, page_id, 'layout', layout.model['id'])
+        else:
+            _keep_unassigned(conn, page_id, 0, outlines, reads, by)
         if page['id'] not in own:
             store.note_page_model(conn, page_id, 'lines', finder[0]['id'])
         conn.commit()
@@ -445,10 +584,40 @@ def _keep(conn, account: str, target: Keeping, uploads: list[Upload], answered: 
     return kept
 
 
+def _find_regions(conn, layout: Layout, uploads: list[Upload], request: InFlight,
+                  models: dict) -> tuple[dict[int, PageLayout], dict[int, str]]:
+    """Every page's regions before any line is looked for, so that the layout model and the
+    line model - which may share a card, each unloading the other - load once a request,
+    as each does once a phase of a dataset's run. Returns the regions by page, and why
+    the layout model refused a page."""
+    request.stage = 'finding regions'
+    found: dict[int, PageLayout] = {}
+    refused: dict[int, str] = {}
+    detector = None
+    for i, upload in enumerate(uploads):
+        decoded = _decoded(upload)
+        if isinstance(decoded, str):
+            continue
+        image, sent = decoded
+        if detector is None:
+            layout.client.on_wait = request.wait
+            detector = RemoteLayout(conn, layout.client, layout.model['id'], layout.vocabulary)
+            models['layout'] = {'id': layout.model['id'], 'name': layout.model['name']}
+        fitted = text_job.fit_for_layout(image)
+        try:
+            found[i] = detector.detect_sent([sent if fitted is image else fitted])[0]
+        except PageRefused as error:
+            refused[i] = f'the layout model could not read it: {error.reason}'
+    request.stage = 'finding lines'
+    return found, refused
+
+
 def pages(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
     """Find the lines of whole pages - or take the outlines the caller sent for a page -
-    and read them. Pages are decoded one at a time and only their line crops are kept, so
-    a request of large scans never holds them all at once. With `keep`, the pages and what
+    and read them. With `layout_model`, the pages' regions are found first and their lines
+    inside each. Pages are decoded one at a time - again for their lines, after layout -
+    and only their line crops are kept, so a request of large scans never holds them all
+    at once. With `keep`, the pages and what
     was read on them are filed into a dataset of the caller's."""
     check_cap(conn, account)
     fmt = fields.get('format') or 'json'
@@ -457,35 +626,58 @@ def pages(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
     keep_name = (fields.get('keep') or '').strip()
     target = keeping(conn, account, keep_name, uploads) if keep_name else None
     own = _own_lines(fields.get('lines'), [u.name for u in uploads])
+    if own and fields.get('layout_model'):
+        raise Refused(400, 'send lines or layout_model, not both: with layout the lines are found inside its regions')
+    layout = _layout(conn, fields['layout_model']) if fields.get('layout_model') else None
     finder = _model(conn, 'lines', fields.get('lines_model')) if any(u.name not in own for u in uploads) else None
     reading = _reading(conn, fields)
     models: dict = {}
+    laid_out: dict[int, LaidOut] = {}
     with admitted(account, pages=len(uploads)) as request:
-        detector = None
+        regions_of, refused = _find_regions(conn, layout, uploads, request, models) if layout else ({}, {})
+        found_lines = None
         answered: list[dict] = []
         lines: list[tuple[object, Crops, dict]] = []
         for i, upload in enumerate(uploads):
+            if i in refused:
+                answered.append({'id': upload.name, 'error': refused[i]})
+                continue
             decoded = _decoded(upload)
             if isinstance(decoded, str):
                 answered.append({'id': upload.name, 'error': decoded})
                 continue
             image, sent = decoded
+            page = {'id': upload.name, 'width': image.width, 'height': image.height}
+            contexts = None
             if upload.name in own:
                 outlines = own[upload.name]
             else:
-                if detector is None:
+                if found_lines is None:
                     row, client = finder
                     client.on_wait = request.wait
-                    detector = RemoteLines(conn, client, row['id'])
+                    found_lines = RemoteLines(conn, client, row['id'])
                     models['lines'] = {'id': row['id'], 'name': row['name']}
-                found = detector.detect([sent], 'page')[0]
-                outlines = [[[round(x * image.width), round(y * image.height)] for x, y in found[j]]
-                            for j in reading_order.order(found, *reading_order.detect(found))]
+                if layout is None:
+                    outlines = [_in_pixels(o, image.width, image.height)
+                                for o in _swept(found_lines.detect([sent], 'page')[0])]
+                else:
+                    laid = laid_out[i] = _lay_out(regions_of[i], found_lines, layout.rules, image, sent)
+                    page['regions'] = [{'class': found.class_name, 'role': role,
+                                        'polygon': _in_pixels(geometry.bbox_ring(found.bbox), image.width, image.height),
+                                        'confidence': found.confidence} for found, role in laid.regions]
+                    placed = [(r, k, o) for r, held in enumerate(laid.lines) for k, o in enumerate(held)] + \
+                             [(None, k, o) for k, o in enumerate(laid.loose)]
+                    outlines = [_in_pixels(o, image.width, image.height) for *_, o in placed]
+                    page['held_in'] = [r for r, *_ in placed]
+                    contexts = [{'line_index': k} if r is None else
+                                {'element_class': laid.regions[r][0].class_name, 'line_index': k}
+                                for r, k, _ in placed]
             for n, outline in enumerate(outlines):
                 crops = [(o, linecrop.crop_line(image, outline, o, mask=config.LINE_CROP_MASK))
                          for o in ocr_phase.orientations(outline)]
-                lines.append(((i, n), [(o, crop) for o, crop in crops if crop is not None], {'line_index': n}))
-            answered.append({'id': upload.name, 'width': image.width, 'height': image.height, 'lines': outlines})
+                lines.append(((i, n), [(o, crop) for o, crop in crops if crop is not None],
+                              contexts[n] if contexts else {'line_index': n}))
+            answered.append({**page, 'lines': outlines})
             request.lines_total = len(lines)
         read, models['ocr'] = _read(conn, reading, request, lines) if lines else ({}, None)
     record_usage(conn, account, pages=sum('error' not in page for page in answered), lines=len(lines),
@@ -493,15 +685,19 @@ def pages(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
     for i, page in enumerate(answered):
         if 'error' in page:
             continue
-        page['lines'] = [{'polygon': outline, 'text': read[(i, n)].text, 'confidence': read[(i, n)].confidence}
+        held_in = page.pop('held_in', None)
+        page['lines'] = [{'polygon': outline, 'text': read[(i, n)].text, 'confidence': read[(i, n)].confidence,
+                          **({'region': held_in[n]} if held_in is not None else {})}
                          for n, outline in enumerate(page['lines'])]
         if fmt != 'json':
-            page['document'] = _document(fmt, i, page['id'], page['width'], page['height'], page['lines'])
+            page['document'] = _document(fmt, i, page['id'], page['width'], page['height'], page['lines'],
+                                         page.get('regions', []))
     if models.get('ocr') is None:
         models.pop('ocr', None)
     answer = {'models': models, 'pages': answered}
     if target:
-        answer['kept'] = _keep(conn, account, target, uploads, answered, read, fields, own, finder, reading)
+        answer['kept'] = _keep(conn, account, target, uploads, answered, read, fields, own, finder, reading,
+                               layout, laid_out)
     return answer
 
 

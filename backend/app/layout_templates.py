@@ -191,10 +191,17 @@ def reading_template(conn: sqlite3.Connection, job_id: str):
     to no template - its order is worked out from the page."""
     job = conn.execute('SELECT run_layout FROM jobs WHERE id = ?', (job_id,)).fetchone()
     model_id = layout_model_id(conn, job_id) if job and job['run_layout'] else None
-    if model_id is None:
-        return None
+    return None if model_id is None else model_template(conn, model_id)
+
+
+def model_template(conn: sqlite3.Connection, model_id: int):
+    """The template a layout model belongs to, or None."""
     return conn.execute('SELECT t.* FROM layout_templates t JOIN models m ON m.layout_template_id = t.id '
                         'WHERE m.id = ?', (model_id,)).fetchone()
+
+
+def template_row(conn: sqlite3.Connection, template_id: int):
+    return conn.execute('SELECT * FROM layout_templates WHERE id = ?', (template_id,)).fetchone()
 
 
 def order_set_by(conn: sqlite3.Connection, job_id: str) -> str | None:

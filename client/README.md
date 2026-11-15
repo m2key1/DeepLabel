@@ -47,6 +47,7 @@ deeplabel recognize pages ./scans -o answer.json # lines and text, no dataset
 deeplabel recognize pages ./scans --format page -o page-xml/   # one PAGE XML per scan
 deeplabel recognize lines ./line-images          # text of each line image
 deeplabel recognize pages ./scans --keep "Letters 1848"        # ...and keep them as a dataset
+deeplabel recognize pages ./scans --layout-model 4             # regions first, lines inside each
 ```
 
 ## Reading without a dataset

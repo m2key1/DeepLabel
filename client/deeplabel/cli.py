@@ -80,8 +80,8 @@ def cmd_recognize(args, client):
     if args.what == 'lines':
         answer = client.recognize_lines(paths, **options)
     else:
-        answer = client.recognize_pages(paths, lines_model=args.lines_model, format=args.format, keep=args.keep,
-                                        **options)
+        answer = client.recognize_pages(paths, layout_model=args.layout_model, lines_model=args.lines_model,
+                                        format=args.format, keep=args.keep, **options)
     if args.what == 'pages' and args.format != 'json' and args.output:
         folder = Path(args.output)
         folder.mkdir(parents=True, exist_ok=True)
@@ -274,6 +274,8 @@ def build_parser() -> argparse.ArgumentParser:
     recognize.add_argument('paths', nargs='+', help='image files, or a directory of them')
     recognize.add_argument('--format', choices=['json', *DOCUMENT_SUFFIX], default='json',
                            help='pages only: a PAGE XML, ALTO, hOCR or text document per page')
+    recognize.add_argument('--layout-model', type=int,
+                           help='pages only: a layout model id to find the regions first, the lines inside each')
     recognize.add_argument('--lines-model', type=int, help='line model id (pages only); default: the default')
     recognize.add_argument('--ocr-model', type=int, help='OCR model id; default: the default')
     recognize.add_argument('--decode', help='how the OCR model decodes, e.g. beam or greedy')

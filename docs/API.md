@@ -76,8 +76,9 @@ them too, as they write nothing, but cannot keep.
   a page its own outlines to read instead, in the order given.
 - `POST /api/recognize/lines` - line images as `files` parts, read as they are, in the
   order sent.
-- `GET /api/recognize` - the line and OCR models a request can name, their decodes and
-  conventions, the formats, and the limits.
+- `GET /api/recognize` - the layout, line and OCR models a request can name (each layout
+  model with the template it reads by), the OCR models' decodes and conventions, the
+  formats, and the limits.
 
 Both take `ocr_model`, `decode` and `convention` (comma-separated); pages also take
 `lines_model` and `format`: `page`, `alto`, `hocr` or `txt` add each page's document beside
@@ -93,11 +94,32 @@ curl -H "Authorization: Bearer $DEEPLABEL_TOKEN" \
 #                        "text": "...", "confidence": 0.97}, ...]}, ...]}
 ```
 
+Pages sent with `layout_model=<id>` have their regions found first, by that layout model:
+the lines are then found inside each content region and read as that region's. A page
+reads as a dataset running that model reads it: by the template the model belongs to,
+which says which classes are containers and how the page is ordered - or, for a model
+without one, by the default template's classes in the page's own order of leaves and
+columns. Each page gains `regions`, the content regions in reading order and then the
+containers, and each line the index of the region it was found in; the documents nest
+the lines in their regions. Text outside every region is not read, unless the page has
+no content region at all: then its lines are found on the whole page, with
+`"region": null`. A page the layout model cannot read comes back as an error, like an
+unreadable image. `lines` and `layout_model` are not sent together.
+
+```bash
+#  "regions": [{"class": "Header", "role": "content", "confidence": 0.94,
+#               "polygon": [[110, 210], [1900, 210], [1900, 330], [110, 330]]}, ...],
+#  "lines": [{"polygon": [...], "text": "...", "confidence": 0.97, "region": 0}, ...]
+```
+
 Pages sent with `keep=<name>` are also filed into your dataset of that name (in any letter
 case), or into a new one if no dataset has the name, so their lines can be corrected there
 and used for training. They arrive read and unchecked, as a dataset that skips layout holds
 them, and nothing of the pipeline runs on them; a new dataset takes the request's models,
-decode and convention, so pages added to it in the app later are read the same way. A scan
+decode and convention, so pages added to it in the app later are read the same way. With
+`layout_model`, each region is kept as a layout box of the dataset's class for its label,
+with its lines, and a new dataset takes the model's template; a region whose label the
+dataset has no class for is left out, and its lines go to Unassigned. A scan
 the dataset holds already lands as a duplicate, without its lines. The answer says where:
 `"kept": {"dataset": "3f9c...", "name": "Letters 1848", "created": true, "pages": 2,
 "duplicates": []}`. A name another account holds is refused `409`, as is a dataset that is

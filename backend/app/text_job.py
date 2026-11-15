@@ -134,12 +134,15 @@ def phase_ingest(conn, job_id: str, job_path: Path):
         store.recount_pages(conn, job_id)
 
 
-def layout_image(page) -> Image.Image:
-    img = open_rgb(page['source_file'])
+def fit_for_layout(img: Image.Image) -> Image.Image:
     if img.height > MAX_LAYOUT_HEIGHT:
         ratio = MAX_LAYOUT_HEIGHT / img.height
         img = img.resize((int(img.width * ratio), MAX_LAYOUT_HEIGHT))
     return img
+
+
+def layout_image(page) -> Image.Image:
+    return fit_for_layout(open_rgb(page['source_file']))
 
 
 def phase_layout(conn, job_id: str, stage, batch_size: int):
@@ -337,6 +340,16 @@ def _full_bbox_lines(elements, el_boxes, polygons_per_element):
         polygons_per_element[i] = [[[x0, y0], [x1, y0], [x1, y1], [x0, y1]]]
 
 
+def lines_in_elements(stage, img, elements, el_boxes, rings=None):
+    """Lines found inside each element's crop, each element's top to bottom; an element of
+    a class read whole is one line of its box. Returns (per_element_polys, orphans) as
+    _lines_per_crop does: with no element, the page's own lines, unassigned."""
+    full_bbox = {i for i, e in enumerate(elements) if e['class_name'] in FULL_BBOX_CLASSES}
+    polygons_per_element, orphans = _lines_per_crop(stage, img, el_boxes, skip=full_bbox, rings=rings)
+    _full_bbox_lines(elements, el_boxes, polygons_per_element)
+    return [sorted(polygons, key=_reading_key) for polygons in polygons_per_element], orphans
+
+
 def phase_lines(conn, job_id: str, stage, line_mode: str):
     pages = conn.execute(
         "SELECT * FROM pages WHERE job_id = ? AND deleted = 0 AND status = 'layout_done' ORDER BY idx",
@@ -442,9 +455,7 @@ def phase_relines(conn, job_id: str, stage, stale):
 
         # Always per-crop here: per_page detection reassigns lines across the whole
         # page, which would disturb elements that are not stale.
-        full_bbox = {i for i, e in enumerate(elements) if e['class_name'] in FULL_BBOX_CLASSES}
-        polygons_per_element, _ = _lines_per_crop(stage, img, el_boxes, skip=full_bbox, rings=_rings(conn, job_id, elements))
-        _full_bbox_lines(elements, el_boxes, polygons_per_element)
+        polygons_per_element, _ = lines_in_elements(stage, img, elements, el_boxes, rings=_rings(conn, job_id, elements))
 
         for element, polygons in zip(elements, polygons_per_element):
             # Whatever was read or corrected under this element goes to the pool first;
@@ -457,7 +468,7 @@ def phase_relines(conn, job_id: str, stage, stale):
             conn.execute('UPDATE lines SET deleted = 1 WHERE element_id = ?', (element['id'],))
             for line_id in replaced:
                 store.log_line(conn, line_id, stage.author, 'delete')
-            for order_idx, poly in enumerate(sorted(polygons, key=_reading_key)):
+            for order_idx, poly in enumerate(polygons):
                 cur = conn.execute('INSERT INTO lines (element_id, order_idx, polygon) VALUES (?,?,?)',
                                    (element['id'], order_idx, json.dumps(poly)))
                 store.log_revision(conn, 'line', cur.lastrowid, job_id, stage.author, 'create',

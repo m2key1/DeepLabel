@@ -1,6 +1,6 @@
 import { test, expect } from '../helpers/test'
 import type { Page } from '@playwright/test'
-import { backendFetch, getJob, jobPageIds, pageLines, slowOcrModelId, uniqueName } from '../helpers/api'
+import { backendFetch, getJob, getPageDetail, jobPageIds, pageLines, slowOcrModelId, uniqueName } from '../helpers/api'
 import { FRONTEND } from '../helpers/frontend'
 import { scanPng } from '../helpers/image'
 import { seedSession, useSession } from '../helpers/session'
@@ -27,6 +27,17 @@ const LINES_500x400 = [
   [[50, 266], [450, 266], [450, 327], [50, 327]],
 ]
 const READ = (n: number) => Array.from({ length: n }, (_, i) => `Sample Text line ${i + 1}`)
+// With a layout model the stub finds those two boxes, a Header and a Paragraph, and inside
+// each the same three lines; a line is then read as "Sample <class> line <n>", by its
+// region's class and its place there, at the confidence the stub gives that class.
+const REGIONS_600x800 = [
+  { class: 'Header', role: 'content', polygon: [[60, 40], [540, 40], [540, 120], [60, 120]], confidence: 0.9 },
+  { class: 'Paragraph', role: 'content', polygon: [[60, 160], [540, 160], [540, 680], [60, 680]], confidence: 0.9 },
+]
+const READ_BY_REGION = [
+  ...[0.97, 0.92, 0.9].map((confidence, i) => ({ text: `Sample Header line ${i + 1}`, confidence, region: 0 })),
+  ...[0.55, 0.82, 0.95].map((confidence, i) => ({ text: `Sample Paragraph line ${i + 1}`, confidence, region: 1 })),
+]
 const STUB_CONFIDENCE = 0.9
 
 interface Image { name: string; png: Buffer | Uint8Array }
@@ -51,7 +62,7 @@ function asToken(token: string, path: string, init: RequestInit = {}) {
   return fetch(`${FRONTEND}${path}`, { ...init, redirect: 'manual', headers: { Authorization: `Bearer ${token}` } })
 }
 
-interface Offered { id: number; name: string; default: boolean; default_decode?: string }
+interface Offered { id: number; name: string; default: boolean; default_decode?: string; template?: string }
 
 async function defaults(token: string) {
   const offered = await (await asToken(token, '/api/recognize')).json()
@@ -61,6 +72,11 @@ async function defaults(token: string) {
     lines: { id: lines.id, name: lines.name },
     ocr: { id: ocr.id, name: ocr.name, decode: ocr.default_decode },
   }
+}
+
+async function layoutModel(token: string): Promise<Offered> {
+  const offered = await (await asToken(token, '/api/recognize')).json()
+  return offered.models.layout.find((m: Offered) => m.default)
 }
 
 const pageOf = (id: string, width: number, height: number, outlines: number[][][]) => ({
@@ -177,6 +193,35 @@ test.describe('Scenario: reading scans through the recognition API', () => {
 
       const offered = await (await asToken(token, '/api/recognize')).json()
       expect(offered.limits).toEqual({ pages: 10, lines: 500, megabytes: 100 })
+    })
+})
+
+test.describe('Scenario: layout before the lines', () => {
+  test('with a layout model a page comes back with its regions, each line found and read inside its own',
+    async ({ page }) => {
+      const token = await mint(page, uniqueName('layout'))
+      const used = await defaults(token)
+      const layout = await layoutModel(token)
+      // The stub's layout model belongs to no template, so it reads by the default one.
+      expect(layout).toEqual({ id: expect.any(Number), name: expect.any(String), default: true, template: 'Schematismus' })
+      const scan = [{ name: 'leaf.png', png: scanPng(600, 800, 50) }]
+
+      const response = await recognize(token, 'pages', scan, { layout_model: String(layout.id) })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        models: { layout: { id: layout.id, name: layout.name }, ...used },
+        pages: [{
+          id: 'leaf.png', width: 600, height: 800, regions: REGIONS_600x800,
+          lines: LINES_600x800.map((polygon, i) => ({ polygon, ...READ_BY_REGION[i] })),
+        }],
+      })
+
+      const xml = (await (await recognize(token, 'pages', scan, { layout_model: String(layout.id), format: 'page' }))
+        .json()).pages[0].document as string
+      expect(xml.match(/<TextRegion /g)).toHaveLength(2)
+      expect(xml).toContain('structure {type:Header;}')
+      expect(xml).toContain('<Coords points="60,160 540,160 540,680 60,680"/>')
+      expect(xml).toContain('<Unicode>Sample Paragraph line 3</Unicode>')
     })
 })
 
@@ -353,5 +398,46 @@ test.describe('Scenario: keeping what a request read as a dataset', () => {
       ])
       expect(grown.counters).toMatchObject({ pages_total: 3, lines_total: 18, lines_ocr_done: 18 })
       await keptLines((await jobPageIds(jobId))[3], 500, 400, LINES_500x400)
+    })
+
+  test('with layout, a kept page holds its regions as layout elements of their class, each with its lines',
+    async ({ page }) => {
+      const token = await mint(page, uniqueName('keep layout'))
+      const used = await defaults(token)
+      const layout = await layoutModel(token)
+      const name = uniqueName('Kept with layout')
+
+      const response = await recognize(token, 'pages', [{ name: 'leaf.png', png: scanPng(600, 800, 51) }],
+                                       { keep: name, layout_model: String(layout.id) })
+      expect(response.status).toBe(200)
+      const { kept } = await response.json()
+      expect(kept).toEqual({ dataset: expect.any(String), name, created: true, pages: 1, duplicates: [] })
+
+      const job = await getJob(kept.dataset)
+      // Pages added in the app later run the same layout model, lines found in each region.
+      expect(job).toMatchObject({
+        status: 'done', run_layout: true, run_lines: true, run_ocr: true, line_mode: 'per_crop',
+        model_layout_id: layout.id, model_lines_id: null, model_ocr_id: null,
+      })
+      expect(job.counters).toMatchObject({ pages_total: 1, lines_total: 6, lines_ocr_done: 6 })
+
+      const [pageId] = await jobPageIds(kept.dataset)
+      const { elements } = await getPageDetail(kept.dataset, pageId)
+      type Kept = { id: number; class_name: string; kind: string; bbox: number[]; conf: number
+                    lines: { text: string; confidence: number; checked: boolean; text_author: string }[] }
+      expect((elements as Kept[]).map((e) => ({
+        class: e.class_name, kind: e.kind, bbox: e.bbox, conf: e.conf,
+        lines: e.lines.map((l) => [l.text, l.confidence, l.checked, l.text_author]),
+      }))).toEqual(REGIONS_600x800.map((region, r) => ({
+        class: region.class, kind: 'content', bbox: [0.1, [0.05, 0.2][r], 0.9, [0.15, 0.85][r]], conf: 0.9,
+        lines: READ_BY_REGION.filter((l) => l.region === r)
+          .map((l) => [l.text, l.confidence, false, `model:ocr@${used.ocr.name}`]),
+      })))
+      const history = await backendFetch(`/api/elements/${(elements as Kept[])[0].id}/revisions`)
+      expect(history.map((r: { author: string; action: string }) => [r.author, r.action]))
+        .toEqual([[`model:layout@${layout.name}`, 'create']])
+
+      await openViewer(page, kept.dataset, pageId)
+      await expect(page.getByTestId('line-text')).toHaveText(READ_BY_REGION.map((l) => l.text))
     })
 })
