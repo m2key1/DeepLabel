@@ -7,7 +7,7 @@ import time
 import traceback
 from pathlib import Path
 
-from app import (config, dataset_sync, evaluator, ingest, map_classes, map_ingest, model_registry,
+from app import (config, dataset_sync, evaluator, ingest, map_classes, map_ingest, model_registry, recognize_async,
                  map_job, registry, store, trainer)
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -156,7 +156,7 @@ def _spawn_served_map_job(job_id: str, class_ids: list, region_kind: str,
         return subprocess.Popen(args, cwd=str(BACKEND_DIR), env=env, stdout=log, stderr=subprocess.STDOUT)
 
 
-QUEUE_KINDS = ('job', 'training', 'evaluation')
+QUEUE_KINDS = ('job', 'training', 'evaluation', 'recognition')
 
 
 def queue_order(row, kind: str, submission_id: int) -> tuple:
@@ -171,20 +171,26 @@ def queued_since(row) -> str:
     return row['queued_at'] or row['created_at']
 
 
+# What each kind has waiting, oldest first. A dataset's or recognition request's id is
+# random, so its rowid is what records the order it was submitted in.
+QUEUED = {
+    'job': "SELECT id, rowid seq, created_at, queued_at FROM jobs WHERE status = 'queued' "
+           'ORDER BY coalesce(queued_at, created_at), rowid',
+    'training': "SELECT id, id seq, created_at, queued_at FROM trainings WHERE status = 'queued' "
+                "AND target = 'local' ORDER BY coalesce(queued_at, created_at), id",
+    'evaluation': "SELECT id, id seq, created_at, queued_at FROM evaluations WHERE status = 'queued' "
+                  'ORDER BY coalesce(queued_at, created_at), id',
+    'recognition': "SELECT id, rowid seq, created_at, queued_at FROM recognition_requests WHERE status = 'queued' "
+                   'ORDER BY coalesce(queued_at, created_at), rowid',
+}
+
+
 def _next_work(conn):
-    """Datasets, local trainings, and evaluations share the one GPU, oldest first. A
-    dataset's id is random, so its rowid is what records the order it was submitted in."""
-    heads = {
-        'job': "SELECT id, rowid seq, created_at, queued_at FROM jobs WHERE status = 'queued' "
-               'ORDER BY coalesce(queued_at, created_at), rowid LIMIT 1',
-        'training': "SELECT id, id seq, created_at, queued_at FROM trainings WHERE status = 'queued' "
-                    "AND target = 'local' ORDER BY coalesce(queued_at, created_at), id LIMIT 1",
-        'evaluation': "SELECT id, id seq, created_at, queued_at FROM evaluations WHERE status = 'queued' "
-                      'ORDER BY coalesce(queued_at, created_at), id LIMIT 1',
-    }
+    """Datasets, local trainings, evaluations and async recognition requests share the one
+    GPU, oldest first."""
     candidates = []
-    for kind, sql in heads.items():
-        row = conn.execute(sql).fetchone()
+    for kind, sql in QUEUED.items():
+        row = conn.execute(f'{sql} LIMIT 1').fetchone()
         if row is not None:
             candidates.append((queue_order(row, kind, row['seq']), kind, row['id']))
     if not candidates:
@@ -193,15 +199,34 @@ def _next_work(conn):
     return (kind, work_id)
 
 
-def _worker_loop():
-    conn = store.connect(config.DB_PATH)
+def queued_work(conn) -> list[tuple[str, object]]:
+    """Everything waiting for the GPU, in the order the worker will take it."""
+    waiting = [(queue_order(row, kind, row['seq']), kind, row['id'])
+               for kind, sql in QUEUED.items() for row in conn.execute(sql)]
+    return [(kind, work_id) for _, kind, work_id in sorted(waiting)]
+
+
+def requeue_interrupted(conn) -> None:
+    """On start, what was running when the backend stopped goes back to its place in the queue."""
     conn.execute("UPDATE jobs SET status = 'queued', pid = NULL WHERE status = 'running'")
     conn.execute("UPDATE trainings SET status = 'queued', pid = NULL "
                  "WHERE target = 'local' AND status IN ('preparing', 'running')")
     conn.execute("UPDATE evaluations SET status = 'queued', pid = NULL WHERE status = 'running'")
     conn.commit()
+    recognize_async.recover(conn)
 
+
+SWEEP_SECONDS = 60
+
+
+def _worker_loop():
+    conn = store.connect(config.DB_PATH)
+    requeue_interrupted(conn)
+    swept = 0.0
     while True:
+        if time.monotonic() - swept > SWEEP_SECONDS:
+            recognize_async.sweep(conn)
+            swept = time.monotonic()
         work = _next_work(conn)
         if work is None:
             time.sleep(1)
@@ -234,6 +259,9 @@ def _run_work(conn, kind: str, work_id):
         return
     if kind == 'evaluation':
         evaluator.run_local(conn, work_id)
+        return
+    if kind == 'recognition':
+        recognize_async.run(conn, work_id)
         return
 
     job_id = work_id

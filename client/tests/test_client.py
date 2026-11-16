@@ -6,6 +6,7 @@ import json
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import ClassVar
 
 import pytest
 
@@ -20,6 +21,11 @@ class Handler(BaseHTTPRequestHandler):
     busy = 0
     # Answer every recognition request as an account past its monthly cap.
     capped = False
+    # Async recognition requests by id, each with its answer and how often it was polled.
+    queued: ClassVar[dict] = {}
+    unfinished = 2
+    # Let every async request end in this error rather than an answer.
+    failing = None
 
     def log_message(self, *_args):
         pass
@@ -42,7 +48,20 @@ class Handler(BaseHTTPRequestHandler):
         self._record()
         if self.path == '/api/recognize':
             return self._reply(200, {'models': {'lines': [], 'ocr': []}, 'formats': ['json', 'page'],
-                                     'limits': {'pages': 2, 'lines': 3, 'megabytes': 1}})
+                                     'limits': {'pages': 2, 'lines': 3, 'megabytes': 1,
+                                                'async': {'pages': 3, 'lines': 4, 'megabytes': 1,
+                                                          'unfinished': Handler.unfinished, 'kept_hours': 24}}})
+        if self.path.startswith('/api/recognize/r'):
+            # Running at the first look, done at the second.
+            request = Handler.queued[self.path.rsplit('/', 1)[1]]
+            request['polls'] += 1
+            state = {'id': request['id'], 'files': request['files'], 'submitted_at': '2026-11-15 10:00:00'}
+            if request['polls'] < 2:
+                return self._reply(202, {**state, 'status': 'running', 'done': 0})
+            request['finished'] = True
+            if Handler.failing:
+                return self._reply(200, {**state, 'status': 'error', 'done': 0, 'error': Handler.failing})
+            return self._reply(200, {**state, 'status': 'done', 'done': request['files'], **request['answer']})
         if self.path.startswith('/api/jobs/denied'):
             return self._reply(403, {'detail': 'read-only API token'})
         if self.path.startswith('/api/jobs/j1/export'):
@@ -100,9 +119,24 @@ class Handler(BaseHTTPRequestHandler):
                     duplicates = [name for name in names if name == 'b.png']
                     answer['kept'] = {'dataset': 'k1', 'name': keep, 'created': 'a.png' in names,
                                       'pages': len(names) - len(duplicates), 'duplicates': duplicates}
+            else:
+                answer = {'models': {'ocr': {'id': 38, 'name': 'reader', 'decode': 'beam'}},
+                          'lines': [{'id': name, 'text': name.upper()} for name in names]}
+            if form_field(sent, 'async') != 'true':
                 return self._reply(200, answer)
-            return self._reply(200, {'models': {'ocr': {'id': 38, 'name': 'reader', 'decode': 'beam'}},
-                                     'lines': [{'id': name, 'text': name.upper()} for name in names]})
+            if sum(not r['finished'] for r in Handler.queued.values()) >= Handler.unfinished:
+                body = json.dumps({'detail': 'this account has 1 async recognition requests unfinished'}).encode()
+                self.send_response(429)
+                self.send_header('Retry-After', '60')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            request_id = f'r{len(Handler.queued) + 1}'
+            Handler.queued[request_id] = {'id': request_id, 'files': len(names), 'answer': answer, 'polls': 0,
+                                          'finished': False}
+            return self._reply(202, {'id': request_id, 'status': 'queued', 'place': 1, 'files': len(names),
+                                     'done': 0, 'submitted_at': '2026-11-15 10:00:00'})
         if self.path.endswith('/reference/cut'):
             return self._reply(200, {'documents': 1, 'pages': 3, 'placed': 3, 'unanchored': 0})
         if self.path.endswith('/groundtruth/read'):
@@ -135,6 +169,7 @@ def server():
 @pytest.fixture
 def client(server):
     RECORDED.clear()
+    Handler.queued.clear()
     return DeepLabel(server, 'dlp_test')
 
 
@@ -527,3 +562,75 @@ class TestRecognition:
         assert (raised.value.status, raised.value.detail) == (429, 'this account has read its 6 lines for this month')
         assert [r['path'] for r in RECORDED if r['method'] == 'POST'] == ['/api/recognize/pages']
 
+
+
+def _scans(folder, names) -> list:
+    for name in names:
+        (folder / name).write_bytes(b'PNG')
+    return [folder / name for name in names]
+
+
+def _calls() -> list[tuple[str, str]]:
+    return [(r['method'], r['path']) for r in RECORDED if r['path'] != '/api/recognize']
+
+
+class TestRecognitionInTheQueue:
+    """Big batches sent async: in requests of the async size, waited for, joined."""
+
+    def test_pages_go_in_async_requests_of_the_async_size_are_waited_for_and_joined(self, client, tmp_path):
+        progress = []
+
+        answer = client.recognize_pages(_scans(tmp_path, 'abcde'), queued=True, poll=0,
+                                        on_progress=progress.append, ocr_model=38)
+
+        posts = [r for r in RECORDED if r['method'] == 'POST']
+        assert [sent_files(r) for r in posts] == [['a', 'b', 'c'], ['d', 'e']]
+        assert [(form_field(r, 'async'), form_field(r, 'ocr_model')) for r in posts] == [('true', '38')] * 2
+        assert _calls() == [('POST', '/api/recognize/pages'), ('POST', '/api/recognize/pages'),
+                            ('GET', '/api/recognize/r1'), ('GET', '/api/recognize/r1'),
+                            ('GET', '/api/recognize/r2'), ('GET', '/api/recognize/r2')]
+        assert [(state['id'], state['status'], state['done']) for state in progress] == [
+            ('r1', 'running', 0), ('r1', 'done', 3), ('r2', 'running', 0), ('r2', 'done', 2)]
+        assert answer == {'models': {'ocr': {'id': 38, 'name': 'reader', 'decode': 'beam'}},
+                          'pages': [{'id': name, 'lines': []} for name in 'abcde']}
+
+    def test_past_the_unfinished_an_account_may_have_the_next_is_sent_once_the_oldest_is_done(
+            self, client, tmp_path):
+        Handler.unfinished = 1
+        try:
+            answer = client.recognize_lines(_scans(tmp_path, 'abcde'), queued=True, poll=0)
+        finally:
+            Handler.unfinished = 2
+
+        assert _calls() == [('POST', '/api/recognize/lines'), ('POST', '/api/recognize/lines'),
+                            ('GET', '/api/recognize/r1'), ('GET', '/api/recognize/r1'),
+                            ('POST', '/api/recognize/lines'),
+                            ('GET', '/api/recognize/r2'), ('GET', '/api/recognize/r2')]
+        assert [sent_files(r) for r in RECORDED if r['method'] == 'POST'] == [['a', 'b', 'c', 'd'], ['e'], ['e']]
+        assert [line['text'] for line in answer['lines']] == ['A', 'B', 'C', 'D', 'E']
+
+    def test_a_request_that_ended_in_an_error_is_raised_with_it(self, client, tmp_path):
+        Handler.failing = 'the model backend failed: out of memory'
+        try:
+            with pytest.raises(DeepLabelError) as raised:
+                client.recognize_pages(_scans(tmp_path, 'ab'), queued=True, poll=0)
+        finally:
+            Handler.failing = None
+        assert str(raised.value) == 'recognition request r1 stopped: the model backend failed: out of memory'
+
+    def test_the_cli_queues_the_scans_async_and_writes_what_they_read(self, server, tmp_path, monkeypatch, capsys):
+        from deeplabel import cli
+        from deeplabel import client as client_module
+        monkeypatch.setenv('DEEPLABEL_URL', server)
+        monkeypatch.setenv('DEEPLABEL_TOKEN', 'dlp_test')
+        monkeypatch.setattr(client_module, 'POLL_SECONDS', 0)
+        _scans(tmp_path, ['a.png', 'b.png'])
+        RECORDED.clear()
+        Handler.queued.clear()
+
+        assert cli.main(['recognize', 'pages', str(tmp_path), '--async', '-o', str(tmp_path / 'answer.json')]) == 0
+
+        assert [form_field(r, 'async') for r in RECORDED if r['method'] == 'POST'] == ['true']
+        assert json.loads((tmp_path / 'answer.json').read_text())['pages'] == [
+            {'id': 'a.png', 'lines': []}, {'id': 'b.png', 'lines': []}]
+        assert capsys.readouterr().err.splitlines() == ['r1: running, 0 of 2 read', 'r1: done, 2 of 2 read']

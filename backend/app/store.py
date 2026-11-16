@@ -754,6 +754,25 @@ CREATE TABLE IF NOT EXISTS recognition_caps (
     account TEXT PRIMARY KEY,
     monthly_lines INTEGER NOT NULL
 );
+-- An async recognition request: its files wait under RECOGNITION_DIR/<id> until read, its
+-- answer there until RECOGNIZE_KEEP_HOURS after it finished. `route` is pages or lines,
+-- `fields` the request's other form fields (JSON), `names` its file names in the order sent.
+CREATE TABLE IF NOT EXISTS recognition_requests (
+    id TEXT PRIMARY KEY,
+    account TEXT NOT NULL,
+    route TEXT NOT NULL,
+    fields TEXT NOT NULL,
+    names TEXT NOT NULL,
+    files INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    error TEXT,
+    batches_done INTEGER NOT NULL DEFAULT 0,
+    files_done INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    queued_at TEXT,
+    started_at TEXT,
+    finished_at TEXT
+);
 """
 
 

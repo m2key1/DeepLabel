@@ -14,19 +14,23 @@ const KIND_FILL: Record<QueueEntry['kind'], string> = {
   training: 'fill-test-wash',
   dataset: 'fill-accent-wash',
   evaluation: 'fill-note-wash',
+  recognition: 'fill-raised',
 }
 
 export const KIND_LABEL: Record<QueueEntry['kind'], string> = {
   dataset: 'dataset',
   training: 'training',
   evaluation: 'evaluation',
+  recognition: 'recognition API',
 }
 
 function caption(placed: Placed): string {
   const { entry, unknown } = placed
   if (entry.status === 'queued') {
-    return unknown ? `${entry.owner} · time unknown` : `${entry.owner} · ${spanLabel(placed.end - placed.start).slice(1)}`
+    const who = entry.owner ? `${entry.owner} · ` : ''
+    return who + (unknown ? 'time unknown' : spanLabel(placed.end - placed.start).slice(1))
   }
+  if (entry.kind === 'recognition' && entry.recognition) return `${entry.recognition.done} of ${entry.recognition.files} read`
   if (entry.kind === 'training' && entry.training?.progress_last?.epoch !== undefined) {
     return `epoch ${entry.training.progress_last.epoch}${entry.training.epochs ? ` of ${entry.training.epochs}` : ''}`
   }
@@ -88,7 +92,7 @@ export function QueueTimeline({ lanes, now, user, pageOf }: {
                    data-mine={mine || undefined} data-unknown={placed.unknown || undefined}
                    className={to ? 'cursor-pointer' : undefined} clipPath="url(#plot)"
                    onClick={to ? () => navigate(to) : undefined}>
-                  <title>{`${placed.entry.name} (${KIND_LABEL[placed.entry.kind]}, ${placed.entry.owner})`
+                  <title>{`${placed.entry.name} (${[KIND_LABEL[placed.entry.kind], placed.entry.owner].filter(Boolean).join(', ')})`
                     + (placed.unknown ? ' - how long it takes is not known yet' : ` - until about ${clock(placed.end, now)}`)}</title>
                   <rect x={left} y={top} width={width} height={BAR} rx="3"
                         className={`${KIND_FILL[placed.entry.kind]} ${mine ? 'stroke-accent' : 'stroke-transparent'}`}

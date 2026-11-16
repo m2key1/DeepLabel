@@ -24,6 +24,7 @@ export function doneShare(entry: QueueEntry): number {
     if (progress_last?.epoch !== undefined && epochs) return progress_last.epoch / epochs
     if (snapshot_progress?.total) return 0.02 * (snapshot_progress.done / snapshot_progress.total)
   }
+  if (entry.kind === 'recognition' && entry.recognition?.files) return entry.recognition.done / entry.recognition.files
   return 0
 }
 

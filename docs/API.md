@@ -65,7 +65,7 @@ thing to paste into a notebook or a CI job. Managing tokens and administering ac
 ## Recognition
 
 Scans in, lines and text out, without a dataset: nothing of a request is stored unless it
-asks to keep its pages. It needs the **recognize** permission, which admins have and grant
+asks to keep its pages, or is async and waits on disk for its turn. It needs the **recognize** permission, which admins have and grant
 per person. A token made with the access **Recognition only** reaches these routes and
 nothing else, which makes it the one to give a service outside; a read-only token may call
 them too, as they write nothing, but cannot keep.
@@ -78,7 +78,8 @@ them too, as they write nothing, but cannot keep.
   order sent.
 - `GET /api/recognize` - the layout, line and OCR models a request can name (each layout
   model with the template it reads by), the OCR models' decodes and conventions, the
-  formats, and the limits.
+  formats, the limits, and your async requests.
+- `GET /api/recognize/{id}` and `DELETE /api/recognize/{id}` - an async request (below).
 
 Both take `ocr_model`, `decode` and `convention` (comma-separated); pages also take
 `lines_model` and `format`: `page`, `alto`, `hocr` or `txt` add each page's document beside
@@ -139,16 +140,55 @@ the date reading resumes (the 1st of next month, UTC) and `Retry-After` until th
 request that starts below the cap finishes. `GET /api/recognize` says where the caller
 stands: `"usage": {"month": "2026-11", "lines": 1240, "cap": 5000}`.
 
+### Async requests
+
+With `async=true`, either route answers `202` as soon as the files are on the backend's
+disk, with the request's id (and a `Location` header to it), and the request waits its turn
+in the **Queue** behind the datasets, trainings and evaluations sent before it. It then has
+the GPU to itself, reading in batches of the size above, while requests answered at once
+still take turns with it batch by batch. Everything an answer at once would refuse - an
+unknown model, a bad `lines`, a `keep` name of another account's - is refused when it is
+sent. An async request may be larger: 1000 pages, 20000 lines and 2048 MB by default
+(`RECOGNIZE_ASYNC_MAX_*`), and an account may have 5 waiting or reading at once
+(`RECOGNIZE_ASYNC_PER_ACCOUNT`; one more is answered `429` with `Retry-After`). Requests
+answered at once are not held up by an account's async ones.
+
+```bash
+curl -H "Authorization: Bearer $DEEPLABEL_TOKEN" \
+  -F async=true -F files=@folio_1.jpg -F files=@folio_2.jpg $DEEPLABEL_URL/api/recognize/pages
+# 202 {"id": "4be0c1a9d2f3", "status": "queued", "place": 3, "files": 2, "done": 0,
+#      "submitted_at": "2026-11-15 10:00:00"}
+curl -H "Authorization: Bearer $DEEPLABEL_TOKEN" $DEEPLABEL_URL/api/recognize/4be0c1a9d2f3
+# 202 {"id": "4be0c1a9d2f3", "status": "running", "files": 2, "done": 0, ...}
+# 200 {"id": "4be0c1a9d2f3", "status": "done", "files": 2, "done": 2, "submitted_at": "...",
+#      "started_at": "...", "finished_at": "...", "expires_at": "...", "models": {...}, "pages": [...]}
+```
+
+`GET /api/recognize/{id}` answers `202` while the request waits (with its `place` in the
+queue) or reads (with the files `done`), and `200` once it finished: with the answer the
+same request answered at once would have given, or `"status": "error"` and the `error` that
+stopped it. Poll it; nothing calls back. Its scans are deleted once read, and its answer
+24 hours after it finished (`RECOGNIZE_KEEP_HOURS`); fetching it does not delete it.
+`DELETE` takes a request off the queue, stops one that is reading after the batch it is
+on, or deletes a finished one's answer; its owner may, and an admin. A request the backend
+stopped under while it read goes on after its last finished batch. The cap is checked when
+an async request is sent and again when it starts.
+
 The client splits any number of files into requests of the allowed size and sends them one
-after another:
+after another; with `--async` (`queued=True`) it sends them as async requests of the async
+size, as many at a time as the account may have, and waits for them:
 
 ```bash
 deeplabel recognize pages ./scans --format page -o page-xml/   # one PAGE XML per scan
 deeplabel recognize lines ./line-images -o lines.json
+deeplabel recognize pages ./volume --async -o volume.json      # waits its turn in the queue
 ```
 
 ```python
 answer = dl.recognize_pages([Path('scans')], format='alto')
 for page in answer['pages']:
     print(page['id'], len(page['lines']))
+
+sent = dl.submit_pages([Path('volume')])        # one async request: {"id": ..., "place": ...}
+answer = dl.wait_recognition(sent['id'])        # its state and, once done, its answer
 ```

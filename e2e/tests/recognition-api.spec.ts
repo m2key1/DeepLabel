@@ -192,7 +192,10 @@ test.describe('Scenario: reading scans through the recognition API', () => {
       expect((await manyLines.json()).detail).toBe('at most 500 lines per request, this one has 501')
 
       const offered = await (await asToken(token, '/api/recognize')).json()
-      expect(offered.limits).toEqual({ pages: 10, lines: 500, megabytes: 100 })
+      expect(offered.limits).toEqual({
+        pages: 10, lines: 500, megabytes: 100,
+        async: { pages: 1000, lines: 20000, megabytes: 2048, unfinished: 5, kept_hours: 24 },
+      })
     })
 })
 
@@ -308,6 +311,66 @@ test.describe('Scenario: a recognition request on the queue', () => {
       await expect.poll(async () => (await backendFetch('/api/queue')).recognition).toEqual([])
       await expect(row).toHaveCount(0)
     })
+})
+
+test.describe('Scenario: a big batch read in its turn', () => {
+  test('sent async, pages are answered at once with an id, and once read in their turn come back as an answer at once gives them',
+    async ({ page }) => {
+      const token = await mint(page, uniqueName('async'))
+      const used = await defaults(token)
+
+      const sent = await recognize(token, 'pages', [
+        { name: 'scan_a.png', png: scanPng(600, 800, 0) },
+        { name: 'scan_b.png', png: scanPng(500, 400, 1) },
+      ], { async: 'true' })
+
+      expect(sent.status).toBe(202)
+      const queued = await sent.json()
+      expect(queued).toEqual({ id: expect.stringMatching(/^[0-9a-f]{12}$/), status: 'queued', place: expect.any(Number),
+                               files: 2, done: 0, submitted_at: expect.any(String) })
+      expect(sent.headers.get('location')).toBe(`/api/recognize/${queued.id}`)
+      await expect.poll(async () => (await asToken(token, `/api/recognize/${queued.id}`)).status,
+                        { timeout: 60_000 }).toBe(200)
+      expect(await (await asToken(token, `/api/recognize/${queued.id}`)).json()).toEqual({
+        id: queued.id, status: 'done', files: 2, done: 2, submitted_at: queued.submitted_at,
+        started_at: expect.any(String), finished_at: expect.any(String), expires_at: expect.any(String),
+        models: used,
+        pages: [pageOf('scan_a.png', 600, 800, LINES_600x800), pageOf('scan_b.png', 500, 400, LINES_500x400)],
+      })
+    })
+
+  test('a waiting request has its place on the Queue page, where its owner cancels it', async ({ page }) => {
+    const token = await mint(page, uniqueName('async queue'))
+    const status = async (id: string) => (await asToken(token, `/api/recognize/${id}`)).status
+    const state = async (id: string) => (await (await asToken(token, `/api/recognize/${id}`)).json()).status
+    // The slow reader takes 15 s over every batch, which holds the GPU for the request behind it.
+    const first = await recognize(token, 'pages', [{ name: 'slow.png', png: scanPng(500, 400, 12) }],
+                                  { async: 'true', ocr_model: String(slowOcrModelId()) })
+    expect(first.status).toBe(202)
+    const ahead = (await first.json()).id as string
+    const second = await recognize(token, 'lines', [{ name: 'one.png', png: scanPng(400, 40, 13) }], { async: 'true' })
+    expect(second.status).toBe(202)
+    const behind = (await second.json()).id as string
+    await expect.poll(() => state(ahead), { timeout: 30_000 }).toBe('running')
+    expect(await state(behind)).toBe('queued')
+
+    await page.goto('/queue')
+    const row = (id: string) => page.locator(`[data-testid="queue-row"][data-id="${id}"]`)
+    await expect(row(ahead)).toHaveAttribute('data-kind', 'recognition')
+    await expect(row(ahead)).toContainText('Recognition request')
+    await expect(row(ahead)).toContainText('0 of 1 page read')
+    await expect(row(behind)).toContainText('Recognition request')
+    await expect(row(behind)).toContainText('1 line image · waiting')
+    await row(behind).getByTestId('queue-cancel').click()
+
+    await expect.poll(() => status(behind)).toBe(404)
+    await expect(row(behind)).toHaveCount(0)
+    await expect(row(ahead)).toHaveCount(1)
+    await expect.poll(() => status(ahead), { timeout: 60_000 }).toBe(200)
+    const read = await (await asToken(token, `/api/recognize/${ahead}`)).json()
+    expect(read.pages[0].lines.map((l: { text: string }) => l.text)).toEqual(READ(6))
+    await expect(row(ahead)).toHaveCount(0)
+  })
 })
 
 test.describe('Scenario: what an account read, and a cap on it', () => {

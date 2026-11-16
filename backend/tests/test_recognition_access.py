@@ -44,12 +44,18 @@ def test_a_recognition_only_token_reaches_nothing_else(client):
 def test_a_recognition_only_token_reaches_the_recognition_routes(client):
     offered = client.get('/api/recognize', headers=RECOGNITION_ONLY)
     assert offered.status_code == 200
-    assert offered.json()['limits'] == {'pages': 10, 'lines': 500, 'megabytes': 100}
+    assert offered.json()['limits'] == {'pages': 10, 'lines': 500, 'megabytes': 100,
+                                        'async': {'pages': 1000, 'lines': 20000, 'megabytes': 2048, 'unfinished': 5,
+                                                  'kept_hours': 24}}
     # No files is the route's own answer, so the request got past every gate to it.
     for path in ('/api/recognize/pages', '/api/recognize/lines'):
         empty = client.post(path, headers=RECOGNITION_ONLY)
         assert empty.status_code == 400
         assert empty.json()['detail'] == 'send at least one image as a files part'
+    # So is an id that names no async request of the caller's.
+    for method in ('get', 'delete'):
+        unknown = getattr(client, method)('/api/recognize/0a1b2c3d4e5f', headers=RECOGNITION_ONLY)
+        assert (unknown.status_code, unknown.json()['detail']) == (404, 'no recognition request of yours has this id')
 
 
 def test_a_readonly_token_may_recognize_but_still_not_write(client):

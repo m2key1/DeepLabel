@@ -48,7 +48,7 @@ async def invalid_geometry(_request: Request, exc: geometry.InvalidGeometry) -> 
 
 WRITE_METHODS = ('POST', 'PATCH', 'PUT', 'DELETE')
 CLIENT_ID = re.compile(r'[A-Za-z0-9-]{1,64}')
-RECOGNITION = re.compile(r'/api/recognize(/[a-z]+)?')
+RECOGNITION = re.compile(r'/api/recognize(/[a-z0-9]+)?')
 
 
 @app.middleware('http')
@@ -63,9 +63,9 @@ async def auth_gate(request: Request, call_next):
         recognition = RECOGNITION.fullmatch(request.url.path) is not None
         if request.headers.get('X-Auth-Scope') == 'recognize' and not recognition:
             return JSONResponse({'detail': 'recognition-only API token'}, status_code=403)
-        # Recognition posts images and stores nothing, so it is not a write: the recognize
-        # capability decides who may, read-only token or not. Its `keep`, which does
-        # store, is gated by the route.
+        # Recognition posts images and keeps nothing of them past the request - an async
+        # one, past its reading - so it is not a write: the recognize capability decides
+        # who may, read-only token or not. Its `keep`, which does store, is gated by the route.
         if request.method in WRITE_METHODS and not recognition:
             if role == 'viewer':
                 return JSONResponse({'detail': 'read-only account'}, status_code=403)

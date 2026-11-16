@@ -133,3 +133,24 @@ def evaluation(conn, evaluation_id: int, now: datetime) -> dict:
     if ev['status'] == 'running' and ev['started_at']:
         took -= (now - _when(ev['started_at'])).total_seconds()
     return _estimate(took, 'history')
+
+
+def recognition(conn, request_id: str, now: datetime) -> dict:
+    """An async recognition request: from its own pace once it has read some, else from
+    how long recent ones of its route took per file."""
+    request = conn.execute('SELECT * FROM recognition_requests WHERE id = ?', (request_id,)).fetchone()
+    running = request['status'] == 'running' and request['started_at']
+    if running:
+        measured = _from_progress(request['started_at'], request['files_done'] / request['files'], now)
+        if measured:
+            return measured
+    recent = conn.execute(
+        "SELECT * FROM recognition_requests WHERE status = 'done' AND route = ? AND started_at IS NOT NULL "
+        'AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?', (request['route'], HISTORY)).fetchall()
+    paces = _paces(recent, lambda row: row['files'])
+    if not paces:
+        return UNKNOWN
+    took = median(paces) * request['files']
+    if running:
+        took -= (now - _when(request['started_at'])).total_seconds()
+    return _estimate(took, 'history')

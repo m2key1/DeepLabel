@@ -1353,7 +1353,8 @@ QUEUE_PROGRESS_FIELDS = ('status', 'counters', 'run_layout', 'run_lines', 'run_o
 @router.get('/api/queue')
 def queue(conn=Depends(get_db), user: dict = Depends(current_user)):
     """Everything the shared GPU worker is running or holding - datasets, local
-    trainings, evaluations - in execution order, plus the cluster's active runs.
+    trainings, evaluations, async recognition requests - in execution order, plus the
+    cluster's active runs and the recognition requests answered at once.
     The queue is global (one GPU), so everyone sees how busy it is - but names of
     datasets a user cannot access are redacted."""
 
@@ -1398,18 +1399,30 @@ def queue(conn=Depends(get_db), user: dict = Depends(current_user)):
                 'owner': ev['owner'], 'status': ev['status'], 'phase': None,
                 'created_at': ev['created_at'], 'queued_at': jobs.queued_since(row), 'started_at': row['started_at']}
 
+    def recognition_entry(row) -> dict:
+        """An async recognition request, whose it is told to its owner alone."""
+        return {'kind': 'recognition', 'id': row['id'], 'name': 'Recognition request',
+                'owner': row['account'] if row['account'] == user['username'] else '',
+                'status': row['status'], 'phase': None, 'created_at': row['created_at'],
+                'queued_at': jobs.queued_since(row), 'started_at': row['started_at'],
+                'recognition': {'route': row['route'], 'files': row['files'], 'done': row['files_done']}}
+
     running = ([dataset_entry(r) for r in conn.execute("SELECT * FROM jobs WHERE status = 'running'")]
                + [training_entry(r) for r in conn.execute(
                    "SELECT * FROM trainings WHERE target = 'local' AND status IN ('preparing', 'running')")]
                + [evaluation_entry(r) for r in conn.execute(
-                   "SELECT * FROM evaluations WHERE status = 'running'")])
+                   "SELECT * FROM evaluations WHERE status = 'running'")]
+               + [recognition_entry(r) for r in conn.execute(
+                   "SELECT * FROM recognition_requests WHERE status = 'running'")])
     waiting = ([(jobs.queue_order(r, 'job', r['seq']), dataset_entry(r))
                 for r in conn.execute("SELECT rowid seq, * FROM jobs WHERE status = 'queued'")]
                + [(jobs.queue_order(r, 'training', r['id']), training_entry(r))
                   for r in conn.execute(
                       "SELECT * FROM trainings WHERE target = 'local' AND status = 'queued'")]
                + [(jobs.queue_order(r, 'evaluation', r['id']), evaluation_entry(r))
-                  for r in conn.execute("SELECT * FROM evaluations WHERE status = 'queued'")])
+                  for r in conn.execute("SELECT * FROM evaluations WHERE status = 'queued'")]
+               + [(jobs.queue_order(r, 'recognition', r['seq']), recognition_entry(r))
+                  for r in conn.execute("SELECT rowid seq, * FROM recognition_requests WHERE status = 'queued'")])
     # Sorted by the worker's own key (jobs.queue_order), so the list shown is the order
     # things will actually run in.
     queued = [entry for _, entry in sorted(waiting, key=lambda pair: pair[0])]
@@ -1445,6 +1458,8 @@ def queue(conn=Depends(get_db), user: dict = Depends(current_user)):
             entry['eta'] = queue_eta.dataset(conn, entry['id'], now, history)
         elif entry['kind'] == 'training':
             entry['eta'] = queue_eta.training(conn, entry['id'], entry['training']['progress_last'], now)
+        elif entry['kind'] == 'recognition':
+            entry['eta'] = queue_eta.recognition(conn, entry['id'], now)
         else:
             entry['eta'] = queue_eta.evaluation(conn, entry['id'], now)
     return {'gpu': {'running': running[0] if running else None, 'queued': queued},

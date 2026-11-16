@@ -19,6 +19,12 @@ describe('the queue timeline', () => {
     expect(placed.map((p) => [p.end - p.start, p.unknown])).toEqual([[60, false], [600, true], [600, false]])
   })
 
+  it('fills an async recognition request by the files it has read, and a waiting one not at all', () => {
+    const request = (status: string, done: number) => entry(1, 60, {
+      kind: 'recognition', status, recognition: { route: 'pages', files: 40, done } })
+    expect(placeLocal(request('running', 10), [request('queued', 0)]).map((p) => p.done)).toEqual([0.25, 0])
+  })
+
   it('starts every cluster run now, side by side', () => {
     expect(placeCluster([entry(1, 3600), entry(2, 60)]).map((p) => [p.start, p.end])).toEqual([[0, 3600], [0, 60]])
   })

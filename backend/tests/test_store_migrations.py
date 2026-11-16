@@ -178,6 +178,8 @@ class TestMigrations:
         'gt_reads': ['completion_tokens', 'created_at', 'error', 'finished_at', 'id', 'job_id', 'label', 'llm_model_id', 'model', 'page_id', 'prompt_hash', 'prompt_tokens', 'raw_text', 'requested_by', 'status'],
         'job_assignees': ['job_id', 'username'],
         'recognition_caps': ['account', 'monthly_lines'],
+        'recognition_requests': ['account', 'batches_done', 'created_at', 'error', 'fields', 'files', 'files_done',
+                                 'finished_at', 'id', 'names', 'queued_at', 'route', 'started_at', 'status'],
         'recognition_usage': ['account', 'day', 'lines', 'pages', 'requests', 'seconds'],
         'job_classes': ['class_id', 'color', 'job_id', 'name', 'priority_rank'],
         'job_documents': ['created_at', 'id', 'idx', 'job_id', 'name', 'text'],

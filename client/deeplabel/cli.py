@@ -74,9 +74,15 @@ def _kept_summary(kept: dict) -> str:
     return summary + (f"; already there: {', '.join(kept['duplicates'])}" if kept['duplicates'] else '')
 
 
+def _recognition_progress(state: dict) -> None:
+    where = f"place {state['place']}" if state['status'] == 'queued' else f"{state['done']} of {state['files']} read"
+    print(f"{state['id']}: {state['status']}, {where}", file=sys.stderr)
+
+
 def cmd_recognize(args, client):
     paths = [Path(p) for p in args.paths]
-    options = {'ocr_model': args.ocr_model, 'decode': args.decode}
+    options = {'ocr_model': args.ocr_model, 'decode': args.decode, 'queued': args.queued,
+               'on_progress': _recognition_progress if args.queued else None}
     if args.what == 'lines':
         answer = client.recognize_lines(paths, **options)
     else:
@@ -282,6 +288,9 @@ def build_parser() -> argparse.ArgumentParser:
     recognize.add_argument('--keep', metavar='DATASET',
                            help='pages only: file them and what was read into this dataset of yours, '
                                 'made if no dataset has the name')
+    recognize.add_argument('--async', dest='queued', action='store_true',
+                           help='send async requests of the larger async size, which wait their turn in the '
+                                "deployment's queue, and wait for them, showing their progress")
     recognize.add_argument('-o', '--output',
                            help='file for the JSON answer; with --format, a folder for the documents')
     recognize.set_defaults(run=cmd_recognize)

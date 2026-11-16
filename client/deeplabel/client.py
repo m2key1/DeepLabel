@@ -32,6 +32,15 @@ class DeepLabelError(RuntimeError):
         super().__init__(f'{status}: {detail}')
 
 
+class RecognitionFailed(DeepLabelError):
+    """An async recognition request that ended in an error rather than an answer."""
+
+    def __init__(self, request_id: str, error: str):
+        super().__init__(0, error)
+        self.request_id = request_id
+        self.args = (f'recognition request {request_id} stopped: {error}',)
+
+
 class DeepLabel:
     """Talks to a DeepLabel deployment with an API token.
 
@@ -255,37 +264,110 @@ class DeepLabel:
         """The models a recognition request can name, the formats, and the limits of one request."""
         return self._request('GET', '/api/recognize')
 
-    def recognize_pages(self, paths: list[Path], *, lines: dict | None = None, **options) -> dict:
+    def recognize_pages(self, paths: list[Path], *, lines: dict | None = None, queued: bool = False,
+                        poll: float | None = None, on_progress=None, **options) -> dict:
         """The lines of whole pages, found and read, without a dataset. Any number of
         pages: they go in requests of the size the deployment allows, one after another,
         and the answers are joined. `lines` gives a page, by file name, its own outlines to
         read instead. Options: layout_model (regions first, the lines found inside each),
         lines_model, ocr_model, decode, convention, format, and keep:
-        the name of a dataset of yours to file the pages in, made if none has the name."""
-        limits = self.recognition_offer()['limits']
-        answer = {'models': {}, 'pages': []}
-        for batch in _recognition_batches(_expand(paths), limits['pages'], limits['megabytes']):
+        the name of a dataset of yours to file the pages in, made if none has the name.
+        With `queued`, the requests are async ones of the larger async size, which wait
+        their turn in the deployment's queue; `on_progress` is given each one's state as
+        it is polled."""
+        limits = self._recognition_limits(queued)
+
+        def fields_of(batch: list[Path]) -> dict:
             fields = _fields(options)
             own = {p.name: lines[p.name] for p in batch if lines and p.name in lines}
             if own:
                 fields['lines'] = json.dumps(own)
-            part = self._recognize('/api/recognize/pages', fields, batch)
+            return fields
+        batches = _recognition_batches(_expand(paths), limits['pages'], limits['megabytes'])
+        answer = {'models': {}, 'pages': []}
+        for part in self._recognized('/api/recognize/pages', batches, fields_of, queued, poll, on_progress):
             answer['models'].update(part['models'])
             answer['pages'] += part['pages']
             if 'kept' in part:
                 answer['kept'] = _kept_together(answer.get('kept'), part['kept'])
         return answer
 
-    def recognize_lines(self, paths: list[Path], **options) -> dict:
+    def recognize_lines(self, paths: list[Path], *, queued: bool = False, poll: float | None = None,
+                        on_progress=None, **options) -> dict:
         """The text of line images, in the order given, in requests of the allowed size.
-        Options: ocr_model, decode, convention."""
-        limits = self.recognition_offer()['limits']
+        Options: ocr_model, decode, convention. `queued` as for recognize_pages."""
+        limits = self._recognition_limits(queued)
+        batches = _recognition_batches(_expand(paths), limits['lines'], limits['megabytes'])
         answer = {'models': {}, 'lines': []}
-        for batch in _recognition_batches(_expand(paths), limits['lines'], limits['megabytes']):
-            part = self._recognize('/api/recognize/lines', _fields(options), batch)
+        for part in self._recognized('/api/recognize/lines', batches, lambda _: _fields(options), queued, poll,
+                                     on_progress):
             answer['models'].update(part['models'])
             answer['lines'] += part['lines']
         return answer
+
+    def submit_pages(self, paths: list[Path], *, lines: dict | None = None, **options) -> dict:
+        """Send pages as one async request, within the async limits. It is answered at once
+        with its id and place in the queue; options as for recognize_pages."""
+        fields = _fields(options)
+        if lines:
+            fields['lines'] = json.dumps(lines)
+        return self._send_files('/api/recognize/pages', {**fields, 'async': 'true'}, _expand(paths))
+
+    def submit_lines(self, paths: list[Path], **options) -> dict:
+        """Send line images as one async request; options as for recognize_lines."""
+        return self._send_files('/api/recognize/lines', {**_fields(options), 'async': 'true'}, _expand(paths))
+
+    def recognition(self, request_id: str) -> dict:
+        """Where an async request stands - its status, place in the queue, files read - and
+        once it is done, its answer as well."""
+        return self._request('GET', f'/api/recognize/{request_id}')
+
+    def wait_recognition(self, request_id: str, poll: float | None = None, on_progress=None) -> dict:
+        """Block until an async request is done, and return it with its answer. One that
+        ended in an error raises it."""
+        while True:
+            state = self.recognition(request_id)
+            if on_progress:
+                on_progress(state)
+            if state['status'] == 'done':
+                return state
+            if state['status'] == 'error':
+                raise RecognitionFailed(request_id, state['error'])
+            time.sleep(POLL_SECONDS if poll is None else poll)
+
+    def delete_recognition(self, request_id: str) -> None:
+        """Take an async request off the queue, or its answer off the deployment."""
+        self._request('DELETE', f'/api/recognize/{request_id}')
+
+    def _recognition_limits(self, queued: bool) -> dict:
+        limits = self.recognition_offer()['limits']
+        return limits['async'] if queued else limits
+
+    def _recognized(self, path: str, batches: list[list[Path]], fields_of, queued: bool, poll: float | None,
+                    on_progress) -> list[dict]:
+        if not queued:
+            return [self._recognize(path, fields_of(batch), batch) for batch in batches]
+        return self._queued(path, batches, fields_of, poll, on_progress)
+
+    def _queued(self, path: str, batches: list[list[Path]], fields_of, poll: float | None, on_progress) -> list[dict]:
+        """Every batch sent as an async request, as many at a time as the account may have
+        unfinished - past that, the next goes once the oldest is done. Answers in the order sent."""
+        waiting: list[tuple[int, str]] = []
+        answers: dict[int, dict] = {}
+        for k, batch in enumerate(batches):
+            while True:
+                try:
+                    sent = self._send_files(path, {**fields_of(batch), 'async': 'true'}, batch)
+                    break
+                except DeepLabelError as error:
+                    if error.status != 429 or not waiting:
+                        raise
+                    oldest, request_id = waiting.pop(0)
+                    answers[oldest] = self.wait_recognition(request_id, poll, on_progress)
+            waiting.append((k, sent['id']))
+        for k, request_id in waiting:
+            answers[k] = self.wait_recognition(request_id, poll, on_progress)
+        return [answers[k] for k in range(len(batches))]
 
     def _recognize(self, path: str, fields: dict, files: list[Path]) -> dict:
         for attempt in range(BUSY_RETRIES):

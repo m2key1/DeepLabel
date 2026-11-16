@@ -210,14 +210,16 @@ source and pages. Changes apply to the next run; nothing already recognised is t
 - Turn a scan that arrived the wrong way up from the page viewer's **Run** menu. Boxes and
   lines turn with it, and turning back restores the original file.
 - The **Queue** page shows everything running or waiting - datasets, trainings,
-  evaluations - on a timeline per GPU and on the cluster, each item as long as it is
+  evaluations, async recognition requests - on a timeline per GPU and on the cluster, each item as long as it is
   expected to take, with the time it should start. Estimates come from the item's own
   progress, else from how long the same kind of work took recently: a dataset is measured
   against recent datasets read by the same OCR model (or, without OCR, against others
   without it, and a map dataset against map datasets), and against all recent ones when
-  there are none yet. Their owner, or an admin, can cancel them there. A recognition API
-  request shows there too while it waits for the GPU or reads, with its pages and how many
-  lines it has read, but never whose it is.
+  there are none yet; an async recognition request against how long recent ones took per
+  file. Their owner, or an admin, can cancel them there. A recognition request names its
+  owner to its owner alone. One answered at once shows apart while it waits for the GPU or
+  reads, with its pages and how many lines it has read, as it takes the GPU between the
+  batches of whatever runs rather than waiting its turn.
 
 ## Reading order
 
@@ -655,7 +657,10 @@ model, the regions are found first and the lines inside each, ordered as a datas
 running that model orders them, for pages with marginalia, headers or several columns. PAGE XML, ALTO,
 hOCR and plain text can come with the lines. Nothing is stored, unless a request asks to
 keep its pages: `keep=<name>` files them, read and unchecked, into your dataset of that
-name, made if no dataset has it, so what the API read can be corrected and trained on. It
+name, made if no dataset has it, so what the API read can be corrected and trained on. A
+big batch - up to 1000 pages by default - can be sent `async=true`: it is answered at once
+with an id, waits its turn in the queue like a dataset, and its answer waits a day to be
+fetched; the command-line tool's `--async` sends and waits for such requests. It
 needs the recognize permission, and a token made **Recognition only** reaches it and nothing
 else, so it can be given to a service outside without opening anyone's datasets to it.
 

@@ -106,13 +106,15 @@ def _next_month(moment: datetime) -> datetime:
     return datetime(year, month + 1, 1, tzinfo=timezone.utc)
 
 
-def record_usage(conn, account: str, pages: int, lines: int, seconds: float, day: str | None = None) -> None:
-    """One answered request, added to its account's row for the day."""
+def record_usage(conn, account: str, pages: int, lines: int, seconds: float, day: str | None = None,
+                 requests: int = 1) -> None:
+    """One answered request - or one batch of an async one, which counts as a request once -
+    added to its account's row for the day."""
     day = day or datetime.now(timezone.utc).strftime('%Y-%m-%d')
-    conn.execute('INSERT INTO recognition_usage (account, day, requests, pages, lines, seconds) VALUES (?,?,1,?,?,?) '
-                 'ON CONFLICT (account, day) DO UPDATE SET requests = requests + 1, pages = pages + excluded.pages, '
-                 'lines = lines + excluded.lines, seconds = seconds + excluded.seconds',
-                 (account, day, pages, lines, seconds))
+    conn.execute('INSERT INTO recognition_usage (account, day, requests, pages, lines, seconds) VALUES (?,?,?,?,?,?) '
+                 'ON CONFLICT (account, day) DO UPDATE SET requests = requests + excluded.requests, '
+                 'pages = pages + excluded.pages, lines = lines + excluded.lines, seconds = seconds + excluded.seconds',
+                 (account, day, requests, pages, lines, seconds))
     conn.commit()
 
 
@@ -187,7 +189,11 @@ def offered(conn, account: str) -> dict:
     this_month = _month(datetime.now(timezone.utc))
     return {'models': {task: [entry(row) for row in _served(conn, task)] for task in ('layout', 'lines', 'ocr')},
             'limits': {'pages': config.RECOGNIZE_MAX_PAGES, 'lines': config.RECOGNIZE_MAX_LINES,
-                       'megabytes': config.RECOGNIZE_MAX_MB},
+                       'megabytes': config.RECOGNIZE_MAX_MB,
+                       'async': {'pages': config.RECOGNIZE_ASYNC_MAX_PAGES, 'lines': config.RECOGNIZE_ASYNC_MAX_LINES,
+                                 'megabytes': config.RECOGNIZE_ASYNC_MAX_MB,
+                                 'unfinished': config.RECOGNIZE_ASYNC_PER_ACCOUNT,
+                                 'kept_hours': config.RECOGNIZE_KEEP_HOURS}},
             'formats': list(FORMATS),
             'usage': {'month': this_month, 'lines': month_usage(conn, account, this_month)['lines'],
                       'cap': cap_of(conn, account)}}
@@ -329,7 +335,7 @@ def _outline(value) -> bool:
         and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in point) for point in value)
 
 
-def _own_lines(raw: str | None, names: list[str]) -> dict[str, list]:
+def _own_lines(raw: str | None, names: list[str], queued: bool = False) -> dict[str, list]:
     if not raw:
         return {}
     try:
@@ -343,13 +349,22 @@ def _own_lines(raw: str | None, names: list[str]) -> dict[str, list]:
             raise Refused(400, f'lines names {name}, which is not a file of this request')
         if not isinstance(outlines, list) or not all(_outline(o) for o in outlines):
             raise Refused(400, f'the lines of {name} must be outlines of at least three [x, y] points')
-    _within_line_limit(sum(len(outlines) for outlines in given.values()))
+    within_limit(sum(len(outlines) for outlines in given.values()), 'lines', queued)
     return given
 
 
-def _within_line_limit(count: int) -> None:
-    if config.RECOGNIZE_MAX_LINES and count > config.RECOGNIZE_MAX_LINES:
-        raise Refused(413, f'at most {config.RECOGNIZE_MAX_LINES} lines per request, this one has {count}')
+def limit_of(unit: str, queued: bool) -> int:
+    """How many pages, lines or MB one request may carry - one answered at once, or one sent
+    async; 0 is no limit."""
+    return {('pages', False): config.RECOGNIZE_MAX_PAGES, ('lines', False): config.RECOGNIZE_MAX_LINES,
+            ('MB', False): config.RECOGNIZE_MAX_MB, ('pages', True): config.RECOGNIZE_ASYNC_MAX_PAGES,
+            ('lines', True): config.RECOGNIZE_ASYNC_MAX_LINES, ('MB', True): config.RECOGNIZE_ASYNC_MAX_MB}[unit, queued]
+
+
+def within_limit(count: int, unit: str, queued: bool) -> None:
+    limit = limit_of(unit, queued)
+    if limit and count > limit:
+        raise Refused(413, f'at most {limit} {unit} per {"async " if queued else ""}request, this one has {count}')
 
 
 Crops = list[tuple[int, Image.Image]]
@@ -426,12 +441,12 @@ class Keeping:
     job_id: str | None
 
 
-def keeping(conn, account: str, name: str, uploads: list[Upload]) -> Keeping:
+def keeping(conn, account: str, name: str, names: list[str]) -> Keeping:
     """The dataset `keep` names, settled before anything is read, as is every file name the
     pages will be kept under."""
-    for upload in uploads:
+    for sent in names:
         try:
-            ingest.require_short_name(_kept_name(upload.name))
+            ingest.require_short_name(_kept_name(sent))
         except ingest.IngestError as error:
             raise Refused(error.status_code, error.detail) from None
     holder = ingest.name_holder(conn, name)
@@ -612,76 +627,100 @@ def _find_regions(conn, layout: Layout, uploads: list[Upload], request: InFlight
     return found, refused
 
 
-def pages(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
-    """Find the lines of whole pages - or take the outlines the caller sent for a page -
-    and read them. With `layout_model`, the pages' regions are found first and their lines
-    inside each. Pages are decoded one at a time - again for their lines, after layout -
-    and only their line crops are kept, so a request of large scans never holds them all
-    at once. With `keep`, the pages and what
-    was read on them are filed into a dataset of the caller's."""
-    check_cap(conn, account)
+@dataclass
+class PagesPlan:
+    """What a request for pages asked for, checked before anything is read."""
+    fields: dict
+    fmt: str
+    target: Keeping | None
+    own: dict[str, list]
+    layout: Layout | None
+    finder: tuple | None
+    reading: Reading
+
+
+def plan_pages(conn, account: str, names: list[str], fields: dict, queued: bool = False) -> PagesPlan:
     fmt = fields.get('format') or 'json'
     if fmt not in FORMATS:
         raise Refused(400, f'format must be one of {", ".join(FORMATS)}')
     keep_name = (fields.get('keep') or '').strip()
-    target = keeping(conn, account, keep_name, uploads) if keep_name else None
-    own = _own_lines(fields.get('lines'), [u.name for u in uploads])
+    target = keeping(conn, account, keep_name, names) if keep_name else None
+    own = _own_lines(fields.get('lines'), names, queued)
     if own and fields.get('layout_model'):
         raise Refused(400, 'send lines or layout_model, not both: with layout the lines are found inside its regions')
     layout = _layout(conn, fields['layout_model']) if fields.get('layout_model') else None
-    finder = _model(conn, 'lines', fields.get('lines_model')) if any(u.name not in own for u in uploads) else None
-    reading = _reading(conn, fields)
+    finder = _model(conn, 'lines', fields.get('lines_model')) if any(name not in own for name in names) else None
+    return PagesPlan(fields, fmt, target, own, layout, finder, _reading(conn, fields))
+
+
+def pages(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
+    """Find the lines of whole pages - or take the outlines the caller sent for a page -
+    and read them, while the caller waits."""
+    check_cap(conn, account)
+    plan = plan_pages(conn, account, [u.name for u in uploads], fields)
+    with admitted(account, pages=len(uploads)) as request:
+        return read_pages(conn, account, plan, uploads, request)
+
+
+def read_pages(conn, account: str, plan: PagesPlan, uploads: list[Upload], request: InFlight, first: int = 0,
+               requests: int = 1) -> dict:
+    """The answer for these pages, the request's usage recorded. With `layout_model`, the
+    pages' regions are found first and their lines inside each. Pages are decoded one at a
+    time - again for their lines, after layout - and only their line crops are kept, so a
+    request of large scans never holds them all at once. With `keep`, the pages and what
+    was read on them are filed into a dataset of the caller's. `first` is the place of the
+    first page in the whole request, for an async one read in batches."""
+    layout, finder, own = plan.layout, plan.finder, plan.own
     models: dict = {}
     laid_out: dict[int, LaidOut] = {}
-    with admitted(account, pages=len(uploads)) as request:
-        regions_of, refused = _find_regions(conn, layout, uploads, request, models) if layout else ({}, {})
-        found_lines = None
-        answered: list[dict] = []
-        lines: list[tuple[object, Crops, dict]] = []
-        for i, upload in enumerate(uploads):
-            if i in refused:
-                answered.append({'id': upload.name, 'error': refused[i]})
-                continue
-            decoded = _decoded(upload)
-            if isinstance(decoded, str):
-                answered.append({'id': upload.name, 'error': decoded})
-                continue
-            image, sent = decoded
-            page = {'id': upload.name, 'width': image.width, 'height': image.height}
-            contexts = None
-            if upload.name in own:
-                outlines = own[upload.name]
+    regions_of, refused = _find_regions(conn, layout, uploads, request, models) if layout else ({}, {})
+    found_lines = None
+    answered: list[dict] = []
+    lines: list[tuple[object, Crops, dict]] = []
+    for i, upload in enumerate(uploads):
+        if i in refused:
+            answered.append({'id': upload.name, 'error': refused[i]})
+            continue
+        decoded = _decoded(upload)
+        if isinstance(decoded, str):
+            answered.append({'id': upload.name, 'error': decoded})
+            continue
+        image, sent = decoded
+        page = {'id': upload.name, 'width': image.width, 'height': image.height}
+        contexts = None
+        if upload.name in own:
+            outlines = own[upload.name]
+        else:
+            if found_lines is None:
+                row, client = finder
+                client.on_wait = request.wait
+                found_lines = RemoteLines(conn, client, row['id'])
+                models['lines'] = {'id': row['id'], 'name': row['name']}
+            if layout is None:
+                outlines = [_in_pixels(o, image.width, image.height)
+                            for o in _swept(found_lines.detect([sent], 'page')[0])]
             else:
-                if found_lines is None:
-                    row, client = finder
-                    client.on_wait = request.wait
-                    found_lines = RemoteLines(conn, client, row['id'])
-                    models['lines'] = {'id': row['id'], 'name': row['name']}
-                if layout is None:
-                    outlines = [_in_pixels(o, image.width, image.height)
-                                for o in _swept(found_lines.detect([sent], 'page')[0])]
-                else:
-                    laid = laid_out[i] = _lay_out(regions_of[i], found_lines, layout.rules, image, sent)
-                    page['regions'] = [{'class': found.class_name, 'role': role,
-                                        'polygon': _in_pixels(geometry.bbox_ring(found.bbox), image.width, image.height),
-                                        'confidence': found.confidence} for found, role in laid.regions]
-                    placed = [(r, k, o) for r, held in enumerate(laid.lines) for k, o in enumerate(held)] + \
-                             [(None, k, o) for k, o in enumerate(laid.loose)]
-                    outlines = [_in_pixels(o, image.width, image.height) for *_, o in placed]
-                    page['held_in'] = [r for r, *_ in placed]
-                    contexts = [{'line_index': k} if r is None else
-                                {'element_class': laid.regions[r][0].class_name, 'line_index': k}
-                                for r, k, _ in placed]
-            for n, outline in enumerate(outlines):
-                crops = [(o, linecrop.crop_line(image, outline, o, mask=config.LINE_CROP_MASK))
-                         for o in ocr_phase.orientations(outline)]
-                lines.append(((i, n), [(o, crop) for o, crop in crops if crop is not None],
-                              contexts[n] if contexts else {'line_index': n}))
-            answered.append({**page, 'lines': outlines})
-            request.lines_total = len(lines)
-        read, models['ocr'] = _read(conn, reading, request, lines) if lines else ({}, None)
+                laid = laid_out[i] = _lay_out(regions_of[i], found_lines, layout.rules, image, sent)
+                page['regions'] = [{'class': found.class_name, 'role': role,
+                                    'polygon': _in_pixels(geometry.bbox_ring(found.bbox), image.width, image.height),
+                                    'confidence': found.confidence} for found, role in laid.regions]
+                placed = [(r, k, o) for r, held in enumerate(laid.lines) for k, o in enumerate(held)] + \
+                         [(None, k, o) for k, o in enumerate(laid.loose)]
+                outlines = [_in_pixels(o, image.width, image.height) for *_, o in placed]
+                page['held_in'] = [r for r, *_ in placed]
+                contexts = [{'line_index': k} if r is None else
+                            {'element_class': laid.regions[r][0].class_name, 'line_index': k}
+                            for r, k, _ in placed]
+        for n, outline in enumerate(outlines):
+            crops = [(o, linecrop.crop_line(image, outline, o, mask=config.LINE_CROP_MASK))
+                     for o in ocr_phase.orientations(outline)]
+            lines.append(((i, n), [(o, crop) for o, crop in crops if crop is not None],
+                          contexts[n] if contexts else {'line_index': n}))
+        answered.append({**page, 'lines': outlines})
+        request.lines_total = len(lines)
+    read, models['ocr'] = _read(conn, plan.reading, request, lines) if lines else ({}, None)
     record_usage(conn, account, pages=sum('error' not in page for page in answered), lines=len(lines),
-                 seconds=request.held())
+                 seconds=request.held(), requests=requests)
     for i, page in enumerate(answered):
         if 'error' in page:
             continue
@@ -689,32 +728,39 @@ def pages(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
         page['lines'] = [{'polygon': outline, 'text': read[(i, n)].text, 'confidence': read[(i, n)].confidence,
                           **({'region': held_in[n]} if held_in is not None else {})}
                          for n, outline in enumerate(page['lines'])]
-        if fmt != 'json':
-            page['document'] = _document(fmt, i, page['id'], page['width'], page['height'], page['lines'],
-                                         page.get('regions', []))
+        if plan.fmt != 'json':
+            page['document'] = _document(plan.fmt, first + i, page['id'], page['width'], page['height'],
+                                         page['lines'], page.get('regions', []))
     if models.get('ocr') is None:
         models.pop('ocr', None)
     answer = {'models': models, 'pages': answered}
-    if target:
-        answer['kept'] = _keep(conn, account, target, uploads, answered, read, fields, own, finder, reading,
-                               layout, laid_out)
+    if plan.target:
+        answer['kept'] = _keep(conn, account, plan.target, uploads, answered, read, plan.fields, own, finder,
+                               plan.reading, layout, laid_out)
     return answer
 
 
 def lines(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
-    """Read line images as they were sent, in the order sent."""
+    """Read line images as they were sent, in the order sent, while the caller waits."""
     check_cap(conn, account)
     reading = _reading(conn, fields)
     with admitted(account, lines=len(uploads)) as request:
-        errors, crops = {}, []
-        for i, upload in enumerate(uploads):
-            decoded = _decoded(upload)
-            if isinstance(decoded, str):
-                errors[i] = decoded
-            else:
-                crops.append((i, [(0, decoded[0])], {'line_index': i}))
-        read, model = _read(conn, reading, request, crops) if crops else ({}, None)
-    record_usage(conn, account, pages=0, lines=len(crops), seconds=request.held())
+        return read_lines(conn, account, reading, uploads, request)
+
+
+def read_lines(conn, account: str, reading: Reading, uploads: list[Upload], request: InFlight, first: int = 0,
+               requests: int = 1) -> dict:
+    """The answer for these line images, the request's usage recorded. `first` is the place
+    of the first image in the whole request, for an async one read in batches."""
+    errors, crops = {}, []
+    for i, upload in enumerate(uploads):
+        decoded = _decoded(upload)
+        if isinstance(decoded, str):
+            errors[i] = decoded
+        else:
+            crops.append((i, [(0, decoded[0])], {'line_index': first + i}))
+    read, model = _read(conn, reading, request, crops) if crops else ({}, None)
+    record_usage(conn, account, pages=0, lines=len(crops), seconds=request.held(), requests=requests)
     answered = [{'id': upload.name, 'error': errors[i]} if i in errors
                 else {'id': upload.name, 'text': read[i].text, 'confidence': read[i].confidence}
                 for i, upload in enumerate(uploads)]

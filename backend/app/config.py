@@ -15,6 +15,7 @@ DATA_DIR = Path(os.environ.get('DATA_DIR', APP_ROOT / 'data')).resolve()
 DB_PATH = DATA_DIR / 'app.db'
 JOBS_DIR = DATA_DIR / 'jobs'
 BLOBS_DIR = DATA_DIR / 'blobs'
+RECOGNITION_DIR = DATA_DIR / 'recognition'
 CORRECTIONS_DIR = Path(os.environ.get('CORRECTIONS_DIR', DATA_DIR / 'corrections'))
 
 
@@ -76,6 +77,11 @@ MAX_IMAGE_PIXELS = _number('MAX_IMAGE_PIXELS', 1_000_000_000, int)
 RECOGNIZE_MAX_PAGES = _number('RECOGNIZE_MAX_PAGES', 10, int)
 RECOGNIZE_MAX_LINES = _number('RECOGNIZE_MAX_LINES', 500, int)
 RECOGNIZE_MAX_MB = _number('RECOGNIZE_MAX_MB', 100, int)
+RECOGNIZE_ASYNC_MAX_PAGES = _number('RECOGNIZE_ASYNC_MAX_PAGES', 1000, int)
+RECOGNIZE_ASYNC_MAX_LINES = _number('RECOGNIZE_ASYNC_MAX_LINES', 20000, int)
+RECOGNIZE_ASYNC_MAX_MB = _number('RECOGNIZE_ASYNC_MAX_MB', 2048, int)
+RECOGNIZE_ASYNC_PER_ACCOUNT = _number('RECOGNIZE_ASYNC_PER_ACCOUNT', 5, int)
+RECOGNIZE_KEEP_HOURS = _number('RECOGNIZE_KEEP_HOURS', 24, float)
 # Where a server-path dataset may be read from; empty means anywhere. See .env.backend.example.
 INGEST_ROOTS = _folders('INGEST_ROOTS')
 PDF_EXTRACT_COVERAGE = _number('PDF_EXTRACT_COVERAGE', 0.9, float)

@@ -498,7 +498,7 @@ export interface ReviewQueue {
 }
 
 export interface QueueEntry {
-  kind: 'dataset' | 'training' | 'evaluation'
+  kind: 'dataset' | 'training' | 'evaluation' | 'recognition'
   id: string | number
   name: string
   owner: string
@@ -524,6 +524,9 @@ export interface QueueEntry {
     progress_last: ProgressPoint | null
     snapshot_progress: { done: number; total: number } | null
   }
+  /** Async recognition requests only: how many files it was sent and how many are read.
+   *  Its owner is named to its owner alone, else empty. */
+  recognition?: { route: 'pages' | 'lines'; files: number; done: number }
 }
 
 export interface PendingReocr {
@@ -2422,6 +2425,12 @@ export function retryTraining(trainingId: number): Promise<Training> {
 }
 
 /** Stop a queued or running evaluation; its row stays, without scores. */
+/** Take an async recognition request off the queue: its owner may, and an admin. */
+export async function cancelRecognition(id: string): Promise<void> {
+  const res = await send(`/api/recognize/${id}`, { method: 'DELETE', headers: { 'X-Client-Id': CLIENT_ID } })
+  if (!res.ok) await failed(res, `DELETE /api/recognize/${id} failed`)
+}
+
 export function cancelEvaluation(evalId: number): Promise<{ ok: boolean }> {
   return request(`/api/evaluations/${evalId}/cancel`, { method: 'POST' })
 }

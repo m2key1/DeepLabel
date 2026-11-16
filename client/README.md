@@ -48,6 +48,7 @@ deeplabel recognize pages ./scans --format page -o page-xml/   # one PAGE XML pe
 deeplabel recognize lines ./line-images          # text of each line image
 deeplabel recognize pages ./scans --keep "Letters 1848"        # ...and keep them as a dataset
 deeplabel recognize pages ./scans --layout-model 4             # regions first, lines inside each
+deeplabel recognize pages ./volume --async -o volume.json      # big batches, read in their turn
 ```
 
 ## Reading without a dataset
@@ -59,7 +60,12 @@ request if no dataset has the name; `answer['kept']` says where, over all the re
 recognize permission; a token made **Recognition only** is the one to give a script that
 should do nothing else. While the account has another request running, a request is sent
 again once the deployment says to; once the account has reached its monthly cap, the
-refusal is raised as a `DeepLabelError` (429) with the date reading resumes.
+refusal is raised as a `DeepLabelError` (429) with the date reading resumes. With
+`queued=True` (`--async`) the files go as async requests of the larger async size, which
+wait their turn in the deployment's queue; the call waits for them, giving each one's state
+to `on_progress`, and one that ended in an error is raised as a `RecognitionFailed`.
+`submit_pages`, `submit_lines`, `wait_recognition` and `delete_recognition` handle a single
+async request.
 
 ```python
 answer = dl.recognize_pages([Path('scans')], format='alto')

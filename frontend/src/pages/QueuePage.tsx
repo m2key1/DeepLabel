@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { cancelEvaluation, cancelJob, cancelTraining, getQueue } from '../api'
+import { cancelEvaluation, cancelJob, cancelRecognition, cancelTraining, getQueue } from '../api'
 import type { PendingReocr, QueueEntry, QueueState, RecognitionRequest } from '../api'
 import { useAuth } from '../auth'
 import { useCrumb } from '../components/NavBar'
@@ -20,7 +20,10 @@ const KIND_LABEL: Record<QueueEntry['kind'], string> = {
   dataset: 'dataset',
   training: 'training',
   evaluation: 'eval',
+  recognition: 'api',
 }
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 function Bar({ fraction }: { fraction: number }) {
   return (
@@ -35,6 +38,17 @@ function Bar({ fraction }: { fraction: number }) {
 
 function ProgressCell({ entry, waiting }: { entry: QueueEntry; waiting: boolean }) {
   const label = 'text-[11px] text-ink-muted'
+  if (entry.kind === 'recognition' && entry.recognition) {
+    const { files, done } = entry.recognition
+    const size = plural(files, entry.recognition.route === 'pages' ? 'page' : 'line image')
+    if (waiting) return <span className={label}>{size} · waiting</span>
+    return (
+      <div className="flex items-center gap-2">
+        <div className="flex-1"><Bar fraction={files ? done / files : 0} /></div>
+        <span className={label}>{done} of {size} read</span>
+      </div>
+    )
+  }
   if (waiting) {
     if (entry.kind === 'training' && entry.training?.target === 'slurm' && entry.status === 'queued') {
       return <span className={label}>submitting to cluster</span>
@@ -79,17 +93,18 @@ function ProgressCell({ entry, waiting }: { entry: QueueEntry; waiting: boolean 
 }
 
 /** Where a row opens: its dataset when the viewer may open it, a run's page, an
- *  evaluation's page - both of which everyone may read. */
+ *  evaluation's page - both of which everyone may read. A recognition request has none. */
 function pageOf(entry: QueueEntry): string | null {
   if (entry.kind === 'training') return `/models/runs/${entry.id}`
   if (entry.kind === 'evaluation') return `/evaluations/${entry.id}`
-  return entry.accessible ? `/jobs/${entry.id}` : null
+  return entry.kind === 'dataset' && entry.accessible ? `/jobs/${entry.id}` : null
 }
 
 const CANCEL: Record<QueueEntry['kind'], (id: QueueEntry['id']) => Promise<unknown>> = {
   dataset: (id) => cancelJob(String(id)),
   training: (id) => cancelTraining(Number(id)),
   evaluation: (id) => cancelEvaluation(Number(id)),
+  recognition: (id) => cancelRecognition(String(id)),
 }
 
 /** A queue is read down in order, so the columns are fixed and the position comes
@@ -194,7 +209,8 @@ function QueueTable({ rows, caption }: { rows: Waiting[]; caption: string }) {
       columns={QUEUE_COLUMNS}
       rows={rows}
       rowKey={({ entry }) => `${entry.kind}-${entry.id}`}
-      rowProps={({ entry, mine }) => ({ 'data-testid': 'queue-row', 'data-kind': entry.kind, 'data-mine': mine || undefined })}
+      rowProps={({ entry, mine }) => ({ 'data-testid': 'queue-row', 'data-kind': entry.kind, 'data-id': String(entry.id),
+                                        'data-mine': mine || undefined })}
     />
   )
 }
@@ -225,8 +241,6 @@ function PendingReocrRow({ pending }: { pending: PendingReocr }) {
     </div>
   )
 }
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 function recognitionProgress(request: RecognitionRequest): string {
   const size = request.pages > 0 ? plural(request.pages, 'page') : plural(request.lines_total, 'line image')
