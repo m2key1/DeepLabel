@@ -34,6 +34,11 @@ class Refused(Exception):
 BUSY_RETRY_SECONDS = 5
 
 
+def flag(value: str | None) -> bool:
+    """A yes/no form field: on when it says so."""
+    return (value or '').strip().lower() in ('true', '1', 'yes')
+
+
 @dataclass
 class Upload:
     name: str
@@ -220,11 +225,13 @@ def _model(conn, task: str, raw_id: str | None):
 
 @dataclass
 class Reading:
-    """How the lines of a request are to be read."""
+    """How the lines of a request are to be read, and whether each is answered with the
+    confidence bands it was read with."""
     model: object
     client: backend_client.BackendClient
     decode: str
     convention: dict[str, bool]
+    characters: bool = False
 
 
 def _reading(conn, fields: dict) -> Reading:
@@ -237,7 +244,7 @@ def _reading(conn, fields: dict) -> Reading:
         convention = conventions.validate({name: True for name in names})
     except ValueError as error:
         raise Refused(400, str(error)) from None
-    return Reading(row, client, mode, convention)
+    return Reading(row, client, mode, convention, flag(fields.get('characters')))
 
 
 def _layout_template(conn, model_id: int):
@@ -376,6 +383,14 @@ class LineRead:
     confidence: float | None
     profile: list | None = None
     orientation: int = 0
+
+
+def _bands(read: LineRead) -> list[dict] | None:
+    """The model's confidence bands for a line, each a stretch of it from its start (0) to
+    its end (1) in the direction it was read, scored 0-1 like the line."""
+    if read.profile is None:
+        return None
+    return [{'x0': band['x0'], 'x1': band['x1'], 'confidence': band['c'] / 100} for band in read.profile]
 
 
 def _read(conn, reading: Reading, request: InFlight, lines: list[tuple[object, Crops, dict]]) -> tuple[dict, dict]:
@@ -726,7 +741,8 @@ def read_pages(conn, account: str, plan: PagesPlan, uploads: list[Upload], reque
             continue
         held_in = page.pop('held_in', None)
         page['lines'] = [{'polygon': outline, 'text': read[(i, n)].text, 'confidence': read[(i, n)].confidence,
-                          **({'region': held_in[n]} if held_in is not None else {})}
+                          **({'region': held_in[n]} if held_in is not None else {}),
+                          **({'characters': _bands(read[(i, n)])} if plan.reading.characters else {})}
                          for n, outline in enumerate(page['lines'])]
         if plan.fmt != 'json':
             page['document'] = _document(plan.fmt, first + i, page['id'], page['width'], page['height'],
@@ -762,6 +778,7 @@ def read_lines(conn, account: str, reading: Reading, uploads: list[Upload], requ
     read, model = _read(conn, reading, request, crops) if crops else ({}, None)
     record_usage(conn, account, pages=0, lines=len(crops), seconds=request.held(), requests=requests)
     answered = [{'id': upload.name, 'error': errors[i]} if i in errors
-                else {'id': upload.name, 'text': read[i].text, 'confidence': read[i].confidence}
+                else {'id': upload.name, 'text': read[i].text, 'confidence': read[i].confidence,
+                      **({'characters': _bands(read[i])} if reading.characters else {})}
                 for i, upload in enumerate(uploads)]
     return {'models': {'ocr': model} if model else {}, 'lines': answered}

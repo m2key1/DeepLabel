@@ -32,7 +32,7 @@ async def _form(request: Request, unit: str) -> tuple[list[UploadFile], dict, bo
     most = max(recognize.limit_of(kind, queued) for kind in ('pages', 'lines') for queued in (False, True))
     form = await request.form(max_files=most + 1, max_fields=20)
     fields = {key: value for key, value in form.multi_items() if isinstance(value, str)}
-    queued = fields.pop('async', '').strip().lower() in ('true', '1', 'yes')
+    queued = recognize.flag(fields.pop('async', None))
     files = [part for part in form.getlist('files') if not isinstance(part, str)]
     if not files:
         raise HTTPException(400, 'send at least one image as a files part')
@@ -102,6 +102,7 @@ async def recognize_pages(request: Request, conn=Depends(get_db), user: dict = D
     regions first and its lines inside each; the answer then carries the regions, and
     each line the region it was found in. Also `lines_model`, `ocr_model`, `decode`,
     `convention` (comma-separated) and `format` (json, page, alto, hocr, txt).
+    `characters=true` gives each line the confidence bands it was read with.
     Nothing of the request is stored, unless `keep` names a dataset of the caller's to
     file the pages and their lines in, which is created if no dataset has that name.
     With `async=true` it is answered 202 at once with its id, waits on disk for its turn
@@ -118,7 +119,7 @@ async def recognize_pages(request: Request, conn=Depends(get_db), user: dict = D
 @router.post('/api/recognize/lines')
 async def recognize_lines(request: Request, conn=Depends(get_db), user: dict = Depends(may_recognize)):
     """Line images in, as `files` parts; their text out, in the order sent. Also
-    `ocr_model`, `decode` and `convention`. Nothing of the request is stored; with
+    `ocr_model`, `decode`, `convention` and `characters`. Nothing of the request is stored; with
     `async=true` it is queued as for pages."""
     files, fields, queued = await _form(request, 'lines')
     if (fields.get('keep') or '').strip():

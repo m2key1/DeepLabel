@@ -270,8 +270,9 @@ class DeepLabel:
         pages: they go in requests of the size the deployment allows, one after another,
         and the answers are joined. `lines` gives a page, by file name, its own outlines to
         read instead. Options: layout_model (regions first, the lines found inside each),
-        lines_model, ocr_model, decode, convention, format, and keep:
-        the name of a dataset of yours to file the pages in, made if none has the name.
+        lines_model, ocr_model, decode, convention, format, characters (each line's
+        confidence bands), and keep: the name of a dataset of yours to file the pages in,
+        made if none has the name.
         With `queued`, the requests are async ones of the larger async size, which wait
         their turn in the deployment's queue; `on_progress` is given each one's state as
         it is polled."""
@@ -295,7 +296,7 @@ class DeepLabel:
     def recognize_lines(self, paths: list[Path], *, queued: bool = False, poll: float | None = None,
                         on_progress=None, **options) -> dict:
         """The text of line images, in the order given, in requests of the allowed size.
-        Options: ocr_model, decode, convention. `queued` as for recognize_pages."""
+        Options: ocr_model, decode, convention, characters. `queued` as for recognize_pages."""
         limits = self._recognition_limits(queued)
         batches = _recognition_batches(_expand(paths), limits['lines'], limits['megabytes'])
         answer = {'models': {}, 'lines': []}

@@ -551,6 +551,19 @@ class TestRecognition:
                          '-o', str(tmp_path / 'answer.json')]) == 0
         assert [form_field(r, 'layout_model') for r in RECORDED if r['method'] == 'POST'] == ['7']
 
+    @pytest.mark.parametrize('what', ['pages', 'lines'])
+    def test_the_cli_asks_for_each_lines_confidence_bands(self, server, tmp_path, monkeypatch, what):
+        from deeplabel import cli
+        monkeypatch.setenv('DEEPLABEL_URL', server)
+        monkeypatch.setenv('DEEPLABEL_TOKEN', 'dlp_test')
+        (tmp_path / 'a.png').write_bytes(b'PNG')
+        RECORDED.clear()
+
+        assert cli.main(['recognize', what, str(tmp_path), '--characters', '-o', str(tmp_path / 'answer.json')]) == 0
+        assert cli.main(['recognize', what, str(tmp_path), '-o', str(tmp_path / 'answer.json')]) == 0
+        assert [(r['path'], form_field(r, 'characters')) for r in RECORDED if r['method'] == 'POST'] == \
+               [(f'/api/recognize/{what}', 'true'), (f'/api/recognize/{what}', None)]
+
     def test_a_refusal_that_lasts_beyond_a_minute_is_reported_rather_than_waited_out(self, client, tmp_path):
         (tmp_path / 'a.png').write_bytes(b'PNG')
         Handler.capped = True

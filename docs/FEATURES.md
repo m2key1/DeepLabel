@@ -655,7 +655,9 @@ lines found on each, in reading order, with their text and outlines in pixels - 
 line images, or a page with its own line outlines, and get only the text. With a layout
 model, the regions are found first and the lines inside each, ordered as a dataset
 running that model orders them, for pages with marginalia, headers or several columns. PAGE XML, ALTO,
-hOCR and plain text can come with the lines. Nothing is stored, unless a request asks to
+hOCR and plain text can come with the lines, and `characters=true` gives each line the
+confidence bands the editor's heat strip is drawn from, so a client can mark where a line is
+doubtful. Nothing is stored, unless a request asks to
 keep its pages: `keep=<name>` files them, read and unchecked, into your dataset of that
 name, made if no dataset has it, so what the API read can be corrected and trained on. A
 big batch - up to 1000 pages by default - can be sent `async=true`: it is answered at once

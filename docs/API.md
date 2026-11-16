@@ -95,6 +95,14 @@ curl -H "Authorization: Bearer $DEEPLABEL_TOKEN" \
 #                        "text": "...", "confidence": 0.97}, ...]}, ...]}
 ```
 
+With `characters=true`, on either route, each line read also carries the confidence bands
+the OCR model read it with, so the doubtful stretches of a line can be marked on its image:
+`"characters": [{"x0": 0.12, "x1": 0.15, "confidence": 0.43}, ...]`. A band runs from `x0`
+to `x1`, fractions of the line from its start (0) to its end (1) in the direction it was
+read, and its confidence is on the line's 0-1 scale. Bands are not paired with the text's
+letters - a model may score an accented letter as two - and a model that gives none answers
+`null`. The documents stay as they are.
+
 Pages sent with `layout_model=<id>` have their regions found first, by that layout model:
 the lines are then found inside each content region and read as that region's. A page
 reads as a dataset running that model reads it: by the template the model belongs to,

@@ -81,8 +81,8 @@ def _recognition_progress(state: dict) -> None:
 
 def cmd_recognize(args, client):
     paths = [Path(p) for p in args.paths]
-    options = {'ocr_model': args.ocr_model, 'decode': args.decode, 'queued': args.queued,
-               'on_progress': _recognition_progress if args.queued else None}
+    options = {'ocr_model': args.ocr_model, 'decode': args.decode, 'characters': args.characters or None,
+               'queued': args.queued, 'on_progress': _recognition_progress if args.queued else None}
     if args.what == 'lines':
         answer = client.recognize_lines(paths, **options)
     else:
@@ -285,6 +285,9 @@ def build_parser() -> argparse.ArgumentParser:
     recognize.add_argument('--lines-model', type=int, help='line model id (pages only); default: the default')
     recognize.add_argument('--ocr-model', type=int, help='OCR model id; default: the default')
     recognize.add_argument('--decode', help='how the OCR model decodes, e.g. beam or greedy')
+    recognize.add_argument('--characters', action='store_true',
+                           help="give each line the confidence bands it was read with, for marking its doubtful "
+                                'stretches')
     recognize.add_argument('--keep', metavar='DATASET',
                            help='pages only: file them and what was read into this dataset of yours, '
                                 'made if no dataset has the name')

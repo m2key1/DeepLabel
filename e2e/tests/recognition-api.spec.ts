@@ -116,6 +116,23 @@ test.describe('Scenario: reading scans through the recognition API', () => {
     })
   })
 
+  test('with characters, each line comes back with the confidence bands it was read with', async ({ page }) => {
+    const token = await mint(page, uniqueName('characters'))
+    const { ocr } = await defaults(token)
+
+    const response = await recognize(token, 'lines', [1, 2].map((n) => ({
+      name: `line_${n}.png`, png: scanPng(400, 40, n),
+    })), { characters: 'true' })
+
+    // The stub reads a line in 20 even bands, each at the line's own confidence.
+    const bands = Array.from({ length: 20 }, (_, i) => ({ x0: i / 20, x1: (i + 1) / 20, confidence: STUB_CONFIDENCE }))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      models: { ocr },
+      lines: READ(2).map((text, i) => ({ id: `line_${i + 1}.png`, text, confidence: STUB_CONFIDENCE, characters: bands })),
+    })
+  })
+
   test('a page sent with its own line outlines is only read, in the order given', async ({ page }) => {
     const token = await mint(page, uniqueName('own lines'))
     const used = await defaults(token)
