@@ -233,9 +233,7 @@ class TestATemplateOfItsOwn:
             _line(_ring(50, 935, 950, 965), 'Marginalia 1', 4),
         ]
 
-    @pytest.mark.parametrize('outside_order', ['from_page', pytest.param('top_to_bottom', marks=pytest.mark.xfail(
-        strict=True, reason='reading_order nests a top-to-bottom template\'s containers in the order detected, '
-                            'not the smaller first, as datasets do too: its own issue'))])
+    @pytest.mark.parametrize('outside_order', ['from_page', 'top_to_bottom'])
     def test_a_container_inside_another_is_filled_first_and_the_containers_are_listed_outside_in(
             self, conn, models, monkeypatch, outside_order):
         # A Row reading across holds two Blocks reading down; the right Block stands higher,
@@ -274,8 +272,6 @@ class TestATemplateOfItsOwn:
                                  _line(_ring(100, 600, 900, 700), 'Page 2', None)]
         assert backend.crops_searched == []
 
-    @pytest.mark.xfail(strict=True, reason='reading_order reads an across container by x alone, so lines stacked '
-                                           'in it keep the order detected, as datasets do too: its own issue')
     def test_lines_stacked_in_a_container_reading_across_are_read_top_to_bottom(self, conn, models, monkeypatch):
         model = _layout_model(conn, 'Letters layout', _template(conn, 'Letters', 'from_page'))
         _serve(monkeypatch, FakeBackend([('Row', [0.05, 0.05, 0.95, 0.95], 0.7)],

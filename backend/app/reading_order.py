@@ -80,7 +80,8 @@ class Rules:
     `schematismus` keeps the Schematismus pipeline's own per-class rules; `pipeline` reads
     the page as that pipeline does, for a template reading top to bottom:
     everything outside the containers top to bottom by its centre, with no guess at leaves
-    or columns, and containers of one kind filled in the order they were detected."""
+    or columns, and the Schematismus containers of one kind filled in the order they were
+    detected."""
     levels: dict = field(default_factory=dict)
     reads: dict = field(default_factory=dict)
     page_number: str | None = None
@@ -169,10 +170,13 @@ def _nest(boxes: list, classes: list, centres: list, widths: list, rules: Rules)
     # Of two containers of one kind, the smaller fills first: a Column drawn over half of
     # a wider one takes that half, and the wider one then holds it. The pipeline never
     # overlaps two of a kind, so for its own boxes the order makes no difference.
-    # The pipeline itself fills them in the order they were detected.
+    # The pipeline itself fills its own in the order they were detected.
     levels = rules.levels
+
+    def as_detected(i):
+        return rules.pipeline and rules.schematismus and classes[i] not in rules.reads
     containers = sorted((i for i in range(len(boxes)) if classes[i] in levels),
-                        key=lambda i: (levels[classes[i]], 0 if rules.pipeline else _area(boxes[i])))
+                        key=lambda i: (levels[classes[i]], 0 if as_detected(i) else _area(boxes[i])))
     loose = [i for i in range(len(centres)) if i >= len(boxes) or classes[i] not in levels]
     by_direction = functools.partial(_arrange_by, rules.reads)
 
@@ -228,18 +232,29 @@ def _arrange(kind: str, items: list, centres: list, widths: list, is_box, class_
 
 
 def _arrange_by(reads: dict, kind: str, items: list, centres: list, widths: list, is_box, class_of) -> list:
-    """A template container's children: side by side from the left when it reads across;
-    from the top when it reads down, items level and beside each other from the left."""
+    """A template container's children: column by column from the left when it reads
+    across, each top to bottom; from the top when it reads down, items level and beside
+    each other from the left."""
     x = lambda i: centres[i][0]
     y = lambda i: centres[i][1]
     if reads.get(kind) == 'across':
-        return sorted(items, key=x)
+        return [i for stack in _stacks(items, widths) for i in sorted(stack, key=y)]
 
     def compare(a, b):
         if abs(y(a) - y(b)) < SAME_ROW and _side_by_side(widths[a], widths[b]):
             return (x(a) > x(b)) - (x(a) < x(b))
         return (y(a) > y(b)) - (y(a) < y(b))
     return sorted(sorted(items, key=y), key=functools.cmp_to_key(compare))
+
+
+def _stacks(items: list, widths: list) -> list[list]:
+    """The columns `items` stand in, from the left: two share one when neither stands
+    beside the other, and so does whatever stands over either of them."""
+    stacks: list[list] = []
+    for i in items:
+        over = [s for s in stacks if any(not _side_by_side(widths[i], widths[j]) for j in s)]
+        stacks = [s for s in stacks if s not in over] + [[i] + [j for s in over for j in s]]
+    return sorted(stacks, key=lambda s: min(widths[j][0] for j in s))
 
 
 def _area(bbox: list) -> float:

@@ -229,8 +229,10 @@ DeepLabel puts the lines of each page in reading order and keeps it up to date a
   two or three columns), or leave it on "work it out" to detect columns from the gaps
   between lines. A single page can override the dataset's setting in the viewer.
 - With layout boxes, containers follow their own rules: a table is read column by column
-  from left to right, a column from top to bottom. Everything outside containers follows
-  the page structure setting.
+  from left to right, a column from top to bottom. A container of your own that reads left
+  to right reads what is stacked in it column by column too, each from top to bottom. Of
+  two containers one inside the other, the inner one takes what it holds. Everything
+  outside containers follows the page structure setting.
 - Lines outside every box are read where they stand, between the boxes around them.
 - Drawing, moving, splitting, merging or deleting a box updates the order at once.
 - A line always sits in the box it lies in: drawing, moving, resizing, reshaping or

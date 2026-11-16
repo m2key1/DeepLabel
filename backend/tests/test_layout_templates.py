@@ -219,6 +219,27 @@ class TestReadingRules:
         order = reading_order.page_order(self.BOXES, ['Panel', 'Body', 'Body', 'Body'], [], rules=rules)
         assert order.content == [3, 1, 2]
 
+    def test_a_container_reading_across_reads_what_is_stacked_in_it_column_by_column(self):
+        # An entry of two lines, the second the shorter, and its amount to the right.
+        boxes = [[0.05, 0.25, 0.95, 0.5], [0.1, 0.3, 0.6, 0.35], [0.1, 0.4, 0.4, 0.45], [0.7, 0.3, 0.9, 0.35]]
+        rules = reading_order.template_rules({'Row': 'across'})
+        order = reading_order.page_order(boxes, ['Row', 'Body', 'Body', 'Body'], [], rules=rules)
+        assert order.content == [1, 2, 3]
+
+    @pytest.mark.parametrize('rules', [
+        reading_order.template_rules({'Section': 'down', 'Row': 'across'}),
+        reading_order.template_rules({'Section': 'down', 'Row': 'across'}, top_to_bottom=True),
+        reading_order.schematismus_rules({'Section': 'down', 'Row': 'across'}, pipeline=True),
+    ], ids=['from the page', 'top to bottom', 'added to schematismus'])
+    def test_of_two_containers_the_smaller_is_filled_first_whichever_was_detected_first(self, rules):
+        # A Section reading down holds a Row reading across, the Section detected first. In
+        # the Row an entry stands lower left and another upper right: across, the left one is
+        # read first; down, the upper one would be.
+        boxes = [[0.05, 0.05, 0.95, 0.95], [0.1, 0.1, 0.45, 0.9], [0.12, 0.3, 0.22, 0.35], [0.3, 0.2, 0.4, 0.25]]
+        order = reading_order.page_order(boxes, ['Section', 'Row', 'Body', 'Body'], [], rules=rules)
+        assert order.containers == [0, 1]
+        assert order.content == [2, 3]
+
     def test_a_schematismus_dataset_reads_by_the_schematismus_rules(self, conn):
         conn.execute("INSERT INTO jobs (id, name, owner) VALUES ('s', 'Volume', 'alice')")
         layout_templates.copy_into(conn, 's')
