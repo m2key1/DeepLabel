@@ -585,8 +585,10 @@ in Authentik, which nobody has to see or visit.
   off, trainings, models, best CER), a year of activity and recent datasets.
 - Click your avatar on your profile to upload and crop a picture.
 - Your settings are tabs on your own profile, grouped as You, Editing, Together and
-  Connections: your password, presence, which overlays a page opens with, keyboard
-  shortcuts, character keyboard, API tokens and language models. Changing your password
+  Connections: your password, presence, which overlays a page opens with (Default
+  visibility), keyboard shortcuts, character keyboard, API tokens and language models. An
+  overlay you toggle in the viewer stays that way on the pages you go on to, until you
+  leave the viewer. Changing your password
   signs out every other browser you are signed in on. Log out sits at the foot of that list and brings you back
   to the sign-in page.
 - The theme (Auto, Light, Dark) is the button in the top bar, on every page.

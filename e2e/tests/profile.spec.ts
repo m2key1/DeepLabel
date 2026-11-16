@@ -124,7 +124,7 @@ test.describe('Scenario: a person\'s profile', () => {
 
       // Your own profile carries your settings as tabs.
       await expect(page.getByTestId('section-nav-item')).toHaveText([
-        'Overview', 'Working together', 'Opening a page', 'Keyboard shortcuts', 'Character keyboard',
+        'Overview', 'Working together', 'Default visibility', 'Keyboard shortcuts', 'Character keyboard',
         'API tokens', 'LLM connections',
       ])
       await page.getByTestId('section-nav-item').filter({ hasText: 'Working together' }).click()

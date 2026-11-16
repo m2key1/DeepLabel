@@ -569,7 +569,11 @@ test.describe('Scenario: what a freshly opened page shows', () => {
     const jobId = await seedCompletedJob(uniqueName('Overlays'), 1, LANDSCAPE)
     const [pageId] = await jobPageIds(jobId)
 
-    await page.goto('/settings?section=opening')
+    await page.goto('/settings?section=visibility')
+    await expect(page.getByRole('heading', { name: 'Default visibility', exact: true })).toBeVisible()
+    await expect(page.getByText('What a page shows when you open it.', { exact: false })).toHaveText(
+      'What a page shows when you open it. An overlay you toggle in the viewer stays that way on the '
+      + 'pages you go on to, until you leave the viewer.')
     await page.getByTestId('overlay-default-lines').check()
     await page.getByTestId('overlay-default-layout').uncheck()
     await expect.poll(overlays(page)).toEqual(
@@ -592,7 +596,7 @@ test.describe('Scenario: what a freshly opened page shows', () => {
     const jobId = await seedCompletedJob(uniqueName('Overlays'), 1, LANDSCAPE)
     const [pageId] = await jobPageIds(jobId)
 
-    await page.goto('/settings?section=opening')
+    await page.goto('/settings?section=visibility')
     await page.getByTestId('overlay-default-order').check()
     await expect.poll(overlays(page)).toMatchObject({ order: true })
 

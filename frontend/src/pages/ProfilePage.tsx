@@ -128,7 +128,7 @@ async function logOut() {
 
 // The settings read in groups by what they are about, under the profile itself.
 const SECTION_GROUP: Record<string, string> = {
-  [OVERVIEW]: 'You', password: 'You', opening: 'Editing', keys: 'Editing', characters: 'Editing',
+  [OVERVIEW]: 'You', password: 'You', visibility: 'Editing', keys: 'Editing', characters: 'Editing',
   together: 'Together', llm: 'Connections', tokens: 'Connections',
 }
 

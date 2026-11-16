@@ -104,11 +104,11 @@ export function useSettingsPanels(): SettingsPanel[] {
         </div>
       </Section>
     ) },
-    { id: 'opening', label: 'Opening a page', node: (
-      <Section title="Opening a page">
+    { id: 'visibility', label: 'Default visibility', node: (
+      <Section title="Default visibility">
         <p className="mb-2 text-xs text-ink-muted">
-          What a freshly opened page shows. Switching an overlay in the viewer stays with that page for
-          as long as it is open; this is where it starts.
+          What a page shows when you open it. An overlay you toggle in the viewer stays that way on the
+          pages you go on to, until you leave the viewer.
         </p>
         <div className="space-y-2 text-sm">
           {PAGE_OVERLAYS.map((overlay) => (
