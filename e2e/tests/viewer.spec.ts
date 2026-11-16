@@ -1116,3 +1116,21 @@ test.describe('Scenario: a narrow panel inside one element', () => {
     await expect(page.getByTestId('delete-line').first()).toBeVisible()
   })
 })
+
+test.describe('Scenario: editing in a window as narrow as a phone', () => {
+  test('the editor stays in place: the rail, the scan and the Edit button are all on screen', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 860 })
+    const { jobId, pageIds } = await seedViewer(1)
+    await openViewer(page, jobId, pageIds[0])
+
+    const edit = page.getByRole('button', { name: /^Edit/ })
+    await edit.click()
+    const layoutComplete = page.getByRole('button', { name: /^Layout complete/ })
+    await expect(layoutComplete).toBeVisible()
+    await expect(layoutComplete).toBeInViewport()
+    await expect(page.getByTestId('overlay-box')).toBeInViewport()
+    await expect(edit).toBeInViewport()
+    // The header's actions scroll along their own row; the frame under it never moves.
+    expect(await page.getByTestId('viewer-header').evaluate((header) => header.parentElement!.scrollLeft)).toBe(0)
+  })
+})

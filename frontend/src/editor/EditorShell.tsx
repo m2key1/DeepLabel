@@ -30,7 +30,7 @@ export function EditorShell({ header, headerTestId, rail, wideRail = false, canv
           {header.left}
         </div>
         {header.actions && (
-          <div className="flex shrink-0 items-center gap-2 pointer-coarse:max-lg:min-w-0 pointer-coarse:max-lg:shrink pointer-coarse:max-lg:basis-full pointer-coarse:max-lg:overflow-x-auto no-scrollbar">
+          <div className="flex min-w-0 items-center gap-2 overflow-x-auto no-scrollbar pointer-coarse:max-lg:basis-full">
             {header.actions}
           </div>
         )}

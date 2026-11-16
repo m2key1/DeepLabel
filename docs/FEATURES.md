@@ -602,7 +602,8 @@ in Authentik, which nobody has to see or visit.
   button. The menu holds Queue (with what is running and queued), Models, Admin, New job,
   your profile and the theme.
 - A phone is a narrow touch screen. A narrow window on a computer gets the menu and the
-  fitting below, but keeps the scan beside the text.
+  fitting below, but keeps the scan beside the text. In the editors, controls that do not
+  fit the header scroll along it, and the editor itself stays in place.
 - Below a tablet's width, on a phone or in a narrow window, the dataset groups slide in from
   the left with the button at the list's edge, and slide out again once one is picked.
 - Below a tablet's width your profile's sections are picked from one menu on top, with Log
