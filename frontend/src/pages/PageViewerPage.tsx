@@ -90,7 +90,7 @@ import { usePageLiveFeed } from '../editor/usePageLiveFeed'
 import { simplifyPolyline } from '../lib/geometry/core'
 import { eraseFromGeom } from '../lib/geometry/region'
 import {
-  REVIEW_THRESHOLDS, classColor, confBadgeClass, getElementPenShapes, getHiddenClasses, setClassColors, getLinePenShape,
+  REVIEW_THRESHOLDS, classColor, classInk, confBadgeClass, getElementPenShapes, getHiddenClasses, setClassColors, getLinePenShape,
   getOcrFrac, setElementPenShapes,
   getPenClass, clampKeyboardSize, clampLoupeHeight, getKeyboardPlace, getKeyboardSize, getLoupeHeight,
   getReadingsFrac, getReadingsOpen, setReadingsOpen, setHiddenClasses, setLoupeHeight,
@@ -4215,8 +4215,9 @@ export function PageViewerPage() {
                         className="cursor-pointer accent-accent"
                       />
                       <span
-                        className="block w-fit rounded border px-1.5 py-0.5 text-[11px] font-medium"
-                        style={{ color: classColor(selected.class_name), borderColor: classColor(selected.class_name) }}
+                        data-testid="selected-class"
+                        className="block w-fit rounded px-1.5 py-0.5 text-[11px] font-medium"
+                        style={{ color: classInk(selected.class_name), backgroundColor: classColor(selected.class_name) }}
                       >
                         {selected.class_name}
                       </span>

@@ -169,6 +169,20 @@ export function classHex(className: string, chosen: string | null): string {
   return `#${[0, 8, 4].map((n) => Math.round(f(n) * 255).toString(16).padStart(2, '0')).join('')}`
 }
 
+// Above this relative luminance black has the higher contrast on a colour, below it white;
+// either way at least 4.58:1.
+const BLACK_READS_ABOVE = 0.179
+
+/** The text colour that reads on a class's colour: black or white, whichever contrasts more. */
+export function classInk(className: string): 'black' | 'white' {
+  const hex = classHex(className, chosenColors.get(className) ?? null)
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > BLACK_READS_ABOVE ? 'black' : 'white'
+}
+
 const HIDDEN_CLASSES_KEY = 'deeplabel.hiddenClasses'
 
 export function getHiddenClasses(): Set<string> {

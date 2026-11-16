@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { Link } from 'react-router-dom'
 
-import { classColor } from '../../util'
+import { classColor, classInk } from '../../util'
 import { avatarFor, subscribeAvatars } from '../../avatars'
 import { profilePath } from '../../people'
 
@@ -42,8 +42,8 @@ export function Avatar({ name, displayName, size = 'md', title, className = '' }
     <span
       title={title ?? (displayName || name)}
       aria-label={name}
-      style={picture ? undefined : { backgroundColor: classColor(name) }}
-      className={`inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold text-white ${SIZES[size]} ${className}`}
+      style={picture ? undefined : { backgroundColor: classColor(name), color: classInk(name) }}
+      className={`inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold ${SIZES[size]} ${className}`}
     >
       {picture
         ? <img src={picture} alt="" className="h-full w-full object-cover" />

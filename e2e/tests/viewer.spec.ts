@@ -480,6 +480,35 @@ test.describe('Scenario: reading a processed page', () => {
       await expect(page.getByTestId('overlay-box').locator('rect[stroke="#dc2626"]')).toHaveCount(1)
     })
 
+  test('a class name on its colour is written dark or white, whichever reads on that colour',
+    async ({ page }) => {
+      const { jobId, pageIds } = await seedViewer(1)
+      const classesUrl = `/api/jobs/${jobId}/layout-classes`
+      const paragraph = (await backendFetch(classesUrl)).classes.find((c: { name: string }) => c.name === 'Paragraph')
+      await backendFetch(`${classesUrl}/${paragraph.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ color: '#1e3a8a' }),
+      })
+      expect((await backendFetch(classesUrl)).classes.find((c: { name: string }) => c.name === 'Paragraph').color)
+        .toBe('#1e3a8a')
+      await openViewer(page, jobId, pageIds[0])
+
+      // Header keeps the amber its name gives, Paragraph has the dark blue chosen for it.
+      await enterEditMode(page)
+      const tags = page.getByTestId('overlay-box').getByTestId('region-label')
+      await expect(tags).toHaveText(['Header', 'Paragraph'])
+      await expect(tags.nth(0)).toHaveCSS('background-color', 'rgb(208, 165, 37)')
+      await expect(tags.nth(0)).toHaveCSS('color', 'rgb(0, 0, 0)')
+      await expect(tags.nth(1)).toHaveCSS('background-color', 'rgb(30, 58, 138)')
+      await expect(tags.nth(1)).toHaveCSS('color', 'rgb(255, 255, 255)')
+
+      await page.getByRole('button', { name: 'View', exact: true }).click()
+      await clickAt(page, [0.5, 0.1])
+      const selectedClass = page.getByTestId('selected-class')
+      await expect(selectedClass).toHaveText('Header')
+      await expect(selectedClass).toHaveCSS('background-color', 'rgb(208, 165, 37)')
+      await expect(selectedClass).toHaveCSS('color', 'rgb(0, 0, 0)')
+    })
+
   // The loupe shows the crop the model reads, but nothing on the page said which region
   // became it - and on a line the backend refuses to straighten that region is an upright
   // box swallowing the neighbours, which is exactly when someone needs to see it.

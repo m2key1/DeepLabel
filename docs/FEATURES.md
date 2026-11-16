@@ -283,7 +283,8 @@ Press `e` to edit the page.
   is the Line eye, and Layout hides or shows every layout class at once (lit while any is
   shown). The eyes stay as you left them, and the view keeps its own setting.
 - Labels tags every box with its class name in edit mode too; Confidence is off while
-  editing and comes back when you return to viewing.
+  editing and comes back when you return to viewing. A tag is written in black or white,
+  whichever reads better on its class colour, also for a colour you chose.
 - Delete a line straight from the text list with its trash can, without entering edit mode.
 - Ctrl+Z undoes and Ctrl+Shift+Z redoes any edit, including merges and splits, in or out of
   edit mode.
