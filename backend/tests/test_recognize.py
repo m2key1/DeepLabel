@@ -106,3 +106,21 @@ def test_an_unknown_format_is_refused(client):
                           files=[('files', ('a.png', _png(4, 4), 'image/png'))], data={'format': 'docx'})
     assert refused.status_code == 400
     assert refused.json()['detail'] == 'format must be one of json, page, alto, hocr, txt'
+
+
+def test_the_caller_sees_where_their_own_request_answered_at_once_stands(client):
+    bob = {**MAY_RECOGNIZE, 'X-Auth-User': 'bob'}
+    assert client.get('/api/recognize/reading', headers=MAY_RECOGNIZE).json() is None
+
+    with recognize.admitted('alice', pages=1) as request:
+        request.stage, request.lines_total, request.lines_read = 'reading', 6, 2
+
+        seen = client.get('/api/recognize/reading', headers=MAY_RECOGNIZE)
+        assert seen.status_code == 200
+        assert seen.json() == {'id': request.id, 'pages': 1, 'lines_total': 6, 'lines_read': 2, 'state': 'reading',
+                               'started_at': request.started_at}
+        assert client.get('/api/recognize/reading', headers=bob).json() is None
+        request.wait(True)
+        assert client.get('/api/recognize/reading', headers=MAY_RECOGNIZE).json()['state'] == 'waiting for the GPU'
+
+    assert client.get('/api/recognize/reading', headers=MAY_RECOGNIZE).json() is None

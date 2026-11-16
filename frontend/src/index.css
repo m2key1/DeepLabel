@@ -48,6 +48,13 @@
     'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-serif: 'Spectral', Georgia, 'Times New Roman', serif;
+
+  /* A band a quarter of its box high, from above the box to below it. */
+  --animate-sweep: sweep 2.4s ease-in-out infinite;
+  @keyframes sweep {
+    from { transform: translateY(-100%); }
+    to { transform: translateY(400%); }
+  }
 }
 
 html {

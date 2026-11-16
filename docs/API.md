@@ -80,6 +80,9 @@ them too, as they write nothing, but cannot keep.
   model with the template it reads by), the OCR models' decodes and conventions, the
   formats, the limits, and your async requests.
 - `GET /api/recognize/{id}` and `DELETE /api/recognize/{id}` - an async request (below).
+- `GET /api/recognize/reading` - your request answered at once while it runs, as the Queue
+  shows it (`state`: finding regions, finding lines, reading or waiting for the GPU, with
+  `lines_read` of `lines_total`), or `null`.
 
 Both take `ocr_model`, `decode` and `convention` (comma-separated); pages also take
 `lines_model` and `format`: `page`, `alto`, `hocr` or `txt` add each page's document beside

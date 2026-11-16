@@ -137,6 +137,13 @@ async def _queue(conn, user: dict, route: str, files: list[UploadFile], fields: 
     return JSONResponse(state, status_code=202, headers={'Location': f'/api/recognize/{state["id"]}'})
 
 
+@router.get('/api/recognize/reading')
+def reading(user: dict = Depends(may_recognize)):
+    """Where the caller's request answered at once stands while it runs - finding regions or
+    lines, reading them, or waiting for the GPU - and null when none runs."""
+    return recognize.reading_of(user['username'])
+
+
 @router.get('/api/recognize/{request_id}')
 async def recognition_request(request_id: str, conn=Depends(get_db), user: dict = Depends(may_recognize)):
     """An async request of the caller's: 202 and where it stands while it waits or reads,

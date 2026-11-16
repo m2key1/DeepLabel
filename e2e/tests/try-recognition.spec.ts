@@ -1,5 +1,5 @@
 import { test, expect } from '../helpers/test'
-import { backendFetch, importStubModel, listRegistryModels, uniqueName } from '../helpers/api'
+import { backendFetch, importStubModel, listRegistryModels, slowOcrModelId, uniqueName } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { seedSession, useSession } from '../helpers/session'
 
@@ -108,5 +108,44 @@ test.describe('Scenario: trying recognition on a scan of your own', () => {
       await expect(page.getByTestId('try-text')).toHaveText(READ(6))
       await expect(page.getByTestId('try-region')).toHaveCount(0)
       await expect(page.getByTestId('try-api')).not.toContainText('layout_model')
+    })
+
+  test('while a scan is read it is swept over with what the read is doing, its old results hidden',
+    async ({ page }) => {
+      test.setTimeout(120_000)
+      const slow = slowOcrModelId()
+      const pill = page.getByTestId('try-reading')
+      await page.goto('/try')
+      await page.getByTestId('try-files').setInputFiles({ name: 'a.png', mimeType: 'image/png', buffer: scanPng(500, 400, 42) })
+      await expect(page.getByTestId('try-text')).toHaveText(READ(6))
+      await expect(page.getByTestId('try-line')).toHaveCount(6)
+      await expect(pill).toHaveCount(0)
+
+      // The slow reader takes 15 s over a batch, so the scan read again stays on its lines that long.
+      await page.getByTestId('try-ocr-model').selectOption(String(slow))
+      await expect(pill).toHaveText(/^Reading 0 of 6 lines · \d+ s$/, { timeout: 10_000 })
+      await expect.poll(async () => (await page.request.get('/api/recognize/reading')).json())
+        .toEqual({ id: expect.any(String), pages: 1, lines_total: 6, lines_read: 0, state: 'reading',
+                   started_at: expect.any(String) })
+      await expect(page.getByTestId('try-sweep')).toBeVisible()
+      await expect(page.getByTestId('try-text-waiting')).toBeVisible()
+      await expect(page.getByTestId('try-line')).toHaveCount(0)
+      await expect(page.getByTestId('try-text')).toHaveCount(0)
+
+      await page.getByTestId('try-files').setInputFiles({ name: 'b.png', mimeType: 'image/png', buffer: scanPng(500, 400, 43) })
+      await page.getByRole('button', { name: 'b.png' }).click()
+      await expect(pill).toHaveText('Next in line')
+
+      await page.getByRole('button', { name: 'a.png' }).click()
+      await expect(page.getByTestId('try-text')).toHaveText(READ(6), { timeout: 30_000 })
+      await expect(page.getByTestId('try-line')).toHaveCount(6)
+      await expect(page.getByTestId('try-sweep')).toHaveCount(0)
+      await expect(page.getByTestId('try-text-waiting')).toHaveCount(0)
+
+      await page.getByRole('button', { name: 'b.png' }).click()
+      await expect(pill).toHaveText(/^Reading 0 of 6 lines · \d+ s$/, { timeout: 10_000 })
+      await expect(page.getByTestId('try-text')).toHaveText(READ(6), { timeout: 30_000 })
+      await expect(pill).toHaveCount(0)
+      expect(await (await page.request.get('/api/recognize/reading')).json()).toBeNull()
     })
 })

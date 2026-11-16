@@ -102,6 +102,13 @@ def in_flight() -> list[dict]:
         return [r.public() for r in sorted(_running.values(), key=lambda r: r.started_at)]
 
 
+def reading_of(account: str) -> dict | None:
+    """The account's request answered at once while it runs, as the queue shows it - for the
+    page that sent it, which has no id for it until it is answered."""
+    with _running_lock:
+        return next((r.public() for r in _running.values() if r.account == account), None)
+
+
 def _month(moment: datetime) -> str:
     return moment.strftime('%Y-%m')
 

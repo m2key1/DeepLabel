@@ -545,7 +545,7 @@ export interface RecognitionRequest {
   pages: number
   lines_total: number
   lines_read: number
-  state: 'finding lines' | 'reading' | 'waiting for the GPU'
+  state: 'finding regions' | 'finding lines' | 'reading' | 'waiting for the GPU'
   started_at: string
 }
 
@@ -596,6 +596,11 @@ export interface Recognized {
 
 export function getRecognitionOffer(): Promise<RecognitionOffer> {
   return request('/api/recognize')
+}
+
+/** Your request answered at once while it runs, or null: the step it is on, for the page waiting for it. */
+export function getRecognitionReading(): Promise<RecognitionRequest | null> {
+  return request('/api/recognize/reading')
 }
 
 /** One scan read through the recognition API; `fields` are its form fields (ocr_model, format...). */

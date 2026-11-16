@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { getRecognitionOffer, recognizePage, saveBlob } from '../api'
-import type { OfferedModel, RecognitionOffer, Recognized } from '../api'
+import { getRecognitionOffer, getRecognitionReading, recognizePage, saveBlob } from '../api'
+import type { OfferedModel, RecognitionOffer, RecognitionRequest, Recognized } from '../api'
 import { useAuth } from '../auth'
 import { DECODE_NAMES } from '../components/job/processing'
 import { useCrumb } from '../components/NavBar'
@@ -34,6 +34,21 @@ interface Scan {
   seconds?: number
   error?: string
   reading: boolean
+  /** When its request went out; unset while it waits in line behind another scan. */
+  sentAt?: number
+}
+
+const STEPS: Record<RecognitionRequest['state'], string> = {
+  'finding regions': 'Finding regions', 'finding lines': 'Finding lines', reading: 'Reading',
+  'waiting for the GPU': 'Waiting for the GPU',
+}
+
+/** What a scan still being read is waiting on, kept short: its step on the backend, or its place in line. */
+function waitingFor(sent: boolean, ahead: number, progress: RecognitionRequest | null): string {
+  if (!sent) return ahead > 1 ? `In line · ${ahead} ahead` : 'Next in line'
+  if (!progress) return 'Sending'
+  if (progress.state === 'reading' && progress.lines_total) return `Reading ${progress.lines_read} of ${progress.lines_total} lines`
+  return STEPS[progress.state]
 }
 
 /** Consecutive lines of one region - or of none, without layout - each run shown under its region. */
@@ -78,6 +93,8 @@ export function TryPage() {
   const [shown, setShown] = useState(0)
   const [hover, setHover] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState<RecognitionRequest | null>(null)
+  const [now, setNow] = useState(() => performance.now())
   // One request at a time - the API reads one per account - and a newer choice of models
   // makes whatever is still waiting on an older one moot.
   const queue = useRef<Promise<void>>(Promise.resolve())
@@ -95,25 +112,44 @@ export function TryPage() {
 
   useEffect(() => () => previews.current.forEach((url) => URL.revokeObjectURL(url)), [])
 
+  // The shown scan's request, while it runs: its step asked of the backend, and its seconds.
+  const sentAt = scans[shown]?.reading ? scans[shown].sentAt : undefined
+  useEffect(() => {
+    setProgress(null)
+    if (sentAt === undefined) return
+    let live = true
+    const tick = () => {
+      setNow(performance.now())
+      getRecognitionReading().then((answer) => { if (live) setProgress(answer) }).catch(() => {})
+    }
+    tick()
+    const timer = window.setInterval(tick, 1000)
+    return () => { live = false; window.clearInterval(timer) }
+  }, [sentAt])
+
   const update = (key: string, change: Partial<Scan>) =>
     setScans((held) => held.map((s) => (s.key === key ? { ...s, ...change } : s)))
 
   const read = (batch: Scan[], chosen: Picks) => {
     const run = generation.current
+    const keys = new Set(batch.map((s) => s.key))
+    setScans((held) => held.map((s) => (keys.has(s.key) ? { ...s, reading: true, sentAt: undefined } : s)))
     for (const scan of batch) {
       queue.current = queue.current.then(async () => {
         if (run !== generation.current) return
-        update(scan.key, { reading: true, error: undefined })
         const started = performance.now()
+        update(scan.key, { error: undefined, sentAt: started })
         try {
           const answer = await recognizePage(scan.file, fieldsOf(chosen))
           if (run !== generation.current) return
           const page = answer.pages[0]
           update(scan.key, page.error
-            ? { reading: false, error: page.error, answer: undefined }
-            : { reading: false, answer, seconds: (performance.now() - started) / 1000 })
+            ? { reading: false, sentAt: undefined, error: page.error, answer: undefined }
+            : { reading: false, sentAt: undefined, answer, seconds: (performance.now() - started) / 1000 })
         } catch (e) {
-          if (run === generation.current) update(scan.key, { reading: false, error: (e as Error).message, answer: undefined })
+          if (run === generation.current) {
+            update(scan.key, { reading: false, sentAt: undefined, error: (e as Error).message, answer: undefined })
+          }
         }
       })
     }
@@ -152,7 +188,12 @@ export function TryPage() {
   }
 
   const scan = scans[shown] as Scan | undefined
-  const page = scan?.answer?.pages[0]
+  // A scan read again shows nothing of its last answer until the new one is in.
+  const page = scan?.reading ? undefined : scan?.answer?.pages[0]
+  const waiting = scan?.reading
+    ? waitingFor(scan.sentAt !== undefined, scans.slice(0, shown).filter((s) => s.reading).length, progress)
+    : null
+  const seconds = scan?.sentAt !== undefined ? Math.max(0, Math.floor((now - scan.sentAt) / 1000)) : null
   const lines = page?.lines ?? []
   const regions = page?.regions ?? []
   const threshold = getReviewConf()
@@ -193,7 +234,26 @@ export function TryPage() {
         <div className="mb-4 flex flex-wrap items-start gap-4">
           <section aria-label="Scan" className="min-w-0 flex-[999_1_480px] rounded-md border border-line bg-surface p-3">
             <div className="relative">
+              {waiting && (
+                // Sticky, so a tall scan scrolled to its foot still shows what it waits on.
+                <div className="pointer-events-none sticky top-0 z-10 flex h-0 items-start justify-center">
+                  <p data-testid="try-reading" role="status"
+                     className="mt-3 flex items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-surface/95 px-2.5 py-1 text-xs text-ink shadow-sm">
+                    <span aria-hidden className="size-3 flex-none rounded-full border-[1.5px] border-accent border-t-transparent motion-safe:animate-spin" />
+                    {waiting}
+                    {seconds !== null && <span aria-hidden className="tabular-nums text-ink-muted"> · {seconds} s</span>}
+                  </p>
+                </div>
+              )}
               <img src={scan.url} alt={scan.file.name} className="block h-auto w-full rounded" />
+              {waiting && (
+                <div data-testid="try-sweep" aria-hidden
+                     className="pointer-events-none absolute inset-0 overflow-hidden rounded bg-surface/45">
+                  {scan.sentAt !== undefined && (
+                    <div className="absolute inset-x-0 top-0 h-1/4 bg-linear-to-b from-transparent via-accent/25 to-transparent motion-safe:animate-sweep motion-reduce:hidden" />
+                  )}
+                </div>
+              )}
               {page?.width && page.height && regions.map((region, r) => {
                 const xs = region.polygon.map(([px]) => px)
                 // A container is tagged at its top right, clear of the box it holds at its top
@@ -245,14 +305,21 @@ export function TryPage() {
             <div>
               <p className="text-sm font-semibold">{scan.file.name}</p>
               <p className="text-xs text-ink-muted">
-                {scan.reading ? 'reading…' : scan.error ? 'not read'
+                {scan.reading ? (scan.sentAt === undefined ? 'in line' : 'reading…') : scan.error ? 'not read'
                   : `${plural(lines.length, 'line')} · read in ${scan.seconds?.toFixed(1)} s · ${
                     [used?.layout && `layout ${used.layout.name}`, used?.lines && `lines ${used.lines.name}`,
                      used?.ocr && `OCR ${used.ocr.name} (${DECODE_NAMES[used.ocr.decode]})`].filter(Boolean).join(', ')}`}
               </p>
             </div>
             {scan.error && <p role="alert" className="text-sm text-danger">{scan.error}</p>}
-            {!scan.error && (
+            {scan.reading && (
+              <div data-testid="try-text-waiting" aria-hidden className="flex flex-col gap-3 border-t border-line px-2 pt-3">
+                {[88, 64, 76, 52, 70].map((width) => (
+                  <span key={width} className="h-2.5 rounded-full bg-line motion-safe:animate-pulse" style={{ width: `${width}%` }} />
+                ))}
+              </div>
+            )}
+            {!scan.error && !scan.reading && (
               <div className="border-t border-line text-sm">
                 {runsOf(lines).map(({ region, start, count }) => {
                   const heading = region === null ? undefined : regions[region]

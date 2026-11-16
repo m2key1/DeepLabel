@@ -670,7 +670,9 @@ else, so it can be given to a service outside without opening anyone's datasets 
 browser: drop up to 10 scans, pick the layout (none by default), line and OCR models, and
 each scan comes back with its lines outlined and numbered in reading order beside their
 text - with a layout model, its regions drawn behind them with their class, and the text
-grouped under each region. Hovering a line marks it
+grouped under each region. While a scan is read, a band sweeps over it and a small note says
+what the read is doing - finding lines, reading 40 of 155 lines, waiting for the GPU - and for
+how many seconds. Hovering a line marks it
 on both sides, lines under your review threshold are tinted as unsure, the text can be copied
 and the PAGE XML downloaded, and the matching `curl` call is shown. Nothing is kept; the
 reads count towards your usage like any API request.
