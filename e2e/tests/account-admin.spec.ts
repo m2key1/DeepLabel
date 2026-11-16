@@ -209,6 +209,33 @@ test.describe('Scenario: how long a token lives, and when it was last used', () 
       expect((await refused.json()).detail).toBe('expires_days must be at least 1')
       expect((await ownTokens(page)).length).toBe(before)
     })
+
+  test('a token lives a year unless its owner picks otherwise, and the tab says in one line what one is for',
+    async ({ browser }) => {
+      // A newcomer, so the tab starts empty.
+      const context = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+      await useSession(context, seedSession('member', uniqueName('newcomer').replace(/\s/g, '-')))
+      const page = await context.newPage()
+      await page.goto('/settings?section=tokens')
+      const tab = page.getByTestId('api-tokens')
+      await expect(tab.getByText(/^Lets scripts/)).toHaveText(
+        'Lets scripts and notebooks use the API as you - send it as Authorization: Bearer <token>. API docs')
+      await expect(tab.getByRole('link', { name: 'API docs' })).toHaveAttribute('href', '/docs')
+      await expect(tab.getByLabel('Access')).toHaveAttribute('title', 'A token can never do more than your role allows.')
+      await expect(tab.getByTestId('empty-state')).toHaveText('No tokens yet.')
+      await expect(tab.getByLabel('Expires').locator('option:checked')).toHaveText('1 year')
+
+      const name = uniqueName('notebook')
+      await tab.getByLabel('Token name').fill(name)
+      await tab.getByRole('button', { name: 'Create token' }).click()
+      await expect(tab.getByTestId('token-row').filter({ hasText: name })).toHaveCount(1)
+      await expect(tab.getByTestId('empty-state')).toHaveCount(0)
+
+      const minted = await tokenNamed(page, name)
+      const lifetime = (parseStamp(minted.expires_at!) - parseStamp(minted.created_at)) / 1000
+      expect(Math.abs(lifetime - 365 * DAY_SECONDS)).toBeLessThanOrEqual(CLOCK_SKEW_SECONDS)
+      await context.close()
+    })
 })
 
 test.describe('Scenario: a token that has expired', () => {

@@ -15,7 +15,6 @@ const EXPIRY_CHOICES: { label: string; days: number | null }[] = [
   { label: 'never', days: null },
 ]
 
-
 const stamp = (value: string | null) => (value ? value.slice(0, 10) : '-')
 
 type Access = 'all' | 'readonly' | 'recognize'
@@ -34,7 +33,7 @@ export function ApiTokens() {
   const [name, setName] = useState('')
   const { can } = useAuth()
   const [access, setAccess] = useState<Access>('all')
-  const [expiryDays, setExpiryDays] = useState<number | null>(90)
+  const [expiryDays, setExpiryDays] = useState<number | null>(365)
   const [minted, setMinted] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -82,14 +81,9 @@ export function ApiTokens() {
       className="mb-0"
       data-testid="api-tokens"
       description={<>
-        For scripts and notebooks: send one as <code>Authorization: Bearer …</code> to reach the same
-        API this page uses. A token acts as you, so it can never do more than your role allows.
-        These are yours alone - nobody else sees them here, not even an admin.
-        The full list of endpoints is at <a href="/docs" className="underline underline-offset-2">/docs</a>.
-        {can('recognize') && <>
-          {' '}A recognition-only token reads scans through <code>/api/recognize</code> and reaches nothing
-          else - the one to give a service outside.
-        </>}
+        Lets scripts and notebooks use the API as you - send it as{' '}
+        <code>Authorization: Bearer &lt;token&gt;</code>.{' '}
+        <a href="/docs" className="underline underline-offset-2">API docs</a>
       </>}
     >
 
@@ -121,6 +115,7 @@ export function ApiTokens() {
           value={access}
           onChange={(e) => setAccess(e.target.value as Access)}
           aria-label="Access"
+          title="A token can never do more than your role allows."
           className="cursor-pointer"
         >
           {ACCESS_CHOICES.filter((c) => c.value !== 'recognize' || can('recognize')).map((c) => (
@@ -157,7 +152,7 @@ export function ApiTokens() {
       {error && <p className="mb-2 text-sm text-danger">{error}</p>}
 
       {tokens.length === 0 ? (
-        <EmptyState>No tokens yet. One minted here reaches the same API this page uses.</EmptyState>
+        <EmptyState>No tokens yet.</EmptyState>
       ) : (
         <div className="overflow-x-auto">
         <table className="w-full whitespace-nowrap text-sm [&_td]:pr-3 [&_th]:pr-3">

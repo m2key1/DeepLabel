@@ -652,7 +652,7 @@ below it. Some commands (navigation, theme) start unbound.
 
 Everything the interface does is available over HTTP. Create a token under your profile's
 **API tokens** tab and send it as `Authorization: Bearer <token>`. A token acts as you, can
-be made read-only, and expires when you choose. The schema is at `/docs` on a running
+be made read-only, and expires in a year unless you choose 30 days, 90 days or never. The schema is at `/docs` on a running
 deployment, and [API.md](API.md) has examples, including the Python client and the
 `deeplabel` command-line tool.
 
