@@ -1,9 +1,16 @@
-import type { ReactNode, RefObject } from 'react'
+import type { MouseEvent, ReactNode, RefObject } from 'react'
 import { Button } from '../components/ui/Button'
 
 export interface Notice {
   text: string
   tone: 'info' | 'error'
+}
+
+/** A hint cut short gets its whole text as a tooltip, worked out as the pointer arrives:
+ *  whether it is cut depends on the window's width at that moment. */
+function wholeIfCut(e: MouseEvent<HTMLElement>) {
+  const hint = e.currentTarget
+  hint.title = hint.scrollWidth > hint.clientWidth ? hint.textContent ?? '' : ''
 }
 
 /** The footer both editors share: the zoom cluster, one sentence saying what the
@@ -29,7 +36,7 @@ export function StatusBar({ zoom, sentence, notice, keys, onShortcuts, provenanc
         </div>
       )}
       {/* The sentence speaks of keys and a mouse, which a phone has neither of. */}
-      <span className="min-w-0 truncate pointer-coarse:max-md:hidden">{sentence}</span>
+      <span onMouseEnter={wholeIfCut} className="min-w-0 truncate pointer-coarse:max-md:hidden">{sentence}</span>
       {notice && (
         <span
           data-testid="editor-notice"
@@ -42,7 +49,7 @@ export function StatusBar({ zoom, sentence, notice, keys, onShortcuts, provenanc
         {provenance}
         {/* The keys a mouse and keyboard reach for, cut short where the footer runs out
             and left out on a phone, which has neither. */}
-        <span className="min-w-0 truncate pointer-coarse:max-md:hidden">{keys}</span>
+        <span onMouseEnter={wholeIfCut} className="min-w-0 truncate pointer-coarse:max-md:hidden">{keys}</span>
         <Button variant="ghost" size="xs" onClick={onShortcuts} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
           ?
         </Button>

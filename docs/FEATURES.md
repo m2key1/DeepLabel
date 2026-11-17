@@ -253,7 +253,9 @@ beside it.
   fits the page to the pane width.
 - The line under the pointer is magnified above the text, showing exactly the crop the OCR
   model reads.
-- The footer names the layout, line and OCR models that produced the page.
+- The footer names the layout, line and OCR models that produced the page, says what the
+  tool in hand does and lists the keys; a hint cut short by a narrow window shows all of it
+  on hover.
 - Copy any scan to the clipboard as an image from the corner of the viewer.
 
 Press `e` to edit the page.

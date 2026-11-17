@@ -1117,6 +1117,34 @@ test.describe('Scenario: a narrow panel inside one element', () => {
   })
 })
 
+test.describe('Scenario: a hint longer than the status bar', () => {
+  test('hovering a hint cut short shows the whole of it, and one that fits gets no tooltip', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 })
+    const { jobId, pageIds } = await seedViewer(1)
+    await openViewer(page, jobId, pageIds[0])
+    await enterEditMode(page)
+
+    const SENTENCE = 'click to select · drag to edit · ⇧click/⇧drag multi · s split · m merge · Entf delete · ⌘Z undo · Esc exit'
+    const KEYS = 'Ctrl+Z undo · Ctrl+Shift+Z redo · Alt/middle-drag pans · Ctrl+wheel zooms · Shift+wheel scrolls left/right'
+    const sentence = page.getByText(SENTENCE, { exact: true })
+    const keys = page.getByText(KEYS, { exact: true })
+    const cut = (hint: Locator) => hint.evaluate((el) => el.scrollWidth > el.clientWidth)
+    // Both are cut short at this width, or there would be nothing for a tooltip to add.
+    expect(await cut(sentence)).toBe(true)
+    expect(await cut(keys)).toBe(true)
+
+    await sentence.hover()
+    await expect(sentence).toHaveAttribute('title', SENTENCE)
+    await keys.hover()
+    await expect(keys).toHaveAttribute('title', KEYS)
+
+    await page.setViewportSize({ width: 2400, height: 900 })
+    await expect.poll(() => cut(sentence)).toBe(false)
+    await sentence.hover()
+    await expect(sentence).toHaveAttribute('title', '')
+  })
+})
+
 test.describe('Scenario: editing in a window as narrow as a phone', () => {
   test('the editor stays in place: the rail, the scan and the Edit button are all on screen', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 860 })
