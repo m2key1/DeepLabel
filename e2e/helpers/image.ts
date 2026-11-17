@@ -39,16 +39,8 @@ export function scanPng(width = 600, height = 800, variant = 0): Buffer {
   ihdr.writeUInt8(8, 8)
   ihdr.writeUInt8(0, 9)
 
-  const rows: Buffer[] = []
-  for (let y = 0; y < height; y++) {
-    const row = Buffer.alloc(width + 1, 0xf2)
-    row[0] = 0
-    const inBar = Math.floor((y + variant * 7) / 40) % 3 === 1
-    if (inBar) {
-      for (let x = Math.floor(width * 0.12); x < width * 0.88; x++) row[x + 1] = 0x30
-    }
-    rows.push(row)
-  }
+  // Each PNG row starts with its filter byte, 0 for none.
+  const rows = scanRows(width, height, variant).map((row) => Buffer.concat([Buffer.alloc(1), row]))
 
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -56,6 +48,44 @@ export function scanPng(width = 600, height = 800, variant = 0): Buffer {
     chunk('IDAT', deflateSync(Buffer.concat(rows))),
     chunk('IEND', Buffer.alloc(0)),
   ])
+}
+
+/** The same scan as an uncompressed 8-bit grayscale TIFF, which Chromium cannot display. */
+export function scanTiff(width = 600, height = 800, variant = 0): Buffer {
+  const SHORT = 3
+  const LONG = 4
+  const entries: [number, number, number][] = [
+    [256, LONG, width], [257, LONG, height], [258, SHORT, 8], [259, SHORT, 1], [262, SHORT, 1],
+    [273, LONG, 0], [277, SHORT, 1], [278, LONG, height], [279, LONG, width * height],
+  ]
+  const header = 8
+  const ifd = Buffer.alloc(2 + entries.length * 12 + 4)
+  const pixelsAt = header + ifd.length
+  ifd.writeUInt16LE(entries.length, 0)
+  entries.forEach(([tag, type, value], i) => {
+    const at = 2 + i * 12
+    ifd.writeUInt16LE(tag, at)
+    ifd.writeUInt16LE(type, at + 2)
+    ifd.writeUInt32LE(1, at + 4)
+    const stored = tag === 273 ? pixelsAt : value
+    if (type === SHORT) ifd.writeUInt16LE(stored, at + 8)
+    else ifd.writeUInt32LE(stored, at + 8)
+  })
+  const start = Buffer.from([0x49, 0x49, 42, 0, header, 0, 0, 0])
+  return Buffer.concat([start, ifd, ...scanRows(width, height, variant)])
+}
+
+function scanRows(width: number, height: number, variant: number): Buffer[] {
+  const rows: Buffer[] = []
+  for (let y = 0; y < height; y++) {
+    const row = Buffer.alloc(width, 0xf2)
+    const inBar = Math.floor((y + variant * 7) / 40) % 3 === 1
+    if (inBar) {
+      for (let x = Math.floor(width * 0.12); x < width * 0.88; x++) row[x] = 0x30
+    }
+    rows.push(row)
+  }
+  return rows
 }
 
 /** An RGB picture whose left half is one colour and right half another, so which half a

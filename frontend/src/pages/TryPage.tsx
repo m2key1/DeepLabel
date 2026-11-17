@@ -13,6 +13,7 @@ import { Select } from '../components/ui/Field'
 import { PageHeader } from '../components/ui/PageHeader'
 import { pageShell } from '../components/ui/page'
 import { classColor, getReviewConf, plural } from '../util'
+import { viewableScan } from '../viewableScan'
 
 const MAX_SCANS = 10
 let scanCount = 0
@@ -29,7 +30,9 @@ interface Picks {
 interface Scan {
   key: string
   file: File
-  url: string
+  /** What is drawn: the file, or a copy decoded on the page where the browser cannot show
+   *  it; unset while that is worked out, null when neither can be drawn. */
+  url?: string | null
   answer?: Recognized
   seconds?: number
   error?: string
@@ -166,11 +169,16 @@ export function TryPage() {
     const room = MAX_SCANS - scans.length
     const taken = Array.from(files ?? []).filter((f) => f.type.startsWith('image/')).slice(0, room)
     if (!taken.length) return
-    const added = taken.map((file) => ({ key: `scan-${(scanCount += 1)}`, file, url: URL.createObjectURL(file), reading: true }))
-    previews.current.push(...added.map((s) => s.url))
+    const added = taken.map((file) => ({ key: `scan-${(scanCount += 1)}`, file, reading: true }))
     setScans((held) => [...held, ...added])
     if (!scans.length) setShown(0)
     read(added, picks)
+    for (const scan of added) {
+      void viewableScan(scan.file).then((url) => {
+        if (url) previews.current.push(url)
+        update(scan.key, { url })
+      })
+    }
   }
 
   const drop = (e: DragEvent) => {
@@ -245,7 +253,14 @@ export function TryPage() {
                   </p>
                 </div>
               )}
-              <img src={scan.url} alt={scan.file.name} className="block h-auto w-full rounded" />
+              {scan.url ? <img src={scan.url} alt={scan.file.name} className="block h-auto w-full rounded" />
+                : scan.url === null && (
+                  <p data-testid="try-unviewable" role="note"
+                     style={{ aspectRatio: page?.width && page.height ? `${page.width} / ${page.height}` : '3 / 4' }}
+                     className="flex items-center justify-center rounded border border-dashed border-line-strong p-4 text-center text-sm text-ink-muted">
+                    This scan&apos;s format cannot be drawn in the browser; what was read is listed beside it.
+                  </p>
+                )}
               {waiting && (
                 <div data-testid="try-sweep" aria-hidden
                      className="pointer-events-none absolute inset-0 overflow-hidden rounded bg-surface/45">
@@ -391,7 +406,7 @@ export function TryPage() {
         {scans.map((s, i) => (
           <button key={s.key} type="button" onClick={() => setShown(i)} aria-label={s.file.name} aria-current={i === shown || undefined}
                   className={`relative h-16 w-12 overflow-hidden rounded border ${i === shown ? 'border-2 border-accent' : 'border-line-strong'}`}>
-            <img src={s.url} alt="" className="h-full w-full object-cover" />
+            {s.url && <img src={s.url} alt="" className="h-full w-full object-cover" />}
             {s.reading && <span className="absolute inset-0 animate-pulse bg-surface/60" />}
             {s.error && <span className="absolute inset-x-0 bottom-0 bg-danger text-[10px] text-on-accent">!</span>}
           </button>

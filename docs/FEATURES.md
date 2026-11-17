@@ -697,5 +697,6 @@ grouped under each region. While a scan is read, a band sweeps over it and a sma
 what the read is doing - finding lines, reading 40 of 155 lines, waiting for the GPU - and for
 how many seconds. Hovering a line marks it
 on both sides, lines under your review threshold are tinted as unsure, the text can be copied
-and the PAGE XML downloaded, and the matching `curl` call is shown. Nothing is kept; the
-reads count towards your usage like any API request.
+and the PAGE XML downloaded, and the matching `curl` call is shown. A TIFF, which most
+browsers cannot show, is decoded on the page to be drawn. Nothing is kept; the reads count
+towards your usage like any API request.

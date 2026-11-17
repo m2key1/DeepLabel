@@ -1,6 +1,6 @@
 import { test, expect } from '../helpers/test'
 import { backendFetch, importStubModel, listRegistryModels, slowOcrModelId, uniqueName } from '../helpers/api'
-import { scanPng } from '../helpers/image'
+import { scanPng, scanTiff } from '../helpers/image'
 import { seedSession, useSession } from '../helpers/session'
 
 const READ = (n: number) => Array.from({ length: n }, (_, i) => `Sample Text line ${i + 1}`)
@@ -62,6 +62,21 @@ test.describe('Scenario: trying recognition on a scan of your own', () => {
       await expect(page.locator('[data-testid="try-line"][data-active]')).toHaveAttribute('data-line', '3')
       await page.locator('[data-testid="try-line"][data-line="5"]').hover({ force: true })
       await expect(page.locator('[data-testid="try-text-line"][data-active]')).toHaveAttribute('data-line', '5')
+    })
+
+  test('a TIFF scan, which the browser cannot show by itself, is drawn with its lines all the same',
+    async ({ page }) => {
+      await page.goto('/try')
+      await page.getByTestId('try-files').setInputFiles({ name: 'leaf.tif', mimeType: 'image/tiff', buffer: scanTiff(600, 800, 40) })
+      await expect(page.getByTestId('try-text')).toHaveText(READ(6))
+      await expect(page.getByTestId('try-line')).toHaveCount(6)
+
+      // Decoded at the scan's own size, in the view and in its thumbnail - not a broken image.
+      const size = (img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight]
+      const shown = page.getByRole('region', { name: 'Scan' }).getByRole('img', { name: 'leaf.tif' })
+      await expect.poll(() => shown.evaluate(size)).toEqual([600, 800])
+      const thumbnail = page.getByRole('button', { name: 'leaf.tif' }).locator('img')
+      await expect.poll(() => thumbnail.evaluate(size)).toEqual([600, 800])
     })
 
   test('the text is copied and the PAGE XML downloaded as the API returns them', async ({ page }) => {
