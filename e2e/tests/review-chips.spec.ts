@@ -58,9 +58,15 @@ test.describe('Scenario: a scan uploaded twice is one page of work', () => {
     await expect(page.getByTestId('page-filter-all')).toHaveText('All · 2')
     await expect(page.getByTestId('page-filter-layout-unchecked')).toHaveText('Not reviewed · 2')
     const row = (filename: string) => page.getByRole('row').filter({ hasText: filename })
-    await expect(row('tile_1_again.png').getByTestId('page-duplicate')).toHaveText('duplicate')
+    const again = row('tile_1_again.png')
+    // The name keeps its cell to itself; the status says it is a duplicate.
+    await expect(again.getByRole('link', { name: 'tile_1_again.png', exact: true })).toBeVisible()
+    await expect(again.getByText('duplicate', { exact: true })).toHaveCount(0)
+    await expect(again.locator('[data-status="duplicate"]')).toHaveText('Duplicate')
+    await expect(again.locator('[data-status="duplicate"]')).toHaveAttribute('title',
+      'The same scan as another page here - not counted, nothing to review')
     await expect(row('tile_2.png')).toHaveCount(1)
-    await expect(row('tile_2.png').getByTestId('page-duplicate')).toHaveCount(0)
+    await expect(row('tile_2.png').locator('[data-status="duplicate"]')).toHaveCount(0)
 
     await page.goto('/')
     const card = page.getByTestId('job-card').filter({ hasText: name })

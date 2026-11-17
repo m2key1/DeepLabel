@@ -118,6 +118,12 @@ const PHASE_LABELS: Record<PagePhase, string> = {
 type SortKey = 'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'checked' | 'confidence'
   | 'llm' | 'regions' | 'test'
 
+// Why a page is left out of the work, on hover over its status.
+const LEFT_OUT: Record<string, string> = {
+  duplicate: 'The same scan as another page here - not counted, nothing to review',
+  unreadable: 'Ingest could not read this scan - not counted, nothing to review',
+}
+
 /** What a run changes on a dataset, as one string two looks at it can be compared by. */
 const runState = (job: Pick<JobWithoutPages, 'status' | 'counters'>) =>
   JSON.stringify([job.status, job.counters])
@@ -821,7 +827,7 @@ export function JobDetailPage() {
     if (!job) return null
     const { label, failed } = pageStatus(status, job)
     return failed ? <FailedPageStatus label={label} error={job.error} />
-      : <span data-status={status} className="text-ink-muted">{label}</span>
+      : <span data-status={status} title={LEFT_OUT[status]} className="text-ink-muted">{label}</span>
   }
 
   const renderCell = (key: SortKey, page: PageSummary) => {
@@ -836,18 +842,6 @@ export function JobDetailPage() {
                   className={`truncate hover:underline ${page.deleted ? 'line-through' : ''}`}>
               {page.filename}
             </Link>
-            {page.status === 'duplicate' && (
-              <Badge data-testid="page-duplicate" className="shrink-0"
-                     title="The same scan as another page here - not counted, nothing to review">
-                duplicate
-              </Badge>
-            )}
-            {page.status === 'unreadable' && (
-              <Badge data-testid="page-unreadable" tone="danger" className="shrink-0"
-                     title="Ingest could not read this scan - not counted, nothing to review">
-                unreadable
-              </Badge>
-            )}
             <NoteTag note={page.note} title={page.filename} canEdit={canEdit} compact onSave={async (text) => {
               const note = await setPageNote(page.id, text)
               refetch()

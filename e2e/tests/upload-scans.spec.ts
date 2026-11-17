@@ -38,8 +38,14 @@ test.describe('Scenario: what ingest makes of the scans uploaded', () => {
     await expect(page.getByTestId('unreadable-pages')).toHaveText(
       'One file could not be read as an image and was left out - delete it and upload a readable copy.'
       + 'b.png could not be read: the file is empty')
-    await expect(page.locator(`[data-page-row="${empty.id}"]`).getByTestId('page-unreadable')).toHaveText('unreadable')
-    await expect(page.getByTestId('page-unreadable')).toHaveCount(1)
+    // The row names the file in full; its status says what is wrong with it.
+    const row = page.locator(`[data-page-row="${empty.id}"]`)
+    const name = row.getByRole('link', { name: 'b.png', exact: true })
+    await expect(name).toBeVisible()
+    expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    const status = row.locator('[data-status="unreadable"]')
+    await expect(status).toHaveText('Unreadable')
+    await expect(status).toHaveAttribute('title', 'Ingest could not read this scan - not counted, nothing to review')
   })
 
   test('unpadded page numbers are put in natural order', async ({ page }) => {
