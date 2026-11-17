@@ -1,18 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DragEvent } from 'react'
+import type { DragEvent, RefObject } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { READING_ORDERS, READING_ORDER_LABEL, getRecognitionOffer, getRecognitionReading, recognizePage, saveBlob } from '../api'
 import type { OfferedModel, RecognitionOffer, RecognitionRequest, Recognized } from '../api'
 import { useAuth } from '../auth'
 import { DECODE_NAMES } from '../components/job/processing'
 import { useCrumb } from '../components/NavBar'
-import { Button } from '../components/ui/Button'
+import { Button, Toggle } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { RegionLabel } from '../components/viewer/RegionLabel'
 import { Select } from '../components/ui/Field'
 import { PageHeader } from '../components/ui/PageHeader'
 import { pageShell } from '../components/ui/page'
-import { classColor, getReviewConf, plural } from '../util'
+import { classColor, getReviewConf, getTryLineNumbers, plural, setTryLineNumbers } from '../util'
 import { viewableScan } from '../viewableScan'
 
 const MAX_SCANS = 10
@@ -87,6 +87,32 @@ function curlFor(name: string, picks: Picks): string {
   return ['curl', ...options.map((o) => `  ${o}`), '  $DEEPLABEL_URL/api/recognize/pages'].join(' \\\n')
 }
 
+/** The scan's height while its text stands beside it, for the text to match; null while the
+ *  two are stacked on a narrow screen, where the text grows with its lines. */
+function useHeightBeside(scanBox: RefObject<HTMLElement | null>, textBox: RefObject<HTMLElement | null>,
+                         shown: string | undefined): number | null {
+  const [height, setHeight] = useState<number | null>(null)
+  useEffect(() => {
+    const scanEl = scanBox.current
+    const textEl = textBox.current
+    if (!scanEl || !textEl?.parentElement) return
+    const measure = () => setHeight(scanEl.offsetTop === textEl.offsetTop ? scanEl.offsetHeight : null)
+    const observer = new ResizeObserver(measure)
+    observer.observe(scanEl)
+    observer.observe(textEl.parentElement)
+    return () => observer.disconnect()
+  }, [scanBox, textBox, shown])
+  return height
+}
+
+/** Scrolls `box` just enough to show `row`, leaving every other scroll where it is. */
+function revealWithin(box: HTMLElement, row: HTMLElement) {
+  const view = box.getBoundingClientRect()
+  const item = row.getBoundingClientRect()
+  if (item.top < view.top) box.scrollTop -= view.top - item.top
+  else if (item.bottom > view.bottom) box.scrollTop += item.bottom - view.bottom
+}
+
 /** Read a scan of one's own through the recognition API and see what came back: the lines
  *  on the scan, their text beside it. Nothing is kept - the scans stay in the browser. */
 export function TryPage() {
@@ -98,6 +124,12 @@ export function TryPage() {
   const [scans, setScans] = useState<Scan[]>([])
   const [shown, setShown] = useState(0)
   const [hover, setHover] = useState<number | null>(null)
+  const [numbered, setNumbered] = useState(getTryLineNumbers)
+  const scanBox = useRef<HTMLElement>(null)
+  const textBox = useRef<HTMLElement>(null)
+  const textScroll = useRef<HTMLDivElement>(null)
+  const outlines = useRef<SVGSVGElement>(null)
+  const heightBeside = useHeightBeside(scanBox, textBox, scans[shown]?.key)
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<RecognitionRequest | null>(null)
   const [now, setNow] = useState(() => performance.now())
@@ -245,7 +277,13 @@ export function TryPage() {
 
       {scan && (
         <div className="mb-4 flex flex-wrap items-start gap-4">
-          <section aria-label="Scan" className="min-w-0 flex-[999_1_480px] rounded-md border border-line bg-surface p-3">
+          <section ref={scanBox} aria-label="Scan" className="min-w-0 flex-[999_1_480px] rounded-md border border-line bg-surface p-3">
+            <div className="mb-2 flex justify-end">
+              <Toggle on={numbered} onClick={() => { setNumbered(!numbered); setTryLineNumbers(!numbered) }}
+                      title="Number the outlines on the scan; the text keeps its numbers either way">
+                Line numbers
+              </Toggle>
+            </div>
             <div className="relative">
               {waiting && (
                 // Sticky, so a tall scan scrolled to its foot still shows what it waits on.
@@ -286,7 +324,7 @@ export function TryPage() {
                 )
               })}
               {page?.width && page.height && (
-                <svg viewBox={`0 0 ${page.width} ${page.height}`} className="absolute inset-0 h-full w-full"
+                <svg ref={outlines} viewBox={`0 0 ${page.width} ${page.height}`} className="absolute inset-0 h-full w-full"
                      aria-label={`${plural(lines.length, 'line')} found`}>
                   {regions.map((region, r) => (
                     <polygon key={`r${r}`} data-testid="try-region" data-class={region.class} data-role={region.role}
@@ -307,12 +345,21 @@ export function TryPage() {
                         <polygon data-testid="try-line" data-line={n} data-active={hover === n || undefined}
                                  points={line.polygon.map(([px, py]) => `${px},${py}`).join(' ')}
                                  vectorEffect="non-scaling-stroke" strokeWidth={hover === n ? 3 : 1.5}
-                                 onMouseEnter={() => setHover(n)} onMouseLeave={() => setHover(null)}
+                                 onMouseEnter={() => {
+                                   setHover(n)
+                                   const row = textScroll.current?.querySelector<HTMLElement>(`[data-line="${n}"]`)
+                                   if (row) revealWithin(textScroll.current!, row)
+                                 }}
+                                 onMouseLeave={() => setHover(null)}
                                  className={`cursor-pointer ${unsure ? 'stroke-warn' : 'stroke-accent'} ${
                                    hover === n ? 'fill-accent/25' : unsure ? 'fill-warn/25' : 'fill-transparent'}`} />
-                        <circle cx={badge} cy={y + r * 0.6} r={r} className={unsure ? 'fill-warn' : 'fill-accent'} />
-                        <text x={badge} y={y + r * 0.6} dy="0.35em" textAnchor="middle" fontSize={r * 1.15}
-                              className="fill-on-accent font-mono">{n}</text>
+                        {numbered && (
+                          <>
+                            <circle cx={badge} cy={y + r * 0.6} r={r} className={unsure ? 'fill-warn' : 'fill-accent'} />
+                            <text x={badge} y={y + r * 0.6} dy="0.35em" textAnchor="middle" fontSize={r * 1.15}
+                                  className="fill-on-accent font-mono">{n}</text>
+                          </>
+                        )}
                       </g>
                     )
                   })}
@@ -321,8 +368,9 @@ export function TryPage() {
             </div>
           </section>
 
-          <section aria-label="Text" className="flex min-w-0 flex-[1_1_340px] flex-col gap-3 rounded-md border border-line bg-surface p-3">
-            <div>
+          <section ref={textBox} aria-label="Text" style={{ height: heightBeside ?? undefined }}
+                   className="flex min-w-0 flex-[1_1_340px] flex-col gap-3 rounded-md border border-line bg-surface p-3">
+            <div className="shrink-0">
               <p className="text-sm font-semibold">{scan.file.name}</p>
               <p className="text-xs text-ink-muted">
                 {scan.reading ? (scan.sentAt === undefined ? 'in line' : 'reading…') : scan.error ? 'not read'
@@ -331,71 +379,76 @@ export function TryPage() {
                      used?.ocr && `OCR ${used.ocr.name} (${DECODE_NAMES[used.ocr.decode]})`].filter(Boolean).join(', ')}`}
               </p>
             </div>
-            {scan.error && <p role="alert" className="text-sm text-danger">{scan.error}</p>}
-            {scan.reading && (
-              <div data-testid="try-text-waiting" aria-hidden className="flex flex-col gap-3 border-t border-line px-2 pt-3">
-                {[88, 64, 76, 52, 70].map((width) => (
-                  <span key={width} className="h-2.5 rounded-full bg-line motion-safe:animate-pulse" style={{ width: `${width}%` }} />
-                ))}
-              </div>
-            )}
-            {!scan.error && !scan.reading && (
-              <div className="border-t border-line text-sm">
-                {runsOf(lines).map(({ region, start, count }) => {
-                  const heading = region === null ? undefined : regions[region]
-                  return (
-                    <section key={start}>
-                      {heading && (
-                        <h3 data-testid="try-region-label"
-                            className="flex items-center gap-1.5 px-2 pb-1 pt-3 text-xs font-medium text-ink-muted">
-                          <span aria-hidden className="size-2 flex-none rounded-sm" style={{ backgroundColor: classColor(heading.class) }} />
-                          {heading.class}
-                        </h3>
-                      )}
-                      <ol start={start + 1}>
-                        {lines.slice(start, start + count).map((line, k) => {
-                          const n = start + k + 1
-                          const unsure = line.confidence !== null && line.confidence < threshold
-                          return (
-                            <li key={n} data-testid="try-text-line" data-line={n} data-unsure={unsure || undefined}
-                                data-active={hover === n || undefined}
-                                onMouseEnter={() => setHover(n)} onMouseLeave={() => setHover(null)}
-                                className={`flex gap-2.5 border-b border-line px-2 py-1.5 ${
-                                  hover === n ? 'bg-accent-wash text-accent-ink shadow-[inset_3px_0_0_var(--color-accent)]'
-                                    : unsure ? 'bg-warn/15' : ''}`}>
-                              <span className={`w-5 flex-none pt-px text-right font-mono text-xs ${unsure ? 'text-warn' : 'text-ink-subtle'}`}>{n}</span>
-                              <span data-testid="try-text">{line.text}</span>
-                              {unsure && (
-                                <span className="ml-auto whitespace-nowrap text-xs text-warn">
-                                  unsure · {Math.round((line.confidence ?? 0) * 100)} %
-                                </span>
-                              )}
-                            </li>
-                          )
-                        })}
-                      </ol>
-                    </section>
-                  )
-                })}
-              </div>
-            )}
-            {page?.lines && (
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={() => void navigator.clipboard?.writeText(lines.map((l) => l.text).join('\n'))}>
-                  Copy text
-                </Button>
-                <Button size="sm" disabled={!page.document}
-                        onClick={() => saveBlob(new Blob([page.document ?? ''], { type: 'application/xml' }), `${stem(scan.file.name)}.xml`)}>
-                  Download PAGE XML
-                </Button>
-              </div>
-            )}
-            <details open className="rounded border border-line bg-ground">
-              <summary className="cursor-pointer px-2.5 py-2 text-xs font-medium">Do this with the API</summary>
-              <pre data-testid="try-api" className="overflow-x-auto px-2.5 pb-2.5 font-mono text-xs text-ink-muted">
-                {curlFor(scan.file.name, picks)}
-              </pre>
-            </details>
+            <div ref={textScroll} data-testid="try-text-scroll"
+                 className="-mx-3 -mb-3 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pb-3">
+              {scan.error && <p role="alert" className="text-sm text-danger">{scan.error}</p>}
+              {scan.reading && (
+                <div data-testid="try-text-waiting" aria-hidden className="flex flex-col gap-3 border-t border-line px-2 pt-3">
+                  {[88, 64, 76, 52, 70].map((width) => (
+                    <span key={width} className="h-2.5 rounded-full bg-line motion-safe:animate-pulse" style={{ width: `${width}%` }} />
+                  ))}
+                </div>
+              )}
+              {!scan.error && !scan.reading && (
+                <div className="border-t border-line text-sm">
+                  {runsOf(lines).map(({ region, start, count }) => {
+                    const heading = region === null ? undefined : regions[region]
+                    return (
+                      <section key={start}>
+                        {heading && (
+                          <h3 data-testid="try-region-label"
+                              className="flex items-center gap-1.5 px-2 pb-1 pt-3 text-xs font-medium text-ink-muted">
+                            <span aria-hidden className="size-2 flex-none rounded-sm" style={{ backgroundColor: classColor(heading.class) }} />
+                            {heading.class}
+                          </h3>
+                        )}
+                        <ol start={start + 1}>
+                          {lines.slice(start, start + count).map((line, k) => {
+                            const n = start + k + 1
+                            const unsure = line.confidence !== null && line.confidence < threshold
+                            return (
+                              <li key={n} data-testid="try-text-line" data-line={n} data-unsure={unsure || undefined}
+                                  data-active={hover === n || undefined}
+                                  onMouseEnter={() => setHover(n)} onMouseLeave={() => setHover(null)}
+                                  onClick={() => outlines.current?.querySelector(`[data-line="${n}"]`)
+                                    ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })}
+                                  className={`flex cursor-pointer gap-2.5 border-b border-line px-2 py-1.5 ${
+                                    hover === n ? 'bg-accent-wash text-accent-ink shadow-[inset_3px_0_0_var(--color-accent)]'
+                                      : unsure ? 'bg-warn/15' : ''}`}>
+                                <span className={`w-5 flex-none pt-px text-right font-mono text-xs ${unsure ? 'text-warn' : 'text-ink-subtle'}`}>{n}</span>
+                                <span data-testid="try-text">{line.text}</span>
+                                {unsure && (
+                                  <span className="ml-auto whitespace-nowrap text-xs text-warn">
+                                    unsure · {Math.round((line.confidence ?? 0) * 100)} %
+                                  </span>
+                                )}
+                              </li>
+                            )
+                          })}
+                        </ol>
+                      </section>
+                    )
+                  })}
+                </div>
+              )}
+              {page?.lines && (
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={() => void navigator.clipboard?.writeText(lines.map((l) => l.text).join('\n'))}>
+                    Copy text
+                  </Button>
+                  <Button size="sm" disabled={!page.document}
+                          onClick={() => saveBlob(new Blob([page.document ?? ''], { type: 'application/xml' }), `${stem(scan.file.name)}.xml`)}>
+                    Download PAGE XML
+                  </Button>
+                </div>
+              )}
+              <details open className="rounded border border-line bg-ground">
+                <summary className="cursor-pointer px-2.5 py-2 text-xs font-medium">Do this with the API</summary>
+                <pre data-testid="try-api" className="overflow-x-auto px-2.5 pb-2.5 font-mono text-xs text-ink-muted">
+                  {curlFor(scan.file.name, picks)}
+                </pre>
+              </details>
+            </div>
           </section>
         </div>
       )}

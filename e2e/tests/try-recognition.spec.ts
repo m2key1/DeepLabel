@@ -127,6 +127,71 @@ test.describe('Scenario: trying recognition on a scan of your own', () => {
     await expect(page.getByTestId('try-api')).toContainText('-F reading_order=1x2')
   })
 
+  test('beside the scan the text is as tall as it and scrolls itself to the outline under the pointer',
+    async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 })
+      const reader = (await listRegistryModels()).find((m) => m.task === 'ocr' && m.is_default)!
+      // Wide and low, so its lines, the buttons and the API call outgrow it.
+      const png = scanPng(1600, 400, 40)
+      const count = (await answered(png, reader.id)).length
+      await page.goto('/try')
+      await page.getByTestId('try-files').setInputFiles({ name: 'wide.png', mimeType: 'image/png', buffer: png })
+      await expect(page.getByTestId('try-text-line')).toHaveCount(count)
+
+      const scan = page.getByRole('region', { name: 'Scan' })
+      const text = page.getByRole('region', { name: 'Text' })
+      const height = async (region: typeof scan) => Math.round((await region.boundingBox())!.height)
+      await expect.poll(() => height(text)).toBe(await height(scan))
+      const list = page.getByTestId('try-text-scroll')
+      expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+
+      const inList = (n: number) => list.evaluate((el, line) => {
+        const row = el.querySelector(`[data-line="${line}"]`)!.getBoundingClientRect()
+        const box = el.getBoundingClientRect()
+        return row.top >= box.top && row.bottom <= box.bottom
+      }, n)
+      const main = page.getByTestId('app-main')
+      const pageScroll = await main.evaluate((el) => el.scrollTop)
+      await list.evaluate((el) => { el.scrollTop = el.scrollHeight })
+      expect(await inList(1)).toBe(false)
+      await page.locator('[data-testid="try-line"][data-line="1"]').hover({ force: true })
+      await expect.poll(() => inList(1)).toBe(true)
+      await expect(page.locator('[data-testid="try-text-line"][data-active]')).toHaveAttribute('data-line', '1')
+      // Only the text column moved: the page stayed where it was under the pointer.
+      expect(await main.evaluate((el) => el.scrollTop)).toBe(pageScroll)
+    })
+
+  test('a click on a line brings its outline into view, and the line numbers on the scan can be hidden',
+    async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 700 })
+      const png = scanPng(600, 2400, 40)
+      await page.goto('/try')
+      await page.getByTestId('try-files').setInputFiles({ name: 'tall.png', mimeType: 'image/png', buffer: png })
+      const lines = page.getByTestId('try-text-line')
+      await expect(lines.first()).toBeVisible()
+      const count = await lines.count()
+      const last = page.locator(`[data-testid="try-line"][data-line="${count}"]`)
+      await expect(last).not.toBeInViewport()
+      await page.locator(`[data-testid="try-text-line"][data-line="${count}"]`).click()
+      await expect(last).toBeInViewport()
+
+      const badges = page.getByRole('region', { name: 'Scan' }).locator('svg circle')
+      await expect(badges).toHaveCount(count)
+      const numbers = page.getByRole('button', { name: 'Line numbers' })
+      await expect(numbers).toHaveAttribute('aria-pressed', 'true')
+      await numbers.click()
+      await expect(badges).toHaveCount(0)
+      // The outlines stay, and the text keeps its numbers.
+      await expect(page.getByTestId('try-line')).toHaveCount(count)
+      await expect(lines.first()).toContainText('1')
+      // Remembered by the browser for the next scan.
+      await page.reload()
+      await page.getByTestId('try-files').setInputFiles({ name: 'tall.png', mimeType: 'image/png', buffer: png })
+      await expect(page.getByTestId('try-line')).toHaveCount(count)
+      await expect(badges).toHaveCount(0)
+      await expect(page.getByRole('button', { name: 'Line numbers' })).toHaveAttribute('aria-pressed', 'false')
+    })
+
   test('the text is copied and the PAGE XML downloaded as the API returns them', async ({ page }) => {
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.goto('/try')

@@ -692,12 +692,14 @@ new model reaches it only once ticked; a token left on **All models** reaches ev
 **Try** in the top bar (or **Try this model** on an OCR model's page) does the same in the
 browser: drop up to 10 scans, pick the layout (none by default), line and OCR models, the
 OCR decoding and the reading order (the choices a dataset has), and each scan comes back
-with its lines outlined and numbered in reading order beside their
-text - with a layout model, its regions drawn behind them with their class, and the text
-grouped under each region. While a scan is read, a band sweeps over it and a small note says
-what the read is doing - finding lines, reading 40 of 155 lines, waiting for the GPU - and for
-how many seconds. Scans dropped later are shown at once, from the first of them. Hovering a
-line marks it on both sides, lines under your review threshold are tinted as unsure, the text can be copied
-and the PAGE XML downloaded, and the matching `curl` call is shown. A TIFF, which most
-browsers cannot show, is decoded on the page to be drawn. Nothing is kept; the reads count
-towards your usage like any API request.
+with its lines outlined and numbered in reading order beside their text - with a layout
+model, its regions drawn behind them with their class, and the text grouped under each
+region. While a scan is read, a band sweeps over it and a small note says what the read is
+doing - finding lines, reading 40 of 155 lines, waiting for the GPU - and for how many
+seconds. Scans dropped later are shown at once, from the first of them. Beside the scan, the
+text is as tall as the scan and scrolls on its own. Hovering a line marks it on both sides,
+and hovering an outline scrolls the text to its line; clicking a line brings its outline
+into view, and **Line numbers** hides the numbers on the scan. Lines under your review
+threshold are tinted as unsure, the text can be copied and the PAGE XML downloaded, and the
+matching `curl` call is shown. A TIFF, which most browsers cannot show, is decoded on the
+page to be drawn. Nothing is kept; the reads count towards your usage like any API request.

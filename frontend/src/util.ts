@@ -237,6 +237,17 @@ export function setReadingsOpen(open: boolean): void {
   localStorage.setItem(READINGS_OPEN_KEY, String(open))
 }
 
+// Whether the Try page numbers the outlines on its scan; the text keeps its numbers either way.
+const TRY_LINE_NUMBERS_KEY = 'deeplabel.tryLineNumbers'
+
+export function getTryLineNumbers(): boolean {
+  return localStorage.getItem(TRY_LINE_NUMBERS_KEY) !== 'false'
+}
+
+export function setTryLineNumbers(on: boolean): void {
+  localStorage.setItem(TRY_LINE_NUMBERS_KEY, String(on))
+}
+
 // How tall the line loupe is, in pixels. Kept with the browser like the dividers beside it
 // rather than with the account: how much room a line crop wants is a property of the screen
 // it is being read on, and a big monitor and a laptop want different answers.
