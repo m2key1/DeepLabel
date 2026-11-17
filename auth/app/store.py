@@ -134,6 +134,10 @@ ROLE_CAPS = {
     'viewer': frozenset(),
 }
 
+# What writes nothing, and so the only exceptions a viewer takes: the backend refuses a
+# viewer every write before it looks at a capability, and recognition is not a write.
+VIEWER_GRANTABLE = frozenset({'recognize'})
+
 # The two grants that predate this and have their own columns. They are capabilities like
 # any other now, but for a member these columns are where they are kept: the Training
 # column on the admin page and the permission matrix both write here, so the two cannot
@@ -171,9 +175,11 @@ def overrides_of(user) -> dict:
 def stored_overrides(user) -> dict:
     """The exceptions kept in the permissions column: only what differs from the role,
     only names this build still offers, and none that a grant column holds instead. A
-    viewer has none: every write of theirs is refused before a capability is looked at."""
+    viewer has only grants of what writes nothing: every write of theirs is refused
+    before a capability is looked at."""
     if user['role'] == 'viewer':
-        return {}
+        return {cap: True for cap, allowed in _stored_permissions(user).items()
+                if allowed and cap in VIEWER_GRANTABLE}
     role = role_caps(user['role'])
     columns = grant_columns(user['role'])
     return {cap: allowed for cap, allowed in _stored_permissions(user).items()
@@ -190,7 +196,7 @@ def dormant_grants(user) -> dict:
                if bool(user[column]) is not (cap in member)}
     if user['role'] == 'viewer':
         dormant.update({cap: True for cap, allowed in _stored_permissions(user).items()
-                        if allowed and cap not in GRANT_COLUMNS})
+                        if allowed and cap not in GRANT_COLUMNS and cap not in VIEWER_GRANTABLE})
     return dormant
 
 

@@ -421,6 +421,7 @@ def get_users(_admin=Depends(require_admin_session)):
                 # What each role allows, which the admin page shows as the line a person's
                 # exceptions break.
                 'roles': {role: sorted(caps) for role, caps in store.ROLE_CAPS.items()},
+                'viewer_grantable': sorted(store.VIEWER_GRANTABLE),
                 'invitations': auth.oidc_enabled() and authentik.enabled()}
     finally:
         conn.close()
@@ -761,9 +762,10 @@ def patch_user(user_id: int, body: UserPatch, me: dict = Depends(require_admin_s
         if before is None:
             raise HTTPException(404)
         role_name = body.role or before['role']
-        if role_name == 'viewer' and _grants_anything(body):
+        if role_name == 'viewer' and _grants_a_write(body):
             raise HTTPException(409, f'{_actor(dict(before))} is a viewer, and a viewer may not write '
-                                     'at all - promote the account to member before granting it anything')
+                                     'at all - promote the account to member before granting it anything '
+                                     'that writes')
         if role_name != before['role']:
             # Exceptions were made against the old role, so the new one starts clean.
             dropped = {'exceptions': store.overrides_of(before), 'dormant_grants': store.dormant_grants(before)}
@@ -811,8 +813,9 @@ def patch_user(user_id: int, body: UserPatch, me: dict = Depends(require_admin_s
         conn.close()
 
 
-def _grants_anything(body: UserPatch) -> bool:
-    return any((body.permissions or {}).values()) or bool(body.train_local) or bool(body.train_cluster)
+def _grants_a_write(body: UserPatch) -> bool:
+    return (any(allowed for cap, allowed in (body.permissions or {}).items() if cap not in store.VIEWER_GRANTABLE)
+            or bool(body.train_local) or bool(body.train_cluster))
 
 
 def _user_payload(row) -> dict:

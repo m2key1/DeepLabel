@@ -66,7 +66,7 @@ thing to paste into a notebook or a CI job. Managing tokens and administering ac
 
 Scans in, lines and text out, without a dataset: nothing of a request is stored unless it
 asks to keep its pages, or is async and waits on disk for its turn. It needs the **recognize** permission, which admins have and grant
-per person. A token made with the access **Recognition only** reaches these routes and
+per person - to a viewer too, since it writes nothing. A token made with the access **Recognition only** reaches these routes and
 nothing else, which makes it the one to give a service outside; a read-only token may call
 them too, as they write nothing, but cannot keep.
 

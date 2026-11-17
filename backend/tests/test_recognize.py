@@ -108,6 +108,15 @@ def test_an_unknown_format_is_refused(client):
     assert refused.json()['detail'] == 'format must be one of json, page, alto, hocr, txt'
 
 
+def test_a_viewer_who_may_recognize_is_let_through_like_anyone(client):
+    """Recognition writes nothing, so a viewer granted it reads like anyone else: the refusal
+    here is the route's own, past the gate that turns a viewer's writes away."""
+    viewer = {**MAY_RECOGNIZE, 'X-Auth-Role': 'viewer'}
+    refused = client.post('/api/recognize/pages', headers=viewer,
+                          files=[('files', ('a.png', _png(4, 4), 'image/png'))], data={'format': 'docx'})
+    assert (refused.status_code, refused.json()['detail']) == (400, 'format must be one of json, page, alto, hocr, txt')
+
+
 def test_the_caller_sees_where_their_own_request_answered_at_once_stands(client):
     bob = {**MAY_RECOGNIZE, 'X-Auth-User': 'bob'}
     assert client.get('/api/recognize/reading', headers=MAY_RECOGNIZE).json() is None

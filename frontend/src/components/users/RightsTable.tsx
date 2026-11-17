@@ -27,10 +27,11 @@ function groupsFor(capabilities: string[]) {
 
 const dot = 'inline-block size-3 rounded-full border align-middle'
 
-function cellTitle(user: AppUser, cap: string, self: boolean, allowed: boolean, overridden: boolean): string {
+function cellTitle(user: AppUser, cap: string, self: boolean, allowed: boolean, overridden: boolean,
+                   grantable: boolean): string {
   const name = user.username || user.subject
   if (user.role === 'admin') return 'Admins may do everything'
-  if (user.role === 'viewer') return `${name} is a viewer and may not write at all - promote the account to member first`
+  if (user.role === 'viewer' && !grantable) return `${name} is a viewer and may not write at all - promote the account to member first`
   if (self) return 'You cannot change your own permissions'
   if (overridden) return `${allowed ? 'Granted' : 'Taken away'} for ${name} - the ${user.role} role says otherwise. Click to go back to the role.`
   return `${capabilityHint(cap)} - as the ${user.role} role allows. Click to make an exception.`
@@ -39,10 +40,12 @@ function cellTitle(user: AppUser, cap: string, self: boolean, allowed: boolean, 
 /** Who may do what, in one table: people under their role, and the role's own line just
  *  above them as the default, so an exception is simply the dot that breaks the line.
  *  The dots are checkboxes; clicking one makes or lifts an exception. */
-export function RightsTable({ users, capabilities, roles, myId, expanded, onToggle, onPatch, detail }: {
+export function RightsTable({ users, capabilities, roles, viewerGrantable, myId, expanded, onToggle, onPatch, detail }: {
   users: AppUser[]
   capabilities: string[]
   roles: Record<string, string[]>
+  /** What a viewer can still be given: the capabilities that write nothing. */
+  viewerGrantable: string[]
   myId: number | null
   expanded: number | null
   onToggle: (id: number) => void
@@ -104,7 +107,8 @@ export function RightsTable({ users, capabilities, roles, myId, expanded, onTogg
                 const self = user.id === myId
                 const name = user.username || user.subject
                 const seen = user.last_seen_at ?? user.last_login_at
-                const locked = role === 'admin' || role === 'viewer' || self
+                const locked = (cap: string) =>
+                  role === 'admin' || self || (role === 'viewer' && !viewerGrantable.includes(cap))
                 const open = expanded === user.id
                 return (
                   <Fragment key={user.id}>
@@ -123,7 +127,7 @@ export function RightsTable({ users, capabilities, roles, myId, expanded, onTogg
                           {self && <span className="text-xs text-ink-subtle">(you)</span>}
                           {!user.active && <span className="text-xs text-danger">Disabled</span>}
                           {role === 'viewer' && (
-                            <span data-testid="promote-first" className="sr-only">promote to member to grant anything</span>
+                            <span data-testid="promote-first" className="sr-only">promote to member to grant anything that writes</span>
                           )}
                         </span>
                       </td>
@@ -139,8 +143,8 @@ export function RightsTable({ users, capabilities, roles, myId, expanded, onTogg
                               data-overridden={overridden || undefined}
                               aria-label={`${capabilityLabel(cap)} for ${name}`}
                               checked={allowed}
-                              disabled={locked}
-                              title={cellTitle(user, cap, self, allowed, overridden)}
+                              disabled={locked(cap)}
+                              title={cellTitle(user, cap, self, allowed, overridden, viewerGrantable.includes(cap))}
                               onChange={(e) => onPatch(user.id, { [cap]: e.target.checked })}
                               className={`${dot} cursor-pointer appearance-none disabled:cursor-default ${
                                 overridden

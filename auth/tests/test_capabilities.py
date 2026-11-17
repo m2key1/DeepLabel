@@ -137,7 +137,7 @@ class TestViewersTakeNoExceptions:
         assert response.status_code == 409
         assert response.json()['detail'] == (
             'vera is a viewer, and a viewer may not write at all - promote the account to '
-            'member before granting it anything')
+            'member before granting it anything that writes')
         assert _caps(client, 'vera') == set()
         assert _listed(client, 'vera')['permissions'] == {}
         audit = client.get(f'/api/users/{_user_id("vera")}/audit', cookies=_session('root')).json()
@@ -166,6 +166,58 @@ class TestViewersTakeNoExceptions:
 
         assert _caps(client, 'vera') == set()
         assert _listed(client, 'vera')['permissions'] == {}
+
+
+class TestAViewerTakesWhatWritesNothing:
+    """Recognition reads scans and stores nothing a viewer could not already see, so it is
+    the one exception a viewer takes - an account that only reads through the API."""
+
+    def test_a_viewer_is_granted_recognition_and_it_is_lifted_again(self, client):
+        user_id = _user_id('vera')
+        granted = client.patch(f'/api/users/{user_id}', json={'permissions': {'recognize': True}},
+                               cookies=_session('root'))
+
+        assert granted.status_code == 200
+        assert _caps(client, 'vera') == {'recognize'}
+        assert _listed(client, 'vera')['permissions'] == {'recognize': True}
+        audit = client.get(f'/api/users/{user_id}/audit', cookies=_session('root')).json()
+        assert [(e['field'], e['old_value'], e['new_value'], e['actor']) for e in audit['entries']] == [
+            ('recognize', '0', '1', 'root')]
+
+        client.patch(f'/api/users/{user_id}', json={'permissions': {'recognize': False}}, cookies=_session('root'))
+        assert _caps(client, 'vera') == set()
+        assert _listed(client, 'vera')['permissions'] == {}
+
+    def test_a_viewer_granted_recognition_mints_a_recognition_token_that_stays_a_viewer(self, client):
+        client.patch(f'/api/users/{_user_id("vera")}', json={'permissions': {'recognize': True}},
+                     cookies=_session('root'))
+
+        minted = client.post('/api/tokens', json={'name': 'scripts', 'scope': 'recognize'},
+                             cookies=_session('vera'))
+        assert minted.status_code == 200
+        answer = client.get('/validate', headers={'Authorization': f'Bearer {minted.json()["token"]}'})
+        assert answer.status_code == 200
+        assert (answer.headers['X-Auth-Role'], answer.headers['X-Auth-Scope'], answer.headers['X-Auth-Caps']) == (
+            'viewer', 'recognize', 'recognize')
+
+    def test_demoting_to_viewer_with_recognition_in_one_request_keeps_only_that(self, client):
+        client.patch(f'/api/users/{_user_id("alice")}', json={'permissions': {'dataset.delete': True}},
+                     cookies=_session('root'))
+
+        response = client.patch(f'/api/users/{_user_id("alice")}',
+                                json={'role': 'viewer', 'permissions': {'recognize': True}},
+                                cookies=_session('root'))
+
+        assert response.status_code == 200
+        assert _caps(client, 'alice') == {'recognize'}
+
+    def test_a_write_and_recognition_together_on_a_viewer_are_refused_whole(self, client):
+        response = client.patch(f'/api/users/{_user_id("vera")}',
+                                json={'permissions': {'recognize': True, 'pipeline.ocr': True}},
+                                cookies=_session('root'))
+
+        assert response.status_code == 409
+        assert _caps(client, 'vera') == set()
 
 
 class TestARoleChangeStartsFromTheRole:

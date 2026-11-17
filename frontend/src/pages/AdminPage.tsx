@@ -94,6 +94,7 @@ export function AdminPage() {
   // this build offers rather than a copy of the list that can drift from the server's.
   const [capabilities, setCapabilities] = useState<string[]>([])
   const [roles, setRoles] = useState<Record<string, string[]>>({})
+  const [viewerGrantable, setViewerGrantable] = useState<string[]>([])
   const [params, setParams] = useSearchParams()
   const asked = params.get('tab')
   const tab = asked === 'tokens' || asked === 'usage' ? asked : 'people'
@@ -119,6 +120,7 @@ export function AdminPage() {
           setUsers(r.users)
           setCapabilities(r.capabilities)
           setRoles(r.roles ?? {})
+          setViewerGrantable(r.viewer_grantable ?? [])
           setInvitations(r.invitations)
         })
         .catch((e: Error) => setError(e.message))
@@ -181,6 +183,7 @@ export function AdminPage() {
               users={users.filter((u) => !u.pending)}
               capabilities={capabilities}
               roles={roles}
+              viewerGrantable={viewerGrantable}
               myId={myId}
               expanded={expanded}
               onToggle={(id) => setExpanded(expanded === id ? null : id)}

@@ -562,7 +562,9 @@ in Authentik, which nobody has to see or visit.
 - Each account has a role - admin, member or viewer - which sets its permissions:
   re-running phases, discarding checked work, deleting datasets, managing models,
   training and the recognition API (admins only, unless granted). Admins can grant or
-  remove single permissions per person on the **Admin** page.
+  remove single permissions per person on the **Admin** page. A viewer writes nothing, so
+  the one permission a viewer can be given is the recognition API, which writes nothing
+  either: an account that only reads scans through the API.
   Buttons you cannot use are not shown.
 - The Admin page shows everyone in one table, grouped by role, with a dot per permission.
   Each role's own line shows what its people get, and an amber dot marks an exception made

@@ -2935,9 +2935,11 @@ export function logout(): Promise<{ ok: boolean; redirect: string }> {
   return request('/api/logout', { method: 'POST' })
 }
 
-/** `roles` is what each role allows, which a person starts from before their exceptions. */
+/** `roles` is what each role allows, which a person starts from before their exceptions;
+ *  `viewer_grantable` the capabilities that write nothing, the only ones a viewer takes. */
 export function getUsers(): Promise<{
-  users: AppUser[]; capabilities: string[]; roles: Record<string, string[]>; invitations: boolean
+  users: AppUser[]; capabilities: string[]; roles: Record<string, string[]>; viewer_grantable: string[]
+  invitations: boolean
 }> {
   return request('/api/users')
 }

@@ -119,9 +119,9 @@ test.describe('Scenario: a capability the admin page offers is one the backend e
       await waitForJobStatus(jobId, 'done')
     })
 
-  // README: "A viewer may not write at all, so the grid takes no exceptions for one: their
-  // row is greyed with a note to promote the account to member first, and the auth service
-  // refuses such a grant in as many words."
+  // A viewer may not write at all, so the grid takes no write for one: those dots are greyed
+  // with a note to promote the account to member first, and the auth service refuses such a
+  // grant in as many words.
   test('a viewer\'s row in the matrix takes no grant until the account is promoted, and the history says what was granted',
     async ({ page }) => {
       const username = `reader-${Date.now()}`
@@ -132,7 +132,7 @@ test.describe('Scenario: a capability the admin page offers is one the backend e
       const matrixRow = page.getByTestId('user-row').filter({ has: page.getByText(username) })
       const cell = matrixRow.locator('[data-testid="permission-cell"][data-cap="dataset.delete"]')
       await expect(matrixRow).toHaveAttribute('data-viewer', 'true')
-      await expect(matrixRow.getByTestId('promote-first')).toHaveText('promote to member to grant anything')
+      await expect(matrixRow.getByTestId('promote-first')).toHaveText('promote to member to grant anything that writes')
       await expect(cell).toBeDisabled()
       await expect(cell).toHaveAttribute('title',
         `${username} is a viewer and may not write at all - promote the account to member first`)
@@ -145,7 +145,7 @@ test.describe('Scenario: a capability the admin page offers is one the backend e
         { data: { permissions: { 'dataset.delete': true } } })
       expect(refused.status()).toBe(409)
       expect((await refused.json()).detail).toBe(
-        `${username} is a viewer, and a viewer may not write at all - promote the account to member before granting it anything`)
+        `${username} is a viewer, and a viewer may not write at all - promote the account to member before granting it anything that writes`)
       expect((await userRecord(page, username)).capabilities).toEqual([])
 
       // Promoted, the same row takes the grant, and the history reads it as a sentence.
@@ -163,6 +163,26 @@ test.describe('Scenario: a capability the admin page offers is one the backend e
       await expect(audit.nth(0)).toHaveText(new RegExp(`^granted "Delete" to ${username}by dev`))
       await expect(audit.nth(1)).toHaveText(/^role: viewer → member/)
     })
+
+  test('a viewer\'s row takes the API permission, which writes nothing, and still no other', async ({ page }) => {
+    const username = `api-reader-${Date.now()}`
+    seedSession('viewer', username)
+    await expect.poll(async () => (await userRecord(page, username)).capabilities).toEqual([])
+
+    await page.goto('/admin')
+    const matrixRow = page.getByTestId('user-row').filter({ has: page.getByText(username) })
+    const recognize = matrixRow.locator('[data-testid="permission-cell"][data-cap="recognize"]')
+    const remove = matrixRow.locator('[data-testid="permission-cell"][data-cap="dataset.delete"]')
+    await expect(remove).toBeDisabled()
+    await expect(recognize).toBeEnabled()
+    await recognize.click()
+    await expect(recognize).toBeChecked()
+    await expect.poll(async () => (await userRecord(page, username)).capabilities).toEqual(['recognize'])
+    const record = await userRecord(page, username)
+    expect(record.role).toBe('viewer')
+    expect(record.permissions).toEqual({ recognize: true })
+    await expect(remove).toBeDisabled()
+  })
 })
 
 test.describe('Scenario: a member re-runs a dataset', () => {
