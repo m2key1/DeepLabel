@@ -52,13 +52,15 @@ export function Shell() {
   // scrollbar over the canvas edge. Under the footer's wrapper h-full has no height to fill,
   // so its panes grow with their content instead of scrolling; the dataset list, which
   // scrolls its rows under a toolbar that stays, ends its own scroll with the footer.
+  // Relative, so anything absolutely placed in a page (a screen-reader caption) is measured
+  // within its scroll rather than stretching the window into a second one.
   return (
     <CrumbContext.Provider value={setCrumbs}>
       <div className="flex h-screen flex-col">
         <div className="shrink-0">
           <NavBar crumbs={crumbs} />
         </div>
-        <div data-testid="app-main" className="min-h-0 flex-1 overflow-auto">
+        <div data-testid="app-main" className="relative min-h-0 flex-1 overflow-auto">
           {fullHeight ? <Outlet /> : (
             <div className="flex min-h-full flex-col">
               <div className="flex-1"><Outlet /></div>

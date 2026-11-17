@@ -352,6 +352,18 @@ test.describe('Scenario: reading curves like TensorBoard', () => {
 })
 
 test.describe('Scenario: the data tab explains what is under the pointer', () => {
+  test('the page scrolls inside the app, and the window around it never does', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 600 })
+    await page.goto(`/models/runs/${runId}?tab=data`)
+    await expect(page.getByTestId('preflight-report')).toBeVisible()
+    const overflow = () => page.evaluate(() => {
+      const main = document.querySelector('[data-testid="app-main"]')!
+      const root = document.scrollingElement!
+      return { page: main.scrollHeight > main.clientHeight, window: root.scrollHeight - root.clientHeight }
+    })
+    await expect.poll(overflow).toEqual({ page: true, window: 0 })
+  })
+
   test('the distributions stand in one block and a bar tells its range, count and share', async ({ page }) => {
     const stored = await backendFetch(`/api/trainings/${runId}/preflight`) as StoredPreflight
     const bins = stored.result.crops.height.bins
