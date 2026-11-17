@@ -215,8 +215,9 @@ test.describe('Scenario: state that reads out loud', () => {
     await page.getByTestId('palette-reset').click()
     await expect.poll(() => palette(page)).toContain('ä')
 
-    const alpha = page.locator('[data-testid="vocab-group"][data-group="Greek"]')
-      .getByRole('button', { name: 'α', exact: true })
+    const greek = page.locator('[data-testid="vocab-group"][data-group="Greek"]')
+    await greek.getByRole('button', { name: 'Greek', exact: true }).click()
+    const alpha = greek.getByRole('button', { name: 'α', exact: true })
     await expect(alpha).toHaveAttribute('aria-pressed', 'false')
     await alpha.click()
     await expect.poll(() => palette(page)).toContain('α')

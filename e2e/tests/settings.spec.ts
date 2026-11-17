@@ -192,7 +192,9 @@ test.describe('Scenario: customizing hotkeys', () => {
     await page.getByTestId('custom-glyphs').fill('Ꙭ')
     await page.getByRole('button', { name: 'Add', exact: true }).click()
     await expect.poll(palette).toEqual([...base, 'Ꙭ'])
+    const ownGroup = page.getByTestId('own-glyphs').getByRole('button', { name: 'Your own', exact: true })
     const own = page.getByTestId('own-glyphs').getByRole('button', { name: 'Ꙭ' })
+    await ownGroup.click()
     await expect(own).toBeVisible()
 
     await openViewer(page, jobId, pageId)
@@ -201,6 +203,7 @@ test.describe('Scenario: customizing hotkeys', () => {
 
     // and the row it lands in is how it comes back off again
     await page.goto('/settings?section=characters')
+    await ownGroup.click()
     await own.click()
     await expect.poll(palette).toEqual(base)
     await expect(page.getByTestId('own-glyphs')).toHaveCount(0)
@@ -297,6 +300,71 @@ test.describe('Scenario: arranging the character keyboard', () => {
   })
 })
 
+test.describe('Scenario: finding the characters to add', () => {
+  const settings = async (page: import('@playwright/test').Page) =>
+    (await page.request.get('/api/settings')).json()
+  const glyphs = (page: import('@playwright/test').Page) =>
+    page.getByTestId('glyph').evaluateAll((keys) => keys.map((k) => (k as HTMLElement).dataset.char))
+  test.afterEach(({ page }) => setKeyboardSource(page))
+
+  test('your keyboard comes first, the groups open on a click, and a name finds a key anywhere', async ({ page }) => {
+    await page.goto('/settings?section=characters')
+    await page.getByTestId('palette-reset').click()
+    await expect.poll(async () => (await settings(page)).keyboard.slice(0, 3)).toEqual(['ä', 'ö', 'ü'])
+    const start: string[] = (await settings(page)).keyboard
+
+    const board = page.getByTestId('palette-order')
+    await expect(board.getByTestId('palette-key')).toHaveCount(start.length)
+    await expect(page.getByText('Drag to reorder, Backspace removes', { exact: true })).toBeVisible()
+    const greek = page.locator('[data-testid="vocab-group"][data-group="Greek"]')
+    expect((await board.boundingBox())!.y).toBeLessThan((await greek.boundingBox())!.y)
+
+    // A group starts closed: its name, how many it holds and Add all, but none of its keys.
+    const greekName = greek.getByRole('button', { name: 'Greek', exact: true })
+    await expect(greekName).toHaveAttribute('aria-expanded', 'false')
+    await expect(greek.getByTestId('group-count')).toHaveText('123')
+    await expect(greek.getByRole('button', { name: 'Add all' })).toBeVisible()
+    await expect(greek.getByTestId('glyph')).toHaveCount(0)
+    await greekName.click()
+    await expect(greekName).toHaveAttribute('aria-expanded', 'true')
+    await expect(greek.getByTestId('glyph')).toHaveCount(123)
+
+    // A name finds its keys in whichever groups hold them, and only those groups show.
+    await page.getByLabel('Find a character').fill('long s')
+    await expect.poll(() => glyphs(page)).toEqual(['ẛ', 'ſ', 'ẜ'])
+    await expect(greek).toHaveCount(0)
+    await page.getByTestId('glyph').filter({ hasText: 'ẜ' }).click()
+    await expect.poll(async () => (await settings(page)).keyboard).toEqual([...start, 'ẜ'])
+    await expect(board.getByTestId('palette-key').last()).toHaveAttribute('data-char', 'ẜ')
+
+    await page.getByLabel('Find a character').fill('yogh')
+    await expect(page.getByTestId('glyph')).toHaveCount(0)
+    await expect(page.getByTestId('no-glyph-found')).toBeVisible()
+
+    // The rest of the explanation waits behind one disclosure.
+    const explained = page.getByText(/The model reads bytes/)
+    await expect(explained).toBeHidden()
+    await page.getByText('How this works').click()
+    await expect(explained).toBeVisible()
+  })
+
+  test('the keys come from you or from the dataset, by a switch that says what each does', async ({ page }) => {
+    await page.goto('/settings?section=characters')
+    const mine = page.getByRole('button', { name: 'My keys', exact: true })
+    const dataset = page.getByRole('button', { name: 'From the dataset', exact: true })
+    const note = page.getByTestId('keyboard-source-note')
+    await expect(mine).toHaveAttribute('aria-pressed', 'true')
+    await expect(note).toHaveText('The line editor shows the keys below, in their order.')
+
+    await dataset.click()
+    await expect.poll(async () => (await settings(page)).keyboard_source).toBe('dataset')
+    await expect(dataset).toHaveAttribute('aria-pressed', 'true')
+    await expect(mine).toHaveAttribute('aria-pressed', 'false')
+    await expect(note).toHaveText(
+      'The line editor shows what the open dataset writes beyond a plain keyboard; the keys below stand in until it has been read.')
+  })
+})
+
 test.describe('Scenario: reading the Schematismus printer marks', () => {
   // The corpus writes its marks as stand-in codepoints - U+2690 for the flag, U+33CB for
   // the ligature - whose ordinary Unicode shapes look nothing like the page. A subset of
@@ -376,6 +444,7 @@ test.describe('Scenario: reading the Schematismus printer marks', () => {
 
     // It is on the palette to be typed, in the group its neighbours are in.
     const special = page.locator('[data-testid="vocab-group"][data-group="Latin - special"]')
+    await special.getByRole('button', { name: 'Latin - special', exact: true }).click()
     await expect(special.getByRole('button', { name: 'ꝫ', exact: true })).toHaveCount(1)
   })
 
@@ -390,6 +459,7 @@ test.describe('Scenario: reading the Schematismus printer marks', () => {
     const base = await palette()
 
     const group = page.locator('[data-testid="vocab-group"][data-group="Schematismus"]')
+    await group.getByRole('button', { name: 'Schematismus', exact: true }).click()
     await expect(group.getByTestId('group-note')).toContainText('stand-in codepoints')
     // Listed once: the marks left the generic groups, where the same glyph would show twice.
     await expect(page.getByRole('button', { name: '⚐', exact: true })).toHaveCount(1)
@@ -633,7 +703,7 @@ test.describe('Scenario: a keyboard that fills itself', () => {
     expect(held.characters).toEqual(['u\u0308', '⁊', '℥'])
 
     await page.goto('/settings?section=characters')
-    await page.getByTestId('keyboard-source-dataset').check()
+    await page.getByRole('button', { name: 'From the dataset', exact: true }).click()
     await openViewer(page, jobId, pageId)
     await page.getByTestId('line-text').first().click()
 
@@ -650,7 +720,7 @@ test.describe('Scenario: a keyboard that fills itself', () => {
     await correctLine(first.id, 'Pru\u0308f.')
 
     await page.goto('/settings?section=characters')
-    await page.getByTestId('keyboard-source-dataset').check()
+    await page.getByRole('button', { name: 'From the dataset', exact: true }).click()
     await openViewer(page, jobId, pageId)
     await page.getByTestId('line-text').first().click()
     await expect(key(page, 'u\u0308')).toBeVisible()
@@ -666,7 +736,7 @@ test.describe('Scenario: a keyboard that fills itself', () => {
     const [pageId] = await jobPageIds(jobId)
 
     await page.goto('/settings?section=characters')
-    await page.getByTestId('keyboard-source-dataset').check()
+    await page.getByRole('button', { name: 'From the dataset', exact: true }).click()
     await openViewer(page, jobId, pageId)
     await page.getByTestId('line-text').first().click()
 

@@ -16,7 +16,7 @@ export default defineConfig({
               'src/components/models/*.test.ts', 'src/components/job/*.test.ts',
               'src/components/augment/*.test.ts', 'src/components/users/*.test.ts', 'src/components/account/*.test.ts',
               'src/components/evaluation/*.test.ts', 'src/components/queue/*.test.ts', 'src/components/viewer/*.test.ts',
-              'src/palette.test.ts',
+              'src/palette.test.ts', 'src/charNames.test.ts',
               'src/lib/text.test.ts', 'src/util.test.ts'],
     environment: 'node',
   },

@@ -323,8 +323,10 @@ Press `e` to edit the page.
   that skips layout never says Layout found. When a run stops with an error, the pages it did
   not get through read Upload failed, Layout failed, Lines failed or Reading failed in red;
   click one for the reason.
-- Build your own character keyboard under Settings, from a grid of characters grouped by
-  script or from presets, or let it fill itself with the characters the dataset uses. The
+- Build your own character keyboard under Settings, from characters grouped by script, from
+  presets or by pasting them, or let it fill itself with the characters the dataset uses.
+  Your keyboard is shown on top, to be dragged into order; the groups open on a click, and
+  the search finds a character by its name, such as "long s", "a macron" or "umlaut". The
   bar sits above the status bar; drag its top handle to move it anywhere, put it back with
   **Dock** or by dragging it to the bottom edge, and drag its corner to resize it. Position
   and size are remembered.
