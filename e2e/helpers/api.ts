@@ -174,6 +174,8 @@ export interface TrainingRow {
   error: string | null
   model_id: number | null
   base_model_id: number | null
+  epochs: number | null
+  default_epochs: number | null
   batch_size: number | null
   grad_accum_steps: number | null
   lr_scale: number | null

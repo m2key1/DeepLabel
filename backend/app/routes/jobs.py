@@ -1375,7 +1375,8 @@ def queue(conn=Depends(get_db), user: dict = Depends(current_user)):
         return {'kind': 'training', 'id': t['id'], 'name': t['name'], 'owner': t['owner'],
                 'status': t['status'], 'phase': t['phase'], 'created_at': t['created_at'],
                 'queued_at': jobs.queued_since(row), 'started_at': row['started_at'],
-                'training': {'task': t['task'], 'target': t['target'], 'epochs': t['epochs'],
+                'training': {'task': t['task'], 'target': t['target'],
+                             'epochs': t['epochs'] or t['default_epochs'],
                              'progress_last': t['progress_last'],
                              'snapshot_progress': t['snapshot_progress']}}
 

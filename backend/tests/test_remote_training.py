@@ -413,6 +413,13 @@ class TestALanguageModelOnTheBackend:
         assert (refused.status_code, refused.json()['detail']) == (
             400, 'model backend "ocr" builds no language model')
 
+    def test_a_backend_that_declares_no_default_epochs_leaves_the_run_without_a_count(self, client):
+        started = client.post('/api/trainings', headers=self.FRONT, json={
+            'task': 'ocr', 'name': 'On an undeclared default', 'dataset_job_ids': ['j1'], 'base_model_id': 3})
+
+        assert started.status_code == 200, started.text
+        assert (started.json()['epochs'], started.json()['default_epochs']) == (None, None)
+
 
 class TestTheBackendsKnobs:
     FRONT = {'X-Frontend-Secret': 'front', 'X-Auth-User': 'root', 'X-Auth-Role': 'admin'}
@@ -470,6 +477,22 @@ class TestTheBackendsKnobs:
         assert started('local')['batch_size'] == 6
         assert started('slurm', gpu_type='h200', gpu_count=1)['batch_size'] == 20
         assert started('local', batch_size=3)['batch_size'] == 3
+
+    def test_a_run_left_on_the_default_epochs_records_the_count_its_backend_declares(self, client, conn):
+        conn.executescript(CHECKED_LINE)
+
+        def started(name, **extra):
+            return client.post('/api/trainings', headers=self.FRONT, json={
+                'task': 'ocr', 'name': name, 'dataset_job_ids': ['j1'], 'base_model_id': 3, **extra}).json()
+
+        on_default, chosen = started('On the default'), started('Chosen', epochs=5)
+
+        assert (on_default['epochs'], on_default['default_epochs']) == (None, 20)
+        assert (chosen['epochs'], chosen['default_epochs']) == (5, None)
+        listed = {t['name']: (t['epochs'], t['default_epochs'])
+                  for t in client.get('/api/trainings', headers=self.FRONT).json()['trainings']
+                  if t['id'] in (on_default['id'], chosen['id'])}
+        assert listed == {'On the default': (None, 20), 'Chosen': (5, None)}
 
 
 class TestScalingOnTheBackend:

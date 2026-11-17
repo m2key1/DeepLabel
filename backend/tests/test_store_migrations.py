@@ -418,6 +418,22 @@ class TestLanguageModelOutcome:
         conn.close()
 
 
+class TestDefaultEpochs:
+    def test_an_older_training_gains_the_column_and_records_no_count(self, tmp_path):
+        """NULL, so a run started before it keeps saying "default" without a total."""
+        db = tmp_path / 'app.db'
+        conn = store.connect(db)
+        conn.execute("INSERT INTO trainings (id, task, name, owner, dataset_job_ids) "
+                     "VALUES (1, 'ocr', 'old run', 'root', '[]')")
+        conn.commit()
+        conn.close()
+        strip_column(db, 'trainings', ['id', 'task', 'name', 'owner', 'dataset_job_ids'])
+
+        conn = store.connect(db)
+        assert conn.execute('SELECT default_epochs FROM trainings WHERE id = 1').fetchone()[0] is None
+        conn.close()
+
+
 class TestSnapshotRegion:
     def test_snapshot_carries_kind(self, tmp_path):
         conn = store.connect(tmp_path / 'app.db')

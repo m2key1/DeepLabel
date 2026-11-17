@@ -14,7 +14,7 @@ import { RunMetrics } from '../components/models/RunMetrics'
 import { describeMetric, headlineKeys } from '../components/models/metrics'
 import { PreflightPanel } from '../components/models/PreflightReport'
 import { pollPreflight, type ShownPreflight } from '../components/models/usePreflight'
-import { isFinished, languageModelLabel } from '../components/models/runStatus'
+import { epochTotal, isFinished, languageModelLabel } from '../components/models/runStatus'
 import { percent } from '../components/evaluation/format'
 import { trainedAugmentationLabel } from '../components/augment/pipeline'
 import { Badge } from '../components/ui/Badge'
@@ -301,7 +301,7 @@ export function TrainingRunPage() {
       <Section title="Settings">
         <dl data-testid="run-settings" className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
           {[
-            ['epochs', run.epochs ?? 'default'],
+            ['epochs', run.epochs ?? (run.default_epochs ? `${run.default_epochs} (default)` : 'default')],
             ['batch size', run.batch_size ?? 'default'],
             ...(run.grad_accum_steps ? [['gradient accumulation', run.grad_accum_steps] as const] : []),
             ...(run.lr_scale ? [['learning rates', `x ${run.lr_scale}`] as const] : []),
@@ -356,7 +356,7 @@ export function TrainingRunPage() {
             <div className="flex items-baseline gap-1">
               <dt className="text-ink-subtle">epoch</dt>
               <dd data-testid="stat-epoch" className="font-mono text-sm font-medium tabular-nums text-ink">
-                {last?.epoch !== undefined ? `${last.epoch}${run.epochs ? ` / ${run.epochs}` : ''}` : '-'}
+                {last?.epoch !== undefined ? `${last.epoch}${epochTotal(run) ? ` / ${epochTotal(run)}` : ''}` : '-'}
               </dd>
             </div>
             <div className="flex items-baseline gap-1">

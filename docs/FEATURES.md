@@ -468,7 +468,11 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   mixed Unicode forms. It warns but never blocks.
 - The run page has tabs for Overview, Curves, Data, Evaluations and Settings. Curves are
   drawn per metric, with smoothing, log scale, zoom and a shared crosshair.
-- **Rerun**, in a run's **⋯** menu, opens a finished run's settings in a new form.
+- A run left on the default epochs keeps the number its model declared when it started:
+  Settings says e.g. "60 (default)", and the run page, the run list and the Queue show the
+  epoch out of that total.
+- **Rerun**, in a run's **⋯** menu, opens a finished run's settings in a new form. A run
+  left on the default epochs reruns on the default.
 - **Augmentations** (under Models) builds augmentation pipelines from the trainer's
   catalogue, with groups and a live preview, on an **OCR**, a **Layout** and a **Lines**
   tab. OCR previews one real line crop (Change lines draws another); Layout previews a page

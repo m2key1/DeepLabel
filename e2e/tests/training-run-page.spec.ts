@@ -100,6 +100,36 @@ test.describe('Scenario: a run page in tabs', () => {
   })
 })
 
+test.describe('Scenario: a run left on the default epochs', () => {
+  test('says how many its model trains for, and a rerun stays on the default', async ({ page }) => {
+    test.setTimeout(120_000)
+    const trainJob = await seedCompletedJob(uniqueName('Default epochs train'), 1)
+    await markLinesChecked(trainJob, 3)
+    const name = uniqueName('Default epochs')
+    await createTraining({ task: 'ocr', name, dataset_job_ids: [trainJob], target: 'local' })
+    // The stub backend declares three epochs, one per point its trainer writes.
+    const recorded = (await listTrainings()).find((t) => t.name === name)!
+    expect([recorded.epochs, recorded.default_epochs]).toEqual([null, 3])
+    await expect.poll(async () => (await listTrainings()).find((t) => t.name === name)?.status,
+                      { timeout: 60_000 }).toBe('done')
+
+    await page.goto(`/models/runs/${recorded.id}?tab=settings`)
+    await expect(page.getByTestId('run-settings').locator('[data-setting="epochs"] dd')).toHaveText('3 (default)')
+    await expect(page.getByTestId('stat-epoch')).toHaveText('3 / 3')
+
+    await page.getByTestId('rerun-training').click()
+    await expect(page.getByRole('heading', { name: `Rerun ${name}` })).toBeVisible()
+    const epochs = page.getByLabel('Epochs', { exact: true })
+    await expect(epochs).toHaveValue('')
+    await expect(epochs).toHaveAttribute('placeholder', '3')
+
+    // A run given its epochs says just the number.
+    await page.goto(`/models/runs/${runId}?tab=settings`)
+    await expect(page.getByTestId('run-settings').locator('[data-setting="epochs"] dd')).toHaveText('3')
+    await expect(page.getByTestId('stat-epoch')).toHaveText('3 / 3')
+  })
+})
+
 test.describe('Scenario: reading curves like TensorBoard', () => {
   test('the crosshair snaps to a step on every chart and reads out each series', async ({ page }) => {
     // Backend oracle: the points the readout is about.

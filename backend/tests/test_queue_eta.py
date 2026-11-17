@@ -25,10 +25,11 @@ def add_job(conn, job_id, status, pages, started=None, finished=None, counters=N
                      (job_id, i))
 
 
-def add_training(conn, status, epochs, task='ocr', started=None, finished=None):
+def add_training(conn, status, epochs, task='ocr', started=None, finished=None, default_epochs=None):
     return conn.execute(
-        'INSERT INTO trainings (task, name, owner, target, status, epochs, started_at, finished_at) '
-        "VALUES (?, 'run', 'alice', 'local', ?, ?, ?, ?)", (task, status, epochs, started, finished)).lastrowid
+        'INSERT INTO trainings (task, name, owner, target, status, epochs, started_at, finished_at, default_epochs) '
+        "VALUES (?, 'run', 'alice', 'local', ?, ?, ?, ?, ?)",
+        (task, status, epochs, started, finished, default_epochs)).lastrowid
 
 
 class TestFinishedAt:
@@ -147,6 +148,15 @@ class TestTrainings:
         run = add_training(conn, 'queued', 5)
 
         assert queue_eta.training(conn, run, None, NOW) == {'seconds': 300, 'basis': 'history'}
+
+    def test_a_training_on_the_default_epochs_goes_by_the_count_it_recorded(self, conn):
+        running = add_training(conn, 'running', None, started='2026-01-01 11:56:40', default_epochs=10)
+        add_training(conn, 'done', None, started='2026-01-01 10:00:00', finished='2026-01-01 10:10:00',
+                     default_epochs=10)
+        waiting = add_training(conn, 'queued', None, default_epochs=5)
+
+        assert queue_eta.training(conn, running, {'epoch': 2}, NOW) == {'seconds': 800, 'basis': 'progress'}
+        assert queue_eta.training(conn, waiting, None, NOW) == {'seconds': 300, 'basis': 'history'}
 
 
 class TestEvaluations:

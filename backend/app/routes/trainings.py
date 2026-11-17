@@ -421,8 +421,9 @@ def create_training(body: TrainingCreate, conn=Depends(get_db),
         'INSERT INTO trainings (task, name, owner, base_model_id, target, dataset_job_ids, '
         'description, epochs, batch_size, gpu_type, gpu_count, hyperparams, val_fraction, '
         'split_strategy, valid_job_ids, test_job_ids, build_lm, human_checked_only, '
-        'slurm_account, augmentation, augmentation_name, preflight_id, grad_accum_steps, lr_scale, line_shape) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'slurm_account, augmentation, augmentation_name, preflight_id, grad_accum_steps, lr_scale, line_shape, '
+        'default_epochs) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         (body.task, name, user['username'], body.base_model_id, body.target,
          json.dumps(body.dataset_job_ids), (body.description or '').strip() or None,
          body.epochs, scaling['batch_size'], body.gpu_type, body.gpu_count,
@@ -431,7 +432,8 @@ def create_training(body: TrainingCreate, conn=Depends(get_db),
          int(body.build_lm), int(body.human_checked_only), user.get('slurm_account') or '',
          json.dumps(augmentation) if augmentation is not None else None, augmentation_name,
          preflight_id, scaling['grad_accum_steps'], scaling['lr_scale'],
-         trainer.line_shape_for(conn, body.task, body.base_model_id, body.line_shape)))
+         trainer.line_shape_for(conn, body.task, body.base_model_id, body.line_shape),
+         None if body.epochs else preflight.default_epochs(conn, body.task, body.base_model_id)))
     conn.commit()
     training_id = cur.lastrowid
     # Local runs wait in the shared GPU queue; SLURM submissions leave immediately.

@@ -8,6 +8,7 @@ import { ClusterUnlock } from '../components/models/ClusterUnlock'
 import { FamilyGraph, formatScore } from '../components/models/FamilyGraph'
 import { buildFamilies } from '../components/models/families'
 import type { Family } from '../components/models/families'
+import { epochTotal } from '../components/models/runStatus'
 import { RunCompare } from '../components/models/RunCompare'
 import { ActionMenu } from '../components/job/ActionMenu'
 import { KebabIcon } from '../components/icons'
@@ -407,7 +408,7 @@ export function ModelsPage() {
                         )}
                         {!isFinished(t.status) && t.progress_last?.epoch !== undefined && (
                           <span className="font-normal">
-                            {' · '}epoch {t.progress_last.epoch}{t.epochs ? `/${t.epochs}` : ''}
+                            {' · '}epoch {t.progress_last.epoch}{epochTotal(t) ? `/${epochTotal(t)}` : ''}
                           </span>
                         )}
                       </Badge>

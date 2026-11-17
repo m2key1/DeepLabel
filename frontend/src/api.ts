@@ -520,6 +520,7 @@ export interface QueueEntry {
   training?: {
     task: ModelTask
     target: 'local' | 'slurm'
+    /** How many epochs it trains for: as set, else its model's default. */
     epochs: number | null
     progress_last: ProgressPoint | null
     snapshot_progress: { done: number; total: number } | null
@@ -750,6 +751,8 @@ export interface Training {
   /** The pipeline it came from, empty when it was built for this run alone. */
   augmentation_name: string
   epochs: number | null
+  /** What its model backend declared at submit, for a run left on the default epochs. */
+  default_epochs: number | null
   description: string | null
   /** Per GPU. With grad_accum_steps and the GPU count it makes the effective batch. */
   batch_size: number | null

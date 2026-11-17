@@ -106,18 +106,23 @@ def dataset(conn, job_id: str, now: datetime, history: list[tuple[tuple, float]]
     return _estimate(median(paces) * pages, 'history') if paces and pages else UNKNOWN
 
 
+def _epoch_total(run) -> int | None:
+    return run['epochs'] or run['default_epochs']
+
+
 def training(conn, training_id: int, progress: dict | None, now: datetime) -> dict:
     run = conn.execute('SELECT * FROM trainings WHERE id = ?', (training_id,)).fetchone()
-    epochs = run['epochs']
+    epochs = _epoch_total(run)
     if run['status'] == 'running' and progress and progress.get('epoch') and epochs:
         measured = _from_progress(run['started_at'], progress['epoch'] / epochs, now)
         if measured:
             return measured
     recent = conn.execute(
-        "SELECT * FROM trainings WHERE status = 'done' AND task = ? AND target = ? AND epochs > 0 "
+        "SELECT * FROM trainings WHERE status = 'done' AND task = ? AND target = ? "
+        'AND COALESCE(epochs, default_epochs) > 0 '
         'AND started_at IS NOT NULL AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?',
         (run['task'], run['target'], HISTORY)).fetchall()
-    paces = _paces(recent, lambda row: row['epochs'])
+    paces = _paces(recent, _epoch_total)
     return _estimate(median(paces) * epochs, 'history') if paces and epochs else UNKNOWN
 
 

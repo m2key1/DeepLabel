@@ -423,6 +423,8 @@ CREATE TABLE IF NOT EXISTS trainings (
     metric_info TEXT,
     -- What a lines run trains each line as: polygon, rotated or box (line_shapes).
     line_shape TEXT,
+    -- The epochs its model backend declared at submit, for a run left on the default.
+    default_epochs INTEGER,
     started_at TEXT,
     queued_at TEXT,
     finished_at TEXT,
@@ -1083,6 +1085,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE trainings ADD COLUMN line_shape TEXT')
         # Before a run could choose, every lines run trained on its polygons as drawn.
         conn.execute("UPDATE trainings SET line_shape = 'polygon' WHERE task = 'lines'")
+    if 'default_epochs' not in training_cols:
+        conn.execute('ALTER TABLE trainings ADD COLUMN default_epochs INTEGER')
     for table in ('jobs', 'trainings', 'evaluations'):
         if 'started_at' not in {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}:
             conn.execute(f'ALTER TABLE {table} ADD COLUMN started_at TEXT')
