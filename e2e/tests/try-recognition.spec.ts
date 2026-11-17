@@ -79,6 +79,24 @@ test.describe('Scenario: trying recognition on a scan of your own', () => {
       await expect.poll(() => thumbnail.evaluate(size)).toEqual([600, 800])
     })
 
+  test('scans added later are shown at once, from the first of them', async ({ page }) => {
+    const scanFile = (name: string, variant: number) => ({ name, mimeType: 'image/png', buffer: scanPng(600, 800, variant) })
+    const thumbnail = (name: string) => page.getByRole('button', { name, exact: true })
+    await page.goto('/try')
+    await page.getByTestId('try-files').setInputFiles(scanFile('first.png', 40))
+    await expect(thumbnail('first.png')).toHaveAttribute('aria-current', 'true')
+
+    await page.getByTestId('try-files').setInputFiles([scanFile('second.png', 41), scanFile('third.png', 42)])
+    await expect(thumbnail('second.png')).toHaveAttribute('aria-current', 'true')
+    await expect(thumbnail('first.png')).not.toHaveAttribute('aria-current')
+    await expect(thumbnail('third.png')).not.toHaveAttribute('aria-current')
+    await expect(page.getByRole('region', { name: 'Scan' }).getByRole('img', { name: 'second.png' })).toBeVisible()
+    // The last is read after the others; the account reads one request at a time, so the
+    // next test waits for nothing left running here.
+    await thumbnail('third.png').click()
+    await expect(page.getByTestId('try-text')).toHaveText(READ(6))
+  })
+
   test('the text is copied and the PAGE XML downloaded as the API returns them', async ({ page }) => {
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.goto('/try')

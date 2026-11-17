@@ -171,7 +171,7 @@ export function TryPage() {
     if (!taken.length) return
     const added = taken.map((file) => ({ key: `scan-${(scanCount += 1)}`, file, reading: true }))
     setScans((held) => [...held, ...added])
-    if (!scans.length) setShown(0)
+    setShown(scans.length)
     read(added, picks)
     for (const scan of added) {
       void viewableScan(scan.file).then((url) => {
