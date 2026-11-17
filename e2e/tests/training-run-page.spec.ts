@@ -243,6 +243,30 @@ test.describe('Scenario: reading curves like TensorBoard', () => {
     await expect(await readEdge()).toHaveText('50.00%')
   })
 
+  test('a zoomed chart offers a Reset zoom button that shows the whole run again', async ({ page }) => {
+    await openCurvesOnEpochs(page)
+    const cer = chart(page, 'cer')
+    const reset = (target: Locator) => target.getByRole('button', { name: 'Reset zoom' })
+    await expect(reset(cer)).toHaveCount(0)
+
+    const box = (await cer.getByTestId('plot-area').boundingBox())!
+    await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width * 0.99, box.y + box.height * 0.8, { steps: 5 })
+    await page.mouse.up()
+    await expect(cer).toHaveAttribute('data-zoomed', 'true')
+    await expect(reset(cer)).toBeVisible()
+    // Only the zoomed chart has anything to reset.
+    await expect(reset(chart(page, 'loss'))).toHaveCount(0)
+
+    await reset(cer).click()
+    await expect(cer).toHaveAttribute('data-zoomed', 'false')
+    await hoverAt(cer, 0.01)
+    await expect(cer.getByTestId('chart-readout').locator('[data-series="cer"]').getByTestId('readout-raw'))
+      .toHaveText('50.00%')
+    await expect(reset(cer)).toHaveCount(0)
+  })
+
   test('the move tool slides the view by what the pointer travelled, keeping its span', async ({ page }) => {
     await openCurvesOnEpochs(page)
     const cer = chart(page, 'cer')

@@ -467,7 +467,8 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   lookalikes (such as a Cyrillic a in Latin text), characters only in validation, and
   mixed Unicode forms. It warns but never blocks.
 - The run page has tabs for Overview, Curves, Data, Evaluations and Settings. Curves are
-  drawn per metric, with smoothing, log scale, zoom and a shared crosshair.
+  drawn per metric, with smoothing, log scale, zoom and a shared crosshair; a zoomed chart
+  has a **Reset zoom** button, and double-click or Escape does the same.
 - A run left on the default epochs keeps the number its model declared when it started:
   Settings says e.g. "60 (default)", and the run page, the run list and the Queue show the
   epoch out of that total.

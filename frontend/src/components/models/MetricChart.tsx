@@ -268,6 +268,13 @@ export function MetricChart({ metric, settings, cursor, active, onCursor }: {
               )
             })}
           </span>
+          {zoom && (
+            <button type="button" onClick={() => setZoom(null)}
+                    title="Show the whole run again - double-click or Escape does this too"
+                    className="whitespace-nowrap rounded px-1 text-[10px] leading-tight text-ink-muted hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent">
+              Reset zoom
+            </button>
+          )}
           <button type="button" data-testid="chart-expand" aria-pressed={expanded}
                   aria-label={expanded ? `Shrink ${metric.key}` : `Expand ${metric.key} to full width`}
                   title={expanded ? 'Shrink' : 'Expand to full width'}
