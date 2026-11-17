@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { getRecognitionOffer, getRecognitionReading, recognizePage, saveBlob } from '../api'
+import { READING_ORDERS, READING_ORDER_LABEL, getRecognitionOffer, getRecognitionReading, recognizePage, saveBlob } from '../api'
 import type { OfferedModel, RecognitionOffer, RecognitionRequest, Recognized } from '../api'
 import { useAuth } from '../auth'
 import { DECODE_NAMES } from '../components/job/processing'
@@ -25,6 +25,8 @@ interface Picks {
   ocr: string
   /** 'auto' leaves the reading to the model, as a dataset on Automatic does. */
   decode: string
+  /** How the page is laid out, as a dataset says it; 'auto' works it out per page. */
+  order: string
 }
 
 interface Scan {
@@ -75,6 +77,7 @@ function fieldsOf(picks: Picks): Record<string, string> {
     ...(picks.lines ? { lines_model: picks.lines } : {}),
     ...(picks.ocr ? { ocr_model: picks.ocr } : {}),
     ...(picks.decode !== 'auto' ? { decode: picks.decode } : {}),
+    ...(picks.order !== 'auto' ? { reading_order: picks.order } : {}),
   }
 }
 
@@ -91,7 +94,7 @@ export function TryPage() {
   const { can } = useAuth()
   const [params] = useSearchParams()
   const [offer, setOffer] = useState<RecognitionOffer | null>(null)
-  const [picks, setPicks] = useState<Picks>({ layout: '', lines: '', ocr: params.get('ocr') ?? '', decode: 'auto' })
+  const [picks, setPicks] = useState<Picks>({ layout: '', lines: '', ocr: params.get('ocr') ?? '', decode: 'auto', order: 'auto' })
   const [scans, setScans] = useState<Scan[]>([])
   const [shown, setShown] = useState(0)
   const [hover, setHover] = useState<number | null>(null)
@@ -233,8 +236,10 @@ export function TryPage() {
               (offer?.models.lines ?? []).map((m) => [String(m.id), m.default ? `${m.name} (default)` : m.name]))}
         {pick('OCR', 'ocr', 'try-ocr-model',
               (offer?.models.ocr ?? []).map((m) => [String(m.id), m.default ? `${m.name} (default)` : m.name]))}
-        {pick('Reading', 'decode', 'try-decode',
+        {pick('OCR decoding', 'decode', 'try-decode',
               [['auto', DECODE_NAMES.auto], ...(ocrModel?.decodes ?? []).map((d): [string, string] => [d, DECODE_NAMES[d]])])}
+        {pick('Reading order', 'order', 'try-reading-order',
+              READING_ORDERS.map((value) => [value, READING_ORDER_LABEL[value]]))}
         <span className="pb-2 text-xs text-ink-subtle">The scans are read again when a choice changes.</span>
       </div>
 

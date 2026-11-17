@@ -315,22 +315,22 @@ class LaidOut:
     loose: list
 
 
-def _page_order(found: PageLayout, rules: reading_order.Rules, loose: list) -> reading_order.PageOrder:
+def _page_order(found: PageLayout, rules: reading_order.Rules, loose: list, setting: str) -> reading_order.PageOrder:
     """How the page reads, as geometry.resequence_page orders a dataset's page."""
     boxes = found.content + found.containers
-    structure = (1, 1) if rules.pipeline else reading_order.detect(
-        loose + [geometry.bbox_ring(d.bbox) for d in found.content])
+    structure = (1, 1) if rules.pipeline else reading_order.resolve(
+        loose + [geometry.bbox_ring(d.bbox) for d in found.content], setting)
     return reading_order.page_order([d.bbox for d in boxes], [d.class_name for d in boxes], loose, *structure,
                                     rules=rules)
 
 
-def _lay_out(found: PageLayout, found_lines: RemoteLines, rules: reading_order.Rules, image: Image.Image,
-             sent: Image.Image | Encoded) -> LaidOut:
+def _lay_out(found: PageLayout, found_lines: RemoteLines, rules: reading_order.Rules, setting: str,
+             image: Image.Image, sent: Image.Image | Encoded) -> LaidOut:
     """Lines inside each content region of a page whose regions were found. A region's role
     is the template's: the reading order may read a container that holds nothing, like a
     divider, among the content, but no line is looked for in it."""
     boxes = found.content + found.containers
-    order = _page_order(found, rules, [])
+    order = _page_order(found, rules, [], setting)
     content = [boxes[i] for i in order.content + order.containers if i < len(found.content)]
     loose = []
     if content:
@@ -338,7 +338,7 @@ def _lay_out(found: PageLayout, found_lines: RemoteLines, rules: reading_order.R
                                               [d.bbox for d in content])
     else:
         lines, page_lines = [], found_lines.detect([sent], 'page')[0]
-        order = _page_order(found, rules, page_lines)
+        order = _page_order(found, rules, page_lines, setting)
         loose = [page_lines[j] for run in order.runs for j in run]
     containers = [boxes[i] for i in order.containers + order.content if i >= len(found.content)]
     return LaidOut([(d, 'content') for d in content] + [(d, 'container') for d in containers], lines, loose)
@@ -348,9 +348,9 @@ def _in_pixels(outline: list, width: int, height: int) -> list:
     return [[round(x * width), round(y * height)] for x, y in outline]
 
 
-def _swept(outlines: list) -> list:
+def _swept(outlines: list, setting: str) -> list:
     """Lines in the order the column sweep reads them."""
-    return [outlines[j] for j in reading_order.order(outlines, *reading_order.detect(outlines))]
+    return [outlines[j] for j in reading_order.order(outlines, *reading_order.resolve(outlines, setting))]
 
 
 def _decoded(upload: Upload) -> tuple[Image.Image, Image.Image | Encoded] | str:
@@ -520,12 +520,13 @@ def _new_dataset(conn, account: str, name: str, fields: dict, finder, reading: R
     template - then read, with the models, decode and convention it named."""
     job_id = uuid.uuid4().hex[:12]
     conn.execute('INSERT INTO jobs (id, name, owner, task, line_mode, run_layout, run_lines, run_ocr, model_layout_id, '
-                 "model_lines_id, model_ocr_id, ocr_decode, status) VALUES (?,?,?,'text',?,?,1,1,?,?,?,?,'done')",
+                 "model_lines_id, model_ocr_id, ocr_decode, reading_order, status) "
+                 "VALUES (?,?,?,'text',?,?,1,1,?,?,?,?,?,'done')",
                  (job_id, name, account, 'per_crop' if layout else 'per_page', int(layout is not None),
                   layout.model['id'] if layout else None,
                   finder[0]['id'] if finder and (fields.get('lines_model') or ALLOWED in fields) else None,
                   reading.model['id'] if fields.get('ocr_model') or ALLOWED in fields else None,
-                  fields.get('decode') or decode.DATASET_DEFAULT))
+                  fields.get('decode') or decode.DATASET_DEFAULT, fields.get('reading_order') or reading_order.AUTO))
     if reading.convention:
         conn.execute('UPDATE jobs SET ocr_convention = ? WHERE id = ?', (json.dumps(reading.convention), job_id))
         conventions.note(conn, list(reading.convention))
@@ -684,12 +685,17 @@ class PagesPlan:
     layout: Layout | None
     finder: tuple | None
     reading: Reading
+    # How the pages are laid out: reading_order.AUTO or '<leaves>x<columns>'.
+    order: str
 
 
 def plan_pages(conn, account: str, names: list[str], fields: dict, queued: bool = False) -> PagesPlan:
     fmt = fields.get('format') or 'json'
     if fmt not in FORMATS:
         raise Refused(400, f'format must be one of {", ".join(FORMATS)}')
+    order = fields.get('reading_order') or reading_order.AUTO
+    if order not in reading_order.CHOICES:
+        raise Refused(400, f'reading_order must be one of {", ".join(reading_order.CHOICES)}')
     keep_name = (fields.get('keep') or '').strip()
     target = keeping(conn, account, keep_name, names) if keep_name else None
     own = _own_lines(fields.get('lines'), names, queued)
@@ -698,7 +704,7 @@ def plan_pages(conn, account: str, names: list[str], fields: dict, queued: bool 
     layout = _layout(conn, fields['layout_model'], fields.get(ALLOWED)) if fields.get('layout_model') else None
     finder = (_model(conn, 'lines', fields.get('lines_model'), fields.get(ALLOWED))
               if any(name not in own for name in names) else None)
-    return PagesPlan(fields, fmt, target, own, layout, finder, _reading(conn, fields))
+    return PagesPlan(fields, fmt, target, own, layout, finder, _reading(conn, fields), order)
 
 
 def pages(conn, account: str, uploads: list[Upload], fields: dict) -> dict:
@@ -746,9 +752,9 @@ def read_pages(conn, account: str, plan: PagesPlan, uploads: list[Upload], reque
                 models['lines'] = {'id': row['id'], 'name': row['name']}
             if layout is None:
                 outlines = [_in_pixels(o, image.width, image.height)
-                            for o in _swept(found_lines.detect([sent], 'page')[0])]
+                            for o in _swept(found_lines.detect([sent], 'page')[0], plan.order)]
             else:
-                laid = laid_out[i] = _lay_out(regions_of[i], found_lines, layout.rules, image, sent)
+                laid = laid_out[i] = _lay_out(regions_of[i], found_lines, layout.rules, plan.order, image, sent)
                 page['regions'] = [{'class': found.class_name, 'role': role,
                                     'polygon': _in_pixels(geometry.bbox_ring(found.bbox), image.width, image.height),
                                     'confidence': found.confidence} for found, role in laid.regions]

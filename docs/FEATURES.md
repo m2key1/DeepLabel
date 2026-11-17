@@ -690,8 +690,9 @@ that kind where not, and a model off its list is answered as if there were no su
 new model reaches it only once ticked; a token left on **All models** reaches every model.
 
 **Try** in the top bar (or **Try this model** on an OCR model's page) does the same in the
-browser: drop up to 10 scans, pick the layout (none by default), line and OCR models, and
-each scan comes back with its lines outlined and numbered in reading order beside their
+browser: drop up to 10 scans, pick the layout (none by default), line and OCR models, the
+OCR decoding and the reading order (the choices a dataset has), and each scan comes back
+with its lines outlined and numbered in reading order beside their
 text - with a layout model, its regions drawn behind them with their class, and the text
 grouped under each region. While a scan is read, a band sweeps over it and a small note says
 what the read is doing - finding lines, reading 40 of 155 lines, waiting for the GPU - and for

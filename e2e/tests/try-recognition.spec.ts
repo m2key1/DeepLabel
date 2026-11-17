@@ -97,6 +97,36 @@ test.describe('Scenario: trying recognition on a scan of your own', () => {
     await expect(page.getByTestId('try-text')).toHaveText(READ(6))
   })
 
+  test('the reading order is chosen as for a dataset, and the scan read again with it', async ({ page }) => {
+    // A request carrying a file has no body Playwright can read, so the page notes what it sends.
+    await page.addInitScript(() => {
+      const sent: (FormDataEntryValue | null)[] = []
+      Object.assign(window, { readingOrdersSent: sent })
+      const original = window.fetch.bind(window)
+      window.fetch = (input, init) => {
+        if (String(input).endsWith('/api/recognize/pages') && init?.body instanceof FormData) {
+          sent.push(init.body.get('reading_order'))
+        }
+        return original(input, init)
+      }
+    })
+    const sent = () => page.evaluate(() => (window as unknown as { readingOrdersSent: unknown[] }).readingOrdersSent)
+    await page.goto('/try')
+    await page.getByTestId('try-files').setInputFiles({ name: 'leaf.png', mimeType: 'image/png', buffer: scanPng(600, 800, 40) })
+    await expect(page.getByTestId('try-text')).toHaveText(READ(6))
+    const order = page.getByLabel('Reading order')
+    await expect(order.locator('option')).toHaveText([
+      'Work it out per page', 'Single page, one column', 'Single page, two columns', 'Single page, three columns',
+      'Double page, one column each', 'Double page, two columns each', 'Double page, three columns each'])
+    await expect(page.getByTestId('try-api')).not.toContainText('reading_order')
+    await expect(page.getByLabel('OCR decoding')).toHaveValue('auto')
+
+    await order.selectOption({ label: 'Single page, two columns' })
+    await expect.poll(sent).toEqual([null, '1x2'])
+    await expect(page.getByTestId('try-text')).toHaveText(READ(6))
+    await expect(page.getByTestId('try-api')).toContainText('-F reading_order=1x2')
+  })
+
   test('the text is copied and the PAGE XML downloaded as the API returns them', async ({ page }) => {
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.goto('/try')

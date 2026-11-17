@@ -90,6 +90,9 @@ those, and one naming a model off the list is answered `400` as if there were no
 Both take `ocr_model`, `decode` and `convention` (comma-separated); pages also take
 `lines_model` and `format`: `page`, `alto`, `hocr` or `txt` add each page's document beside
 its lines. Without them the deployment's default models read, the way a new dataset would.
+Pages also take `reading_order`, the layout a dataset can be given: `auto` (the default)
+works it out per page, `1x1` to `1x3` is a single page of one to three columns, and `2x1` to
+`2x3` a double page with that many columns on each side.
 
 ```bash
 curl -H "Authorization: Bearer $DEEPLABEL_TOKEN" \
@@ -131,11 +134,11 @@ Pages sent with `keep=<name>` are also filed into your dataset of that name (in 
 case), or into a new one if no dataset has the name, so their lines can be corrected there
 and used for training. They arrive read and unchecked, as a dataset that skips layout holds
 them, and nothing of the pipeline runs on them; a new dataset takes the request's models,
-decode and convention, so pages added to it in the app later are read the same way. With
-`layout_model`, each region is kept as a layout box of the dataset's class for its label,
-with its lines, and a new dataset takes the model's template; a region whose label the
-dataset has no class for is left out, and its lines go to Unassigned. A scan
-the dataset holds already lands as a duplicate, without its lines. The answer says where:
+decode, convention and reading order, so pages added to it in the app later are read the
+same way. With `layout_model`, each region is kept as a layout box of the dataset's class
+for its label, with its lines, and a new dataset takes the model's template; a region whose
+label the dataset has no class for is left out, and its lines go to Unassigned. A scan the
+dataset holds already lands as a duplicate, without its lines. The answer says where:
 `"kept": {"dataset": "3f9c...", "name": "Letters 1848", "created": true, "pages": 2,
 "duplicates": []}`. A name another account holds is refused `409`, as is a dataset that is
 queued or running; keeping needs an account that may make datasets and a token that is not
