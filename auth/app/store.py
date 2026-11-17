@@ -102,7 +102,9 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     last_used_at TEXT,
     expires_at TEXT,
     -- 'all', or 'recognize': only the recognition API, nothing else of either service.
-    scope TEXT NOT NULL DEFAULT 'all'
+    scope TEXT NOT NULL DEFAULT 'all',
+    -- The models a recognition-only token may use, as a JSON list of ids; NULL is every model.
+    models TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
 """
@@ -270,6 +272,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE users ADD COLUMN last_seen_at TEXT')
     if 'scope' not in {r[1] for r in conn.execute('PRAGMA table_info(api_tokens)')}:
         conn.execute("ALTER TABLE api_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT 'all'")
+    if 'models' not in {r[1] for r in conn.execute('PRAGMA table_info(api_tokens)')}:
+        conn.execute('ALTER TABLE api_tokens ADD COLUMN models TEXT')
     if 'must_change_password' not in {r[1] for r in conn.execute('PRAGMA table_info(sessions)')}:
         conn.execute('ALTER TABLE sessions ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0')
     if 'pending' not in columns:
@@ -496,11 +500,13 @@ def set_user_active(conn: sqlite3.Connection, user_id: int, active: bool):
 
 
 def create_api_token(conn: sqlite3.Connection, user_id: int, name: str, token_hash: str,
-                     prefix: str, readonly: bool, expires_at: str | None, scope: str = 'all'):
+                     prefix: str, readonly: bool, expires_at: str | None, scope: str = 'all',
+                     models: list[int] | None = None):
     cur = conn.execute(
-        'INSERT INTO api_tokens (user_id, name, token_hash, prefix, readonly, expires_at, scope) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?)',
-        (user_id, name, token_hash, prefix, int(readonly), expires_at, scope))
+        'INSERT INTO api_tokens (user_id, name, token_hash, prefix, readonly, expires_at, scope, models) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        (user_id, name, token_hash, prefix, int(readonly), expires_at, scope,
+         None if models is None else json.dumps(models)))
     conn.commit()
     return conn.execute('SELECT * FROM api_tokens WHERE id = ?', (cur.lastrowid,)).fetchone()
 
@@ -511,7 +517,7 @@ def get_user_by_api_token(conn: sqlite3.Connection, token_hash: str | None):
     if not token_hash:
         return None
     row = conn.execute(
-        'SELECT u.*, t.id token_id, t.readonly, t.scope FROM api_tokens t JOIN users u ON u.id = t.user_id '
+        'SELECT u.*, t.id token_id, t.readonly, t.scope, t.models FROM api_tokens t JOIN users u ON u.id = t.user_id '
         "WHERE t.token_hash = ? AND u.active = 1 "
         "AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))",
         (token_hash,)).fetchone()
@@ -527,15 +533,29 @@ def touch_api_token(conn: sqlite3.Connection, token_id: int):
     conn.commit()
 
 
+TOKEN_LISTING = ('SELECT t.id, t.user_id, t.name, t.prefix, t.readonly, t.scope, t.models, t.created_at, '
+                 "t.last_used_at, t.expires_at, t.expires_at <= datetime('now') AS expired, u.username, u.subject "
+                 'FROM api_tokens t JOIN users u ON u.id = t.user_id ')
+
+
 def list_api_tokens(conn: sqlite3.Connection, user_id: int | None = None):
     """Every token, or one user's. The hash never leaves the database."""
     where = 'WHERE t.user_id = ?' if user_id is not None else ''
     args = (user_id,) if user_id is not None else ()
-    return conn.execute(
-        'SELECT t.id, t.user_id, t.name, t.prefix, t.readonly, t.scope, t.created_at, t.last_used_at, '
-        "t.expires_at, t.expires_at <= datetime('now') AS expired, u.username, u.subject "
-        'FROM api_tokens t JOIN users u ON u.id = t.user_id '
-        f'{where} ORDER BY t.created_at DESC', args).fetchall()
+    return conn.execute(f'{TOKEN_LISTING}{where} ORDER BY t.created_at DESC', args).fetchall()
+
+
+def get_api_token(conn: sqlite3.Connection, token_id: int, user_id: int | None = None):
+    """One token as the list shows it; user_id scopes it to its owner, None finds anyone's."""
+    where = 'WHERE t.id = ?' + (' AND t.user_id = ?' if user_id is not None else '')
+    args = (token_id, user_id) if user_id is not None else (token_id,)
+    return conn.execute(f'{TOKEN_LISTING}{where}', args).fetchone()
+
+
+def set_api_token_models(conn: sqlite3.Connection, token_id: int, models: list[int] | None):
+    conn.execute('UPDATE api_tokens SET models = ? WHERE id = ?',
+                 (None if models is None else json.dumps(models), token_id))
+    conn.commit()
 
 
 def delete_api_token(conn: sqlite3.Connection, token_id: int, user_id: int | None = None) -> bool:

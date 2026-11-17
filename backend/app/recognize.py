@@ -183,14 +183,35 @@ def default_decode(conn, model_id: int) -> str:
     return auto_decode.resolve(conn, model_id, 'auto')
 
 
-def _served(conn, task: str) -> list:
+def _served(conn, task: str, allowed: list[int] | None = None) -> list:
     rows = conn.execute('SELECT * FROM models WHERE task = ? AND archived = 0 ORDER BY created_at', (task,)).fetchall()
-    return [row for row in rows if backend_client.client_for(conn, row['id']) is not None]
+    return [row for row in rows if backend_client.client_for(conn, row['id']) is not None
+            and (allowed is None or row['id'] in allowed)]
 
 
-def offered(conn, account: str) -> dict:
+# The models an API key is limited to, as the auth service sends them. The route puts them
+# among the request's fields, so an async request is held to them when its turn comes.
+ALLOWED = 'allowed_models'
+
+
+def held_to(fields: dict, models: list[int] | None) -> dict:
+    """The request's fields with its key's list of models - never one the request sent."""
+    rest = {key: value for key, value in fields.items() if key != ALLOWED}
+    return rest if models is None else {**rest, ALLOWED: models}
+
+
+def _default(conn, task: str, allowed: list[int] | None):
+    """What a request naming no model reads with: the deployment's default - for a key
+    limited to some models, only if the list has it, else the task's first on the list."""
+    row = registry.default_model(conn, task)
+    if allowed is None or (row is not None and row['id'] in allowed):
+        return row
+    return next(iter(_served(conn, task, allowed)), None)
+
+
+def offered(conn, account: str, allowed: list[int] | None = None) -> dict:
     def entry(row) -> dict:
-        model = {'id': row['id'], 'name': row['name'], 'default': bool(row['is_default'])}
+        model = {'id': row['id'], 'name': row['name'], 'default': row['id'] == defaults[row['task']]}
         if row['task'] == 'layout':
             return {**model, 'template': _layout_template(conn, row['id'])[1]['name']}
         if row['task'] != 'ocr':
@@ -199,7 +220,8 @@ def offered(conn, account: str) -> dict:
                 'default_decode': default_decode(conn, row['id']),
                 'conventions': json.loads(row['conventions']) if row['conventions'] else []}
     this_month = _month(datetime.now(timezone.utc))
-    return {'models': {task: [entry(row) for row in _served(conn, task)] for task in ('layout', 'lines', 'ocr')},
+    defaults = {task: (row['id'] if (row := _default(conn, task, allowed)) else None) for task in ('layout', 'lines', 'ocr')}
+    return {'models': {task: [entry(row) for row in _served(conn, task, allowed)] for task in ('layout', 'lines', 'ocr')},
             'limits': {'pages': config.RECOGNIZE_MAX_PAGES, 'lines': config.RECOGNIZE_MAX_LINES,
                        'megabytes': config.RECOGNIZE_MAX_MB,
                        'async': {'pages': config.RECOGNIZE_ASYNC_MAX_PAGES, 'lines': config.RECOGNIZE_ASYNC_MAX_LINES,
@@ -211,17 +233,20 @@ def offered(conn, account: str) -> dict:
                       'cap': cap_of(conn, account)}}
 
 
-def _model(conn, task: str, raw_id: str | None):
-    """The model a request named, or the task's default, and the backend it runs on."""
+def _model(conn, task: str, raw_id: str | None, allowed: list[int] | None = None):
+    """The model a request named, or the task's default, and the backend it runs on. For
+    a key limited to some models, one off its list is as unavailable as one that is not there."""
     if raw_id:
         try:
             row = registry.get_model(conn, int(raw_id))
         except ValueError:
             raise Refused(400, f'{task}_model must be a model id') from None
-        if row is None or row['task'] != task or row['archived']:
+        if row is None or row['task'] != task or row['archived'] or (allowed is not None and row['id'] not in allowed):
             raise Refused(400, f'not an available {task} model')
     else:
-        row = registry.default_model(conn, task)
+        row = _default(conn, task, allowed)
+        if row is None and allowed is not None:
+            raise Refused(403, f'this API token may use no {task} model')
         if row is None:
             raise Refused(503, f'this deployment has no default {task} model')
     client = backend_client.client_for(conn, row['id'])
@@ -242,7 +267,7 @@ class Reading:
 
 
 def _reading(conn, fields: dict) -> Reading:
-    row, client = _model(conn, 'ocr', fields.get('ocr_model'))
+    row, client = _model(conn, 'ocr', fields.get('ocr_model'), fields.get(ALLOWED))
     mode = fields.get('decode') or default_decode(conn, row['id'])
     if mode not in decode.OCR_DECODES:
         raise Refused(400, f'decode must be one of {", ".join(decode.OCR_DECODES)}')
@@ -273,8 +298,8 @@ class Layout:
     rules: reading_order.Rules
 
 
-def _layout(conn, raw_id: str) -> Layout:
-    row, client = _model(conn, 'layout', raw_id)
+def _layout(conn, raw_id: str, allowed: list[int] | None = None) -> Layout:
+    row, client = _model(conn, 'layout', raw_id, allowed)
     own, template = _layout_template(conn, row['id'])
     vocabulary = layout_templates.Vocabulary(layout_templates.template_classes(conn, template['id']), template['rules'])
     return Layout(row, client, template, vocabulary, vocabulary.reading_rules(own))
@@ -498,8 +523,8 @@ def _new_dataset(conn, account: str, name: str, fields: dict, finder, reading: R
                  "model_lines_id, model_ocr_id, ocr_decode, status) VALUES (?,?,?,'text',?,?,1,1,?,?,?,?,'done')",
                  (job_id, name, account, 'per_crop' if layout else 'per_page', int(layout is not None),
                   layout.model['id'] if layout else None,
-                  finder[0]['id'] if finder and fields.get('lines_model') else None,
-                  reading.model['id'] if fields.get('ocr_model') else None,
+                  finder[0]['id'] if finder and (fields.get('lines_model') or ALLOWED in fields) else None,
+                  reading.model['id'] if fields.get('ocr_model') or ALLOWED in fields else None,
                   fields.get('decode') or decode.DATASET_DEFAULT))
     if reading.convention:
         conn.execute('UPDATE jobs SET ocr_convention = ? WHERE id = ?', (json.dumps(reading.convention), job_id))
@@ -670,8 +695,9 @@ def plan_pages(conn, account: str, names: list[str], fields: dict, queued: bool 
     own = _own_lines(fields.get('lines'), names, queued)
     if own and fields.get('layout_model'):
         raise Refused(400, 'send lines or layout_model, not both: with layout the lines are found inside its regions')
-    layout = _layout(conn, fields['layout_model']) if fields.get('layout_model') else None
-    finder = _model(conn, 'lines', fields.get('lines_model')) if any(name not in own for name in names) else None
+    layout = _layout(conn, fields['layout_model'], fields.get(ALLOWED)) if fields.get('layout_model') else None
+    finder = (_model(conn, 'lines', fields.get('lines_model'), fields.get(ALLOWED))
+              if any(name not in own for name in names) else None)
     return PagesPlan(fields, fmt, target, own, layout, finder, _reading(conn, fields))
 
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { deleteApiToken, listAllApiTokens, type ApiToken } from '../../api'
 import { formatDate } from '../../util'
 import { useAutoClear } from '../../messages'
@@ -6,6 +6,8 @@ import { EmptyState } from '../ui/EmptyState'
 import { Section } from '../ui/Section'
 import { tableCell, tableHeadRow } from '../ui/Table'
 import { tokenAccess } from '../ApiTokens'
+import { TokenModelsEditor } from '../TokenModels'
+import { modelsLabel, useRecognitionOffer } from '../../tokenModels'
 
 const stamp = (value: string | null) => (value ? formatDate(value) : '-')
 
@@ -14,6 +16,8 @@ export const ADMIN_TOKENS_ID = 'admin-tokens'
 export function AdminTokens() {
   const [tokens, setTokens] = useState<ApiToken[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const offer = useRecognitionOffer(true)
+  const [changing, setChanging] = useState<number | null>(null)
   useAutoClear(error, setError)
 
   const refresh = useCallback(() => {
@@ -54,6 +58,7 @@ export function AdminTokens() {
               <th className={`${tableCell} py-1.5 font-semibold`}>Name</th>
               <th className={`${tableCell} py-1.5 font-semibold`}>Prefix</th>
               <th className={`${tableCell} py-1.5 font-semibold`}>Access</th>
+              <th className={`${tableCell} py-1.5 font-semibold`}>Models</th>
               <th className={`${tableCell} py-1.5 font-semibold`}>Last used</th>
               <th className={`${tableCell} py-1.5 font-semibold`}>Expires</th>
               <th />
@@ -61,16 +66,26 @@ export function AdminTokens() {
           </thead>
           <tbody>
             {tokens?.map((t) => (
-              <tr key={t.id} data-testid="admin-token-row" data-expired={t.expired || undefined}
+              <Fragment key={t.id}>
+              <tr data-testid="admin-token-row" data-expired={t.expired || undefined}
                   title={t.expired ? 'Expired - refused by the API, listed until revoked' : undefined}
                   className={`border-b border-line ${t.expired ? 'text-ink-subtle opacity-60' : ''}`}>
                 <td className="py-1.5">{t.username}</td>
                 <td className="py-1.5">{t.name}</td>
                 <td className="py-1.5 font-mono text-xs text-ink-muted">{t.prefix}…</td>
                 <td className="py-1.5">{tokenAccess(t)}</td>
+                <td data-testid="token-models-label" className="max-w-56 truncate py-1.5 pr-4" title={modelsLabel(t, offer)}>
+                  {modelsLabel(t, offer)}
+                </td>
                 <td className="py-1.5 text-ink-muted">{stamp(t.last_used_at)}</td>
                 <td className="py-1.5 text-ink-muted">{t.expired ? `expired ${stamp(t.expires_at)}` : stamp(t.expires_at)}</td>
-                <td className="py-1.5 text-right">
+                <td className="space-x-3 py-1.5 text-right">
+                  {t.scope === 'recognize' && offer && (
+                    <button onClick={() => setChanging(changing === t.id ? null : t.id)} aria-expanded={changing === t.id}
+                            className="text-xs text-ink-muted hover:text-accent-ink hover:underline">
+                      Change models
+                    </button>
+                  )}
                   <button
                     onClick={() => revoke(t)}
                     className="text-xs text-danger hover:underline"
@@ -79,6 +94,11 @@ export function AdminTokens() {
                   </button>
                 </td>
               </tr>
+              {changing === t.id && offer && (
+                <TokenModelsEditor token={t} offer={offer} columns={8} onCancel={() => setChanging(null)}
+                                   onSaved={() => { setChanging(null); refresh() }} />
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>

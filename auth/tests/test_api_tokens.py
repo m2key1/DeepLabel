@@ -301,3 +301,97 @@ def test_tokens_made_before_scopes_reach_everything(tmp_path):
     migrated = store.connect(db)
     assert [tuple(r) for r in migrated.execute('SELECT name, scope FROM api_tokens')] == [('old', 'all')]
     store.connect(db).close()
+
+
+class TestARecognitionTokenLimitedToSomeModels:
+    """A key given to someone outside reaches only the models picked for it (decision 287).
+    The auth service keeps the ids; the backend, which knows the models, holds to them."""
+
+    def test_the_models_go_to_the_backend_with_the_scope(self, client):
+        token = _mint(client, 'root', scope='recognize', models=[40, 2])
+        answer = client.get('/validate', headers=_bearer(token))
+        assert answer.status_code == 200
+        assert (answer.headers['X-Auth-Scope'], answer.headers['X-Auth-Models']) == ('recognize', '2,40')
+
+    def test_a_key_without_a_list_reaches_every_model(self, client):
+        answer = client.get('/validate', headers=_bearer(_mint(client, 'root', scope='recognize')))
+        assert answer.status_code == 200
+        assert 'X-Auth-Models' not in answer.headers
+
+    def test_the_list_shows_with_the_key(self, client):
+        _mint(client, 'root', name='guest', scope='recognize', models=[40, 2])
+        _mint(client, 'root', name='open', scope='recognize')
+        own = {t['name']: t['models'] for t in client.get('/api/tokens', cookies=_session('root')).json()['tokens']}
+        assert own == {'guest': [2, 40], 'open': None}
+        everyone = client.get('/api/admin/tokens', cookies=_session('root')).json()['tokens']
+        assert {t['name']: t['models'] for t in everyone} == {'guest': [2, 40], 'open': None}
+
+    def test_a_full_access_key_takes_no_list(self, client):
+        refused = client.post('/api/tokens', json={'name': 'x', 'models': [40]}, cookies=_session('root'))
+        assert refused.status_code == 400
+        assert refused.json()['detail'] == 'only a recognition-only token can be limited to some models'
+        assert client.get('/api/tokens', cookies=_session('root')).json()['tokens'] == []
+
+    def test_an_empty_list_is_refused(self, client):
+        refused = client.post('/api/tokens', json={'name': 'x', 'scope': 'recognize', 'models': []},
+                              cookies=_session('root'))
+        assert refused.status_code == 400
+        assert refused.json()['detail'] == 'a token limited to some models needs at least one'
+
+    def test_the_owner_changes_the_list_of_a_key_already_handed_out(self, client):
+        token = _mint(client, 'root', scope='recognize')
+        token_id = client.get('/api/tokens', cookies=_session('root')).json()['tokens'][0]['id']
+
+        changed = client.patch(f'/api/tokens/{token_id}', json={'models': [40]}, cookies=_session('root'))
+        assert changed.status_code == 200
+        assert changed.json()['models'] == [40]
+        assert client.get('/validate', headers=_bearer(token)).headers['X-Auth-Models'] == '40'
+
+        lifted = client.patch(f'/api/tokens/{token_id}', json={'models': None}, cookies=_session('root'))
+        assert lifted.json()['models'] is None
+        assert 'X-Auth-Models' not in client.get('/validate', headers=_bearer(token)).headers
+
+    def test_an_admin_changes_anyones_key_and_nobody_else_can(self, client):
+        conn = store.connect(config.DB_PATH)
+        conn.execute("UPDATE users SET permissions = '{\"recognize\": true}' WHERE username = 'alice'")
+        conn.commit()
+        conn.close()
+        token = _mint(client, 'alice', scope='recognize')
+        token_id = client.get('/api/tokens', cookies=_session('alice')).json()['tokens'][0]['id']
+        conn = store.connect(config.DB_PATH)
+        store.upsert_user(conn, 'sub-bob', 'bob', 'member')
+        conn.close()
+
+        assert client.patch(f'/api/tokens/{token_id}', json={'models': [2]}, cookies=_session('bob')).status_code == 404
+        assert 'X-Auth-Models' not in client.get('/validate', headers=_bearer(token)).headers
+        assert client.patch(f'/api/tokens/{token_id}', json={'models': [2]}, cookies=_session('root')).status_code == 200
+        assert client.get('/validate', headers=_bearer(token)).headers['X-Auth-Models'] == '2'
+
+    def test_a_full_access_key_cannot_be_given_a_list_later(self, client):
+        _mint(client, 'root')
+        token_id = client.get('/api/tokens', cookies=_session('root')).json()['tokens'][0]['id']
+        refused = client.patch(f'/api/tokens/{token_id}', json={'models': [40]}, cookies=_session('root'))
+        assert refused.status_code == 400
+        assert refused.json()['detail'] == 'only a recognition-only token can be limited to some models'
+
+    def test_the_list_reaches_no_further_than_recognition(self, client):
+        token = _mint(client, 'root', scope='recognize', models=[40])
+        token_id = client.get('/api/tokens', cookies=_session('root')).json()['tokens'][0]['id']
+        refused = client.patch(f'/api/tokens/{token_id}', json={'models': None}, headers=_bearer(token))
+        assert (refused.status_code, refused.json()['detail']) == (403, 'needs a signed-in session, not an API token')
+        assert client.get('/validate', headers=_bearer(token)).headers['X-Auth-Models'] == '40'
+
+
+def test_tokens_made_before_model_lists_reach_every_model(tmp_path):
+    db = tmp_path / 'old.db'
+    conn = sqlite3.connect(db)
+    conn.execute('CREATE TABLE api_tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, '
+                 "name TEXT NOT NULL DEFAULT '', token_hash TEXT UNIQUE NOT NULL, prefix TEXT NOT NULL DEFAULT '', "
+                 "readonly INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), "
+                 "last_used_at TEXT, expires_at TEXT, scope TEXT NOT NULL DEFAULT 'all')")
+    conn.execute("INSERT INTO api_tokens (user_id, name, token_hash, scope) VALUES (1, 'old', 'h', 'recognize')")
+    conn.commit()
+    conn.close()
+    migrated = store.connect(db)
+    assert [tuple(r) for r in migrated.execute('SELECT name, models FROM api_tokens')] == [('old', None)]
+    store.connect(db).close()

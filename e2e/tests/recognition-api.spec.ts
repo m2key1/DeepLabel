@@ -1,6 +1,8 @@
 import { test, expect } from '../helpers/test'
 import type { Page } from '@playwright/test'
-import { backendFetch, getJob, getPageDetail, jobPageIds, pageLines, slowOcrModelId, uniqueName } from '../helpers/api'
+import {
+  backendFetch, getJob, getPageDetail, importStubModel, jobPageIds, pageLines, slowOcrModelId, uniqueName,
+} from '../helpers/api'
 import { FRONTEND } from '../helpers/frontend'
 import { scanPng } from '../helpers/image'
 import { seedSession, useSession } from '../helpers/session'
@@ -265,6 +267,64 @@ test.describe('Scenario: a token that can only recognize', () => {
         expect(refused.status, path).toBe(403)
         expect((await refused.json()).detail, path).toBe('recognition-only API token')
       }
+    })
+
+  test('a key limited to chosen models is offered them alone, reads with them and is refused the rest, until widened',
+    async ({ page }) => {
+      const guestOcrName = uniqueName('Guest OCR')
+      const guestOcr = importStubModel('ocr', guestOcrName, 'stub-misread')
+      const everything = await (await page.request.get('/api/recognize')).json()
+      const lines = everything.models.lines.find((m: Offered) => m.default) as Offered
+      const ocr = everything.models.ocr.find((m: Offered) => m.default) as Offered
+
+      await page.goto('/settings?section=tokens')
+      const name = uniqueName('guest key')
+      await page.getByLabel('Token name').fill(name)
+      await page.getByLabel('Access').selectOption({ label: 'Recognition only' })
+      const chooser = page.getByTestId('token-models')
+      await expect(chooser.getByRole('button', { name: 'All models', exact: true })).toHaveAttribute('aria-pressed', 'true')
+      await chooser.getByRole('button', { name: 'Chosen models', exact: true }).click()
+      // Chosen starts from the deployment's own line and OCR models.
+      const chip = (task: string, model: string) =>
+        chooser.locator(`[data-task="${task}"]`).getByRole('button', { name: model, exact: true })
+      await expect(chip('lines', lines.name)).toHaveAttribute('aria-pressed', 'true')
+      await expect(chip('ocr', ocr.name)).toHaveAttribute('aria-pressed', 'true')
+      await expect(chip('layout', everything.models.layout[0].name)).toHaveAttribute('aria-pressed', 'false')
+      await chip('ocr', ocr.name).click()
+      await expect(page.getByText('Pick at least one OCR model.')).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Create token' })).toBeDisabled()
+      await chip('ocr', guestOcrName).click()
+      await page.getByRole('button', { name: 'Create token' }).click()
+      const token = await page.getByTestId('token-secret').locator('code').innerText()
+
+      const stored = async () => ((await (await page.request.get('/api/tokens')).json()).tokens as
+        { name: string; models: number[] | null }[]).find((t) => t.name === name)!.models
+      await expect.poll(stored).toEqual([lines.id, guestOcr].sort((a, b) => a - b))
+      const row = page.getByTestId('token-row').filter({ hasText: name })
+      await expect(row.getByTestId('token-models-label')).toHaveText(`${lines.name}, ${guestOcrName}`)
+
+      const offered = await (await asToken(token, '/api/recognize')).json()
+      const listed = (task: string) => offered.models[task].map((m: Offered) => [m.name, m.default])
+      expect([listed('layout'), listed('lines'), listed('ocr')]).toEqual([[], [[lines.name, true]], [[guestOcrName, true]]])
+      const read = await recognize(token, 'lines', [{ name: 'one.png', png: scanPng(400, 40, 12) }])
+      expect(read.status).toBe(200)
+      expect((await read.json()).models.ocr.id).toBe(guestOcr)
+      const refused = await recognize(token, 'lines', [{ name: 'one.png', png: scanPng(400, 40, 13) }],
+                                      { ocr_model: String(ocr.id) })
+      expect(refused.status).toBe(400)
+      expect((await refused.json()).detail).toBe('not an available ocr model')
+
+      // Widened again from its row: the key handed out reaches every model.
+      await row.getByRole('button', { name: 'Change models' }).click()
+      const editor = page.getByTestId('token-models-editor')
+      await editor.getByRole('button', { name: 'All models', exact: true }).click()
+      await editor.getByRole('button', { name: 'Save' }).click()
+      await expect.poll(stored).toBeNull()
+      await expect(row.getByTestId('token-models-label')).toHaveText('all')
+      const widened = await recognize(token, 'lines', [{ name: 'one.png', png: scanPng(400, 40, 14) }],
+                                      { ocr_model: String(ocr.id) })
+      expect(widened.status).toBe(200)
+      expect((await widened.json()).models.ocr.id).toBe(ocr.id)
     })
 
   test('a read-only token may recognize, as that writes nothing', async ({ page }) => {

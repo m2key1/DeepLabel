@@ -68,7 +68,10 @@ Scans in, lines and text out, without a dataset: nothing of a request is stored 
 asks to keep its pages, or is async and waits on disk for its turn. It needs the **recognize** permission, which admins have and grant
 per person - to a viewer too, since it writes nothing. A token made with the access **Recognition only** reaches these routes and
 nothing else, which makes it the one to give a service outside; a read-only token may call
-them too, as they write nothing, but cannot keep.
+them too, as they write nothing, but cannot keep. Such a token can be limited to some models: `GET
+/api/recognize` then lists those alone, marking as default the deployment's own where the list
+has it and the first of that kind on the list where not, a request naming no model reads with
+those, and one naming a model off the list is answered `400` as if there were no such model.
 
 - `POST /api/recognize/pages` - whole pages as `files` parts. Each comes back with the
   lines found on it, in reading order, each with its text, confidence and outline in pixels

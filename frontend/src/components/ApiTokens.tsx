@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { createApiToken, deleteApiToken, listApiTokens } from '../api'
 import type { ApiToken } from '../api'
 import { useAuth } from '../auth'
 import { useAutoClear } from '../messages'
+import { ModelChooser, TokenModelsEditor } from './TokenModels'
+import { modelsLabel, readsSomething, useRecognitionOffer } from '../tokenModels'
 import { Section } from './ui/Section'
 import { Button } from './ui/Button'
 import { Input, Select } from './ui/Field'
@@ -33,6 +35,9 @@ export function ApiTokens() {
   const [name, setName] = useState('')
   const { can } = useAuth()
   const [access, setAccess] = useState<Access>('all')
+  const offer = useRecognitionOffer(can('recognize'))
+  const [models, setModels] = useState<number[] | null>(null)
+  const [changing, setChanging] = useState<number | null>(null)
   const [expiryDays, setExpiryDays] = useState<number | null>(365)
   const [minted, setMinted] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -53,10 +58,11 @@ export function ApiTokens() {
     try {
       const created = await createApiToken({
         name: name.trim(), readonly: access === 'readonly', scope: access === 'recognize' ? 'recognize' : 'all',
-        expires_days: expiryDays,
+        expires_days: expiryDays, models: access === 'recognize' ? models : null,
       })
       setMinted(created.token)
       setName('')
+      setModels(null)
       refresh()
     } catch (e) {
       setError((e as Error).message)
@@ -122,10 +128,16 @@ export function ApiTokens() {
             <option key={c.value} value={c.value}>{c.label}</option>
           ))}
         </Select>
-        <Button variant="primary" size="md" onClick={create} disabled={busy || !name.trim()}>
+        <Button variant="primary" size="md" onClick={create}
+                disabled={busy || !name.trim() || (access === 'recognize' && offer !== null && !readsSomething(models, offer))}>
           {busy ? 'Creating…' : 'Create token'}
         </Button>
       </div>
+      {access === 'recognize' && offer && (
+        <div className="mb-3">
+          <ModelChooser offer={offer} value={models} onChange={setModels} />
+        </div>
+      )}
 
       {minted && (
         <div data-testid="token-secret"
@@ -161,6 +173,7 @@ export function ApiTokens() {
               <th className="py-1 font-medium">Name</th>
               <th className="py-1 font-medium">Prefix</th>
               <th className="py-1 font-medium">Access</th>
+              <th className="py-1 font-medium">Models</th>
               <th className="py-1 font-medium">Last used</th>
               <th className="py-1 font-medium">Expires</th>
               <th />
@@ -168,21 +181,36 @@ export function ApiTokens() {
           </thead>
           <tbody>
             {tokens.map((t) => (
-              <tr key={t.id} data-testid="token-row" data-expired={t.expired || undefined}
+              <Fragment key={t.id}>
+              <tr data-testid="token-row" data-expired={t.expired || undefined}
                   title={t.expired ? 'Expired - refused by the API, listed until revoked' : undefined}
                   className={`border-b border-line ${t.expired ? 'text-ink-subtle opacity-60' : ''}`}>
                 <td className="py-1.5">{t.name}</td>
                 <td className="py-1.5 font-mono text-xs text-ink-muted">{t.prefix}…</td>
                 <td className="py-1.5">{tokenAccess(t)}</td>
+                <td data-testid="token-models-label" className="max-w-56 truncate py-1.5" title={modelsLabel(t, offer)}>
+                  {modelsLabel(t, offer)}
+                </td>
                 <td className="py-1.5 text-ink-muted">{stamp(t.last_used_at)}</td>
                 <td className="py-1.5 text-ink-muted">{t.expired ? `expired ${stamp(t.expires_at)}` : stamp(t.expires_at)}</td>
-                <td className="py-1.5 text-right">
+                <td className="space-x-3 py-1.5 text-right">
+                  {t.scope === 'recognize' && offer && (
+                    <button onClick={() => setChanging(changing === t.id ? null : t.id)} aria-expanded={changing === t.id}
+                            className="text-xs text-ink-muted hover:text-accent-ink hover:underline">
+                      Change models
+                    </button>
+                  )}
                   <button onClick={() => revoke(t)}
                           className="text-xs text-danger hover:underline">
                     Revoke
                   </button>
                 </td>
               </tr>
+              {changing === t.id && offer && (
+                <TokenModelsEditor token={t} offer={offer} columns={7} onCancel={() => setChanging(null)}
+                                   onSaved={() => { setChanging(null); refresh() }} />
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>

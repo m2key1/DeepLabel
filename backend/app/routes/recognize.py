@@ -83,7 +83,8 @@ def offered(conn=Depends(get_db), user: dict = Depends(may_recognize)):
     with the template it reads by, each OCR model with its decodes and conventions - the
     formats, the limits of one request and of an async one, the caller's lines read this
     month against its cap, and the caller's async requests."""
-    return {**recognize.offered(conn, user['username']), 'requests': recognize_async.listed(conn, user['username'])}
+    return {**recognize.offered(conn, user['username'], user.get('models')),
+            'requests': recognize_async.listed(conn, user['username'])}
 
 
 def _may_keep(request: Request, user: dict) -> None:
@@ -108,6 +109,7 @@ async def recognize_pages(request: Request, conn=Depends(get_db), user: dict = D
     With `async=true` it is answered 202 at once with its id, waits on disk for its turn
     in the queue, and its answer at GET /api/recognize/{id}."""
     files, fields, queued = await _form(request, 'pages')
+    fields = recognize.held_to(fields, user.get('models'))
     if (fields.get('keep') or '').strip():
         _may_keep(request, user)
     if queued:
@@ -122,6 +124,7 @@ async def recognize_lines(request: Request, conn=Depends(get_db), user: dict = D
     `ocr_model`, `decode`, `convention` and `characters`. Nothing of the request is stored; with
     `async=true` it is queued as for pages."""
     files, fields, queued = await _form(request, 'lines')
+    fields = recognize.held_to(fields, user.get('models'))
     if (fields.get('keep') or '').strip():
         raise HTTPException(400, 'keep works on pages: send them to /api/recognize/pages')
     if queued:

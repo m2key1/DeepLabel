@@ -1150,6 +1150,8 @@ export interface ApiToken {
   readonly: boolean
   /** 'recognize': the recognition API and nothing else. */
   scope: TokenScope
+  /** The models a recognition-only token may use, by id; null is every model. */
+  models: number[] | null
   created_at: string
   last_used_at: string | null
   expires_at: string | null
@@ -1168,8 +1170,14 @@ export function createApiToken(body: {
   readonly: boolean
   scope: TokenScope
   expires_days: number | null
+  models: number[] | null
 }): Promise<ApiToken & { token: string }> {
   return request('/api/tokens', json('POST', body))
+}
+
+/** Which models a recognition-only token may use; null lifts the limit. Its owner's, or an admin's. */
+export function setApiTokenModels(id: number, models: number[] | null): Promise<ApiToken> {
+  return request(`/api/tokens/${id}`, json('PATCH', { models }))
 }
 
 export function deleteApiToken(id: number): Promise<{ ok: boolean }> {

@@ -579,7 +579,8 @@ in Authentik, which nobody has to see or visit.
   and signs the person in, without waiting for approval. **Reset password** in a person's
   details gives the same kind of link for a forgotten password. Links work once, for 7
   days, and a new one cancels the last. See [AUTHENTIK.md](../AUTHENTIK.md).
-- Admins can see and revoke every API token.
+- Admins can see and revoke every API token, and change which models a recognition-only one
+  may use.
 - The Admin page's **API usage** tab lists what each account read through the recognition
   API this month and last - requests, pages, lines and GPU time - and takes an optional
   monthly cap on lines read per account. Only the counts are kept.
@@ -676,7 +677,12 @@ big batch - up to 1000 pages by default - can be sent `async=true`: it is answer
 with an id, waits its turn in the queue like a dataset, and its answer waits a day to be
 fetched; the command-line tool's `--async` sends and waits for such requests. It
 needs the recognize permission, and a token made **Recognition only** reaches it and nothing
-else, so it can be given to a service outside without opening anyone's datasets to it.
+else, so it can be given to a service outside without opening anyone's datasets to it. Such a
+token can also be limited to chosen layout, line and OCR models - when it is made, or later
+with **Change models** on its row, by its owner or an admin: it is then offered those alone,
+reads with the deployment's default where the list has it and with its own first model of
+that kind where not, and a model off its list is answered as if there were no such model. A
+new model reaches it only once ticked; a token left on **All models** reaches every model.
 
 **Try** in the top bar (or **Try this model** on an OCR model's page) does the same in the
 browser: drop up to 10 scans, pick the layout (none by default), line and OCR models, and

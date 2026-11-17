@@ -127,8 +127,8 @@ async function mintToken(page: Page, name: string, expires: string): Promise<str
 
 // The columns of the two token tables, so a cell is named rather than counted at each use.
 // Each table ends in an unlabelled column holding the Revoke button.
-const SETTINGS_COLUMNS = ['Name', 'Prefix', 'Access', 'Last used', 'Expires']
-const ADMIN_COLUMNS = ['Owner', 'Name', 'Prefix', 'Access', 'Last used', 'Expires']
+const SETTINGS_COLUMNS = ['Name', 'Prefix', 'Access', 'Models', 'Last used', 'Expires']
+const ADMIN_COLUMNS = ['Owner', 'Name', 'Prefix', 'Access', 'Models', 'Last used', 'Expires']
 const headingsOf = (columns: string[]) => [...columns, '']
 const cell = (row: Locator, columns: string[], column: string) =>
   row.getByRole('cell').nth(columns.indexOf(column))

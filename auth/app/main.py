@@ -906,12 +906,30 @@ class TokenCreate(BaseModel):
     readonly: bool = False
     expires_days: int | None = None
     scope: Literal['all', 'recognize'] = 'all'
+    models: list[int] | None = None
+
+
+class TokenModels(BaseModel):
+    models: list[int] | None
+
+
+def _model_list(scope: str, models: list[int] | None) -> list[int] | None:
+    """A token's models as stored, or why it may not have them: a full-access token can run
+    datasets with any model, so a list there would promise what it cannot keep."""
+    if models is None:
+        return None
+    if scope != RECOGNITION_ONLY:
+        raise HTTPException(400, 'only a recognition-only token can be limited to some models')
+    if not models:
+        raise HTTPException(400, 'a token limited to some models needs at least one')
+    return sorted(set(models))
 
 
 def _token_payload(row) -> dict:
     token = dict(row)
     token['readonly'] = bool(token['readonly'])
     token['expired'] = bool(token.get('expired'))
+    token['models'] = json.loads(token['models']) if token.get('models') else None
     for secret in ('token_hash', 'subject'):
         token.pop(secret, None)
     return token
@@ -951,15 +969,31 @@ def post_token(body: TokenCreate, user: dict = Depends(session_user)):
         raise HTTPException(400, 'expires_days must be at least 1')
     if body.scope == RECOGNITION_ONLY and 'recognize' not in store.effective_caps(user):
         raise HTTPException(403, 'not permitted: recognize')
+    models = _model_list(body.scope, body.models)
     token = auth.new_api_token()
     conn = store.connect(config.DB_PATH)
     try:
         row = store.create_api_token(conn, user['id'], name, auth.hash_api_token(token),
                                      auth.api_token_prefix(token), body.readonly,
-                                     auth.api_token_expiry(body.expires_days), body.scope)
+                                     auth.api_token_expiry(body.expires_days), body.scope, models)
     finally:
         conn.close()
     return {**_token_payload(row), 'token': token}
+
+
+@app.patch('/api/tokens/{token_id}')
+def patch_token(token_id: int, body: TokenModels, user: dict = Depends(session_user)):
+    """Which models a recognition-only token may use, changed on a token already handed
+    out: by its owner, or by an admin for anyone's."""
+    conn = store.connect(config.DB_PATH)
+    try:
+        row = store.get_api_token(conn, token_id, None if user['role'] == 'admin' else user['id'])
+        if row is None:
+            raise HTTPException(404)
+        store.set_api_token_models(conn, token_id, _model_list(row['scope'], body.models))
+        return _token_payload(store.get_api_token(conn, token_id))
+    finally:
+        conn.close()
 
 
 @app.delete('/api/tokens/{token_id}')
@@ -992,6 +1026,9 @@ def validate(request: Request):
         headers['X-Auth-Readonly'] = '1'
     if scope != 'all':
         headers['X-Auth-Scope'] = scope
+    models = dict(user).get('models')
+    if scope == RECOGNITION_ONLY and models:
+        headers['X-Auth-Models'] = ','.join(str(model) for model in json.loads(models))
     # What this person may do, resolved here so the backend never has to know which role
     # implies what. Space-separated: the names are dotted ASCII and nothing else.
     caps = store.effective_caps(user)

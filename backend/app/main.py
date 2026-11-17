@@ -83,8 +83,12 @@ async def auth_gate(request: Request, call_next):
         if caps_header is None:
             legacy = {'train.local': 'X-Auth-Train-Local', 'train.cluster': 'X-Auth-Train-Cluster'}
             caps |= {cap for cap, header in legacy.items() if request.headers.get(header) == '1'}
+        # A recognition-only key limited to some models names them; without the header,
+        # every model. Anything but ids leaves the key with none.
+        models_header = request.headers.get('X-Auth-Models')
         request.state.user = {
             'username': username, 'role': role, 'caps': caps,
+            'models': None if models_header is None else [int(m) for m in models_header.split(',') if m.isdigit()],
             'train_local': 'train.local' in caps,
             'train_cluster': 'train.cluster' in caps,
             'slurm_account': trainer.sanitize_slurm_account(request.headers.get('X-Auth-Slurm-Account')),
