@@ -498,11 +498,16 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
 
 ## Evaluation
 
-- **Evaluations** (under Models) draws one ruler per dataset or validation split, with each
-  model as a dot at its CER on a marked scale, the best in green. Test pages come first and are marked as
-  such; a run's validation split comes last and is marked too, since it chose the
-  checkpoint and reads optimistic. Click a dot for its scores in every decode and a link to
-  each evaluation. **Table** lists them all instead.
+- **Evaluations** (under Models) is one table: a row per evaluated OCR model, grouped by
+  family with the default model's family first (families of one model share **Other
+  models** at the end), and a column for each model's own run's validation lines plus one
+  per dataset it was scored on. A cell is the character error
+  rate in the decoding Automatic reads with, beside its change against the model it was
+  trained from on the same lines (▼ better, ▲ worse). A score over several datasets fills
+  each dataset's column from its per-dataset figures. A cell opens its evaluation, a model
+  name the model's page. The search narrows the rows to the models it names and the columns
+  to where they were scored; the six datasets most models were scored on are shown, and
+  **Show all** adds the rest. Archived models stay out unless **Show archived** is ticked.
 - Evaluate any OCR model on any dataset's checked lines with **Evaluate...** on its page; a
   dataset with test pages is scored on those, unless **All pages** is chosen. Training runs
   are evaluated automatically on their validation split and test pages, the new model and its

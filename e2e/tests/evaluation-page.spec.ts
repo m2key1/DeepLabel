@@ -59,20 +59,17 @@ test.describe('Scenario: an evaluation has a page of its own', () => {
   // list under Models", with the headline figures computed from the per-line records.
   test('the Evaluations list opens a page whose figures come from the scored lines', async ({ page }) => {
     const name = uniqueName('Scored set')
-    const { jobId, pageId, evalId, ids } = await evaluatedDataset(name)
+    const { jobId, pageId, evalId, ids, model } = await evaluatedDataset(name)
 
     await page.goto('/models')
     await page.getByTestId('evaluations-list').click()
     await expect(page).toHaveURL(/\/models\/evaluations$/)
-    // The dataset is a ruler, the model a dot on it; the dot opens a card with its scores.
-    const ruler = page.getByTestId('evaluation-ruler').filter({ hasText: name })
-    await expect(ruler.getByTestId('evaluation-dot')).toHaveCount(1)
-    await ruler.getByTestId('evaluation-dot').click()
-    const card = ruler.getByTestId('evaluation-card')
-    await expect(card).toContainText(`on ${name}`)
-    await expect(card.locator('tbody tr')).toHaveCount(1)
-    await expect(card.locator('tbody tr').first()).toContainText('4.82%')
-    await card.getByTestId('evaluation-open').click()
+    // The model is a row, the dataset - scored on all its pages, having no test pages - a column.
+    await page.getByRole('searchbox', { name: 'Search models' }).fill(`${name} reader`)
+    await expect(page.getByRole('columnheader', { name: `${name} all pages`, exact: true })).toBeVisible()
+    const score = page.locator(`[data-testid="eval-model-row"][data-model="${model.id}"] [data-material="${jobId}:all"]`)
+    await expect(score.getByRole('link')).toHaveText('4.82%')
+    await score.getByRole('link').click()
     await expect(page).toHaveURL(new RegExp(`/evaluations/${evalId}(\\?|$)`))
 
     // 4 edits over 83 characters; 5 word errors over 16 words, order-free or not.

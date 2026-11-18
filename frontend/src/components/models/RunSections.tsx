@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import type { Evaluation, Preflight, ProgressPoint, RegistryModel, Training } from '../../api'
 import { trainedAugmentationLabel } from '../augment/pipeline'
 import { percent } from '../evaluation/format'
+import { ScoreChange } from '../evaluation/ScoreChange'
 import { cardChrome } from '../ui/Card'
 import { tableCell, tableHeadRow, tableRow } from '../ui/Table'
 import { headlineScore } from './families'
@@ -82,11 +83,7 @@ export function ScoresTable({ model, base, run, evaluations, materialName }: {
                     <td key={c.key} data-material={c.key} className={`${tableCell} px-3 text-right font-mono text-xs tabular-nums`}>
                       {shown ? <Link to={shown.to} className="hover:text-accent-ink">{percent(shown.cer)}</Link>
                         : <span className="font-sans text-ink-subtle">not run</span>}
-                      {change !== null && Math.abs(change) >= 0.0005 && (
-                        <span className={`ml-2 ${change < 0 ? 'text-ok' : 'text-danger'}`}>
-                          {change < 0 ? '▼' : '▲'} {(Math.abs(change) * 100).toFixed(2)}
-                        </span>
-                      )}
+                      <ScoreChange change={change} />
                     </td>
                   )
                 })}
