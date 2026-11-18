@@ -1,10 +1,11 @@
 # Model backends
 
-Contract version **1.5**. 1.1 added batches per card, gradient accumulation,
+Contract version **1.6**. 1.1 added batches per card, gradient accumulation,
 learning-rate scaling, the out-of-memory fallback, resuming, declared metrics and the
 final evaluation (6.9); 1.2 added builtin weight facts (5.2), `default_epochs` (6.2) and
 the trainer's default augmentation stack (7.1); 1.3 added a builtin base for a training
-(6.5, 6.6); 1.4 added boxes to the augmentation preview (7.1); 1.5 added line outlines to it.
+(6.5, 6.6); 1.4 added boxes to the augmentation preview (7.1); 1.5 added line outlines to it;
+1.6 added the card's memory and each version's size, so backends that fit share a card (3.9).
 
 A *model backend* is a small HTTP service that wraps one model type, with its own image,
 GPU and dependencies. DeepLabel knows a backend only by its URL and a shared secret. It
@@ -96,6 +97,7 @@ its own.
 | `POST /v1/weights/load` | yes | make a weights version ready (download, verify, load) |
 | `GET /v1/weights/{sha256}` | yes | state of one version; `builtin` for a backend's own weights (5.2) |
 | `POST /v1/weights/unload` | yes | free GPU memory (3.9) |
+| `GET /v1/memory` | no | the card's memory and what is loaded (3.9) |
 | `POST /v1/predict/{task}` | yes, per declared task | predict a batch |
 | `POST /v1/train` and `/v1/train/...` | if `train` | see 6.5 |
 | `GET /v1/train/tunables`, `GET /v1/train/augmentations`, `POST /v1/train/augmentations/preview` | if `train` | the training form's tunables, augmentation catalogue and preview (7.1) |
@@ -104,7 +106,7 @@ its own.
 ### 3.3 `GET /health`
 
 ```json
-{"status": "ok", "contract": "1.5", "busy": 0, "loaded": ["9f2c...e1"]}
+{"status": "ok", "contract": "1.6", "busy": 0, "loaded": ["9f2c...e1"]}
 ```
 
 `status` is `ok`, `starting` (process up, not ready) or `error` (with `message`). `busy`
@@ -114,7 +116,7 @@ counts the requests and trainings running now; `loaded` lists the versions in me
 
 ```json
 {
-  "contract": "1.5",
+  "contract": "1.6",
   "name": "deepocr",
   "version": "2026.10.1",
   "model_type": "deepocr",
@@ -241,15 +243,39 @@ no lines, and fails the job on a layout or map item.
 
 ### 3.9 Several backends on one GPU
 
-On a machine with one card, backends each holding a loaded model would compete for its
-memory. So:
+On a machine with one card, backends each holding a loaded model compete for its memory.
+So:
 
-* every backend has a **GPU group** (`MODEL_BACKEND_<NAME>_GPU_GROUP`, default `default`);
-* DeepLabel runs one piece of model work at a time - jobs, local trainings and
+* every backend has a **GPU group** (`MODEL_BACKEND_<NAME>_GPU_GROUP`, default `default`):
+  the backends that share one card;
+* DeepLabel runs one piece of model work at a time per group - jobs, local trainings and
   evaluations share one queue, oldest first;
-* before a backend loads a model or starts a training, DeepLabel calls
-  `POST /v1/weights/unload` on every other backend of its group (one at the same address is
-  the same server, which manages its own memory).
+* before a backend loads weights, DeepLabel leaves the other backends of its group loaded
+  when the weights fit beside them: the card's free memory less the weights' size must be
+  at least a tenth of the card. Otherwise it calls `POST /v1/weights/unload` on the one
+  whose loaded weights went unused longest, asks again, and goes on until they fit or no
+  neighbour holds anything. A neighbour that cannot say what it holds is unloaded first;
+* weights the backend has never measured, or a backend that sees no card, free the whole
+  group's card as before, and so does starting a training;
+* a load or predict that runs out of memory frees the whole card and is tried once more,
+  since programs DeepLabel does not know of may share it.
+
+One at the same address as the loading backend is the same server, which manages its own
+memory.
+
+`GET /v1/memory` is what DeepLabel decides by:
+
+```json
+{"card": {"total": 34190917632, "free": 25800000000},
+ "loaded": [{"sha256": "9f2c...e1", "gpu_memory": 2791728742, "idle_seconds": 12.5}]}
+```
+
+`card` is the whole card in bytes, every process on it counted, or `null` without a GPU.
+`loaded` lists the versions in memory, each with the most card memory it was seen to take
+(`null` before it was measured) and the seconds since it last served a request.
+`GET /v1/weights/{sha256}` carries the same `gpu_memory` once a version has been measured,
+in any state, so DeepLabel knows a size before loading it. A backend that does not answer
+`/v1/memory` (contract before 1.6) is treated as holding weights of unknown size.
 
 Edge detection predicts without a load, so it never unloads a neighbour.
 
@@ -595,7 +621,11 @@ The SDK implements these rules, so a backend author writes none of them:
 * Memory: at most `MODEL_MAX_LOADED` versions loaded (default 2), least recently used
   unloaded first, never one that is serving a request.
 * `POST /v1/weights/unload {"sha256": ...}` (or `{}` for all) frees GPU memory now, and
-  `MODEL_IDLE_UNLOAD_SECONDS` (default 0 = never) unloads after idling.
+  `MODEL_IDLE_UNLOAD_SECONDS` (default 0 = never) unloads after idling. An unload hands
+  the allocator's cached memory back to the card, whatever the model's own `unload` does.
+* Each version's size is the most card memory the process held while loading it or serving
+  a request, kept in `gpu-memory.json` beside the files, which the disk budget never deletes
+  (3.9).
 * `MODEL_DEVICE` (default `auto`) picks the device `load` is given.
 * The cache survives restarts.
 

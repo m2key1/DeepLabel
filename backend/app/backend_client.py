@@ -2,6 +2,7 @@ import fcntl
 import hashlib
 import io
 import json
+import math
 import re
 import time
 import urllib.error
@@ -17,6 +18,8 @@ from app import config, weights
 
 CONNECT_TIMEOUT = 10
 LOAD_POLL_SECONDS = 2.0
+# What a model loaded beside others on a card must leave free of it (3.9).
+HEADROOM = 0.10
 SECRET_HEADER = 'X-Model-Backend-Secret'
 
 
@@ -145,16 +148,72 @@ class BackendClient:
         # Headroom under the backend's ceiling for the request part and the multipart framing.
         return int((self.info().get('max_request_mb') or 64) * (1 << 20) * 0.9)
 
+    def _neighbours(self) -> list['BackendClient']:
+        """The other backends on this one's card. One at this backend's own address is this
+        server, which manages its own memory."""
+        return [BackendClient(n) for n in config.MODEL_BACKENDS.values()
+                if n.url and n.url != self.backend.url and n.gpu_group == self.backend.gpu_group]
+
+    def _unload(self) -> None:
+        """A neighbour that does not answer holds nothing to free."""
+        try:
+            self._call('POST', '/v1/weights/unload', b'{}', 'application/json')
+        except BackendError:
+            pass
+
     def free_card(self) -> None:
         """Unload whatever the other backends on this one's GPU group hold, so the card is
-        this backend's alone (3.9). A neighbour that does not answer holds nothing to free;
-        one at this backend's own address is this server, which manages its own memory."""
-        for neighbour in config.MODEL_BACKENDS.values():
-            if neighbour.url and neighbour.url != self.backend.url and neighbour.gpu_group == self.backend.gpu_group:
-                try:
-                    BackendClient(neighbour)._call('POST', '/v1/weights/unload', b'{}', 'application/json')
-                except BackendError:
-                    pass
+        this backend's alone (3.9)."""
+        for neighbour in self._neighbours():
+            neighbour._unload()
+
+    def _card(self) -> dict | None:
+        try:
+            return self._call('GET', '/v1/memory').get('card')
+        except BackendError:
+            return None
+
+    def _idle_seconds(self) -> float | None:
+        """How long what this backend holds has gone unused; None when it holds nothing,
+        infinity when it is too old to say, so it is unloaded before any that can."""
+        try:
+            loaded = self._call('GET', '/v1/memory').get('loaded')
+        except BackendError as error:
+            if error.code == 'unreachable':
+                return None
+            loaded = None
+        if loaded is None:
+            return math.inf
+        return min((version.get('idle_seconds') or 0 for version in loaded), default=None)
+
+    def make_room(self, sha256: str) -> None:
+        """Leave the other backends of this card loaded when these weights fit beside them
+        with HEADROOM of the card to spare; otherwise unload the least recently used of them,
+        then the next, until they do (3.9). Weights this backend never measured, or a backend
+        that sees no card, free the whole card instead."""
+        neighbours = self._neighbours()
+        if not neighbours:
+            return
+        state = self._call('GET', f'/v1/weights/{sha256}')
+        if state.get('state') == 'loaded':
+            return
+        need, card = state.get('gpu_memory'), self._card()
+        if not need or card is None:
+            return self.free_card()
+        holders = None
+        while card is not None and card['free'] - need < HEADROOM * card['total']:
+            if holders is None:
+                holders = self._least_recently_used_first(neighbours)
+            if not holders:
+                return
+            holders.pop(0)._unload()
+            card = self._card()
+
+    @staticmethod
+    def _least_recently_used_first(neighbours: list['BackendClient']) -> list['BackendClient']:
+        idle = [(neighbour._idle_seconds(), neighbour) for neighbour in neighbours]
+        return [neighbour for seconds, neighbour in sorted(idle, key=lambda pair: -(pair[0] or 0))
+                if seconds is not None]
 
     def load(self, conn, model_id: int) -> tuple[dict | None, dict]:
         """Make a model's weights ready on the backend. Returns the weights block predict
@@ -182,8 +241,19 @@ class BackendClient:
             state.get('facts') or {}
 
     def _load(self, request: dict) -> dict:
-        """Load weights and wait until they are; the caller holds the card's turn."""
-        self.free_card()
+        """Load weights and wait until they are; the caller holds the card's turn. Running
+        out of memory frees the whole card and tries once more, since programs DeepLabel does
+        not know of may share it."""
+        self.make_room(request['sha256'])
+        try:
+            return self._loaded(request)
+        except BackendError as error:
+            if error.code != 'out_of_memory':
+                raise
+            self.free_card()
+            return self._loaded(request)
+
+    def _loaded(self, request: dict) -> dict:
         sha = request['sha256']
         state = self._call('POST', '/v1/weights/load', json.dumps(request).encode(), 'application/json', timeout=30)
         deadline = time.monotonic() + config.MODEL_BACKEND_LOAD_TIMEOUT
@@ -253,6 +323,9 @@ class BackendClient:
             try:
                 return self._send(task, body, content_type)
             except BackendError as error:
+                if error.code == 'out_of_memory':
+                    self.free_card()
+                    return self._send(task, body, content_type)
                 # Something else on the card unloaded these weights since they were loaded.
                 load = self._loads.get((weights_block or {}).get('sha256'))
                 if error.code != 'weights_not_loaded' or load is None:
@@ -269,7 +342,8 @@ class BackendClient:
                 if error.status == 429 and attempt == 1:
                     time.sleep(LOAD_POLL_SECONDS)
                     continue
-                if not error.retryable or attempt == 2:
+                # Out of memory again on the same card is no use; the caller frees it first.
+                if error.code == 'out_of_memory' or not error.retryable or attempt == 2:
                     raise
         raise AssertionError('unreachable')
 

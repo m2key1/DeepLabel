@@ -17,6 +17,7 @@ from app.remote_models import RemoteOcrEngine
 
 SECRET = 'backend-secret'
 SHA = 'ab' * 32
+GB = 1 << 30
 
 
 class FakeBackend(BaseHTTPRequestHandler):
@@ -138,11 +139,24 @@ def test_loading_sends_the_files_with_their_urls_and_waits_until_loaded(conn, ba
 
 
 class Neighbour(BaseHTTPRequestHandler):
-    """Another backend on the same machine: records only which calls reached it."""
+    """Another backend on the same machine: records which calls reached it, and answers
+    /v1/memory from `memory` by its port - a port missing there is a backend too old to say."""
     calls: ClassVar[list] = []
+    memory: ClassVar[dict] = {}
 
     def log_message(self, *args):
         pass
+
+    def do_GET(self):
+        Neighbour.calls.append((self.server.server_port, self.path, None))
+        known = Neighbour.memory.get(self.server.server_port)
+        status, body = (200, known) if known is not None else (
+            404, {'error': {'code': 'not_found', 'message': 'no such route'}})
+        data = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def do_POST(self):
         Neighbour.calls.append((self.server.server_port, self.path, json.loads(self.rfile.read(
@@ -157,7 +171,7 @@ class Neighbour(BaseHTTPRequestHandler):
 def neighbours(backend, monkeypatch):
     """The ocr backend with a neighbour on its card, one on another card, one with no URL,
     one that does not answer, and itself under a second name."""
-    Neighbour.calls = []
+    Neighbour.calls, Neighbour.memory = [], {}
     servers = [ThreadingHTTPServer(('127.0.0.1', 0), Neighbour) for _ in range(2)]
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -175,8 +189,14 @@ def neighbours(backend, monkeypatch):
         server.shutdown()
 
 
-def test_loading_a_model_first_frees_the_card_from_the_other_backends_on_it(conn, neighbours):
+@pytest.mark.parametrize('weights, memory', [
+    ({'state': 'cached'}, {'card': {'total': 10 * GB, 'free': 9 * GB}, 'loaded': []}),
+    ({'state': 'cached', 'gpu_memory': 4 * GB}, {'card': None, 'loaded': []}),
+], ids=['size never measured', 'backend sees no card'])
+def test_loading_a_model_whose_fit_is_unknown_frees_the_card_from_the_other_backends_on_it(
+        conn, neighbours, weights, memory):
     same, _ = neighbours
+    FakeBackend.script = {f'/v1/weights/{SHA}': [(200, weights)], '/v1/memory': [(200, memory)]}
 
     BackendClient(config.MODEL_BACKENDS['ocr']).load(conn, 1)
 
@@ -192,6 +212,141 @@ def test_a_training_first_frees_the_card_from_the_other_backends_on_it(neighbour
 
     assert training.id == 'run-1'
     assert Neighbour.calls == [(same, '/v1/weights/unload', {})]
+
+
+OUT_OF_MEMORY = (503, {'error': {'code': 'out_of_memory', 'message': 'CUDA out of memory', 'retryable': True}})
+
+
+@pytest.fixture
+def crowded(backend, monkeypatch):
+    """The ocr backend sharing a 10 GB card with a line finder and a layout model, and an
+    RF-DETR server on another card. Each neighbour holds nothing until `holding` says so."""
+    Neighbour.calls, Neighbour.memory = [], {}
+    servers = {name: ThreadingHTTPServer(('127.0.0.1', 0), Neighbour) for name in ('lines', 'layout', 'rfdetr')}
+    for server in servers.values():
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    ports = {name: server.server_port for name, server in servers.items()}
+    for port in ports.values():
+        Neighbour.memory[port] = {'card': {'total': 10 * GB, 'free': 0}, 'loaded': []}
+    url = lambda name: f'http://127.0.0.1:{ports[name]}'
+    monkeypatch.setattr(config, 'MODEL_BACKENDS', {
+        'ocr': backend,
+        'lines': config.ModelBackend('lines', url('lines'), SECRET, 'default'),
+        'layout': config.ModelBackend('layout', url('layout'), SECRET, 'default'),
+        'rfdetr-lines': config.ModelBackend('rfdetr-lines', url('rfdetr'), SECRET, 'second-card'),
+    })
+    yield ports
+    for server in servers.values():
+        server.shutdown()
+
+
+def holding(port: int, idle_seconds: float) -> None:
+    Neighbour.memory[port]['loaded'] = [{'sha256': 'ef' * 32, 'gpu_memory': GB, 'idle_seconds': idle_seconds}]
+
+
+def needs(gpu_memory: int, *free: int) -> None:
+    """The ocr backend measured these weights at gpu_memory, and its card has `free` bytes
+    free when first asked, then after each neighbour it saw unloaded."""
+    FakeBackend.script = {f'/v1/weights/{SHA}': [(200, {'state': 'cached', 'gpu_memory': gpu_memory})],
+                          '/v1/memory': [(200, {'card': {'total': 10 * GB, 'free': f}, 'loaded': []}) for f in free]}
+
+
+def unloaded(ports: dict) -> list[str]:
+    names = {port: name for name, port in ports.items()}
+    return [names[port] for port, path, _ in Neighbour.calls if path == '/v1/weights/unload']
+
+
+@pytest.mark.parametrize('free, expected', [
+    ((20 * GB,), []),
+    ((5 * GB,), []),
+    ((5 * GB - 1, 5 * GB), ['lines']),
+    ((2 * GB, 3 * GB, 5 * GB), ['lines', 'layout']),
+    ((2 * GB, 3 * GB, 4 * GB), ['lines', 'layout']),
+], ids=['fits', 'fits with exactly a tenth of the card to spare', 'one short of that',
+        'needs both unloaded', 'still short with nothing left to unload'])
+def test_a_model_loads_beside_its_neighbours_unloading_the_least_recently_used_until_it_fits(
+        conn, crowded, free, expected):
+    holding(crowded['lines'], idle_seconds=100)
+    holding(crowded['layout'], idle_seconds=5)
+    holding(crowded['rfdetr'], idle_seconds=1000)
+    needs(4 * GB, *free)
+
+    BackendClient(config.MODEL_BACKENDS['ocr']).load(conn, 1)
+
+    assert unloaded(crowded) == expected
+    assert [c[1] for c in FakeBackend.calls].count('/v1/weights/load') == 1
+
+
+def test_a_neighbour_too_old_to_report_its_memory_is_unloaded_first_and_one_holding_nothing_never(
+        conn, crowded):
+    holding(crowded['lines'], idle_seconds=100)
+    del Neighbour.memory[crowded['layout']]
+    needs(4 * GB, 2 * GB, 4 * GB, 5 * GB)
+    Neighbour.memory[crowded['rfdetr']]['loaded'] = []
+    config.MODEL_BACKENDS['rfdetr-lines'] = config.ModelBackend(
+        'rfdetr-lines', config.MODEL_BACKENDS['rfdetr-lines'].url, SECRET, 'default')
+
+    BackendClient(config.MODEL_BACKENDS['ocr']).load(conn, 1)
+
+    assert unloaded(crowded) == ['layout', 'lines']
+
+
+def test_weights_already_loaded_need_no_room(conn, crowded):
+    holding(crowded['lines'], idle_seconds=100)
+    holding(crowded['layout'], idle_seconds=5)
+    FakeBackend.script = {f'/v1/weights/{SHA}': [(200, {'state': 'loaded', 'gpu_memory': 4 * GB, 'facts': {}})]}
+
+    BackendClient(config.MODEL_BACKENDS['ocr']).load(conn, 1)
+
+    assert unloaded(crowded) == []
+    assert [c[1] for c in FakeBackend.calls].count('/v1/weights/load') == 1
+    assert '/v1/memory' not in [c[1] for c in FakeBackend.calls]
+
+
+def test_a_load_that_runs_out_of_memory_frees_the_card_and_is_tried_once_more(conn, crowded):
+    holding(crowded['lines'], idle_seconds=100)
+    holding(crowded['layout'], idle_seconds=5)
+    needs(4 * GB, 20 * GB)
+    FakeBackend.script['/v1/weights/load'] = [OUT_OF_MEMORY]
+
+    _, facts = BackendClient(config.MODEL_BACKENDS['ocr']).load(conn, 1)
+
+    assert facts['target_height'] == 128
+    assert unloaded(crowded) == ['lines', 'layout']
+    assert [c[1] for c in FakeBackend.calls].count('/v1/weights/load') == 2
+
+
+def loaded_beside(conn, crowded) -> tuple[BackendClient, dict]:
+    holding(crowded['lines'], idle_seconds=100)
+    holding(crowded['layout'], idle_seconds=5)
+    FakeBackend.script = {f'/v1/weights/{SHA}': [(200, {'state': 'loaded', 'facts': {}})]}
+    client = BackendClient(config.MODEL_BACKENDS['ocr'])
+    weights, _ = client.load(conn, 1)
+    FakeBackend.calls, Neighbour.calls = [], []
+    return client, weights
+
+
+def test_a_predict_that_runs_out_of_memory_frees_the_card_and_is_tried_once_more(conn, crowded):
+    client, weights = loaded_beside(conn, crowded)
+    FakeBackend.script = {'/v1/predict/ocr': [OUT_OF_MEMORY]}
+
+    answer = client.predict('ocr', weights, {}, [Item('0', Image.new('RGB', (40, 10)))])
+
+    assert [r['text'] for r in answer['results']] == ['read None of 1']
+    assert unloaded(crowded) == ['lines', 'layout']
+    assert [c[1] for c in FakeBackend.calls] == ['/v1/predict/ocr', '/v1/predict/ocr']
+
+
+def test_a_predict_out_of_memory_again_after_freeing_the_card_fails(conn, crowded):
+    client, weights = loaded_beside(conn, crowded)
+    FakeBackend.script = {'/v1/predict/ocr': [OUT_OF_MEMORY, OUT_OF_MEMORY]}
+
+    with pytest.raises(BackendError) as raised:
+        client.predict('ocr', weights, {}, [Item('0', Image.new('RGB', (40, 10)))])
+
+    assert raised.value.code == 'out_of_memory'
+    assert unloaded(crowded) == ['lines', 'layout']
+    assert [c[1] for c in FakeBackend.calls] == ['/v1/predict/ocr', '/v1/predict/ocr']
 
 
 def test_a_model_with_no_stored_files_is_refused_unless_the_backend_has_its_own(conn, backend):
