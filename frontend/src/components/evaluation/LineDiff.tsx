@@ -27,3 +27,16 @@ export function LineDiff({ ops }: { ops: EditOp[] }) {
     </span>
   )
 }
+
+const LABEL = 'mr-2 inline-block w-8 font-sans text-[10px] uppercase tracking-wider text-ink-subtle'
+
+/** A line read at least half wrong: a diff would interleave two different texts, so the
+ *  transcription and the reading stand one above the other, to compare with the crop. */
+export function LineTexts({ truth, reading }: { truth: string; reading: string }) {
+  return (
+    <span data-testid="line-texts" className="block font-ocr text-sm">
+      <span className="block text-ink-muted"><span className={LABEL}>text</span>{displayed(truth)}</span>
+      <span className="block"><span className={LABEL}>read</span>{displayed(reading)}</span>
+    </span>
+  )
+}

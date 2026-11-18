@@ -194,7 +194,8 @@ class TestLinesApi:
             'line_id': 2, 'job_id': 'j1', 'page_id': 1, 'ground_truth': 'Wien 1850', 'length': 9,
             'reading': {'evaluation_id': 7, 'decode': 'beam', 'prediction': 'Wien 1860',
                         'cer': pytest.approx(1 / 9), 'distance': 1, 'confidence': 0.95,
-                        'ops': [['=', 'Wien 18', 'Wien 18'], ['s', '5', '6'], ['=', '0', '0']]}}
+                        'ops': [['=', 'Wien 18', 'Wien 18'], ['s', '5', '6'], ['=', '0', '0']]},
+            'line': {'checked': True, 'changed': False, 'revision': 0}}
 
     def test_filtered_by_cer_range(self, client):
         body = lines(client, cer_min=0.2, cer_max=0.3, sort='cer', order='asc')
@@ -233,6 +234,42 @@ class TestLinesApi:
         bob = lines(client, headers=BOB)
         assert [l['line_id'] for l in bob['lines']] == [5]
 
+
+
+class TestLineState:
+    """Each row says how its line stands now, so a line a person changed since the
+    evaluation read it is not overwritten from a stale reading."""
+
+    @pytest.fixture
+    def scored_long_ago(self, imported):
+        imported.execute("UPDATE evaluations SET created_at = '2026-01-01 00:00:00' WHERE id = 7")
+        imported.commit()
+        return imported
+
+    def state(self, client):
+        return {row['line_id']: row['line'] for row in lines(client)['lines']}
+
+    def test_an_untouched_line_is_checked_and_unchanged(self, client, scored_long_ago):
+        assert self.state(client) == {line_id: {'checked': True, 'changed': False, 'revision': 0}
+                                      for line_id in (1, 2, 3, 4, 5)}
+
+    def test_taking_the_reading_or_unchecking_marks_the_line_changed(self, client, scored_long_ago):
+        taken = client.patch('/api/lines/2', headers=ALICE,
+                             json={'corrected_text': 'Wien 1860', 'from_reading': True, 'checked': True})
+        assert taken.status_code == 200, taken.text
+        assert client.patch('/api/lines/3', headers=ALICE, json={'checked': False}).status_code == 200
+        latest = {line_id: store.latest_person_revision(scored_long_ago, 'line', line_id) for line_id in (2, 3)}
+        assert all(latest.values())
+        state = self.state(client)
+        assert state[2] == {'checked': True, 'changed': True, 'revision': latest[2]}
+        assert state[3] == {'checked': False, 'changed': True, 'revision': latest[3]}
+        assert state[1] == {'checked': True, 'changed': False, 'revision': 0}
+
+    def test_an_edit_before_the_evaluation_read_the_line_is_not_a_change(self, client, imported):
+        client.patch('/api/lines/1', headers=ALICE, json={'checked': True})
+        imported.execute("UPDATE evaluations SET created_at = '2999-01-01 00:00:00' WHERE id = 7")
+        imported.commit()
+        assert self.state(client)[1]['changed'] is False
 
 
 class TestDetail:

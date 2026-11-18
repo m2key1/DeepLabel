@@ -7,7 +7,8 @@ import { EmptyState } from '../ui/EmptyState'
 import { Input, Select } from '../ui/Field'
 import { Segmented } from '../ui/Segmented'
 import { tableCell, tableHeadRow, tableRow } from '../ui/Table'
-import { LineDiff } from './LineDiff'
+import { LineActions } from './LineActions'
+import { LineDiff, LineTexts } from './LineDiff'
 import { count, editorLink, percent } from './format'
 import { LIKELY_TRANSCRIPTION_ERROR, fractionToPercent, percentToFraction, readFilter } from './lineFilter'
 import { getReviewConf } from '../../util'
@@ -40,7 +41,7 @@ function boundsOf(params: URLSearchParams): Record<string, string> {
 const sameBounds = (a: Record<string, string>, b: Partial<Record<string, number>>) =>
   Object.keys(a).length === Object.keys(b).length && Object.entries(b).every(([k, v]) => Number(a[k]) === v)
 
-export function LinesTab({ evaluation, canSend }: { evaluation: EvaluationDetail; canSend: boolean }) {
+export function LinesTab({ evaluation, canEdit }: { evaluation: EvaluationDetail; canEdit: boolean }) {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const filter = readFilter(params)
@@ -168,7 +169,7 @@ export function LinesTab({ evaluation, canSend }: { evaluation: EvaluationDetail
 
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
         <span data-testid="lines-total">{count(total)} line{total === 1 ? '' : 's'}</span>
-        {canSend && (
+        {canEdit && (
           <Button size="xs" data-testid="send-to-review" disabled={sending || total === 0} onClick={send}>
             Send {count(total)} to review
           </Button>
@@ -201,6 +202,7 @@ export function LinesTab({ evaluation, canSend }: { evaluation: EvaluationDetail
                 <th className="px-2 py-1.5 font-semibold">Truth against reading</th>
                 <th className="px-2 py-1.5 text-right font-semibold">CER</th>
                 <th className="px-2 py-1.5 text-right font-semibold">Confidence</th>
+                {canEdit && <th className="px-2 py-1.5"><span className="sr-only">Fix the line</span></th>}
               </tr>
             </thead>
             <tbody>
@@ -223,7 +225,9 @@ export function LinesTab({ evaluation, canSend }: { evaluation: EvaluationDetail
                       ) : crop}
                     </td>
                     <td className={`${tableCell} py-1`}>
-                      <LineDiff ops={line.reading.ops} />
+                      {line.reading.cer >= LIKELY_TRANSCRIPTION_ERROR.cer_min
+                        ? <LineTexts truth={line.ground_truth} reading={line.reading.prediction} />
+                        : <LineDiff ops={line.reading.ops} />}
                     </td>
                     <td className={`${tableCell} text-right font-mono text-xs tabular-nums`} data-col="cer">
                       {percent(line.reading.cer)}
@@ -231,6 +235,7 @@ export function LinesTab({ evaluation, canSend }: { evaluation: EvaluationDetail
                     <td className={`${tableCell} text-right font-mono text-xs tabular-nums`} data-col="confidence">
                       {line.reading.confidence === null ? '-' : percent(line.reading.confidence, 0)}
                     </td>
+                    {canEdit && <td className={`${tableCell} whitespace-nowrap text-right`}><LineActions line={line} /></td>}
                   </tr>
                 )
               })}

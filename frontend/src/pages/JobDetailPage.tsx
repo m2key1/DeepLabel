@@ -96,6 +96,7 @@ import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
 import { SettleAgainDialog } from '../components/job/SettleAgainDialog'
 import { RepredictDialog } from '../components/job/RepredictDialog'
 import { RerunDialog } from '../components/job/RerunDialog'
+import { CheckDialog } from '../components/job/CheckDialog'
 import { CopyImageButton } from '../components/CopyImageButton'
 import {
   REVIEW_THRESHOLDS, classColor, confBadgeClass, confOutlineClass, getReviewConf,
@@ -242,6 +243,7 @@ export function JobDetailPage() {
   const [downloadingFullMaps, setDownloadingFullMaps] = useState(false)
   const [repredictOpen, setRepredictOpen] = useState(false)
   const [llmOpen, setLlmOpen] = useState(false)
+  const [checkOpen, setCheckOpen] = useState(false)
   const [newerModels, setNewerModels] = useState<NewerModelOffer[]>([])
   const [settleOpen, setSettleOpen] = useState(false)
   const [removeReadingsOpen, setRemoveReadingsOpen] = useState(false)
@@ -1069,6 +1071,12 @@ export function JobDetailPage() {
                   testId: 'llm-read-open',
                   onSelect: () => { setLlmPages(undefined); setLlmOpen(true) },
                 }] : []),
+                ...(canEdit && !isMap ? [{
+                  label: 'Check transcriptions…',
+                  hint: 'A model reads the checked lines, and those that look nothing like their text are listed',
+                  testId: 'check-open',
+                  onSelect: () => setCheckOpen(true),
+                }] : []),
               ]}
             />
             {isMap ? (
@@ -1278,6 +1286,7 @@ export function JobDetailPage() {
         <NewerModelsDialog jobId={jobId} name={job.name} offers={newerModels}
                            onClose={() => setNewerModels([])} onStarted={refetch} onError={setError} />
       )}
+      {checkOpen && <CheckDialog jobId={jobId} onClose={() => setCheckOpen(false)} />}
       {llmOpen && (
         <LlmReadDialog
           jobId={jobId}

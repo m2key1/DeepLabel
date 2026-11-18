@@ -52,7 +52,7 @@ export function EvaluationTabs({ tab, evaluations, shownFirst, materialName, can
           </Select>
         </label>
       )}
-      {tab === 'lines' && detail && <LinesTab key={detail.id} evaluation={detail} canSend={canSend} />}
+      {tab === 'lines' && detail && <LinesTab key={detail.id} evaluation={detail} canEdit={canSend} />}
       {tab === 'errors' && (summary ? <ErrorsTab summary={summary} /> : <p className="text-sm text-ink-subtle">Loading...</p>)}
     </div>
   )

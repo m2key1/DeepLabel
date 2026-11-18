@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 
 from app.caches import db_key
 from app.deps import can_access_job, can_reach_group, current_user, get_db
+from app.evaluator import NOT_A_CHECK
 from app.routes.contributors import (EDITS_PER_DAY, IN_WINDOW, PERSON_EDITS, REACHABLE_DATASETS,
                                      REACHABLE_GROUPS, window_start)
 
@@ -40,9 +41,9 @@ _TRAININGS = """
     FROM trainings WHERE owner = :user
 """
 
-_BEST_CER = """
+_BEST_CER = f"""
     SELECT MIN(cer) FROM evaluations
-    WHERE status = 'done' AND model_id IN (
+    WHERE status = 'done' AND {NOT_A_CHECK} AND model_id IN (
         SELECT model_id FROM trainings WHERE owner = :user AND model_id IS NOT NULL)
 """
 

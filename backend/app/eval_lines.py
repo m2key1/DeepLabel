@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from app import eval_metrics
+from app import eval_metrics, store
 
 SORTS = {'cer': 'cer', 'confidence': 'confidence', 'length': 'length', 'line': 'line_id'}
 COLUMNS = ('line_id', 'job_id', 'page_id', 'decode', 'ground_truth', 'prediction', 'cer',
@@ -139,6 +139,24 @@ def _row(row) -> dict:
                         'ops': json.loads(row['ops'])}}
 
 
+def _line_states(conn, eval_id: int, line_ids: list[int]) -> dict[int, dict]:
+    """How each line stands now: checked or not, the newest revision a person wrote to it,
+    and whether a person changed it - or it went - since the evaluation read it."""
+    if not line_ids:
+        return {}
+    read_at = conn.execute('SELECT COALESCE(started_at, created_at) FROM evaluations WHERE id = ?',
+                           (eval_id,)).fetchone()[0]
+    by_person = ("FROM revisions r WHERE r.target_type = 'line' AND r.target_id = l.id "
+                 f"AND {store.person_author_sql('r.author')}")
+    rows = conn.execute(
+        f'SELECT l.id, l.checked, l.deleted, (SELECT MAX(r.id) {by_person}) revision, '
+        f'(SELECT MAX(r.created_at) {by_person}) edited_at '
+        f'FROM lines l WHERE l.id IN ({", ".join("?" * len(line_ids))})', line_ids).fetchall()
+    return {r['id']: {'checked': bool(r['checked']), 'revision': r['revision'] or 0,
+                      'changed': bool(r['deleted']) or (r['edited_at'] is not None and r['edited_at'] >= read_at)}
+            for r in rows}
+
+
 def page(conn, eval_id: int, jobs: list[str] | None, flt: LineFilter, sort: str = 'cer',
          order: str = 'desc', offset: int = 0, limit: int = 50) -> dict:
     where, params = _where(eval_id, jobs, flt)
@@ -149,7 +167,9 @@ def page(conn, eval_id: int, jobs: list[str] | None, flt: LineFilter, sort: str 
         f'SELECT * FROM eval_lines WHERE {where} '
         f'ORDER BY {SORTS[sort]} IS NULL, {SORTS[sort]} {direction}, line_id '
         'LIMIT ? OFFSET ?', (*params, limit, offset)).fetchall()
-    return {'total': total, 'lines': [_row(r) for r in rows]}
+    gone = {'checked': False, 'revision': 0, 'changed': True}
+    states = _line_states(conn, eval_id, [r['line_id'] for r in rows])
+    return {'total': total, 'lines': [{**_row(r), 'line': states.get(r['line_id'], gone)} for r in rows]}
 
 
 def scored_rows(conn, eval_id: int, jobs: list[str] | None) -> list[dict]:

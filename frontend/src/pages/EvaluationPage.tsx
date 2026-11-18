@@ -80,14 +80,18 @@ function EvaluationView({ id }: { id: string | undefined }) {
     return () => { live = false }
   }, [evalId, lineRows])
 
+  const checkedJob = evaluation?.source.check ? evaluation.source.jobs?.[0] : undefined
   useEffect(() => {
-    setCrumbs([
+    setCrumbs(checkedJob && evaluation ? [
+      { label: evaluation.source_label ?? 'Dataset', to: `/jobs/${checkedJob}` },
+      { label: 'Transcription check' },
+    ] : [
       { label: 'Models', to: '/models' },
       { label: 'Evaluations', to: '/models/evaluations' },
       { label: evaluation ? `${evaluation.model_name ?? 'model'} · ${evaluation.decode}` : `Evaluation ${evalId}` },
     ])
     return () => setCrumbs([])
-  }, [setCrumbs, evaluation, evalId])
+  }, [setCrumbs, evaluation, evalId, checkedJob])
 
   if (missing) {
     return (
@@ -101,6 +105,12 @@ function EvaluationView({ id }: { id: string | undefined }) {
   if (evaluation === null) return <div className={widePageShell} />
 
   const canRun = isAdmin || evaluation.owner === user
+  const noun = checkedJob ? 'check' : 'evaluation'
+  const modelLink = (
+    <Link to={`/models/${evaluation.model_id}`} className="hover:text-accent-ink">
+      <span data-testid="evaluation-title">{evaluation.model_name ?? `Model ${evaluation.model_id}`}</span>
+    </Link>
+  )
   const active = evaluation.status === 'queued' || evaluation.status === 'running'
   const act = (action: (id: number) => Promise<unknown>) => () => {
     setActionError(null)
@@ -119,9 +129,7 @@ function EvaluationView({ id }: { id: string | undefined }) {
   return (
     <div className={widePageShell}>
       <PageHeader
-        title={<Link to={`/models/${evaluation.model_id}`} className="hover:text-accent-ink">
-          <span data-testid="evaluation-title">{evaluation.model_name ?? `Model ${evaluation.model_id}`}</span>
-        </Link>}
+        title={checkedJob ? 'Transcription check' : modelLink}
         actions={<>
           {evaluation.decodes.length > 1 && (
             <span className="flex items-center gap-2" data-testid="decode-switch">
@@ -142,7 +150,11 @@ function EvaluationView({ id }: { id: string | undefined }) {
           )}
         </>}
       >
-        Scored on {evaluation.source_label}
+        {checkedJob
+          ? <>The checked lines of <Link to={`/jobs/${checkedJob}`} className="text-accent-ink hover:underline">
+              {evaluation.source_label}</Link> read with <Link to={`/models/${evaluation.model_id}`}
+              data-testid="evaluation-title" className="text-accent-ink hover:underline">{evaluation.model_name}</Link></>
+          : <>Scored on {evaluation.source_label}</>}
         {evaluation.training_id !== null && (
           <> for run <Link to={`/models/runs/${evaluation.training_id}`} data-testid="evaluation-run"
                          className="text-accent-ink hover:underline">{evaluation.training_name ?? evaluation.training_id}</Link></>
@@ -159,13 +171,13 @@ function EvaluationView({ id }: { id: string | undefined }) {
 
       {actionError && <p role="alert" className="mb-3 text-sm text-danger">{actionError}</p>}
       {evaluation.status === 'cancelled' && (
-        <EmptyState>This evaluation was cancelled before it finished; nothing it scored is kept.</EmptyState>
+        <EmptyState>This {noun} was cancelled before it finished; nothing it read is kept.</EmptyState>
       )}
       {evaluation.status === 'error' && (
-        <EmptyState>This evaluation failed{evaluation.error ? `: ${evaluation.error}` : ''}.</EmptyState>
+        <EmptyState>This {noun} failed{evaluation.error ? `: ${evaluation.error}` : ''}.</EmptyState>
       )}
       {(evaluation.status === 'queued' || evaluation.status === 'running') && (
-        <EmptyState>This evaluation is {evaluation.status}; its lines appear here when it finishes.</EmptyState>
+        <EmptyState>This {noun} is {evaluation.status}; its lines appear here when it finishes.</EmptyState>
       )}
       {evaluation.status === 'done' && lineRows === 0 && (
         <EmptyState>
@@ -185,7 +197,7 @@ function EvaluationView({ id }: { id: string | undefined }) {
                   setParams(kept, { replace: true })
                 }} />
           <div role="tabpanel" id={panelId(tab)} aria-labelledby={tabId(tab)}>
-            {tab === 'lines' && <LinesTab evaluation={evaluation} canSend={canEdit} />}
+            {tab === 'lines' && <LinesTab evaluation={evaluation} canEdit={canEdit} />}
             {tab === 'errors' && (summary ? <ErrorsTab summary={summary} /> : <p className="text-sm text-ink-subtle">Loading...</p>)}
           </div>
         </>

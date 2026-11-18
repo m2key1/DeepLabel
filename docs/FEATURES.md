@@ -522,7 +522,14 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   confidence yet at least half wrong, which is most often wrong truth) and **Unsure
   readings** (under your review threshold) are one click each, with their counts; sort,
   filter and search the lines, open any in the editor, and **Send to review** flags the
-  current lines for review.
+  current lines for review. Whoever may edit can fix a line from its row: **Use reading**
+  makes the reading its text and keeps the line checked, **Uncheck** leaves it out of
+  training. A line edited since it was read says so instead.
+- **Check transcriptions...** in a dataset's **Run** menu reads every checked line with a
+  chosen OCR model (the default one first; the dialog warns when the model was trained on
+  this dataset) and opens on its likely transcription errors, to find wrong ground truth
+  before a training run does. A check is no score of the model: it is not in Evaluations or
+  on the model's page, and the dialog lists the dataset's earlier checks.
 - **Errors** shows the five commonest mix-ups, the five characters read worst, the error
   rate by line length and the worst pages, each opening the lines behind it. **More
   measures** holds the word error rates, edits, accuracy per character class and every

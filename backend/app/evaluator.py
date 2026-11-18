@@ -22,6 +22,11 @@ def get_evaluation(conn, eval_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+# A transcription check reads a dataset with a model to find wrong ground truth; it is
+# stored as an evaluation but is no score of the model.
+NOT_A_CHECK = "json_extract(source, '$.check') IS NULL"
+
+
 def payload(row) -> dict:
     ev = dict(row)
     ev['source'] = json.loads(ev['source'] or '{}')

@@ -32,8 +32,10 @@ def _source_label(conn, source: dict, user: dict) -> str:
 
 @router.get('/api/evaluations')
 def list_evaluations(conn=Depends(get_db), user: dict = Depends(current_user)):
-    """Every model evaluation, newest first, each naming what it scored against."""
-    rows = conn.execute('SELECT * FROM evaluations ORDER BY created_at DESC, id DESC').fetchall()
+    """Every model evaluation, newest first, each naming what it scored against. A
+    transcription check is not one: it is listed on its dataset."""
+    rows = conn.execute(f'SELECT * FROM evaluations WHERE {evaluator.NOT_A_CHECK} '
+                        'ORDER BY created_at DESC, id DESC').fetchall()
     evaluations = []
     for row in rows:
         ev = evaluator.payload(row)
@@ -89,6 +91,40 @@ def create_evaluation(body: EvaluationCreate, conn=Depends(get_db),
     eval_id = evaluator.create(conn, body.model_id, source, body.decode, user['username'])
     return evaluator.payload(
         conn.execute('SELECT * FROM evaluations WHERE id = ?', (eval_id,)).fetchone())
+
+
+class CheckCreate(BaseModel):
+    model_id: int
+
+
+@router.post('/api/jobs/{job_id}/checks')
+def start_check(job_id: str, body: CheckCreate, conn=Depends(get_db),
+                user: dict = Depends(require_role('admin', 'member'))):
+    """Read every checked line of a dataset with a model, in the mode Automatic reads with,
+    to find transcriptions that look nothing like the reading. Stored as an evaluation but
+    never a score of the model, which may have trained on these very lines."""
+    require_job_access(conn, job_id, user)
+    model = registry.get_model(conn, body.model_id)
+    if model is None:
+        raise HTTPException(404, 'model not found')
+    if model['task'] != 'ocr':
+        raise HTTPException(400, 'only an OCR model can check transcriptions')
+    if sum(trainer.eligible_counts(conn, 'ocr', [job_id], pages='all').values()) == 0:
+        raise HTTPException(400, 'the dataset has no checked lines to check')
+    eval_id = evaluator.create(conn, body.model_id, {'jobs': [job_id], 'check': True},
+                               evaluator.automatic(conn, body.model_id), user['username'])
+    return evaluator.payload(conn.execute('SELECT * FROM evaluations WHERE id = ?', (eval_id,)).fetchone())
+
+
+@router.get('/api/jobs/{job_id}/checks')
+def list_checks(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """A dataset's transcription checks, newest first, each with the model that read it."""
+    require_job_access(conn, job_id, user)
+    rows = conn.execute(
+        'SELECT e.*, m.name model_name FROM evaluations e LEFT JOIN models m ON m.id = e.model_id '
+        "WHERE json_extract(e.source, '$.check') = 1 AND json_extract(e.source, '$.jobs[0]') = ? "
+        'ORDER BY e.id DESC', (job_id,)).fetchall()
+    return {'checks': [{**evaluator.payload(row), 'model_name': row['model_name']} for row in rows]}
 
 
 def _have_test_pages(conn, job_ids: list[str]) -> bool:

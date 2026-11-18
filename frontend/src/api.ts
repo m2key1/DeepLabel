@@ -835,7 +835,8 @@ export interface Evaluation {
   id: number
   model_id: number
   training_id: number | null
-  source: { snapshot?: number; jobs?: string[]; test_pages?: boolean }
+  /** A check reads a dataset with a model to find wrong ground truth; it is no score of the model. */
+  source: { snapshot?: number; jobs?: string[]; test_pages?: boolean; check?: boolean }
   /** What was scored, named and redacted server-side; absent on a create response. */
   source_label?: string
   /** Per-dataset scores when the material spans several datasets; names resolved server-side. */
@@ -1864,6 +1865,29 @@ export function listEvaluations(): Promise<{ evaluations: Evaluation[] }> {
   return request('/api/evaluations')
 }
 
+export type TranscriptionCheck = Evaluation & { model_name: string | null }
+
+/** Read every checked line of a dataset with a model, to find wrong transcriptions. */
+export function startCheck(jobId: string, modelId: number): Promise<Evaluation> {
+  return request(`/api/jobs/${jobId}/checks`, json('POST', { model_id: modelId }))
+}
+
+export function listChecks(jobId: string): Promise<{ checks: TranscriptionCheck[] }> {
+  return request(`/api/jobs/${jobId}/checks`)
+}
+
+/** A scored line's reading becomes its text, and the line stays checked: the person chose
+ *  it over the transcription. Refused if someone edited the line since that revision. */
+export function takeReading(lineId: number, text: string, revision: number): Promise<Spanned<Line>> {
+  return request(`/api/lines/${lineId}`,
+    json('PATCH', { corrected_text: text, from_reading: true, checked: true, revision }))
+}
+
+/** Leave a scored line out of training, unless someone edited it since that revision. */
+export function uncheckLine(lineId: number, revision: number): Promise<Spanned<Line>> {
+  return request(`/api/lines/${lineId}`, json('PATCH', { checked: false, revision }))
+}
+
 export interface EvaluationDetail extends Omit<Evaluation, 'breakdown'> {
   model_name: string | null
   training_name: string | null
@@ -1899,6 +1923,8 @@ export interface EvalLine {
   ground_truth: string
   length: number
   reading: EvalReading
+  /** How the line stands now; changed means a person edited it since it was read. */
+  line: { checked: boolean; changed: boolean; revision: number }
 }
 
 export interface EvalLineFilter {
