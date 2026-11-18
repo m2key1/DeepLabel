@@ -35,7 +35,6 @@ services:
       - ${SLURM_SSH_KEY_HOST:-/dev/null}:/run/secrets/slurm_key:ro
     environment:
       TZ: Europe/Vienna
-      LINE_CROP_MASK: ${LINE_CROP_MASK:-true}
       LAYOUT_BATCH_SIZE: ${LAYOUT_BATCH_SIZE:-4}
       FRONTEND_SECRET: ${FRONTEND_SECRET:?set FRONTEND_SECRET in .env}
       SAVE_OCR_DATA: ${SAVE_OCR_DATA:-true}

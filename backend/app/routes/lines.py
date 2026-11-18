@@ -447,7 +447,7 @@ def line_crop(line_id: int, conn=Depends(get_db), auth: dict = Depends(current_u
             poly = [[x * img.width, y * img.height] for x, y in json.loads(row['polygon'])]
             # The deskewed base at orientation 0; the loupe spins the manual orientation
             # on top with CSS, so a rotate needs no refetch. OCR/training bake orientation in.
-            out = linecrop.crop_line(img, poly, mask=config.LINE_CROP_MASK)
+            out = linecrop.crop_line(img, poly)
         if out is None:
             raise HTTPException(422, 'degenerate line polygon')
         out.save(cache, quality=90)

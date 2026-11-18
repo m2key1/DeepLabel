@@ -225,7 +225,7 @@ def _cut_page(entry: tuple) -> list[str]:
     written = []
     for stem, out_dir, polygon, orientation, text in items:
         poly = [[x * img.width, y * img.height] for x, y in polygon]
-        crop = linecrop.crop_line(img, poly, orientation, mask=config.LINE_CROP_MASK)
+        crop = linecrop.crop_line(img, poly, orientation)
         if crop is None:
             continue
         crop.save(Path(out_dir) / f'{stem}.png', compress_level=PNG_COMPRESS)

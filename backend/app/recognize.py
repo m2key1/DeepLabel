@@ -766,7 +766,7 @@ def read_pages(conn, account: str, plan: PagesPlan, uploads: list[Upload], reque
                             {'element_class': laid.regions[r][0].class_name, 'line_index': k}
                             for r, k, _ in placed]
         for n, outline in enumerate(outlines):
-            crops = [(o, linecrop.crop_line(image, outline, o, mask=config.LINE_CROP_MASK))
+            crops = [(o, linecrop.crop_line(image, outline, o))
                      for o in ocr_phase.orientations(outline)]
             lines.append(((i, n), [(o, crop) for o, crop in crops if crop is not None],
                           contexts[n] if contexts else {'line_index': n}))

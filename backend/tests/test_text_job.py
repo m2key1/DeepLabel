@@ -88,7 +88,6 @@ def backend(monkeypatch):
 
 @pytest.fixture
 def conn(tmp_path, monkeypatch):
-    monkeypatch.setattr('app.config.LINE_CROP_MASK', False)
     monkeypatch.setattr('app.config.BLOBS_DIR', tmp_path / 'blobs')
     monkeypatch.setattr('app.config.JOBS_DIR', tmp_path / 'jobs')
     scan = tmp_path / 'scan.jpg'

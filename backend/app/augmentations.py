@@ -395,8 +395,7 @@ def crop_samples(samples: list[dict], out_dir: Path) -> tuple[list[tuple[dict, P
             problems.append(f'the scan {source} could not be read ({exc})')
             continue
         polygon = [[x * page.width, y * page.height] for x, y in json.loads(sample['polygon'])]
-        crop = linecrop.crop_line(page, polygon, sample['orientation'] or 0,
-                                  mask=config.LINE_CROP_MASK)
+        crop = linecrop.crop_line(page, polygon, sample['orientation'] or 0)
         if crop is None:
             problems.append(f'line {sample["id"]} has no area to cut')
             continue

@@ -32,7 +32,7 @@ def _crop_line(source: Path, polygon: list[list[float]], orientation: int = 0) -
         im = im.convert('RGB')
         w, h = im.size
         poly = [[x * w, y * h] for x, y in polygon]
-        crop = linecrop.crop_line(im, poly, orientation, mask=config.LINE_CROP_MASK)
+        crop = linecrop.crop_line(im, poly, orientation)
     if crop is None or crop.width < MIN_SIDE or crop.height < MIN_SIDE:
         return None
     return crop

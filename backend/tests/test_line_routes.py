@@ -719,10 +719,10 @@ class TestTheCrop:
     def test_a_line_that_does_not_exist_is_a_404(self, client):
         assert client.get('/api/lines/99/crop', headers=ALICE).status_code == 404
 
-    def test_a_crop_cut_before_masking_is_not_served_after_it(
-            self, client, conn, scan, monkeypatch):
-        """The cache has to be keyed on how the crop is cut. Turning masking on otherwise
-        leaves every crop already on disk showing the neighbours' ink it paints out."""
+    def test_a_line_is_cut_whole_with_nothing_painted_out(self, client, conn, scan):
+        """Painting out what lay outside an outline took a tight outline's own ascenders and
+        descenders with it: on imported Kurrent lines it cost two points of CER (#129). Every
+        reader gets the plain crop of the line's rectangle."""
         conn.execute('UPDATE lines SET polygon = ? WHERE id = 1', (json.dumps(WEDGE),))
         conn.commit()
         with Image.open(scan) as page:
@@ -730,25 +730,12 @@ class TestTheCrop:
         ImageDraw.Draw(sheet).rectangle((45, 45, 120, 60), fill='black')
         sheet.save(scan)
         poly = [[x * sheet.width, y * sheet.height] for x, y in WEDGE]
-        plain = as_jpeg(linecrop.crop_line(sheet, poly, mask=False))
-        masked = as_jpeg(linecrop.crop_line(sheet, poly, mask=True))
-        assert plain != masked, 'the wedge must actually have something to paint out'
 
-        monkeypatch.setattr('app.config.LINE_CROP_MASK', False)
-        assert client.get('/api/lines/1/crop', headers=ALICE).content == plain
-        monkeypatch.setattr('app.config.LINE_CROP_MASK', True)
+        assert client.get('/api/lines/1/crop', headers=ALICE).content == as_jpeg(linecrop.crop_line(sheet, poly))
 
-        assert client.get('/api/lines/1/crop', headers=ALICE).content == masked
-
-    def test_the_line_says_how_its_crop_is_cut(self, client, monkeypatch):
-        """A crop is cached in the browser for a year, so its URL carries the recipe - and
-        only the server knows when it starts cutting them another way."""
-        monkeypatch.setattr('app.config.LINE_CROP_MASK', False)
+    def test_the_line_says_how_its_crop_is_cut(self, client):
+        """A crop is cached in the browser for a year, so its URL carries the recipe."""
         assert recipe_of(client) == 'v2'
-
-        monkeypatch.setattr('app.config.LINE_CROP_MASK', True)
-
-        assert recipe_of(client) == 'v2-masked'
 
 
 class TestWhoMayEdit:

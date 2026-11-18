@@ -100,13 +100,6 @@ MASK_EXPORT_DIR = Path(os.environ.get('MASK_EXPORT_DIR', DATA_DIR / 'masks'))
 LAYOUT_BATCH_SIZE = _number('LAYOUT_BATCH_SIZE', 4, int)
 OCR_CHUNK_LINES = _number('OCR_CHUNK_LINES', 512, int)
 
-# Paint out everything outside a line's own polygon before cropping it. A minimum-area
-# rectangle is not the line: where the polygon is not a tight rectangle its corners hold the
-# neighbours' ink, and the model is handed the row above as part of this line. Measured over
-# 379,728 reviewed lines, that is 0.6% of them - the hand-traced polygons, which are also the
-# most careful ground truth there is. For the rest the crop comes out byte-identical, and on
-# the corpora that do have them it read better or the same, so it is on.
-LINE_CROP_MASK = _flag('LINE_CROP_MASK')
 
 # --- LLM pre-annotation -----------------------------------------------------------
 # OpenAI-compatible endpoints people register under Settings, used to pre-transcribe

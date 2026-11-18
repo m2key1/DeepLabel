@@ -95,7 +95,7 @@ def run(conn, job_id: str, read: Read, author: str, model_id: int | None, chunk_
             for line in lines:
                 poly = [[pt[0] * width - ex0, pt[1] * height - ey0] for pt in json.loads(line['polygon'])]
                 context = {'element_class': element['class_name'], 'line_index': line['order_idx']}
-                crops = [(orientation, linecrop.crop_line(crop, poly, orientation, mask=config.LINE_CROP_MASK))
+                crops = [(orientation, linecrop.crop_line(crop, poly, orientation))
                          for orientation in _orientations(line, width, height)]
                 if crops[0][1] is None:
                     conn.execute("UPDATE lines SET text = '', needs_ocr = 0, ocr_model_id = ?, "

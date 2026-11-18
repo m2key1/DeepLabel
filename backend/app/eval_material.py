@@ -98,8 +98,7 @@ def job_batches(conn, job_ids: list[str], held: int = HELD_AT_ONCE,
                     continue
                 polygon = [[x * image.width, y * image.height]
                            for x, y in json.loads(line['polygon'])]
-                crop = linecrop.crop_line(image, polygon, line['orientation'],
-                                          mask=config.LINE_CROP_MASK)
+                crop = linecrop.crop_line(image, polygon, line['orientation'])
                 if crop is None:
                     continue
                 batch.append(Crop(crop, text, job_id, line['id'], page['id'],

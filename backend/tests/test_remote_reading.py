@@ -11,7 +11,6 @@ from app import config, eval_run, evaluator, ocr_phase, store
 
 @pytest.fixture
 def conn(tmp_path, monkeypatch):
-    monkeypatch.setattr('app.config.LINE_CROP_MASK', False)
     scan = tmp_path / 'p.png'
     Image.new('RGB', (400, 200), 'white').save(scan)
     connection = store.connect(tmp_path / 'app.db')
@@ -107,7 +106,6 @@ def test_a_tall_line_is_read_turned_and_keeps_the_orientation_read_best(tmp_path
     from PIL import ImageDraw
 
     from app import linecrop
-    monkeypatch.setattr('app.config.LINE_CROP_MASK', False)
     scan = tmp_path / 'p.png'
     image = Image.new('RGB', (400, 400), 'white')
     ImageDraw.Draw(image).rectangle((40, 160, 52, 200), fill='black')  # written bottom to top: it starts low
@@ -138,7 +136,7 @@ def test_a_tall_line_is_read_turned_and_keeps_the_orientation_read_best(tmp_path
     ocr_phase.run(conn, 'j1', read, 'model:ocr@DeepOCR', None, chunk_lines=512)
 
     expected = next(q for q in (0, 180)
-                    if starts_dark(linecrop.crop_line(image, [[x * 400, y * 400] for x, y in tall], q, mask=False)))
+                    if starts_dark(linecrop.crop_line(image, [[x * 400, y * 400] for x, y in tall], q)))
     assert expected == 180
     rows = {r['id']: r for r in conn.execute('SELECT * FROM lines')}
     assert (rows[1]['text'], rows[1]['orientation'], rows[1]['confidence']) == ('Herrn Professor', expected, 0.9)
@@ -147,7 +145,6 @@ def test_a_tall_line_is_read_turned_and_keeps_the_orientation_read_best(tmp_path
 
 
 def test_a_tall_line_a_person_turned_is_read_only_as_turned(tmp_path, monkeypatch):
-    monkeypatch.setattr('app.config.LINE_CROP_MASK', False)
     scan = tmp_path / 'p.png'
     Image.new('RGB', (400, 400), 'white').save(scan)
     conn = store.connect(tmp_path / 'app.db')

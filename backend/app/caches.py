@@ -213,10 +213,10 @@ def drop_element_crop(conn, element_id: int):
 
 
 def line_crop_recipe() -> str:
-    """How this deployment cuts a line crop - the algorithm and the settings that change
-    its pixels. A crop is only valid for the recipe that produced it, so everything that
-    keeps one keys on this: the file on disk, and the URL the browser caches it under."""
-    return linecrop.RECIPE + ('-masked' if config.LINE_CROP_MASK else '')
+    """How a line crop is cut. A crop is only valid for the recipe that produced it, so
+    everything that keeps one keys on this: the file on disk, and the URL the browser
+    caches it under."""
+    return linecrop.RECIPE
 
 
 def line_crop_path(job_id: str, line_id: int) -> Path:
