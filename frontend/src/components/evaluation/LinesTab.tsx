@@ -2,14 +2,15 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { listEvaluationLines, sendEvaluationToReview } from '../../api'
 import type { EvalLine, EvalLineSort, EvaluationDetail } from '../../api'
-import { Button } from '../ui/Button'
+import { Button, Toggle } from '../ui/Button'
 import { EmptyState } from '../ui/EmptyState'
 import { Input, Select } from '../ui/Field'
 import { Segmented } from '../ui/Segmented'
 import { tableCell, tableHeadRow, tableRow } from '../ui/Table'
 import { LineDiff } from './LineDiff'
 import { count, editorLink, percent } from './format'
-import { fractionToPercent, percentToFraction, readFilter } from './lineFilter'
+import { LIKELY_TRANSCRIPTION_ERROR, fractionToPercent, percentToFraction, readFilter } from './lineFilter'
+import { getReviewConf } from '../../util'
 
 const PAGE_SIZE = 50
 const SORTS: { value: EvalLineSort; label: string }[] = [
@@ -19,6 +20,25 @@ const SORTS: { value: EvalLineSort; label: string }[] = [
 ]
 
 type ReviewResult = Awaited<ReturnType<typeof sendEvaluationToReview>>
+
+const BOUNDS = ['cer_min', 'cer_max', 'conf_min', 'conf_max'] as const
+
+/** The ways into the lines one click away: all of them, the confident readings far from
+ *  their truth, and the readings under the review threshold. */
+function views(): { id: string; label: string; bounds: Partial<Record<(typeof BOUNDS)[number], number>> }[] {
+  return [
+    { id: 'all', label: 'All', bounds: {} },
+    { id: 'likely', label: 'Likely transcription errors', bounds: LIKELY_TRANSCRIPTION_ERROR },
+    { id: 'unsure', label: 'Unsure readings', bounds: { conf_max: getReviewConf() } },
+  ]
+}
+
+function boundsOf(params: URLSearchParams): Record<string, string> {
+  return Object.fromEntries(BOUNDS.flatMap((key) => (params.get(key) ? [[key, params.get(key)!]] : [])))
+}
+
+const sameBounds = (a: Record<string, string>, b: Partial<Record<string, number>>) =>
+  Object.keys(a).length === Object.keys(b).length && Object.entries(b).every(([k, v]) => Number(a[k]) === v)
 
 export function LinesTab({ evaluation, canSend }: { evaluation: EvaluationDetail; canSend: boolean }) {
   const navigate = useNavigate()
@@ -36,7 +56,20 @@ export function LinesTab({ evaluation, canSend }: { evaluation: EvaluationDetail
   })
   const [sent, setSent] = useState<ReviewResult | null>(null)
   const [sending, setSending] = useState(false)
+  const [viewCounts, setViewCounts] = useState<Record<string, number>>({})
   const key = params.toString()
+  const shownViews = views()
+  const active = shownViews.find((v) => sameBounds(boundsOf(params), v.bounds))?.id ?? null
+
+  useEffect(() => {
+    let live = true
+    for (const view of views()) {
+      listEvaluationLines(evaluation.id, { ...view.bounds, sort: 'cer', order: 'desc', offset: 0, limit: 1 })
+        .then((r) => live && setViewCounts((held) => ({ ...held, [view.id]: r.total })))
+        .catch(() => {})
+    }
+    return () => { live = false }
+  }, [evaluation.id])
 
   useEffect(() => {
     let live = true
@@ -81,9 +114,25 @@ export function LinesTab({ evaluation, canSend }: { evaluation: EvaluationDetail
     }
   }
 
+  const showView = (view: (typeof shownViews)[number]) => {
+    update({ ...Object.fromEntries(BOUNDS.map((k) => [k, view.bounds[k] === undefined ? null : String(view.bounds[k])])) })
+    setDraft({ ...draft, min: fractionToPercent(view.bounds.cer_min), max: fractionToPercent(view.bounds.cer_max) })
+  }
+
   const total = result?.total ?? 0
   return (
     <div data-testid="lines-tab">
+      <div className="mb-3 flex flex-wrap items-center gap-2" role="group" aria-label="Which lines">
+        {shownViews.map((view) => (
+          <Toggle key={view.id} on={active === view.id} data-testid="line-view" data-view={view.id}
+                  onClick={() => showView(view)}>
+            {view.label}
+            {viewCounts[view.id] !== undefined && (
+              <span className="font-mono tabular-nums opacity-80">{count(viewCounts[view.id])}</span>
+            )}
+          </Toggle>
+        ))}
+      </div>
       <form onSubmit={applyDraft} className="mb-2 flex flex-wrap items-end gap-2" data-testid="lines-filter">
         <label className="text-xs text-ink-muted">
           CER from

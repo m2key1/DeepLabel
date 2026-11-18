@@ -431,9 +431,17 @@ backends up as described in [MODEL-BACKENDS.md](MODEL-BACKENDS.md).
   version graph with each version's score. Each row says what the version came from
   ("from" a model it was trained from, "after" the one it is a new version of), and a star
   marks the default.
-- Each model has its own page with its lineage, scores, decoding settings, evaluations,
-  notes and the run that produced it, plus **Evaluate**, **Set default**, **Edit** and
-  **Archive**.
+- Each model has one page, which is also the page of the run that trained it. It opens on
+  **Scores** (the model and its base on its run's validation lines and each test set, with
+  the change), **Trained on** (each dataset with its pages and training, validation and test
+  lines, each linked), **Training** (how long, where, epochs, the epoch kept, lines per
+  step, learning rate, augmentation, early stopping) and **How it went**, which lists only
+  what happened: a best epoch early followed by worse ones, a memory fallback, restarts,
+  pre-flight warnings, likely transcription errors or the failure. Below are the tabs
+  **Lines** (the scored lines, worst first), **Errors**, **Training** (curves, every
+  setting, the log), **Data** (the pre-flight) and **Details** (lineage, how it reads, every
+  evaluation, stored files), with **Evaluate**, **Set default**, **Edit**, **Archive** and
+  **Rerun**.
 - Every task has a default model. Archived models leave the pickers but stay on record and
   can be unarchived.
 - Mark a model as the **new version of** another under **Edit**, even when it was not
@@ -466,11 +474,14 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   crop sizes, characters per line and a character table that flags rare characters,
   lookalikes (such as a Cyrillic a in Latin text), characters only in validation, and
   mixed Unicode forms. It warns but never blocks.
-- The run page has tabs for Overview, Curves, Data, Evaluations and Settings. Curves are
-  drawn per metric, with smoothing, log scale, zoom and a shared crosshair; a zoomed chart
-  has a **Reset zoom** button, and double-click or Escape does the same.
+- A run still training, or one that failed or was cancelled, has the same page without
+  scores: what it trains on, its settings, its progress and how it went so far, with the
+  **Training** and **Data** tabs; once its model exists, the run's address leads to the
+  model. Curves are drawn per metric, with smoothing, log scale, zoom and a shared
+  crosshair; a zoomed chart has a **Reset zoom** button, and double-click or Escape does the
+  same.
 - A run left on the default epochs keeps the number its model declared when it started:
-  Settings says e.g. "60 (default)", and the run page, the run list and the Queue show the
+  its settings say e.g. "60 (default)", and its page, the run list and the Queue show the
   epoch out of that total.
 - **Rerun**, in a run's **⋯** menu, opens a finished run's settings in a new form. A run
   left on the default epochs reruns on the default.
@@ -499,13 +510,18 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   **Evaluate...** away. The scores a run, a model and the model families show are those.
 - A queued or running evaluation can be cancelled by its owner or an admin. It keeps its
   place in the list without scores, and **Retry** runs it again.
-- Each evaluation has a page with CER, WER, bag-of-words WER, error types and accuracy per
-  character class.
+- Each evaluation has a page with its CER, WER and line count, and the same **Lines** and
+  **Errors** tabs as a model's page.
 - **Lines** lists every scored line with its crop, a character-level diff, CER and
-  confidence; sort, filter and search them, and open any line in the editor.
-  **Send to review** flags the current lines for review.
-- **Confusions**, **Characters** and **Context and calibration** break the errors down by
-  character, line length, dataset, page and confidence.
+  confidence, worst first. **All**, **Likely transcription errors** (read with at least 80%
+  confidence yet at least half wrong, which is most often wrong truth) and **Unsure
+  readings** (under your review threshold) are one click each, with their counts; sort,
+  filter and search the lines, open any in the editor, and **Send to review** flags the
+  current lines for review.
+- **Errors** shows the five commonest mix-ups, the five characters read worst, the error
+  rate by line length and the worst pages, each opening the lines behind it. **More
+  measures** holds the word error rates, edits, accuracy per character class and every
+  confusion, character and context table.
 
 ## Maps
 

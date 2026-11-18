@@ -93,6 +93,8 @@ def count(conn, eval_id: int, jobs: list[str] | None = None) -> int:
 class LineFilter:
     cer_min: float | None = None
     cer_max: float | None = None
+    conf_min: float | None = None
+    conf_max: float | None = None
     job_id: str | None = None
     q: str | None = None
 
@@ -110,6 +112,12 @@ def _where(eval_id: int, jobs: list[str] | None, flt: LineFilter) -> tuple[str, 
     if flt.cer_max is not None:
         clauses.append('cer <= ?')
         params.append(flt.cer_max)
+    if flt.conf_min is not None:
+        clauses.append('confidence >= ?')
+        params.append(flt.conf_min)
+    if flt.conf_max is not None:
+        clauses.append('confidence < ?')
+        params.append(flt.conf_max)
     if flt.job_id:
         clauses.append('job_id = ?')
         params.append(flt.job_id)

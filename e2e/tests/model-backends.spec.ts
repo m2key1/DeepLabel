@@ -66,7 +66,7 @@ test.describe('Scenario: a model read on its model backend', () => {
                       { timeout: 30_000 }).toBe('done')
     expect((await listEvaluations()).find((e) => e.id === evaluation.id)).toMatchObject({ cer: 0, line_count: 3 })
 
-    await page.goto(`/models/${modelId}`)
+    await page.goto(`/models/${modelId}?tab=details`)
     await expect(page.getByTestId('model-runs-on')).toHaveText('model backend "stub"')
     await expect(page.getByTestId('model-conventions'))
       .toHaveText('knows 4: long s, oblique hyphen, typographic punctuation, abbreviations')

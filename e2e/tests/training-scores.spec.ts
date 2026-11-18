@@ -40,9 +40,8 @@ test.describe('Scenario: what a run is scored on', () => {
     // of them - three decodes for the base and three for the new model - over nothing.
     expect((await listEvaluations()).filter((e) => e.training_id === finished.id)).toEqual([])
     await page.goto(`/models/runs/${finished.id}`)
-    await expect(page.getByTestId('stat-tile').filter({ hasText: 'lines trained' })).toBeVisible()
-    await expect(page.getByTestId('score-valid-base')).toHaveCount(0)
-    await expect(page.getByTestId('score-valid-new')).toHaveCount(0)
+    await expect(page.locator(`[data-testid="trained-on-row"][data-job="${jobId}"] [data-column="train"]`)).toHaveText('6')
+    await expect(page.getByTestId('score-row')).toHaveCount(0)
   })
 
   // README: "Split per dataset, every dataset with two or more pages validates on at least
@@ -100,8 +99,9 @@ test.describe('Scenario: what a run is scored on', () => {
     const cerOf = (modelId: number) => evals.find((e) => e.model_id === modelId)!.cer!
 
     await page.goto(`/models/runs/${finished.id}`)
-    await expect(page.getByTestId('score-valid-new')).toContainText(pct(cerOf(trained.id)))
-    await expect(page.getByTestId('score-valid-new')).toContainText('Reranked')
-    await expect(page.getByTestId('score-valid-base')).toContainText(pct(cerOf(base.id)))
+    const cell = (role: string) => page.locator(`[data-testid="score-row"][data-role="${role}"] [data-material="valid"]`)
+    await expect(cell('new').getByRole('link')).toHaveText(pct(cerOf(trained.id)))
+    await expect(cell('base').getByRole('link')).toHaveText(pct(cerOf(base.id)))
+    await expect(page.getByTestId('model-scores')).toContainText('in Automatic decoding')
   })
 })

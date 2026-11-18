@@ -4,26 +4,23 @@ import { cancelEvaluation, getEvaluation, getEvaluationSummary, retryEvaluation 
 import type { EvalSummary, EvaluationDetail, OcrDecode } from '../api'
 import { useAuth } from '../auth'
 import { useSetCrumbs } from '../components/NavBar'
-import { CharactersTab } from '../components/evaluation/CharactersTab'
-import { ConfusionsTab } from '../components/evaluation/ConfusionsTab'
-import { ContextTab } from '../components/evaluation/ContextTab'
-import { Headline } from '../components/evaluation/Headline'
+import { ErrorsTab } from '../components/evaluation/ErrorsTab'
+import { HeadlineShort } from '../components/evaluation/Headline'
 import { LinesTab } from '../components/evaluation/LinesTab'
+import { DECODE_NAMES } from '../components/job/processing'
 import { count } from '../components/evaluation/format'
 import { Badge } from '../components/ui/Badge'
 import { Button, buttonClass } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { PageHeader } from '../components/ui/PageHeader'
-import { SectionNav } from '../components/ui/SectionNav'
+import { Tabs, panelId, tabId } from '../components/ui/Tabs'
 import { Segmented } from '../components/ui/Segmented'
 import { widePageShell } from '../components/ui/page'
 import { STATUS_TONE, formatDate } from '../util'
 
 const TABS = [
   { id: 'lines', label: 'Lines' },
-  { id: 'confusions', label: 'Confusions' },
-  { id: 'characters', label: 'Characters' },
-  { id: 'context', label: 'Context and calibration' },
+  { id: 'errors', label: 'Errors' },
 ] as const
 type Tab = (typeof TABS)[number]['id']
 
@@ -122,7 +119,9 @@ function EvaluationView({ id }: { id: string | undefined }) {
   return (
     <div className={widePageShell}>
       <PageHeader
-        title={<span data-testid="evaluation-title">{evaluation.model_name ?? `Model ${evaluation.model_id}`}</span>}
+        title={<Link to={`/models/${evaluation.model_id}`} className="hover:text-accent-ink">
+          <span data-testid="evaluation-title">{evaluation.model_name ?? `Model ${evaluation.model_id}`}</span>
+        </Link>}
         actions={<>
           {evaluation.decodes.length > 1 && (
             <span className="flex items-center gap-2" data-testid="decode-switch">
@@ -148,7 +147,7 @@ function EvaluationView({ id }: { id: string | undefined }) {
           <> for run <Link to={`/models/runs/${evaluation.training_id}`} data-testid="evaluation-run"
                          className="text-accent-ink hover:underline">{evaluation.training_name ?? evaluation.training_id}</Link></>
         )}
-        {` · ${evaluation.decode} decode · ${formatDate(evaluation.created_at)} · `}
+        {` · ${DECODE_NAMES[evaluation.decode]} · ${formatDate(evaluation.created_at)} · `}
         <Badge tone={STATUS_TONE[evaluation.status]}>{evaluation.status}</Badge>
         {evaluation.hidden_lines > 0 && (
           <span data-testid="hidden-lines" className="block text-xs text-ink-subtle">
@@ -178,21 +177,16 @@ function EvaluationView({ id }: { id: string | undefined }) {
 
       {lineRows > 0 && (
         <>
-          {summary && <Headline summary={summary} />}
-          <div className="flex flex-col gap-4 md:flex-row">
-            <SectionNav label="Evaluation tabs" active={tab} items={[...TABS]}
-                        onSelect={(next) => {
-                          const kept = new URLSearchParams(params)
-                          kept.set('tab', next)
-                          setParams(kept, { replace: true })
-                        }} />
-            <div className="min-w-0 flex-1">
-              {tab === 'lines' && <LinesTab evaluation={evaluation} canSend={canEdit} />}
-              {tab !== 'lines' && !summary && <p className="text-sm text-ink-subtle">Loading...</p>}
-              {tab === 'confusions' && summary && <ConfusionsTab summary={summary} />}
-              {tab === 'characters' && summary && <CharactersTab summary={summary} />}
-              {tab === 'context' && summary && <ContextTab summary={summary} />}
-            </div>
+          {summary && <HeadlineShort summary={summary} />}
+          <Tabs items={[...TABS]} active={tab} label="Evaluation sections" className="mb-4"
+                onSelect={(next) => {
+                  const kept = new URLSearchParams(params)
+                  kept.set('tab', next)
+                  setParams(kept, { replace: true })
+                }} />
+          <div role="tabpanel" id={panelId(tab)} aria-labelledby={tabId(tab)}>
+            {tab === 'lines' && <LinesTab evaluation={evaluation} canSend={canEdit} />}
+            {tab === 'errors' && (summary ? <ErrorsTab summary={summary} /> : <p className="text-sm text-ink-subtle">Loading...</p>)}
           </div>
         </>
       )}

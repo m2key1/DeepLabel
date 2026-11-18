@@ -29,9 +29,8 @@ import { AdminPage } from './pages/AdminPage'
 import { OwnProfileRedirect, ProfilePage } from './pages/ProfilePage'
 import { ModelsPage } from './pages/ModelsPage'
 import { TryPage } from './pages/TryPage'
-import { ModelPage } from './pages/ModelPage'
+import { ModelPage, RunPage } from './pages/ModelPage'
 import { TrainingNewPage } from './pages/TrainingNewPage'
-import { TrainingRunPage } from './pages/TrainingRunPage'
 import { EvaluationPage } from './pages/EvaluationPage'
 import { EvaluationsPage } from './pages/EvaluationsPage'
 import { AugmentationsPage } from './pages/AugmentationsPage'
@@ -67,7 +66,7 @@ const router = createBrowserRouter([
           { path: '/models', element: <ModelsPage /> },
           { path: '/try', element: <TryPage /> },
           { path: '/models/train', element: <TrainingNewPage /> },
-          { path: '/models/runs/:id', element: <TrainingRunPage /> },
+          { path: '/models/runs/:id', element: <RunPage /> },
           { path: '/models/evaluations', element: <EvaluationsPage /> },
           { path: '/models/:id', element: <ModelPage /> },
           { path: '/evaluations/:id', element: <EvaluationPage /> },

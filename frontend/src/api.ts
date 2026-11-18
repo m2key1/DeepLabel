@@ -779,6 +779,8 @@ export interface Training {
   /** The statistics reviewed before the run started; null for runs from before them. */
   preflight_id: number | null
   created_at: string
+  started_at: string | null
+  finished_at: string | null
 }
 
 /** How a model backend describes one metric it reports (MODEL-BACKENDS.md 6.9). A `*` in
@@ -1902,6 +1904,10 @@ export interface EvalLine {
 export interface EvalLineFilter {
   cer_min?: number
   cer_max?: number
+  /** Confidence at least this. */
+  conf_min?: number
+  /** Confidence below this. */
+  conf_max?: number
   job_id?: string
   q?: string
 }

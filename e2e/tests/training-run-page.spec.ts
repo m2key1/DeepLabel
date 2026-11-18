@@ -46,59 +46,61 @@ const chart = (page: Page, metric: string) => page.locator(`[data-testid="metric
 
 /** Hovers a chart at a fraction of its plot's width, 0 the left edge and 1 the right. */
 async function hoverAt(target: Locator, fraction: number) {
+  await target.getByTestId('plot-area').scrollIntoViewIfNeeded()
   const box = (await target.getByTestId('plot-area').boundingBox())!
   await target.page().mouse.move(box.x + box.width * fraction, box.y + box.height / 2)
 }
 
 async function openCurvesOnEpochs(page: Page) {
-  await page.goto(`/models/runs/${runId}?tab=curves`)
+  await page.goto(`/models/runs/${runId}?tab=training`)
   await page.getByTestId('curve-toolbar').getByRole('button', { name: 'epoch', exact: true }).click()
   await expect(chart(page, 'cer')).toHaveAttribute('data-axis', 'epoch')
 }
 
 test.describe('Scenario: a run page in tabs', () => {
-  test('each tab has its own address and the strip is driven from the keyboard', async ({ page }) => {
-    await page.goto(`/models/runs/${runId}`)
-    const tabs = page.getByRole('tablist', { name: 'Run sections' })
-    await expect(tabs.getByRole('tab')).toHaveText(['Overview', 'Curves', 'Data', 'Evaluations', 'Settings'])
-    await expect(tabs.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
-    // The overview leads with the headline curves only.
-    await expect(page.getByTestId('metric-chart')).toHaveCount(2)
-    await expect(chart(page, 'cer')).toBeVisible()
-    await expect(chart(page, 'loss')).toBeVisible()
+  test('a finished run opens as its model, each tab has its own address and the strip is driven from the keyboard',
+    async ({ page }) => {
+      // The new model once, in the mode Automatic reads it with; trained from scratch, it has no
+      // base to score.
+      const finished = (await listTrainings()).find((t) => t.id === runId)!
+      expect(finished.base_model_id).toBeNull()
+      await expect.poll(async () => (await listEvaluations()).filter((e) => e.training_id === runId && e.status === 'done').length,
+                        { timeout: 30_000 }).toBe(1)
+      const modelId = finished.model_id!
+      await page.goto(`/models/runs/${runId}`)
+      await expect(page).toHaveURL(new RegExp(`/models/${modelId}$`))
+      const tabs = page.getByRole('tablist', { name: 'Model sections' })
+      await expect(tabs.getByRole('tab')).toHaveText(['Lines', 'Errors', 'Training', 'Data', 'Details'])
+      await expect(tabs.getByRole('tab', { name: 'Lines' })).toHaveAttribute('aria-selected', 'true')
 
-    await tabs.getByRole('tab', { name: 'Curves' }).click()
-    await expect(page).toHaveURL(new RegExp(`/models/runs/${runId}\\?tab=curves$`))
-    await expect(page.getByTestId('metric-chart')).toHaveCount(6)
-    await expect(chart(page, 'time/epoch_seconds')).toBeVisible()
-    await expect(chart(page, 'time/items_per_s')).toBeVisible()
+      await tabs.getByRole('tab', { name: 'Training' }).click()
+      await expect(page).toHaveURL(new RegExp(`/models/${modelId}\\?tab=training$`))
+      await expect(page.getByTestId('metric-chart')).toHaveCount(6)
+      await expect(chart(page, 'time/epoch_seconds')).toBeVisible()
+      await expect(chart(page, 'time/items_per_s')).toBeVisible()
 
-    await tabs.getByRole('tab', { name: 'Curves' }).focus()
-    await page.keyboard.press('ArrowRight')
-    await expect(page).toHaveURL(/\?tab=data$/)
-    await expect(tabs.getByRole('tab', { name: 'Data' })).toBeFocused()
-    await expect(page.getByTestId('preflight-report')).toBeVisible()
-    await page.keyboard.press('End')
-    await expect(page).toHaveURL(/\?tab=settings$/)
-    await expect(page.getByTestId('run-settings')).toBeVisible()
-    await expect(page.getByTestId('preflight-report')).toHaveCount(0)
+      await tabs.getByRole('tab', { name: 'Training' }).focus()
+      await page.keyboard.press('ArrowRight')
+      await expect(page).toHaveURL(/\?tab=data$/)
+      await expect(tabs.getByRole('tab', { name: 'Data' })).toBeFocused()
+      await expect(page.getByTestId('preflight-report')).toBeVisible()
+      await page.keyboard.press('End')
+      await expect(page).toHaveURL(/\?tab=details$/)
+      await expect(page.getByTestId('model-details')).toBeVisible()
+      await expect(page.getByTestId('preflight-report')).toHaveCount(0)
 
-    // The header stays on every tab, with the best CER the stub reported at epoch 3.
-    await page.reload()
-    await expect(tabs.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true')
-    await expect(page.getByTestId('stat-best-cer')).toContainText('10.00%')
-    await expect(page.getByTestId('stat-best-cer')).toContainText('e3')
+      // The overview stays above every tab, with the epoch whose checkpoint was kept: the stub's
+      // best CER came at epoch 3.
+      await page.reload()
+      await expect(tabs.getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
+      await expect(page.locator('[data-testid="training-facts"] [data-fact="kept"] dd')).toHaveText('Epoch 3')
 
-    // The new model once, in the mode Automatic reads it with; trained from scratch, it has no
-    // base to score.
-    expect((await listTrainings()).find((t) => t.id === runId)!.base_model_id).toBeNull()
-    await expect.poll(async () => (await listEvaluations()).filter((e) => e.training_id === runId).length,
-                      { timeout: 30_000 }).toBe(1)
-    await page.goto(`/models/runs/${runId}?tab=evaluations`)
-    await expect(page.getByTestId('run-evaluation')).toHaveCount(1)
-    await page.goto(`/models/runs/${runId}?tab=nonsense`)
-    await expect(tabs.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
-  })
+      // The old run page's tabs still land: settings and curves on Training, a stray one on Lines.
+      await page.goto(`/models/runs/${runId}?tab=settings`)
+      await expect(page.getByTestId('run-settings')).toBeVisible()
+      await page.goto(`/models/runs/${runId}?tab=nonsense`)
+      await expect(tabs.getByRole('tab', { name: 'Lines' })).toHaveAttribute('aria-selected', 'true')
+    })
 })
 
 test.describe('Scenario: a run left on the default epochs', () => {
@@ -116,7 +118,8 @@ test.describe('Scenario: a run left on the default epochs', () => {
 
     await page.goto(`/models/runs/${recorded.id}?tab=settings`)
     await expect(page.getByTestId('run-settings').locator('[data-setting="epochs"] dd')).toHaveText('3 (default)')
-    await expect(page.getByTestId('stat-epoch')).toHaveText('3 / 3')
+    const epochsFact = page.locator('[data-testid="training-facts"] [data-fact="epochs"] dd')
+    await expect(epochsFact).toHaveText('3 (model default)')
 
     await page.getByTestId('rerun-training').click()
     await expect(page.getByRole('heading', { name: `Rerun ${name}` })).toBeVisible()
@@ -127,7 +130,7 @@ test.describe('Scenario: a run left on the default epochs', () => {
     // A run given its epochs says just the number.
     await page.goto(`/models/runs/${runId}?tab=settings`)
     await expect(page.getByTestId('run-settings').locator('[data-setting="epochs"] dd')).toHaveText('3')
-    await expect(page.getByTestId('stat-epoch')).toHaveText('3 / 3')
+    await expect(epochsFact).toHaveText('3')
   })
 })
 
@@ -230,6 +233,7 @@ test.describe('Scenario: reading curves like TensorBoard', () => {
     await expect(await readEdge()).toHaveText('50.00%')
 
     // From 45% of the way along to the right edge: epochs 1.9 to 3, so epoch 1 is out of view.
+    await cer.getByTestId('plot-area').scrollIntoViewIfNeeded()
     const box = (await cer.getByTestId('plot-area').boundingBox())!
     await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.2)
     await page.mouse.down()
@@ -250,6 +254,7 @@ test.describe('Scenario: reading curves like TensorBoard', () => {
     const reset = (target: Locator) => target.getByRole('button', { name: 'Reset zoom' })
     await expect(reset(cer)).toHaveCount(0)
 
+    await cer.getByTestId('plot-area').scrollIntoViewIfNeeded()
     const box = (await cer.getByTestId('plot-area').boundingBox())!
     await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.2)
     await page.mouse.down()
@@ -276,7 +281,8 @@ test.describe('Scenario: reading curves like TensorBoard', () => {
       return cer.getByTestId('chart-readout').locator('[data-series="cer"]').getByTestId('readout-raw')
     }
     const dragAcross = async (from: number, to: number) => {
-      const box = (await cer.getByTestId('plot-area').boundingBox())!
+      await cer.getByTestId('plot-area').scrollIntoViewIfNeeded()
+    const box = (await cer.getByTestId('plot-area').boundingBox())!
       await page.mouse.move(box.x + box.width * from, box.y + box.height / 2)
       await page.mouse.down()
       await page.mouse.move(box.x + box.width * to, box.y + box.height / 2, { steps: 5 })
@@ -336,7 +342,7 @@ test.describe('Scenario: reading curves like TensorBoard', () => {
   test('a log axis is offered, and step derives from the pre-flight steps per epoch', async ({ page }) => {
     const stored = await backendFetch(`/api/trainings/${runId}/preflight`) as { result: { settings: { steps_per_epoch: number } } }
     const perEpoch = stored.result.settings.steps_per_epoch
-    await page.goto(`/models/runs/${runId}?tab=curves`)
+    await page.goto(`/models/runs/${runId}?tab=training`)
     const toolbar = page.getByTestId('curve-toolbar')
     await toolbar.getByRole('button', { name: 'step', exact: true }).click()
     const cer = chart(page, 'cer')

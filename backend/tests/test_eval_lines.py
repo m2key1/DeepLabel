@@ -201,6 +201,16 @@ class TestLinesApi:
         assert [l['line_id'] for l in body['lines']] == [4, 3]
         assert body['total'] == 2
 
+    def test_filtered_by_confidence(self, client):
+        assert lines(client, conf_min=0.9, sort='confidence', order='desc')['total'] == 3
+        assert [l['line_id'] for l in lines(client, conf_max=0.9, sort='confidence', order='asc')['lines']] == [5, 3]
+
+    def test_a_confident_reading_far_from_its_truth_is_found_with_both_bounds(self, client):
+        """What the model page counts as a likely transcription error (#123): read with
+        confidence, yet far from what the line is said to hold."""
+        body = lines(client, cer_min=0.2, conf_min=0.8, sort='cer', order='asc')
+        assert [l['line_id'] for l in body['lines']] == [4, 3]
+
     def test_filtered_by_dataset(self, client):
         body = lines(client, job_id='j2')
         assert [l['line_id'] for l in body['lines']] == [5]
@@ -385,6 +395,12 @@ class TestSendToReview:
         queued = self.queue(client)
         assert [l['id'] for l in queued] == [3, 4]
         assert all(l['flagged'] for l in queued)
+
+    def test_the_confidence_bounds_narrow_what_is_sent(self, client, imported):
+        response = client.post('/api/evaluations/7/review', headers=ALICE,
+                               json={'cer_min': 0.2, 'conf_min': 0.9})
+        assert response.json()['flagged'] == 1
+        assert [r['line_id'] for r in imported.execute('SELECT line_id FROM review_flags')] == [4]
 
     def test_a_dataset_the_sender_cannot_open_is_not_touched(self, client, imported):
         client.post('/api/evaluations/7/review', headers=ALICE, json={'cer_min': 0.3})

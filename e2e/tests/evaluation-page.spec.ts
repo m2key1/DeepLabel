@@ -78,16 +78,7 @@ test.describe('Scenario: an evaluation has a page of its own', () => {
     // 4 edits over 83 characters; 5 word errors over 16 words, order-free or not.
     await expect(tile(page, 'headline-cer')).toHaveText(/^CER\s*4\.82%\s*83 chars$/)
     await expect(tile(page, 'headline-wer')).toHaveText(/^WER\s*31\.25%\s*16 words$/)
-    await expect(tile(page, 'headline-bow-wer')).toHaveText(/^bag-of-words WER\s*31\.25%$/)
-    // 11 words matched regardless of order, of 15 read and 16 in the ground truth.
-    await expect(tile(page, 'headline-bow-precision')).toHaveText(/^bag-of-words precision\s*73\.33%$/)
-    await expect(tile(page, 'headline-bow-recall')).toHaveText(/^bag-of-words recall\s*68\.75%$/)
     await expect(tile(page, 'headline-lines')).toHaveText(/^lines\s*4$/)
-    await expect(tile(page, 'headline-substitutions')).toHaveText(/^substitutions\s*2\s*50%$/)
-    await expect(tile(page, 'headline-insertions')).toHaveText(/^insertions\s*1\s*25%$/)
-    await expect(tile(page, 'headline-deletions')).toHaveText(/^deletions\s*1\s*25%$/)
-    await expect(tile(page, 'class-case')).toHaveText(/^case errors\s*1\s*50% of substitutions$/)
-    await expect(tile(page, 'class-digits')).toHaveText(/^digits accuracy\s*75\.0%\s*of 4$/)
 
     // Worst first by default; ties keep line order.
     await expect(cerColumn(page)).toHaveText(['8.70%', '5.00%', '5.00%', '0.00%'])
@@ -105,6 +96,18 @@ test.describe('Scenario: an evaluation has a page of its own', () => {
     await expect.poll(() => lineIds(page)).toEqual([ids.paragraph1, ids.header3, ids.header2, ids.header1])
     await expect(page.getByTestId('eval-line').first().locator('[data-col="confidence"]')).toHaveText('65%')
 
+    // Every other figure is under Errors, behind More measures.
+    await page.getByRole('tab', { name: 'Errors' }).click()
+    await page.getByTestId('more-measures').locator('summary').click()
+    await expect(tile(page, 'headline-bow-wer')).toHaveText(/^bag-of-words WER\s*31\.25%$/)
+    // 11 words matched regardless of order, of 15 read and 16 in the ground truth.
+    await expect(tile(page, 'headline-bow-precision')).toHaveText(/^bag-of-words precision\s*73\.33%$/)
+    await expect(tile(page, 'headline-bow-recall')).toHaveText(/^bag-of-words recall\s*68\.75%$/)
+    await expect(tile(page, 'headline-substitutions')).toHaveText(/^substitutions\s*2\s*50%$/)
+    await expect(tile(page, 'headline-insertions')).toHaveText(/^insertions\s*1\s*25%$/)
+    await expect(tile(page, 'headline-deletions')).toHaveText(/^deletions\s*1\s*25%$/)
+    await expect(tile(page, 'class-case')).toHaveText(/^case errors\s*1\s*50% of substitutions$/)
+    await expect(tile(page, 'class-digits')).toHaveText(/^digits accuracy\s*75\.0%\s*of 4$/)
     await page.getByTestId('section-nav-item').filter({ hasText: 'Confusions' }).click()
     const subs = page.getByTestId('confusions-substitutions').getByTestId('confusion-row')
     await expect(subs).toHaveCount(2)
@@ -116,7 +119,7 @@ test.describe('Scenario: an evaluation has a page of its own', () => {
     await expect(cells(1).nth(1)).toHaveText('s')
 
     // A row opens its line in the page editor, selected - from the keyboard as well.
-    await page.getByTestId('section-nav-item').filter({ hasText: 'Lines' }).click()
+    await page.getByRole('tab', { name: 'Lines' }).click()
     const open = page.locator(`[data-testid="eval-line"][data-line-id="${ids.paragraph1}"]`)
       .getByRole('link', { name: 'Sample Paragraph line 1', exact: true })
     await open.focus()
@@ -202,9 +205,9 @@ test.describe('Scenario: an evaluation has a page of its own', () => {
     await expect(page.getByTestId('eval-line')).toHaveCount(4)
   })
 
-  // README: the page is "reached from the run page's scores". A run scores each model once,
-  // in the mode Automatic reads it with (#122), so there is no sibling decode to switch to.
-  test("a run's score opens its evaluation, one decode with nothing to switch to", async ({ page }) => {
+  // A run scores each model once, in the mode Automatic reads it with (#122), so there is no
+  // sibling decode to switch to; the model page's score opens those lines in place (#123).
+  test("a run's score opens its lines, and its evaluation has one decode with nothing to switch to", async ({ page }) => {
     test.setTimeout(180_000)
     const jobId = await seedDistinctPagesJob(uniqueName('Run pages'), 2)
     await markLinesChecked(jobId, 12)
@@ -226,8 +229,10 @@ test.describe('Scenario: an evaluation has a page of its own', () => {
     await expect.poll(async () => (await evaluationDetail(scored.id)).line_rows).toBe(6)
 
     await page.goto(`/models/runs/${finished.id}`)
-    await page.getByTestId('score-valid-new').getByRole('link').click()
-    await expect(page).toHaveURL(new RegExp(`/evaluations/${scored.id}(\\?|$)`))
+    await page.locator('[data-testid="score-row"][data-role="new"] [data-material="valid"]').getByRole('link').click()
+    await expect(page).toHaveURL(new RegExp(`/models/${trained.id}\\?tab=lines&eval=${scored.id}$`))
+    await expect(page.getByTestId('eval-line')).toHaveCount(6)
+    await page.goto(`/evaluations/${scored.id}`)
     await expect(page.getByTestId('evaluation-title')).toHaveText(name)
     // The valid page's six lines, 129 characters.
     await expect(tile(page, 'headline-cer')).toHaveText(new RegExp(`^CER\\s*${(scored.cer! * 100).toFixed(2)}%\\s*129 chars$`))

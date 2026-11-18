@@ -265,7 +265,7 @@ test.describe('Scenario: augmentation pipelines', () => {
     const run = page.getByTestId('training-row').filter({ hasText: withPipeline })
     await expect(run.getByText('done')).toBeVisible({ timeout: 30_000 })
     await run.getByTestId('training-open').click()
-    await page.getByRole('tab', { name: 'Settings' }).click()
+    await page.getByRole('tab', { name: 'Training' }).click()
     await expect(page.getByTestId('run-settings')).toContainText(pipelineName)
   })
 

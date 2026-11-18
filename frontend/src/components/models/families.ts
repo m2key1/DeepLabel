@@ -11,6 +11,13 @@ export function headlineScore(evaluations: Evaluation[]): Evaluation | undefined
 
 export type ScoreKind = 'test' | 'valid' | 'eval' | 'training'
 
+export const SOURCE_LABELS: Record<RegistryModel['source'], string> = {
+  builtin: 'Shipped with DeepLabel',
+  backend: 'Shipped with its backend',
+  imported: 'Imported',
+  trained: 'Trained',
+}
+
 export interface Score {
   value: number
   /** What the number is, as a short label: CER for OCR, else the trainer's own metric. */

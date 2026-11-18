@@ -38,6 +38,11 @@ describe('readFilter', () => {
       .toEqual({ cer_min: 0.05, cer_max: 0.5, job_id: 'j1', q: 'line' })
   })
 
+  it('reads the confidence bounds the likely-error and unsure views set', () => {
+    expect(readFilter(new URLSearchParams('cer_min=0.5&conf_min=0.8&conf_max=0.9')))
+      .toEqual({ cer_min: 0.5, conf_min: 0.8, conf_max: 0.9 })
+  })
+
   it('drops a bound that is not a number rather than sending NaN', () => {
     expect(readFilter(new URLSearchParams('cer_min=abc&cer_max=0.2')))
       .toEqual({ cer_min: undefined, cer_max: 0.2, job_id: undefined, q: undefined })

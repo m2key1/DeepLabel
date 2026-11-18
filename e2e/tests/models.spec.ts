@@ -90,7 +90,7 @@ test.describe('Scenario: the model registry', () => {
     await run.getByTestId('training-open').click()
     // One chart per metric the trainer reported, discovered from the points rather
     // than listed anywhere in the frontend.
-    await page.getByRole('tab', { name: 'Curves' }).click()
+    await page.getByRole('tab', { name: 'Training' }).click()
     // Three the trainer wrote, and two worked out from its timestamps and the split.
     await expect(page.getByTestId('metric-chart')).toHaveCount(5)
     await expect(page.locator('[data-testid="metric-chart"][data-metric="cer"]')).toBeVisible()
@@ -118,11 +118,9 @@ test.describe('Scenario: the model registry', () => {
     const line = (await tile.locator('path[data-line="smoothed"]').boundingBox())!
     expect(line.width).toBeGreaterThan(plotBox.width * 0.7)
 
-    // The best epoch is the checkpoint that gets registered - the page names it with
-    // the exact CER the stub trainer reported for epoch 3.
-    await expect(page.getByTestId('stat-best-cer')).toContainText('10.00%')
-    await expect(page.getByTestId('stat-best-cer')).toContainText('e3')
-    await page.getByRole('tab', { name: 'Overview' }).click()
+    // The best epoch is the checkpoint that gets registered - the page names it: the stub
+    // trainer's best CER came at epoch 3.
+    await expect(page.locator('[data-testid="training-facts"] [data-fact="kept"] dd')).toHaveText('Epoch 3')
     await expect(page.getByTestId('run-log')).toContainText('stub trainer: epoch 3/3 done')
     const trainingId = (await listTrainings()).find((t) => t.name === modelName)!.id
     // Points also carry a ts stamp per epoch, so the chart can derive durations.
@@ -159,10 +157,11 @@ test.describe('Scenario: the model registry', () => {
     expect(freshEval.line_count).toBe(training.snapshot_counts!.val)
     await page.reload()
     // Both sides of the valid split are scored, so the run answers "did it help?".
-    await expect(page.getByTestId('score-valid-base')).toBeVisible()
-    await expect(page.getByTestId('score-valid-new')).toBeVisible()
+    const valid = (role: string) => page.locator(`[data-testid="score-row"][data-role="${role}"] [data-material="valid"]`)
+    await expect(valid('base').getByRole('link')).toHaveText(`${(autoEvals.find((e) => e.model_id === training.base_model_id)!.cer! * 100).toFixed(2)}%`)
+    await expect(valid('new').getByRole('link')).toHaveText('0.00%')
     // The record shows what the run was tuned to, so runs stay comparable.
-    await page.getByRole('tab', { name: 'Settings' }).click()
+    await page.getByRole('tab', { name: 'Training' }).click()
     const settings = page.getByTestId('run-settings')
     await expect(settings).toContainText('learning rate')
     await expect(settings).toContainText('0.00005')
@@ -171,8 +170,9 @@ test.describe('Scenario: the model registry', () => {
     await expect(settings).toContainText("the model's own")
     const registered = (await listRegistryModels()).find((m) => m.name === modelName)!
     const builtinOcr = (await listRegistryModels()).find((m) => m.task === 'ocr' && m.source === 'backend')!
-    await page.goto(`/models/${registered.id}`)
-    await expect(page.getByTestId('model-source')).toHaveText('trained')
+    // How a model came to be, what its trainer reported and where its files are: under Details.
+    await page.goto(`/models/${registered.id}?tab=details`)
+    await expect(page.getByTestId('model-source')).toHaveText('Trained')
     await expect(page.getByTestId('model-metric-val_metric')).toHaveText('validation cer42.00%')
 
     // The result is in the weight store by content, for model backends to fetch: the stub
@@ -196,7 +196,7 @@ test.describe('Scenario: the model registry', () => {
       .toBe(true)
 
     // The former builtin default lost the badge but can be restored.
-    await page.goto(`/models/${builtinOcr.id}`)
+    await page.goto(`/models/${builtinOcr.id}?tab=details`)
     await expect(page.getByTestId('model-files')).toHaveText('not stored')
     await expect(header.getByText('★ DEFAULT')).toHaveCount(0)
     await page.getByRole('button', { name: 'Set default' }).click()
@@ -416,7 +416,8 @@ test.describe('Scenario: the model registry', () => {
     expect(Object.fromEntries(done.breakdown!.map((b) => [b.job_id, b.lines])))
       .toEqual({ [jobId]: 3, [secondJob]: 2 })
 
-    // The model page shows the overall score; the per-dataset rows sit behind their toggle.
+    // Every evaluation of the model is under Details; the per-dataset rows sit behind their toggle.
+    await page.getByRole('tab', { name: 'Details' }).click()
     const scored = page.getByTestId('eval-row').filter({ hasText: name })
     await expect(scored).toContainText('5 lines')
     const line = page.locator('div', { has: scored }).last()
@@ -469,15 +470,17 @@ test.describe('Scenario: the model registry', () => {
           .map((e) => [e.decode, e.source.test_pages]))
       .toEqual([['rescored', true], ['rescored', true]])
 
-    // The model page leads with that score.
+    // The model page leads with that score, and lists the evaluation under Details.
     const modelId = (await listRegistryModels()).find((m) => m.name === modelName)!.id
-    await page.goto(`/models/${modelId}`)
-    await expect(page.getByTestId('eval-row').filter({ hasText: `test pages of ${testName}` })).toHaveCount(1)
     const testScoreOf = async () => (await listEvaluations()).find(
       (e) => e.model_id === modelId && e.training_id === trainingId && e.source.jobs?.[0] === testJob)
     await expect.poll(async () => (await testScoreOf())?.status, { timeout: 30_000 }).toBe('done')
     const testScore = (await testScoreOf())!
-    await expect(page.getByTestId('model-score')).toContainText(`${(testScore.cer! * 100).toFixed(2)}%`)
+    await page.goto(`/models/${modelId}`)
+    await expect(page.locator(`[data-testid="score-row"][data-role="new"] [data-material="${testJob}"]`))
+      .toContainText(`${(testScore.cer! * 100).toFixed(2)}%`)
+    await page.getByRole('tab', { name: 'Details' }).click()
+    await expect(page.getByTestId('eval-row').filter({ hasText: `test pages of ${testName}` })).toHaveCount(1)
   })
 
   test('the run list filters by stage and state, and lays two runs over each other',
@@ -520,14 +523,15 @@ test.describe('Scenario: the model registry', () => {
       await expect(cer.locator('path[data-line="smoothed"]')).toHaveCount(2)
       for (const name of names) await expect(cer).toContainText(name)
 
-      // The model each run registered is named beside it, and the model says which run
-      // it came from - the same pair of facts read from either end.
+      // The model each run registered is named beside it, and the model's page is the run's:
+      // it says what the run trained on.
       const runRow = rows.filter({ hasText: names[0] })
       const registered = (await listRegistryModels()).find((m) => m.name === names[0])!
       await expect(runRow.getByTestId('run-model')).toHaveAttribute('href', `/models/${registered.id}`)
       await expect(runRow.getByTestId('run-model')).toHaveAttribute('title', names[0])
       await page.goto(`/models/${registered.id}`)
-      await expect(page.getByTestId('model-from-run')).toHaveText(names[0])
+      await expect(page.getByRole('heading', { level: 1, name: names[0] })).toBeVisible()
+      await expect(page.locator(`[data-testid="trained-on-row"][data-job="${dataset}"]`)).toBeVisible()
     })
 
   test('a run can be scored on several test sets at once', async ({ page }) => {
@@ -572,16 +576,18 @@ test.describe('Scenario: the model registry', () => {
       (e.breakdown as { job_id: string }[] | null)?.map((row) => row.job_id).sort(),
     ]).sort(), { timeout: 60_000 }).toEqual([['base', [...ids].sort()], ['new', [...ids].sort()]])
 
+    // The model's Scores show each test set on its own and all of them together.
     await page.goto(`/models/runs/${training.id}`)
-    const table = page.getByTestId('test-evaluation')
-    await expect(table.locator('tbody tr')).toHaveCount(3)
-    await expect(table.locator('tr[data-dataset="overall"]')).toContainText('all test pages')
     const trained = (await testScores()).find((e) => e.model_id === training.model_id)!
+    const cell = (material: string) =>
+      page.locator(`[data-testid="score-row"][data-role="new"] [data-material="${material}"]`)
+    await expect(cell(trained.source.jobs!.join('+')).getByRole('link')).toHaveText(`${(trained.cer! * 100).toFixed(2)}%`)
+    const scores = page.getByTestId('model-scores')
+    await expect(scores.getByRole('columnheader', { name: 'All test pages' })).toBeVisible()
     for (const [i, id] of ids.entries()) {
-      const row = table.locator(`tr[data-dataset="${id}"]`)
-      await expect(row).toContainText(names[i])
+      await expect(scores.getByRole('columnheader', { name: names[i] })).toBeVisible()
       const score = (trained.breakdown as { job_id: string; cer: number }[]).find((r) => r.job_id === id)!.cer
-      await expect(row.locator('[data-score="trained"]')).toHaveText(`${(score * 100).toFixed(2)}%`)
+      await expect(cell(id).getByRole('link')).toHaveText(`${(score * 100).toFixed(2)}%`)
     }
   })
 
@@ -627,18 +633,16 @@ test.describe('Scenario: the model registry', () => {
     // base whose score on this material would mean anything.
     const nameA = uniqueName('OCR testchart A')
     const first = await start(nameA, null)
-    await expect(page.getByTestId('score-test-new'))
-      .toContainText(pct(await testScore(first.id, first.model.id)))
-    await expect(page.getByTestId('score-test-base')).toHaveCount(0)
+    const cell = (role: string) => page.locator(`[data-testid="score-row"][data-role="${role}"] [data-material="${testJob}"]`)
+    await expect(cell('new')).toContainText(pct(await testScore(first.id, first.model.id)))
+    await expect(page.locator('[data-testid="score-row"][data-role="base"]')).toHaveCount(0)
 
     // Warm-started from it: both scores, on material neither run ever trained on, so the
     // chart answers "did it help?" where the run is read.
     const nameB = uniqueName('OCR testchart B')
     const second = await start(nameB, first.model.id)
-    await expect(page.getByTestId('score-test-base'))
-      .toContainText(pct(await testScore(second.id, first.model.id)))
-    await expect(page.getByTestId('score-test-new'))
-      .toContainText(pct(await testScore(second.id, second.model.id)))
+    await expect(cell('base')).toContainText(pct(await testScore(second.id, first.model.id)))
+    await expect(cell('new')).toContainText(pct(await testScore(second.id, second.model.id)))
   })
 
   test('a multi-dataset valid split charts per-dataset CER curves', async ({ page }) => {
@@ -668,7 +672,7 @@ test.describe('Scenario: the model registry', () => {
     // A run whose valid split spans two datasets gets a chart of its own for them,
     // one named line each, beside the overall curve.
     await run.getByTestId('training-open').click()
-    await page.getByRole('tab', { name: 'Curves' }).click()
+    await page.getByRole('tab', { name: 'Training' }).click()
     const overall = page.locator('[data-testid="metric-chart"][data-metric="cer"]')
     await expect(overall).toBeVisible()
     const perDataset = page.locator('[data-testid="metric-chart"][data-metric="cer_by_dataset"]')
@@ -1104,7 +1108,7 @@ test.describe('Scenario: bringing an archived model back', () => {
 })
 
 test.describe('Scenario: what a run page reports', () => {
-  test('lines trained counts the training split, with the validation count beside it', async ({ page }) => {
+  test('Trained on counts the training split, and the validation set beside it', async ({ page }) => {
     const trainJob = await seedDistinctPagesJob(uniqueName('Counted train'), 2)
     await markLinesChecked(trainJob, 12)
     const holdout = await seedCompletedJob(uniqueName('Counted holdout'), 1)
@@ -1120,9 +1124,10 @@ test.describe('Scenario: what a run page reports', () => {
     const runId = (await listTrainings()).find((t) => t.name === name)!.id
 
     await page.goto(`/models/runs/${runId}`)
-    const tile = page.getByTestId('stat-tile').filter({ hasText: 'lines trained' })
-    await expect(tile).toHaveCount(1)
-    await expect(tile).toHaveText(/^lines trained\s*12\s*3 validation$/)
+    const count = (jobId: string, column: string) =>
+      page.locator(`[data-testid="trained-on-row"][data-job="${jobId}"] [data-column="${column}"]`)
+    await expect(count(trainJob, 'train')).toHaveText('12')
+    await expect(count(holdout, 'val')).toHaveText('3')
   })
 
   // README: "says how the language model it was asked to build went: "building" until the

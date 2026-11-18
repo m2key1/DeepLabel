@@ -6,9 +6,13 @@ const finite = (value: number) => (Number.isFinite(value) ? value : undefined)
  *  stored as fractions; a bound that is not a number is no bound. */
 export function readFilter(params: URLSearchParams): EvalLineFilter {
   const bound = (key: string) => (params.get(key) ? finite(Number(params.get(key))) : undefined)
-  return { cer_min: bound('cer_min'), cer_max: bound('cer_max'),
-           job_id: params.get('job') ?? undefined, q: params.get('q') ?? undefined }
+  return { cer_min: bound('cer_min'), cer_max: bound('cer_max'), conf_min: bound('conf_min'),
+           conf_max: bound('conf_max'), job_id: params.get('job') ?? undefined, q: params.get('q') ?? undefined }
 }
+
+/** A line read confidently yet far from what it is said to hold: most often the
+ *  transcription is wrong, not the reading. */
+export const LIKELY_TRANSCRIPTION_ERROR = { cer_min: 0.5, conf_min: 0.8 } as const
 
 /** A typed percentage as the fraction the URL keeps, or null for no bound. A decimal comma
  *  reads as a point. */

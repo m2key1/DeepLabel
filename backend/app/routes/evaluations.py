@@ -244,9 +244,10 @@ def evaluation_summary(eval_id: int, conn=Depends(get_db), user: dict = Depends(
 
 
 def _line_filter(cer_min: float | None = None, cer_max: float | None = None,
+                 conf_min: float | None = None, conf_max: float | None = None,
                  job_id: str | None = None, q: str | None = None) -> eval_lines.LineFilter:
-    return eval_lines.LineFilter(cer_min=cer_min, cer_max=cer_max, job_id=job_id or None,
-                                 q=q or None)
+    return eval_lines.LineFilter(cer_min=cer_min, cer_max=cer_max, conf_min=conf_min, conf_max=conf_max,
+                                 job_id=job_id or None, q=q or None)
 
 
 @router.get('/api/evaluations/{eval_id}/lines')
@@ -264,6 +265,8 @@ def evaluation_lines(eval_id: int, sort: Literal['cer', 'confidence', 'length', 
 class ReviewFilter(BaseModel):
     cer_min: float | None = None
     cer_max: float | None = None
+    conf_min: float | None = None
+    conf_max: float | None = None
     job_id: str | None = None
     q: str | None = None
 

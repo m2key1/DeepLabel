@@ -1,333 +1,362 @@
-import { useCallback, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  cancelEvaluation, getLayoutTemplates, getModelUsage, listConventionFlags, listEvaluations, listModels, listTrainings,
-  patchModel, retryEvaluation,
+  cancelEvaluation, cancelTraining, deleteTraining, getLayoutTemplates, getModelUsage, getTrainingPreflight,
+  listConventionFlags, listEvaluationLines, listEvaluations, listModels, listTrainings, patchModel, retryEvaluation,
+  retryTraining, trainingProgress,
 } from '../api'
-import type { ConventionFlag, Evaluation, LayoutTemplate, ModelUsage, OcrDecode, RegistryModel, Training } from '../api'
-import { conventionLabel } from '../components/conventionLabel'
+import type {
+  ConventionFlag, Evaluation, LayoutTemplate, ModelUsage, ProgressPoint, RegistryModel, Training,
+} from '../api'
 import { useAuth } from '../auth'
-import { useCrumb } from '../components/NavBar'
+import { useSetCrumbs } from '../components/NavBar'
+import { LIKELY_TRANSCRIPTION_ERROR } from '../components/evaluation/lineFilter'
+import { percent } from '../components/evaluation/format'
 import { EditModelDialog } from '../components/models/EditModelDialog'
 import { EvaluateDialog } from '../components/models/EvaluateDialog'
-import { automaticDecode, buildFamilies, headlineScore, readsWithOwnDecoder } from '../components/models/families'
-import type { Family, Version } from '../components/models/families'
-import { formatScore } from '../components/models/FamilyGraph'
-import { ReportedMetrics } from '../components/models/ReportedMetrics'
+import { EvaluationTabs } from '../components/models/EvaluationTabs'
+import { ModelDetails } from '../components/models/ModelDetails'
+import { DataPanel, TrainingPanel } from '../components/models/RunPanels'
+import { HowItWent, ScoresTable, TrainedOn, TrainingFacts } from '../components/models/RunSections'
+import { bestEpoch, duration, materialOf, runSeconds } from '../components/models/runFacts'
+import { SOURCE_LABELS, buildFamilies, headlineScore } from '../components/models/families'
+import { runChecks } from '../components/models/runChecks'
+import { epochTotal, isFinished } from '../components/models/runStatus'
+import { pollPreflight, type ShownPreflight } from '../components/models/usePreflight'
 import { Badge } from '../components/ui/Badge'
+import type { Tone } from '../components/ui/Badge'
 import { Button, buttonClass } from '../components/ui/Button'
-import { PageHeader } from '../components/ui/PageHeader'
-import { Section } from '../components/ui/Section'
-import { StatRow, StatTile } from '../components/ui/StatTile'
-import { Table } from '../components/ui/Table'
-import { pageShell } from '../components/ui/page'
+import { EmptyState } from '../components/ui/EmptyState'
+import { Tabs, panelId, tabId } from '../components/ui/Tabs'
+import { widePageShell } from '../components/ui/page'
 import { usePolling } from '../hooks/usePolling'
 import { useAutoClear } from '../messages'
-import { formatDate, humanBytes } from '../util'
-import { DECODE_NAMES } from '../components/job/processing'
+import { formatDate } from '../util'
 
 const STAGE: Record<string, string> = { layout: 'Layout detection', lines: 'Line segmentation', ocr: 'OCR' }
 
-function Lineage({ family, version }: { family: Family; version: Version }) {
-  const byKey = new Map(family.versions.map((v) => [v.key, v]))
-  const chain: Version[] = []
-  for (let at: Version | undefined = version; at; at = at.parentKey ? byKey.get(at.parentKey) : undefined) chain.unshift(at)
-  const forks = family.versions.filter((v) => v.parentKey === version.key && v.model)
-  return (
-    <div data-testid="lineage" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-      {chain.map((v, i) => (
-        <span key={v.key} className="flex items-center gap-2">
-          {i > 0 && <span aria-hidden className="text-ink-subtle">→</span>}
-          {v.key === version.key
-            ? <span data-testid="lineage-step" className="font-semibold text-ink">{v.name}</span>
-            : <Link to={`/models/${v.model!.id}`} data-testid="lineage-step" className="text-accent-ink hover:underline">{v.name}</Link>}
-          <span className="text-xs tabular-nums text-ink-subtle">{formatScore(v.score)}</span>
-        </span>
-      ))}
-      {forks.length > 0 && (
-        <span data-testid="lineage-forks" className="basis-full text-xs text-ink-muted">
-          {forks.length === 1 ? '1 fine-tune' : `${forks.length} fine-tunes`} from it:{' '}
-          {forks.map((f, i) => (
-            <span key={f.key}>
-              {i > 0 && ', '}
-              <Link to={`/models/${f.model!.id}`} className="text-accent-ink hover:underline">{f.name}</Link>
-              {' '}{formatScore(f.score)}{f.archived && ' (archived)'}
-            </span>
-          ))}
-        </span>
-      )}
-    </div>
-  )
+const STATUS_TONE: Record<Training['status'], Tone> = {
+  queued: 'neutral', preparing: 'accent', running: 'accent', done: 'ok', error: 'danger', cancelled: 'warn',
 }
 
-function EvaluationLine({ ev, canRun, onRetry, onCancel }: {
-  ev: Evaluation; canRun: boolean; onRetry: () => void; onCancel: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div>
-      <span data-testid="eval-row" className="block text-xs text-ink-muted">
-        {ev.status === 'done' && ev.cer !== null ? (
-          <>
-            <span className="font-medium text-ink">CER {ev.cer.toFixed(4)}</span>
-            {ev.wer !== null && ` · WER ${ev.wer.toFixed(4)}`}
-            {ev.line_count !== null && ` · ${ev.line_count} lines`}
-          </>
-        ) : (
-          <span className={ev.status === 'error' ? 'text-danger' : ''}>{ev.status}{ev.error ? ` - ${ev.error}` : ''}</span>
-        )}
-        {` · ${ev.decode} · ${ev.source_label ?? ''} · ${formatDate(ev.created_at)}`}
-        <Link to={`/evaluations/${ev.id}`} data-testid="evaluation-page" className="ml-2 text-ink-subtle hover:text-accent-ink">
-          open
-        </Link>
-        {canRun && (ev.status === 'error' || ev.status === 'cancelled') && (
-          <button data-testid="retry-evaluation" onClick={onRetry} className="ml-2 text-ink-subtle hover:text-accent-ink">
-            retry
-          </button>
-        )}
-        {canRun && (ev.status === 'queued' || ev.status === 'running') && (
-          <button data-testid="cancel-evaluation" onClick={onCancel} className="ml-2 text-ink-subtle hover:text-danger">
-            cancel
-          </button>
-        )}
-        {(ev.breakdown?.length ?? 0) > 0 && (
-          <button data-testid="breakdown-toggle" onClick={() => setOpen(!open)}
-                  className="ml-2 text-ink-subtle hover:text-accent-ink">
-            {open ? 'hide datasets' : 'per dataset'}
-          </button>
-        )}
-      </span>
-      {open && ev.breakdown?.map((row) => (
-        <span key={row.job_id} data-testid="breakdown-row" className="block pl-4 text-xs text-ink-subtle">
-          {row.name}: CER {row.cer.toFixed(4)} · WER {row.wer.toFixed(4)} · {row.lines} lines
-        </span>
-      ))}
-    </div>
-  )
+const TAB_LABELS = { lines: 'Lines', errors: 'Errors', training: 'Training', data: 'Data', details: 'Details' } as const
+type PageTab = keyof typeof TAB_LABELS
+// The run page's tabs, so a link from before the two pages were one still lands.
+const OLD_TABS: Record<string, PageTab> = { overview: 'training', curves: 'training', settings: 'training', evaluations: 'lines' }
+
+/** What the page is read from: the registry, the runs and the evaluations, kept fresh while
+ *  anything on it is still moving. */
+function usePageData(modelId: number | null) {
+  const [models, setModels] = useState<RegistryModel[] | null>(null)
+  const [trainings, setTrainings] = useState<Training[] | null>(null)
+  const [evaluations, setEvaluations] = useState<Evaluation[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const refresh = useCallback(() => {
+    listModels(true).then((r) => setModels(r.models)).catch((e: Error) => setError(e.message))
+    listTrainings().then((r) => setTrainings(r.trainings)).catch((e: Error) => setError(e.message))
+    listEvaluations().then((r) => setEvaluations(r.evaluations)).catch(() => {})
+  }, [])
+  const moving = (trainings ?? []).some((t) => !isFinished(t.status) && (modelId === null || t.model_id === modelId))
+    || evaluations.some((ev) => ev.status === 'queued' || ev.status === 'running')
+  usePolling(refresh, moving ? 5000 : 30000)
+  return { models, trainings, evaluations, error, setError, refresh }
 }
 
-/** The decodes a model reads with, by the names New job offers them under, marking the one a
- *  dataset on Automatic gets. */
-function decodesOf(model: RegistryModel, models: RegistryModel[]): string {
-  const offered: OcrDecode[] = [...(readsWithOwnDecoder(model, models) ? ['decoder' as const] : []),
-                                'beam', 'rescored', 'greedy']
-  const automatic = automaticDecode(model, models)
-  return offered
-    .map((mode) => (mode === automatic ? `${DECODE_NAMES[mode]} (what Automatic reads with)` : DECODE_NAMES[mode]))
-    .join(', ')
+/** A run's own record: what it was cut from, its progress and its log. */
+function useRunData(run: Training | null) {
+  const [preflight, setPreflight] = useState<ShownPreflight | null>(null)
+  const [points, setPoints] = useState<ProgressPoint[]>([])
+  const [log, setLog] = useState('')
+  const [datasets, setDatasets] = useState<Record<string, string>>({})
+  const runId = run?.id ?? null
+  const preflightId = run?.preflight_id ?? null
+  const finished = run ? isFinished(run.status) : true
+  const read = useCallback(() => {
+    if (runId === null) return
+    trainingProgress(runId).then((r) => {
+      setPoints(r.points)
+      setLog(r.log_tail)
+      setDatasets(r.datasets)
+    }).catch(() => {})
+  }, [runId])
+  useEffect(read, [read])
+  usePolling(read, 5000, runId !== null && !finished)
+  useEffect(() => {
+    setPreflight(null)
+    if (runId === null || preflightId === null) return
+    return pollPreflight(() => getTrainingPreflight(runId), setPreflight, 2000, { retry: true })
+  }, [runId, preflightId])
+  return { preflight, points, log, datasets }
 }
 
-function StoredFiles({ model }: { model: RegistryModel }) {
-  const weights = model.files.find((f) => f.role === 'weights')
-  if (!weights) {
+/** A model in the registry, with the run that made it when it was trained here. */
+export function ModelPage() {
+  const modelId = Number(useParams().id)
+  const data = usePageData(modelId)
+  const model = data.models?.find((m) => m.id === modelId) ?? null
+  if (data.models === null || data.trainings === null) return <div className={widePageShell}><p className="text-sm text-ink-muted">Loading…</p></div>
+  if (!model) return <div className={widePageShell}><p className="text-sm text-ink-muted">No model #{modelId}.</p></div>
+  const run = data.trainings.find((t) => t.model_id === model.id) ?? null
+  return <ModelView model={model} run={run} {...data} models={data.models} trainings={data.trainings} />
+}
+
+/** A run: the page of the model it made once there is one, else the same page without it. */
+export function RunPage() {
+  const runId = Number(useParams().id)
+  const { search } = useLocation()
+  const data = usePageData(null)
+  const run = data.trainings?.find((t) => t.id === runId) ?? null
+  if (!Number.isFinite(runId) || (data.trainings !== null && run === null)) {
     return (
-      <Badge tone="warn" data-testid="model-files" data-roles=""
-             title="Not in the weight store yet: python -m app.weights import-existing on the backend">
-        not stored
-      </Badge>
+      <div className={widePageShell}>
+        <EmptyState action={<Link to="/models" className={buttonClass()}>Back to models</Link>}>
+          There is no training run {Number.isFinite(runId) ? runId : ''}. It may have been deleted with its snapshot.
+        </EmptyState>
+      </div>
     )
   }
-  return (
-    <span data-testid="model-files" data-roles={model.files.map((f) => f.role).join(' ')}
-          className="rounded-full bg-raised px-2 py-0.5 font-mono text-[10px] text-ink-muted">
-      {weights.sha256.slice(0, 8)} · {humanBytes(weights.size)}
-    </span>
-  )
+  if (data.models === null || data.trainings === null || run === null) return <div className={widePageShell} />
+  if (run.model_id !== null && data.models.some((m) => m.id === run.model_id)) {
+    return <Navigate to={`/models/${run.model_id}${search}`} replace />
+  }
+  return <ModelView model={null} run={run} {...data} models={data.models} trainings={data.trainings} />
 }
 
-function ReadingOrder({ template }: { template: LayoutTemplate | undefined }) {
-  if (!template) return <>worked out from each page - it belongs to no layout template</>
-  const outside = template.outside_order === 'top_to_bottom'
-    ? 'top to bottom outside containers, as the Schematismus pipeline does'
-    : "by the page's leaves and columns outside containers"
-  return <>the <Link to="/templates" className="text-accent-ink hover:underline">{template.name}</Link> template's: {outside}</>
-}
-
-const SOURCE_LABELS: Record<RegistryModel['source'], string> = {
-  builtin: 'Shipped with DeepLabel',
-  backend: 'Shipped with its backend',
-  imported: 'Imported',
-  trained: 'Trained',
-}
-
-export function ModelPage() {
-  const { id } = useParams()
-  const modelId = Number(id)
+function ModelView({ model, run, models, trainings, evaluations, error, setError, refresh }: {
+  model: RegistryModel | null
+  run: Training | null
+  models: RegistryModel[]
+  trainings: Training[]
+  evaluations: Evaluation[]
+  error: string | null
+  setError: (message: string | null) => void
+  refresh: () => void
+}) {
   const { user, canEdit, isAdmin, can } = useAuth()
-  const managesModels = can('models.manage')
-  const [models, setModels] = useState<RegistryModel[] | null>(null)
-  const [trainings, setTrainings] = useState<Training[]>([])
-  const [evaluations, setEvaluations] = useState<Evaluation[]>([])
+  const navigate = useNavigate()
+  const setCrumbs = useSetCrumbs()
+  const [params, setParams] = useSearchParams()
+  const tabsRef = useRef<HTMLDivElement>(null)
   const [usage, setUsage] = useState<ModelUsage | null>(null)
   const [templates, setTemplates] = useState<LayoutTemplate[]>([])
   const [catalog, setCatalog] = useState<ConventionFlag[] | null>(null)
   const [editing, setEditing] = useState(false)
   const [evaluating, setEvaluating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [likely, setLikely] = useState<number | null>(null)
   useAutoClear(error, setError)
+  const { preflight, points, log, datasets } = useRunData(run)
+  const modelId = model?.id ?? null
 
-  const refresh = useCallback(() => {
-    listModels(true).then((r) => setModels(r.models)).catch((e: Error) => setError(e.message))
-    listTrainings().then((r) => setTrainings(r.trainings)).catch(() => {})
-    listEvaluations().then((r) => setEvaluations(r.evaluations)).catch(() => {})
+  useEffect(() => {
+    if (modelId === null) return
     getModelUsage(modelId).then(setUsage).catch(() => {})
     getLayoutTemplates().then(setTemplates).catch(() => {})
     listConventionFlags().then((r) => setCatalog(r.flags)).catch(() => {})
   }, [modelId])
-  usePolling(refresh, 10000)
 
-  const model = models?.find((m) => m.id === modelId) ?? null
-  useCrumb(model?.name ?? 'Model')
-  if (models === null) return <div className={pageShell}><p className="text-sm text-ink-muted">Loading…</p></div>
-  if (!model) return <div className={pageShell}><p className="text-sm text-ink-muted">No model #{modelId}.</p></div>
+  const title = model?.name ?? run?.name ?? ''
+  useEffect(() => {
+    setCrumbs([{ label: 'Models', to: '/models' }, { label: title }])
+    return () => setCrumbs([])
+  }, [setCrumbs, title])
 
-  const family = buildFamilies(models.filter((m) => m.task === model.task), trainings, evaluations)
-    .find((f) => f.versions.some((v) => v.key === `m${model.id}`))!
-  const version = family.versions.find((v) => v.key === `m${model.id}`)!
-  const run = version.run
-  const own = model.owner === user
-  const evals = evaluations.filter((ev) => ev.model_id === model.id)
-  const base = model.trained_from !== null ? models.find((m) => m.id === model.trained_from) : undefined
-  const older = model.supersedes !== null ? models.find((m) => m.id === model.supersedes) : undefined
-  const newer = models.find((m) => m.supersedes === model.id && !m.archived)
-  const baseOnSameTest = run && headlineScore(evaluations.filter((ev) => ev.model_id === base?.id
-    && ev.training_id === run.id && ev.source.jobs !== undefined && ev.status === 'done' && ev.cer !== null))
-  const valid = run ? headlineScore(evals.filter((ev) => ev.source.snapshot === run.id && ev.status === 'done')) : undefined
+  const base = run?.base_model_id != null ? models.find((m) => m.id === run.base_model_id) ?? null
+    : model?.trained_from != null ? models.find((m) => m.id === model.trained_from) ?? null : null
+  const ofModel = useMemo(() => (model ? evaluations.filter((ev) => ev.model_id === model.id) : []), [evaluations, model])
+  const scored = ofModel.filter((ev) => ev.status === 'done' && ev.cer !== null)
+  const shownFirst = (run && headlineScore(scored.filter((ev) => ev.training_id === run.id && ev.source.jobs !== undefined)))
+    ?? (run && headlineScore(scored.filter((ev) => ev.source.snapshot === run.id)))
+    ?? headlineScore(scored)
+  const shownFirstId = shownFirst?.id ?? null
 
+  useEffect(() => {
+    setLikely(null)
+    if (shownFirstId === null) return
+    let live = true
+    listEvaluationLines(shownFirstId, { ...LIKELY_TRANSCRIPTION_ERROR, sort: 'cer', order: 'desc', offset: 0, limit: 1 })
+      .then((r) => live && setLikely(r.total)).catch(() => {})
+    return () => { live = false }
+  }, [shownFirstId])
+
+  const names: Record<string, string> = { ...datasets, ...(preflight?.datasets ?? {}) }
+  const materialName = (key: string) => (key === 'valid' ? 'Validation lines'
+    : key.split('+').map((id) => names[id] ?? scored.find((ev) => materialOf(ev) === key)?.source_label ?? id).join(', '))
+  const checks = run ? runChecks({
+    run, points, preflight: preflight?.status === 'done' ? preflight.result : null,
+    likelyErrors: shownFirst && likely !== null
+      ? { count: likely, of: shownFirst.line_count ?? 0, material: materialOf(shownFirst) === 'valid' ? 'validation lines' : 'test pages' }
+      : null,
+  }) : []
+
+  const items = ([
+    ...(model?.task === 'ocr' && scored.length > 0 ? ['lines', 'errors'] as const : []),
+    ...(run ? ['training', 'data'] as const : []),
+    ...(model ? ['details'] as const : []),
+  ] as PageTab[]).map((id) => ({ id, label: TAB_LABELS[id] }))
+  const asked = params.get('tab') ?? ''
+  const tab: PageTab = items.find((t) => t.id === (OLD_TABS[asked] ?? asked))?.id ?? items[0]?.id ?? 'details'
+  const show = (next: PageTab, extra: Record<string, string> = {}) => {
+    setParams(new URLSearchParams({ tab: next, ...extra }), { replace: true })
+    tabsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  // A link to a tab lands on the tab, not on the overview above it.
+  const landedOnTab = useRef(params.has('tab'))
+  useEffect(() => {
+    if (landedOnTab.current) tabsRef.current?.scrollIntoView({ block: 'start' })
+    landedOnTab.current = false
+  }, [])
+
+  const finished = run ? isFinished(run.status) : true
+  const mine = run !== null && canEdit && (isAdmin || run.owner === user)
+  const managesModels = can('models.manage')
+  const ownsModel = model !== null && model.owner === user
+  const family = model ? buildFamilies(models.filter((m) => m.task === model.task), trainings, evaluations)
+    .find((f) => f.versions.some((v) => v.key === `m${model.id}`)) ?? null : null
+  const version = family?.versions.find((v) => v.key === `m${model!.id}`) ?? null
   const apply = (body: { is_default?: boolean; archived?: boolean }) =>
-    patchModel(model.id, body).then(refresh).catch((e: Error) => setError(e.message))
+    model && patchModel(model.id, body).then(refresh).catch((e: Error) => setError(e.message))
 
   return (
-    <div className={pageShell}>
-      <nav className="mb-2 text-xs text-ink-subtle">
-        <Link to="/models" className="hover:text-accent-ink">Models</Link>
-        {' / '}{STAGE[model.task]} · {family.name} family
-      </nav>
-      <PageHeader
-        title={<span className="flex items-center gap-2">{model.name}
-          {model.is_default && <Badge tone="accent">★ DEFAULT</Badge>}
-          {model.archived && <Badge>ARCHIVED</Badge>}
-          <span data-testid="model-source" className="rounded-full bg-raised px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-muted">
-            {model.source}
-          </span>
-          <StoredFiles model={model} /></span>}
-        actions={<>
-          {can('recognize') && model.task === 'ocr' && !model.archived && (
-            <Link to={`/try?ocr=${model.id}`} className={buttonClass({ size: 'xs' })}>Try this model</Link>
-          )}
-          {canEdit && model.task === 'ocr' && !model.archived && (
-            <Button size="xs" onClick={() => setEvaluating(true)}>Evaluate…</Button>
-          )}
-          {managesModels && !model.is_default && !model.archived && (
-            <Button size="xs" onClick={() => apply({ is_default: true })}>Set default</Button>
-          )}
-          {(managesModels || own) && <Button size="xs" onClick={() => setEditing(true)}>Edit</Button>}
-          {(managesModels || own) && !model.is_default && (
-            <Button size="xs" data-testid="archive-model" onClick={() => apply({ archived: !model.archived })}>
-              {model.archived ? 'Unarchive' : 'Archive'}
-            </Button>
-          )}
-        </>}
-      >
-        {SOURCE_LABELS[model.source]}
-        {' '}{formatDate(model.created_at)}
-        {model.owner && <span data-testid="model-owner"> by {model.owner === user ? 'you' : model.owner}</span>}
-        {run && <> · from run <Link to={`/models/runs/${run.id}`} data-testid="model-from-run"
-                                    className="text-accent-ink hover:underline">{run.name}</Link></>}
-      </PageHeader>
-      {error && <p className="mb-4 text-sm text-danger">{error}</p>}
-
-      <Section title="Lineage"><Lineage family={family} version={version} /></Section>
-
-      <StatRow className="mb-8">
-        <StatTile data-testid="model-score" label={version.score?.kind === 'test' ? 'Test CER · beam' : 'Score'}
-                  value={formatScore(version.score)} />
-        {valid?.cer != null && <StatTile label="Valid CER" value={`${(valid.cer * 100).toFixed(2)}%`} />}
-        {baseOnSameTest && version.score?.kind === 'test' && base && (
-          <StatTile data-testid="model-vs-base" label="vs its base"
-                    value={`${((version.score.value - baseOnSameTest.cer!) * 100).toFixed(2)} pt`}
-                    note={`${base.name} read ${(baseOnSameTest.cer! * 100).toFixed(2)}%`}
-                    tone={version.score.value <= baseOnSameTest.cer! ? 'good' : 'bad'} />
-        )}
-        {usage && <StatTile data-testid="model-used-by" label="Used by" value={usage.datasets}
-                            note={usage.datasets === 1 ? 'dataset reads with it' : 'datasets read with it'} />}
-      </StatRow>
-
-      <Section title="Reads with">
-        <dl className="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-1 text-sm">
-          {model.task === 'ocr' && <>
-            <dt className="text-ink-muted">Decodes</dt>
-            <dd data-testid="model-decodes">{decodesOf(model, models ?? [])}</dd>
-            <dt className="text-ink-muted">Beam LM</dt>
-            <dd>{model.lm_path ? model.lm_path.split('/').pop() : 'none - decodes by decoder rescoring'}</dd>
-            <dt className="text-ink-muted">Input size</dt>
-            <dd>{model.target_height ? `${model.target_height} px high, up to ${model.max_width} wide` : 'known once it has read a page'}</dd>
-            <dt className="text-ink-muted">Conventions</dt>
-            <dd data-testid="model-conventions">{model.conventions === null ? 'known once it has read a page'
-              : model.conventions.length === 0 ? 'one convention only'
-                : `knows ${model.conventions.length}: ${model.conventions.map((c) => conventionLabel(c, catalog).toLowerCase()).join(', ')}`}</dd>
-          </>}
-          {model.metrics && <>
-            <dt className="text-ink-muted">Training reported</dt>
-            <dd><ReportedMetrics metrics={model.metrics} info={run?.metric_info} /></dd>
-          </>}
-          {model.task === 'layout' && <>
-            <dt className="text-ink-muted">Reading order</dt>
-            <dd data-testid="model-reading-order"><ReadingOrder template={templates.find((t) => t.id === model.layout_template_id)} /></dd>
-          </>}
-          {(older || newer) && <>
-            <dt className="text-ink-muted">Version</dt>
-            <dd data-testid="model-versions">
-              {older && <>New version of <Link to={`/models/${older.id}`} className="text-accent-ink hover:underline">{older.name}</Link></>}
-              {older && newer && ' · '}
-              {newer && <>Replaced by <Link to={`/models/${newer.id}`} className="text-accent-ink hover:underline">{newer.name}</Link></>}
-            </dd>
-          </>}
-          <dt className="text-ink-muted">Runs on</dt>
-          <dd data-testid="model-runs-on">{model.runs_on ? `model backend "${model.runs_on}"` : 'no configured model backend'}</dd>
-          <dt className="text-ink-muted">Notes</dt>
-          <dd data-testid="model-notes">{model.notes ?? <span className="text-ink-subtle">none</span>}</dd>
-        </dl>
-      </Section>
-
-      <Section title="Evaluations">
-        {evals.length === 0
-          ? <p className="text-xs text-ink-subtle">Not evaluated yet.</p>
-          : <div className="space-y-1">{evals.map((ev) => (
-              <EvaluationLine key={ev.id} ev={ev} canRun={isAdmin || ev.owner === user}
-                              onRetry={() => retryEvaluation(ev.id).then(refresh).catch((e: Error) => setError(e.message))}
-                              onCancel={() => cancelEvaluation(ev.id).then(refresh).catch((e: Error) => setError(e.message))} />
-            ))}</div>}
-      </Section>
-
-      <Section title="Stored files">
-        {model.files.length === 0
-          ? <p className="text-xs text-ink-subtle">
-              Not in the weight store yet: python -m app.weights import-existing on the backend.
+    <div className={widePageShell}>
+      <header className="mb-8">
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="flex flex-wrap items-center gap-2 font-serif text-2xl font-semibold">
+              {title}
+              {model?.is_default && <Badge tone="accent">★ DEFAULT</Badge>}
+              {model?.archived && <Badge>ARCHIVED</Badge>}
+              {!model && run && <Badge tone={STATUS_TONE[run.status]} data-testid="run-status">{run.status}</Badge>}
+              {!model && run?.phase && <span className="text-xs font-normal text-ink-subtle">{run.phase}</span>}
+            </h1>
+            <p className="mt-1 text-sm text-ink-muted">
+              {STAGE[(model ?? run)!.task]}
+              {base ? <> · fine-tuned from <Link to={`/models/${base.id}`} className="text-accent-ink hover:underline">{base.name}</Link></>
+                : model && <> · {SOURCE_LABELS[model.source]}</>}
+              {family && <> · {family.name} family</>}
+              {' · '}{formatDate((model ?? run)!.created_at)}
+              {(model?.owner ?? run?.owner) && (
+                <span data-testid="model-owner"> · {(model?.owner ?? run?.owner) === user ? 'you' : (model?.owner ?? run?.owner)}</span>
+              )}
             </p>
-          : <Table caption="Stored files" rows={model.files} rowKey={(f) => f.role}
-                   rowProps={() => ({ 'data-testid': 'model-file-row' })}
-                   columns={[
-                     { key: 'role', label: 'Role', cell: (f) => f.role },
-                     { key: 'file', label: 'File', cell: (f) => f.filename },
-                     { key: 'size', label: 'Size', align: 'right', cell: (f) => humanBytes(f.size) },
-                     { key: 'sha', label: 'SHA-256', cell: (f) => <span className="font-mono text-xs">{f.sha256}</span> },
-                   ]} />}
-      </Section>
+            {(model?.notes ?? run?.description) && (
+              <p data-testid="model-notes" className="mt-2 max-w-3xl text-sm text-ink">{model?.notes ?? run?.description}</p>
+            )}
+            {!model && run && (points.length > 0 || run.error) && <RunProgress run={run} points={points} />}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {model && can('recognize') && model.task === 'ocr' && !model.archived && (
+              <Link to={`/try?ocr=${model.id}`} className={buttonClass({ size: 'xs' })}>Try this model</Link>
+            )}
+            {model && canEdit && model.task === 'ocr' && !model.archived && (
+              <Button size="xs" onClick={() => setEvaluating(true)}>Evaluate…</Button>
+            )}
+            {model && managesModels && !model.is_default && !model.archived && (
+              <Button size="xs" onClick={() => apply({ is_default: true })}>Set default</Button>
+            )}
+            {model && (managesModels || ownsModel) && <Button size="xs" onClick={() => setEditing(true)}>Edit</Button>}
+            {model && (managesModels || ownsModel) && !model.is_default && (
+              <Button size="xs" data-testid="archive-model" onClick={() => apply({ archived: !model.archived })}>
+                {model.archived ? 'Unarchive' : 'Archive'}
+              </Button>
+            )}
+            {run && finished && canEdit && (
+              <Link to={`/models/train?task=${run.task}&from=${run.id}`} data-testid="rerun-training"
+                    className={buttonClass({ size: 'xs' })} title="Open the training form on this run's settings">Rerun…</Link>
+            )}
+            {run && !model && !finished && mine && (
+              <Button size="xs" onClick={() => cancelTraining(run.id).then(refresh).catch((e: Error) => setError(e.message))}>Cancel</Button>
+            )}
+            {run && !model && run.status === 'error' && mine && (
+              <Button size="xs" data-testid="retry-training"
+                      onClick={() => retryTraining(run.id).then(refresh).catch((e: Error) => setError(e.message))}>Retry</Button>
+            )}
+            {run && !model && finished && mine && (
+              <Button size="xs" variant="danger" onClick={() => {
+                if (!window.confirm(`Delete training "${run.name}" and free its snapshot?`)) return
+                deleteTraining(run.id).then(() => navigate('/models?tab=runs')).catch((e: Error) => setError(e.message))
+              }}>Delete</Button>
+            )}
+          </div>
+        </div>
+        {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
+      </header>
 
-      {run && (
-        <Section title="Run">
-          <p className="text-sm text-ink-muted">
-            Trained by run <Link to={`/models/runs/${run.id}`} className="text-accent-ink hover:underline">{run.name}</Link>;
-            its page has the datasets, split and every setting it ran with.
-          </p>
-        </Section>
+      <div className="mb-10 space-y-8">
+        {model && <ScoresTable model={model} base={base} run={run} evaluations={evaluations} materialName={materialName} />}
+        {run && (
+          <TrainedOn run={run} preflight={preflight}
+                     evaluationFor={(split) => headlineScore(scored.filter((ev) => ev.training_id === run.id
+                       && (split === 'val' ? ev.source.snapshot !== undefined : ev.source.jobs !== undefined)))} />
+        )}
+        {run && <TrainingFacts run={run} points={points} onAllSettings={() => show('training')} />}
+        {run && (
+          <HowItWent checks={checks} finished={finished}
+                     onShow={(check) => check.show?.tab === 'lines' && shownFirstId !== null
+                       ? show('lines', { eval: String(shownFirstId), cer_min: String(LIKELY_TRANSCRIPTION_ERROR.cer_min),
+                                         conf_min: String(LIKELY_TRANSCRIPTION_ERROR.conf_min) })
+                       : check.show && show(check.show.tab)} />
+        )}
+      </div>
+
+      {items.length > 0 && (
+        <div ref={tabsRef} className="scroll-mt-4">
+          <Tabs items={items} active={tab} label="Model sections" className="mb-4"
+                onSelect={(next) => setParams(new URLSearchParams({ tab: next }), { replace: true })} />
+          <div role="tabpanel" id={panelId(tab)} aria-labelledby={tabId(tab)}>
+            {(tab === 'lines' || tab === 'errors') && shownFirstId !== null && (
+              <EvaluationTabs tab={tab} evaluations={scored} shownFirst={shownFirstId} materialName={materialName}
+                              canSend={canEdit} />
+            )}
+            {tab === 'training' && run && <TrainingPanel run={run} points={points} datasets={datasets} preflight={preflight} log={log} />}
+            {tab === 'data' && run && <DataPanel run={run} preflight={preflight} />}
+            {tab === 'details' && model && family && version && (
+              <ModelDetails model={model} models={models} family={family} version={version} run={run}
+                            evaluations={ofModel} usage={usage} templates={templates} catalog={catalog}
+                            canRun={(ev) => isAdmin || ev.owner === user}
+                            onRetry={(ev) => retryEvaluation(ev.id).then(refresh).catch((e: Error) => setError(e.message))}
+                            onCancel={(ev) => cancelEvaluation(ev.id).then(refresh).catch((e: Error) => setError(e.message))} />
+            )}
+          </div>
+        </div>
       )}
 
-      {evaluating && <EvaluateDialog model={model} onClose={() => setEvaluating(false)} onStarted={refresh} />}
-      {editing && <EditModelDialog model={model} onClose={() => setEditing(false)} onSaved={refresh} onError={setError}
-                                   familyName={managesModels && family.root.id === model.id ? model.family_name ?? '' : undefined}
-                                   models={managesModels ? models : undefined} />}
+      {model && evaluating && <EvaluateDialog model={model} onClose={() => setEvaluating(false)} onStarted={refresh} />}
+      {model && editing && family && (
+        <EditModelDialog model={model} onClose={() => setEditing(false)} onSaved={refresh} onError={setError}
+                         familyName={managesModels && family.root.id === model.id ? model.family_name ?? '' : undefined}
+                         models={managesModels ? models : undefined} />
+      )}
     </div>
+  )
+}
+
+/** Where a run without a model stands: its best so far, its epoch and how long it has run. */
+function RunProgress({ run, points }: { run: Training; points: ProgressPoint[] }) {
+  const last = points[points.length - 1]
+  const kept = bestEpoch(points)
+  const best = points.find((p) => p.epoch === kept)?.cer ?? null
+  const seconds = runSeconds(run, points)
+  return (
+    <dl className="mt-3 flex flex-wrap items-baseline gap-5 text-xs">
+      <div data-testid="stat-best-cer" className="flex items-baseline gap-1">
+        <dt className="text-ink-subtle">best cer</dt>
+        <dd className="font-mono text-sm font-medium tabular-nums text-ink">{percent(best)}</dd>
+        {kept !== null && <dd className="text-ink-subtle">e{kept}</dd>}
+      </div>
+      <div className="flex items-baseline gap-1">
+        <dt className="text-ink-subtle">epoch</dt>
+        <dd data-testid="stat-epoch" className="font-mono text-sm font-medium tabular-nums text-ink">
+          {last?.epoch !== undefined ? `${last.epoch}${epochTotal(run) ? ` / ${epochTotal(run)}` : ''}` : '-'}
+        </dd>
+      </div>
+      <div className="flex items-baseline gap-1">
+        <dt className="text-ink-subtle">duration</dt>
+        <dd data-testid="stat-duration" className="font-mono text-sm font-medium tabular-nums text-ink">
+          {seconds === null ? '-' : duration(seconds)}
+        </dd>
+      </div>
+      {run.error && <dd data-testid="run-error" className="basis-full text-sm text-danger">{run.error}</dd>}
+    </dl>
   )
 }
