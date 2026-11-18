@@ -202,9 +202,9 @@ test.describe('Scenario: an evaluation has a page of its own', () => {
     await expect(page.getByTestId('eval-line')).toHaveCount(4)
   })
 
-  // README: the page is "reached from the run page's scores", and "a switch moves the
-  // whole page to another decode the same model was scored with on the same material".
-  test("a run's score opens its evaluation, and the decode switch moves to the sibling", async ({ page }) => {
+  // README: the page is "reached from the run page's scores". A run scores each model once,
+  // in the mode Automatic reads it with (#122), so there is no sibling decode to switch to.
+  test("a run's score opens its evaluation, one decode with nothing to switch to", async ({ page }) => {
     test.setTimeout(180_000)
     const jobId = await seedDistinctPagesJob(uniqueName('Run pages'), 2)
     await markLinesChecked(jobId, 12)
@@ -219,25 +219,20 @@ test.describe('Scenario: an evaluation has a page of its own', () => {
     const trained = (await listRegistryModels()).find((m) => m.name === name)!
     await expect.poll(async () =>
       (await listEvaluations()).filter((e) => e.training_id === finished.id && e.status === 'done').length,
-      { timeout: 60_000 }).toBe(6)
+      { timeout: 60_000 }).toBe(2)
     const evals = (await listEvaluations()).filter((e) => e.training_id === finished.id && e.model_id === trained.id)
-    const beam = evals.find((e) => e.decode === 'beam')!
-    const greedy = evals.find((e) => e.decode === 'greedy')!
-    await expect.poll(async () => (await evaluationDetail(beam.id)).line_rows).toBe(6)
+    expect(evals.map((e) => e.decode)).toEqual(['rescored'])
+    const scored = evals[0]
+    await expect.poll(async () => (await evaluationDetail(scored.id)).line_rows).toBe(6)
 
     await page.goto(`/models/runs/${finished.id}`)
     await page.getByTestId('score-valid-new').getByRole('link').click()
-    await expect(page).toHaveURL(new RegExp(`/evaluations/${beam.id}(\\?|$)`))
+    await expect(page).toHaveURL(new RegExp(`/evaluations/${scored.id}(\\?|$)`))
     await expect(page.getByTestId('evaluation-title')).toHaveText(name)
-    // The valid page's six lines: 5 edits over 129 characters.
-    await expect(tile(page, 'headline-cer')).toHaveText(/^CER\s*3\.88%\s*129 chars$/)
+    // The valid page's six lines, 129 characters.
+    await expect(tile(page, 'headline-cer')).toHaveText(new RegExp(`^CER\\s*${(scored.cer! * 100).toFixed(2)}%\\s*129 chars$`))
     await expect(tile(page, 'headline-lines')).toHaveText(/^lines\s*6$/)
     await expect(page.getByTestId('eval-line')).toHaveCount(6)
-
-    const decodes = page.getByTestId('decode-switch')
-    await expect(decodes.getByRole('button')).toHaveText(['beam', 'rescored', 'greedy'])
-    await decodes.getByRole('button', { name: 'greedy' }).click()
-    await expect(page).toHaveURL(new RegExp(`/evaluations/${greedy.id}(\\?|$)`))
-    await expect(decodes.getByRole('button', { name: 'greedy' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('decode-switch')).toHaveCount(0)
   })
 })

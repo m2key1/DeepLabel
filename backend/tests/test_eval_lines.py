@@ -153,14 +153,15 @@ class TestImport:
         (valid / 'line_1.png').write_bytes(b'PNG')
         imported.execute("INSERT INTO trainings (id, name, task, status, owner, base_model_id) "
                          "VALUES (1, 'Run', 'ocr', 'done', 'alice', 9)")
-        imported.execute('UPDATE evaluations SET fingerprint = ? WHERE id = 7',
+        # A run's baseline is its base model's score in the mode Automatic reads with (#122).
+        imported.execute("UPDATE evaluations SET fingerprint = ?, decode = 'rescored' WHERE id = 7",
                          (evaluator.split_fingerprint(1),))
         imported.commit()
         training = dict(imported.execute('SELECT * FROM trainings WHERE id = 1').fetchone())
 
         evaluator.create_baseline(imported, training)
 
-        copy = imported.execute("SELECT id FROM evaluations WHERE training_id = 1 AND decode = 'beam'"
+        copy = imported.execute("SELECT id FROM evaluations WHERE training_id = 1 AND decode = 'rescored'"
                                 ).fetchone()['id']
         assert [r['line_id'] for r in stored(imported, copy)] == [1, 2, 3, 4, 5]
 

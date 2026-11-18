@@ -10,7 +10,7 @@ import { useAuth } from '../auth'
 import { useCrumb } from '../components/NavBar'
 import { EditModelDialog } from '../components/models/EditModelDialog'
 import { EvaluateDialog } from '../components/models/EvaluateDialog'
-import { automaticDecode, buildFamilies, readsWithOwnDecoder } from '../components/models/families'
+import { automaticDecode, buildFamilies, headlineScore, readsWithOwnDecoder } from '../components/models/families'
 import type { Family, Version } from '../components/models/families'
 import { formatScore } from '../components/models/FamilyGraph'
 import { ReportedMetrics } from '../components/models/ReportedMetrics'
@@ -190,9 +190,9 @@ export function ModelPage() {
   const base = model.trained_from !== null ? models.find((m) => m.id === model.trained_from) : undefined
   const older = model.supersedes !== null ? models.find((m) => m.id === model.supersedes) : undefined
   const newer = models.find((m) => m.supersedes === model.id && !m.archived)
-  const baseOnSameTest = run && evaluations.find((ev) => ev.model_id === base?.id && ev.training_id === run.id
-    && ev.source.jobs !== undefined && ev.status === 'done' && ev.decode === 'beam' && ev.cer !== null)
-  const valid = evals.find((ev) => run && ev.source.snapshot === run.id && ev.status === 'done' && ev.decode === 'beam')
+  const baseOnSameTest = run && headlineScore(evaluations.filter((ev) => ev.model_id === base?.id
+    && ev.training_id === run.id && ev.source.jobs !== undefined && ev.status === 'done' && ev.cer !== null))
+  const valid = run ? headlineScore(evals.filter((ev) => ev.source.snapshot === run.id && ev.status === 'done')) : undefined
 
   const apply = (body: { is_default?: boolean; archived?: boolean }) =>
     patchModel(model.id, body).then(refresh).catch((e: Error) => setError(e.message))

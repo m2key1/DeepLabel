@@ -111,6 +111,25 @@ describe('model families', () => {
     expect(family.best?.value).toBe(0.031)
   })
 
+  it('scores a version in the mode Automatic reads it with, falling back to beam for older runs', () => {
+    const models = [model(1, { is_default: true }), model(2, { trained_from: 1 }), model(3, { trained_from: 1 })]
+    const trainings = [run(2, { model_id: 2, base_model_id: 1 }), run(3, { model_id: 3, base_model_id: 1 })]
+    const evaluations = [
+      evaluation(1, 2, 0.031, { training_id: 2, decode: 'beam' }),
+      evaluation(2, 2, 0.044, { training_id: 2, decode: 'rescored' }),
+      evaluation(3, 2, 0.052, { training_id: 2, decode: 'greedy' }),
+      evaluation(4, 3, 0.061, { training_id: 3, decode: 'decoder' }),
+      evaluation(5, 3, 0.07, { training_id: 3, decode: 'rescored' }),
+      evaluation(6, 1, 0.09, { training_id: 2, decode: 'beam' }),
+    ]
+    const [family] = buildFamilies(models, trainings, evaluations)
+    const score = (key: string) => family.versions.find((v) => v.key === key)!.score
+
+    expect(score('m2')).toMatchObject({ value: 0.044, kind: 'test' })
+    expect(score('m3')).toMatchObject({ value: 0.061, kind: 'test' })
+    expect(score('m1')).toMatchObject({ value: 0.09, kind: 'eval' })
+  })
+
   it('ranks families by their best score, the unscored after them newest first', () => {
     const models = [model(1), model(2), model(3), model(4)]
     const evaluations = [evaluation(1, 1, 0.08), evaluation(2, 2, 0.03)]

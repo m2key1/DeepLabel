@@ -58,12 +58,12 @@ def test_registering_a_result_scores_the_base_model_beside_it(conn, tmp_path, mo
     rows = conn.execute(
         'SELECT model_id, training_id, source, decode, status, owner FROM evaluations '
         'ORDER BY id').fetchall()
-    # Every decode the model has is scored for both, so base and result are comparable in
-    # each mode; neither has a token decoder, so its own reading is not among them.
+    # Each is scored once, in the mode Automatic picks for it; neither has a token decoder,
+    # so that is the reranked beam (#122).
     assert [(r['model_id'], r['training_id'], r['source'], r['decode'], r['status'], r['owner'])
             for r in rows] == [
-        *[(base, 2, '{"snapshot": 2}', m, 'queued', 'eva') for m in ('beam', 'rescored', 'greedy')],
-        *[(new_model, 2, '{"snapshot": 2}', m, 'queued', 'eva') for m in ('beam', 'rescored', 'greedy')],
+        (base, 2, '{"snapshot": 2}', 'rescored', 'queued', 'eva'),
+        (new_model, 2, '{"snapshot": 2}', 'rescored', 'queued', 'eva'),
     ]
 
 
@@ -89,22 +89,18 @@ def test_identical_valid_split_reuses_the_baseline_scores(conn, tmp_path, monkey
 
     first = _seed_training_with_valid_split(conn, tmp_path, 10, base, pairs)
     evaluator.create_baseline(conn, first)
-    # Score one mode; only that mode's result should be copied to the identical split.
-    scored = conn.execute("SELECT id FROM evaluations WHERE decode = 'beam'").fetchone()['id']
+    scored = conn.execute("SELECT id FROM evaluations WHERE decode = 'rescored'").fetchone()['id']
     evaluator.set_state(conn, scored, status='done', cer=0.09, wer=0.49, line_count=2)
 
     second = _seed_training_with_valid_split(conn, tmp_path, 11, base, pairs)
     evaluator.create_baseline(conn, second)
 
     rows = conn.execute("SELECT training_id, status, cer, wer, line_count FROM evaluations "
-                        "WHERE decode = 'beam' ORDER BY id").fetchall()
+                        "ORDER BY id").fetchall()
     assert [tuple(r) for r in rows] == [
         (10, 'done', 0.09, 0.49, 2),
         (11, 'done', 0.09, 0.49, 2),
     ]
-    # The modes with nothing to copy are queued to run, not silently skipped.
-    assert [r[0] for r in conn.execute("SELECT decode FROM evaluations WHERE training_id = 11 "
-                                       "AND status = 'queued' ORDER BY decode")] == ['greedy', 'rescored']
 
 
 def test_changed_valid_split_queues_a_fresh_baseline(conn, tmp_path, monkeypatch):

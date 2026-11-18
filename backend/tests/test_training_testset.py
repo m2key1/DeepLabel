@@ -255,12 +255,9 @@ def test_a_person_only_run_refuses_a_test_set_only_models_settled(client):
     assert res.json()['detail'] == 'the test pages contain no checked material for this task'
 
 
-def test_the_test_set_is_scored_in_the_same_mode_the_model_will_run(client, tmp_path):
-    """One headline number on untouched data, in the decode the model actually runs.
-    It was pinned to a mode name that later came to mean something else, so the test-set
-    score compared against valid-split scores taken a different way."""
-    from app import decode
-
+def test_the_test_set_is_scored_in_the_decoding_automatic_picks(client, tmp_path):
+    """One headline number on untouched data, in the decoding a dataset reads with this
+    model: Automatic's pick, as on the valid split, so the two compare (#122)."""
     api, conn = client
     seed_checked_lines(conn, 'j-test', 2)
     conn.execute("INSERT INTO models (id, task, name, checkpoint) VALUES (7, 'ocr', 'Base', '/b.ckpt')")
@@ -276,7 +273,7 @@ def test_the_test_set_is_scored_in_the_same_mode_the_model_will_run(client, tmp_
 
     modes = {row['decode'] for row in conn.execute(
         "SELECT decode FROM evaluations WHERE source LIKE '%jobs%'")}
-    assert modes == {decode.DEFAULT_DECODE} == {'beam'}
+    assert modes == {'rescored'}
 
 
 @pytest.mark.parametrize('task', ['ocr', 'layout', 'lines'])

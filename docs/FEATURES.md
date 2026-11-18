@@ -494,7 +494,9 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   each evaluation. **Table** lists them all instead.
 - Evaluate any OCR model on any dataset's checked lines with **Evaluate...** on its page; a
   dataset with test pages is scored on those, unless **All pages** is chosen. Training runs
-  are evaluated automatically on their validation split and test pages.
+  are evaluated automatically on their validation split and test pages, the new model and its
+  base once each, in the decoding Automatic reads them with; any other decoding is a click on
+  **Evaluate...** away. The scores a run, a model and the model families show are those.
 - A queued or running evaluation can be cancelled by its owner or an admin. It keeps its
   place in the list without scores, and **Retry** runs it again.
 - Each evaluation has a page with CER, WER, bag-of-words WER, error types and accuracy per

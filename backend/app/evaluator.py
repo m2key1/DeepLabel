@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from app import config, decode, eval_lines, registry, store
+from app import auto_decode, config, decode, eval_lines, registry, store
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -74,6 +74,13 @@ def decodes_for(conn, model_id: int) -> list[str]:
     return [mode for mode in decode.OCR_DECODES if mode != 'decoder' or registry.has_token_decoder(conn, model_id)]
 
 
+def automatic(conn, model_id: int) -> str:
+    """The one mode a run's own scores are taken in: what Automatic reads with on that
+    model, so they say how a dataset reading with it fares. Every other mode is a click
+    away on Evaluate; scoring them all took hours of GPU time per run."""
+    return auto_decode.resolve(conn, model_id, 'auto')
+
+
 def create_baseline(conn, training: dict):
     """Queued as soon as the snapshot exists: scores the base model on the valid
     split while the training runs, so the number to beat is known early - and
@@ -86,36 +93,32 @@ def create_baseline(conn, training: dict):
     if registry.get_model(conn, training['base_model_id']) is None:
         return
     fingerprint = split_fingerprint(training['id'])
-    for mode in decodes_for(conn, training['base_model_id']):
-        prior = conn.execute(
-            'SELECT id, cer, wer, line_count FROM evaluations '
-            'WHERE model_id = ? AND decode = ? AND fingerprint = ? AND status = ? '
-            'ORDER BY id DESC LIMIT 1',
-            (training['base_model_id'], mode, fingerprint, 'done')).fetchone() if fingerprint else None
-        if prior is not None:
-            cur = conn.execute(
-                'INSERT INTO evaluations (model_id, training_id, source, decode, owner, '
-                "fingerprint, status, cer, wer, line_count) VALUES (?, ?, ?, ?, ?, ?, 'done', ?, ?, ?)",
-                (training['base_model_id'], training['id'], json.dumps({'snapshot': training['id']}),
-                 mode, training['owner'], fingerprint, prior['cer'], prior['wer'], prior['line_count']))
-            conn.commit()
-            eval_lines.copy(conn, prior['id'], cur.lastrowid)
-            continue
-        create(conn, training['base_model_id'], {'snapshot': training['id']}, mode,
-               training['owner'], training['id'], fingerprint)
+    mode = automatic(conn, training['base_model_id'])
+    prior = conn.execute(
+        'SELECT id, cer, wer, line_count FROM evaluations '
+        'WHERE model_id = ? AND decode = ? AND fingerprint = ? AND status = ? '
+        'ORDER BY id DESC LIMIT 1',
+        (training['base_model_id'], mode, fingerprint, 'done')).fetchone() if fingerprint else None
+    if prior is not None:
+        cur = conn.execute(
+            'INSERT INTO evaluations (model_id, training_id, source, decode, owner, '
+            "fingerprint, status, cer, wer, line_count) VALUES (?, ?, ?, ?, ?, ?, 'done', ?, ?, ?)",
+            (training['base_model_id'], training['id'], json.dumps({'snapshot': training['id']}),
+             mode, training['owner'], fingerprint, prior['cer'], prior['wer'], prior['line_count']))
+        conn.commit()
+        eval_lines.copy(conn, prior['id'], cur.lastrowid)
+        return
+    create(conn, training['base_model_id'], {'snapshot': training['id']}, mode,
+           training['owner'], training['id'], fingerprint)
 
 
 def create_result_eval(conn, training: dict, new_model_id: int):
     """After the training registers its model: score it on the same valid split as the
-    baseline - the pair answers "did it help?". Every decode is scored, because they
-    disagree: the LM beam and the decoder rerank differ by more than a point of CER on
-    material the LM was not built for, and one number cannot show that."""
+    baseline - the pair answers "did it help?"."""
     if valid_split_is_empty(training):
         return
-    fingerprint = split_fingerprint(training['id'])
-    for mode in decodes_for(conn, new_model_id):
-        create(conn, new_model_id, {'snapshot': training['id']}, mode,
-               training['owner'], training['id'], fingerprint)
+    create(conn, new_model_id, {'snapshot': training['id']}, automatic(conn, new_model_id),
+           training['owner'], training['id'], split_fingerprint(training['id']))
 
 
 def set_state(conn, eval_id: int, **fields):

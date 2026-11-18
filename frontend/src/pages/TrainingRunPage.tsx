@@ -6,7 +6,7 @@ import {
   cancelTraining, deleteTraining, getTrainingPreflight, lineShapeLabel, listEvaluations, listTrainings,
   retryTraining, trainingProgress,
 } from '../api'
-import type { Evaluation, FinalEvaluation, OcrDecode, ProgressPoint, TestEvaluation, Training } from '../api'
+import type { Evaluation, FinalEvaluation, ProgressPoint, TestEvaluation, Training } from '../api'
 import { useAuth } from '../auth'
 import { useSetCrumbs } from '../components/NavBar'
 import { FinalEvaluationTable, TestEvaluationTable, ocrTestEvaluation } from '../components/models/FinalEvaluation'
@@ -15,6 +15,8 @@ import { describeMetric, headlineKeys } from '../components/models/metrics'
 import { PreflightPanel } from '../components/models/PreflightReport'
 import { pollPreflight, type ShownPreflight } from '../components/models/usePreflight'
 import { epochTotal, isFinished, languageModelLabel } from '../components/models/runStatus'
+import { headlineScore } from '../components/models/families'
+import { DECODE_NAMES } from '../components/job/processing'
 import { percent } from '../components/evaluation/format'
 import { trainedAugmentationLabel } from '../components/augment/pipeline'
 import { Badge } from '../components/ui/Badge'
@@ -47,10 +49,6 @@ const TABS = [
   { id: 'settings', label: 'Settings' },
 ] as const
 type RunTab = typeof TABS[number]['id']
-
-/** Every decode is scored because they disagree; the pair a run is read by is the default
- *  beam decode (the backend's DEFAULT_DECODE), never whichever was written last. */
-const HEADLINE_DECODE: OcrDecode = 'beam'
 
 /** How long the run has been going, from its own timestamps rather than the clock. */
 function elapsed(points: ProgressPoint[]): number | null {
@@ -143,8 +141,8 @@ export function TrainingRunPage() {
   const mine = run !== null && canEdit && (isAdmin || run.owner === user)
 
   const scored = (modelId: number | null, onJobs: boolean) =>
-    forRun.find((e) => e.model_id === modelId && e.status === 'done' && e.decode === HEADLINE_DECODE &&
-      (onJobs ? e.source.jobs !== undefined : e.source.snapshot !== undefined)) ?? null
+    headlineScore(forRun.filter((e) => e.model_id === modelId && e.status === 'done' &&
+      (onJobs ? e.source.jobs !== undefined : e.source.snapshot !== undefined))) ?? null
   const modelRole = (modelId: number) =>
     modelId === run?.model_id ? 'new' : modelId === run?.base_model_id ? 'base' : `model ${modelId}`
 
@@ -178,7 +176,7 @@ export function TrainingRunPage() {
     ['score-test-base', 'test · base', scored(run.base_model_id, true)],
     ['score-test-new', 'test · new', scored(run.model_id, true)],
   ] as const).map(([testid, label, ev]) => ev === null || ev.cer === null ? null : (
-    <StatTile key={testid} data-testid={testid} label={label} note={HEADLINE_DECODE}
+    <StatTile key={testid} data-testid={testid} label={label} note={DECODE_NAMES[ev.decode]}
               value={<Link to={`/evaluations/${ev.id}`} className="hover:text-accent-ink">{percent(ev.cer)}</Link>} />
   ))
   const logSection = log && (
@@ -272,7 +270,7 @@ export function TrainingRunPage() {
       </Section>
     ),
     evaluations: (
-      <Section title="Scores" description="The valid split is cut from the training snapshot; a test set is material the run never saw. Each tile is the default beam decode; every decode is listed below it. A score appears once it exists - there is nothing to show for a base model a run never had.">
+      <Section title="Scores" description="The valid split is cut from the training snapshot; a test set is material the run never saw. Each tile is the score in the mode Automatic reads with; any other decode is listed below it. A score appears once it exists - there is nothing to show for a base model a run never had.">
         {forRun.length === 0 ? (
           <EmptyState>No evaluations yet. The run queues its own once it has finished.</EmptyState>
         ) : (
@@ -285,7 +283,7 @@ export function TrainingRunPage() {
                         className="flex items-center gap-3 px-1 py-1.5 text-ink-muted hover:bg-raised hover:text-accent-ink">
                     <span className="w-20">{modelRole(ev.model_id)}</span>
                     <span className="w-12">{ev.source.snapshot !== undefined ? 'valid' : 'test'}</span>
-                    <span className="w-20">{ev.decode}</span>
+                    <span className="w-36">{DECODE_NAMES[ev.decode]}</span>
                     <span className="font-mono tabular-nums text-ink">
                       {ev.status === 'done' && ev.cer !== null ? percent(ev.cer) : ev.status}
                     </span>

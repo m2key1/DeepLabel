@@ -72,16 +72,15 @@ test.describe('Scenario: what a run is scored on', () => {
       .toEqual({ train: 6, val: 6 })
   })
 
-  // README: "Both scores sit on the run's own page beside the valid-split pair", and every
-  // decode is scored because they disagree. The pair shown is then one named decode - the
-  // beam search the model runs in - not whichever score happened to be written last.
-  test("the run page's valid scores are the beam decode, the one the model runs in", async ({ page }) => {
+  // README: "Both scores sit on the run's own page beside the valid-split pair". A run scores
+  // each model once, in the mode Automatic reads it with (#122); the pair shown is that one.
+  test("the run page's valid scores are in the mode Automatic reads with", async ({ page }) => {
     // Two pages that differ: the split divides pages by content hash, so two copies of one
     // scan would be a single key and nothing would land in validation.
     const jobId = await seedDistinctPagesJob(uniqueName('Two pages'), 2)
     await markLinesChecked(jobId, 12)
     const name = uniqueName('Headline')
-    // A misreading base, whose successor misreads too, so the scores have errors to differ by.
+    // A misreading base, whose successor misreads too, so the scores have errors to show.
     const base = { id: importStubModel('ocr', `${name} base`, 'stub-misread') }
     await createTraining({
       task: 'ocr', name, dataset_job_ids: [jobId], target: 'local', base_model_id: base.id,
@@ -93,16 +92,16 @@ test.describe('Scenario: what a run is scored on', () => {
     const trained = (await listRegistryModels()).find((m) => m.name === name)!
     await expect.poll(async () =>
       (await listEvaluations()).filter((e) => e.training_id === finished.id && e.status === 'done').length,
-      { timeout: 60_000 }).toBe(6)
+      { timeout: 60_000 }).toBe(2)
 
     const evals = (await listEvaluations()).filter((e) => e.training_id === finished.id)
-    const cerOf = (modelId: number, decode: string) =>
-      evals.find((e) => e.model_id === modelId && e.decode === decode)!.cer!
-    // The stub misreads other lines in each decode, so the wrong one is tellable.
-    expect(cerOf(trained.id, 'greedy')).not.toBe(cerOf(trained.id, 'beam'))
+    expect(evals.map((e) => `${e.model_id} ${e.decode}`).sort())
+      .toEqual([`${trained.id} rescored`, `${base.id} rescored`].sort())
+    const cerOf = (modelId: number) => evals.find((e) => e.model_id === modelId)!.cer!
 
     await page.goto(`/models/runs/${finished.id}`)
-    await expect(page.getByTestId('score-valid-new')).toContainText(pct(cerOf(trained.id, 'beam')))
-    await expect(page.getByTestId('score-valid-base')).toContainText(pct(cerOf(base.id, 'beam')))
+    await expect(page.getByTestId('score-valid-new')).toContainText(pct(cerOf(trained.id)))
+    await expect(page.getByTestId('score-valid-new')).toContainText('Reranked')
+    await expect(page.getByTestId('score-valid-base')).toContainText(pct(cerOf(base.id)))
   })
 })

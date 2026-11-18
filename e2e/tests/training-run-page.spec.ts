@@ -89,12 +89,13 @@ test.describe('Scenario: a run page in tabs', () => {
     await expect(page.getByTestId('stat-best-cer')).toContainText('10.00%')
     await expect(page.getByTestId('stat-best-cer')).toContainText('e3')
 
-    // The new model in each of the three decodes; trained from scratch, it has no base to score.
+    // The new model once, in the mode Automatic reads it with; trained from scratch, it has no
+    // base to score.
     expect((await listTrainings()).find((t) => t.id === runId)!.base_model_id).toBeNull()
     await expect.poll(async () => (await listEvaluations()).filter((e) => e.training_id === runId).length,
-                      { timeout: 30_000 }).toBe(3)
+                      { timeout: 30_000 }).toBe(1)
     await page.goto(`/models/runs/${runId}?tab=evaluations`)
-    await expect(page.getByTestId('run-evaluation')).toHaveCount(3)
+    await expect(page.getByTestId('run-evaluation')).toHaveCount(1)
     await page.goto(`/models/runs/${runId}?tab=nonsense`)
     await expect(tabs.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
   })

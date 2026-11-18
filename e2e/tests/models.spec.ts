@@ -141,23 +141,18 @@ test.describe('Scenario: the model registry', () => {
       learning_rate: 0.00005, patience: 5, warmup_epochs: 2, freeze_backbone: true,
     })
 
-    // Auto-eval: the new model and its base were scored on the same valid split, in
-    // every decode - the modes disagree, so one number per model would hide that.
-    const DECODES = ['beam', 'rescored', 'greedy']
+    // Auto-eval: the new model and its base were scored once each on the same valid split,
+    // in the mode Automatic reads them with - the stub has no token decoder, so reranked (#122).
     await expect
       .poll(async () =>
         (await listEvaluations()).filter((e) => e.training_id === trainingId && e.status === 'done').length,
         { timeout: 60_000 })
-      .toBe(2 * DECODES.length)
+      .toBe(2)
     const trainedId = (await listRegistryModels()).find((m) => m.name === modelName)!.id
     const autoEvals = (await listEvaluations()).filter((e) => e.training_id === trainingId)
-    // Two models scored - the new one and its base - each with one score per mode,
-    // not three of the same one.
-    const byModel = new Map<number, string[]>()
-    for (const e of autoEvals) byModel.set(e.model_id, [...(byModel.get(e.model_id) ?? []), e.decode])
-    expect([...byModel.keys()].sort()).toEqual([trainedId, training.base_model_id].sort())
-    for (const decodes of byModel.values()) expect([...decodes].sort()).toEqual([...DECODES].sort())
-    const freshEval = autoEvals.find((e) => e.model_id === trainedId && e.decode === 'beam')!
+    expect(autoEvals.map((e) => `${e.model_id} ${e.decode}`).sort())
+      .toEqual([`${trainedId} rescored`, `${training.base_model_id} rescored`].sort())
+    const freshEval = autoEvals.find((e) => e.model_id === trainedId)!
     // A model tuned from the builtin one reads every line exactly; the eval ran on
     // exactly the snapshot's valid lines.
     expect(freshEval.cer).toBe(0)
@@ -465,14 +460,14 @@ test.describe('Scenario: the model registry', () => {
                        snapshot_counts: { train: 3, val: 0 } })
 
     // Finishing queued a test-set score for the new model and its base alike - one
-    // headline number each, in the decode the model actually runs in, on the test pages.
+    // headline number each, in the mode Automatic reads them with, on the test pages.
     const trainingId = (await listTrainings()).find((t) => t.name === modelName)!.id
     await expect
       .poll(async () =>
         (await listEvaluations())
           .filter((e) => e.training_id === trainingId && e.source.jobs?.[0] === testJob)
           .map((e) => [e.decode, e.source.test_pages]))
-      .toEqual([['beam', true], ['beam', true]])
+      .toEqual([['rescored', true], ['rescored', true]])
 
     // The model page leads with that score.
     const modelId = (await listRegistryModels()).find((m) => m.name === modelName)!.id

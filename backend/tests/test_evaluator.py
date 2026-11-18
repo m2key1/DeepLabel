@@ -80,22 +80,23 @@ class TestFingerprintingTheSplit:
 
 
 class TestTheBaselineScore:
-    def test_every_decode_mode_is_queued(self, conn, training, tmp_path):
-        """They disagree by more than a point of CER, and one number cannot show that."""
+    def test_it_is_scored_once_in_the_decoding_automatic_picks(self, conn, training, tmp_path):
+        """Every mode for both models took hours of GPU time per run; Automatic is how a
+        dataset reads with the model, so it is the score that matters (#122)."""
         write_split(tmp_path)
 
         evaluator.create_baseline(conn, training)
 
-        assert sorted(e['decode'] for e in evaluations(conn)) == ['beam', 'greedy', 'rescored']
+        assert [e['decode'] for e in evaluations(conn)] == ['rescored']
 
-    def test_a_token_decoder_base_is_scored_on_its_own_reading_too(self, conn, training, tmp_path):
+    def test_a_token_decoder_base_is_scored_on_its_own_reading(self, conn, training, tmp_path):
         write_split(tmp_path)
         conn.execute("UPDATE models SET decoder = 'token' WHERE id = 1")
         conn.commit()
 
         evaluator.create_baseline(conn, training)
 
-        assert sorted(e['decode'] for e in evaluations(conn)) == ['beam', 'decoder', 'greedy', 'rescored']
+        assert [e['decode'] for e in evaluations(conn)] == ['decoder']
 
     def test_it_scores_the_base_model_on_this_trainings_split(self, conn, training, tmp_path):
         write_split(tmp_path)
@@ -130,13 +131,13 @@ class TestNotPayingForTheSameScoreTwice:
         conn.execute(
             'INSERT INTO evaluations (model_id, decode, owner, fingerprint, status, cer, wer, '
             "line_count) VALUES (1, ?, 'alice', ?, 'done', 0.042, 0.11, 500)",
-            (decode.OCR_DECODES[0], fingerprint))
+            ('rescored', fingerprint))
         conn.commit()
 
         evaluator.create_baseline(conn, training)
 
         copied = [e for e in evaluations(conn)
-                  if e['training_id'] == 1 and e['decode'] == decode.OCR_DECODES[0]]
+                  if e['training_id'] == 1 and e['decode'] == 'rescored']
         assert len(copied) == 1
         assert copied[0]['status'] == 'done'
         assert (copied[0]['cer'], copied[0]['wer'], copied[0]['line_count']) == (0.042, 0.11, 500)
@@ -146,7 +147,7 @@ class TestNotPayingForTheSameScoreTwice:
         conn.execute(
             'INSERT INTO evaluations (model_id, decode, owner, fingerprint, status, cer) '
             "VALUES (1, ?, 'alice', 'a-different-split', 'done', 0.042)",
-            (decode.OCR_DECODES[0],))
+            ('rescored',))
         conn.commit()
 
         evaluator.create_baseline(conn, training)
@@ -159,12 +160,12 @@ class TestNotPayingForTheSameScoreTwice:
         fingerprint = evaluator.split_fingerprint(1)
         conn.execute(
             'INSERT INTO evaluations (model_id, decode, owner, fingerprint, status, cer) '
-            "VALUES (1, ?, 'alice', ?, 'error', NULL)", (decode.OCR_DECODES[0], fingerprint))
+            "VALUES (1, ?, 'alice', ?, 'error', NULL)", ('rescored', fingerprint))
         conn.commit()
 
         evaluator.create_baseline(conn, training)
 
-        assert [e['status'] for e in evaluations(conn) if e['training_id'] == 1] == ['queued'] * 3
+        assert [e['status'] for e in evaluations(conn) if e['training_id'] == 1] == ['queued']
 
     def test_a_split_that_cannot_be_fingerprinted_is_always_re_run(self, conn, training):
         """No snapshot on disk means nothing to compare, so nothing may be assumed equal."""
@@ -201,15 +202,13 @@ class TestWhenTheyAreScheduled:
 
 
 class TestScoringWhatCameOut:
-    def test_the_new_model_is_scored_on_the_same_split_in_every_mode(self, conn, training,
-                                                                     tmp_path):
+    def test_the_new_model_is_scored_once_on_the_same_split_in_its_automatic_decoding(
+            self, conn, training, tmp_path):
         write_split(tmp_path)
 
         evaluator.create_result_eval(conn, training, new_model_id=2)
 
-        scored = evaluations(conn)
-        assert {e['model_id'] for e in scored} == {2}
-        assert sorted(e['decode'] for e in scored) == ['beam', 'greedy', 'rescored']
+        assert [(e['model_id'], e['decode']) for e in evaluations(conn)] == [(2, 'rescored')]
 
     def test_the_pair_shares_a_fingerprint_so_the_two_numbers_are_comparable(
             self, conn, training, tmp_path):
@@ -248,7 +247,7 @@ class TestAnEmptyValidSplit:
         evaluator.create_baseline(conn, training)
         evaluator.create_result_eval(conn, training, new_model_id=2)
 
-        assert [e['model_id'] for e in evaluations(conn)] == [1] * 3 + [2] * 3
+        assert [e['model_id'] for e in evaluations(conn)] == [1, 2]
 
     def test_a_held_out_test_set_is_still_scored(self, conn, tmp_path):
         """A test set is material of its own, not the valid split: an empty split says

@@ -332,12 +332,13 @@ def register_result(conn, training: dict, out_dir: Path) -> int:
             test_source = {'jobs': test_ids, 'test_pages': True}
             if training.get('human_checked_only'):
                 test_source['human_checked_only'] = True
-            # One headline number per model, in the mode they actually run in.
-            evaluator.create(conn, model_id, test_source, decode.DEFAULT_DECODE,
+            # One headline number per model, in the mode a dataset reading with it uses.
+            evaluator.create(conn, model_id, test_source, evaluator.automatic(conn, model_id),
                              training['owner'], training['id'])
             if training['base_model_id'] and registry.get_model(conn, training['base_model_id']):
                 evaluator.create(conn, training['base_model_id'], test_source,
-                                 decode.DEFAULT_DECODE, training['owner'], training['id'])
+                                 evaluator.automatic(conn, training['base_model_id']),
+                                 training['owner'], training['id'])
     return model_id
 
 

@@ -51,10 +51,10 @@ def test_greedy_is_never_overridden():
     assert decode.resolve('greedy', lm_on=True, use_decoder=True) == 'greedy'
 
 
-class TestEveryDecodeIsScored:
-    """One score per model hid that the decodes disagree: on Kurrent handwriting the
-    decoder rerank beat the LM beam by 1.4 CER points, which a single number could
-    never show.
+class TestOneDecodeIsScored:
+    """A run's own scores are taken once, in the mode Automatic reads with on the model: its
+    own decoder where it is a token decoder, else the reranked beam (#122). Every mode for
+    both models took hours of GPU time per run; any other is a click away on Evaluate.
     """
 
     def _result_modes(self, tmp_path, base_decoder):
@@ -73,16 +73,15 @@ class TestEveryDecodeIsScored:
         conn.close()
         return modes
 
-    def test_a_result_is_scored_in_every_mode(self, tmp_path):
-        assert self._result_modes(tmp_path, 'token') == sorted(decode.OCR_DECODES)
+    def test_a_token_decoder_is_scored_on_its_own_reading(self, tmp_path):
+        assert self._result_modes(tmp_path, 'token') == ['decoder']
 
-    def test_a_character_decoder_is_not_scored_on_its_own_reading(self, tmp_path):
-        """On a character decoder that reading is the plain greedy decoder, which the rerank
-        beats; scored, it would be the model's headline number."""
-        assert self._result_modes(tmp_path, 'char') == ['beam', 'greedy', 'rescored']
+    def test_a_character_decoder_is_scored_on_the_reranked_beam(self, tmp_path):
+        """Its own reading is the plain greedy decoder, which the rerank beats."""
+        assert self._result_modes(tmp_path, 'char') == ['rescored']
 
     def test_a_model_not_loaded_yet_has_its_bases_decoder(self, tmp_path):
-        assert self._result_modes(tmp_path, None) == ['beam', 'greedy', 'rescored']
+        assert self._result_modes(tmp_path, None) == ['rescored']
 
 
 class TestDomainLanguageModel:
