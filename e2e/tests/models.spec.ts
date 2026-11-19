@@ -497,18 +497,20 @@ test.describe('Scenario: the model registry', () => {
         await expect(rows.filter({ hasText: name }).getByText('done')).toBeVisible({ timeout: 30_000 })
       }
 
-      // Filtering by a stage nothing ran under empties the list; back to all brings the
-      // same runs back, so an empty list is the filter and not a broken locator.
+      // A stage these two did not run under hides them; back to all brings them back, so
+      // their absence is the filter and not a broken locator. Only these two are looked
+      // at: other specs leave layout and running trainings of their own on the stack.
       const filters = page.getByTestId('run-filters')
       await filters.getByRole('button', { name: 'layout', exact: true }).click()
-      await expect(rows).toHaveCount(0)
+      for (const name of names) await expect(rows.filter({ hasText: name })).toHaveCount(0)
       await filters.getByRole('button', { name: 'all stages' }).click()
       for (const name of names) await expect(rows.filter({ hasText: name })).toHaveCount(1)
 
-      // The same for state: these two are finished, so "running" has nothing.
+      // The same for state: these two are finished, so "running" hides them.
       await filters.getByRole('button', { name: 'running', exact: true }).click()
-      await expect(rows).toHaveCount(0)
+      for (const name of names) await expect(rows.filter({ hasText: name })).toHaveCount(0)
       await filters.getByRole('button', { name: 'all', exact: true }).click()
+      for (const name of names) await expect(rows.filter({ hasText: name })).toHaveCount(1)
 
       // Two picked, and the charts carry one line per run - named, so the legend is not
       // colour alone.
