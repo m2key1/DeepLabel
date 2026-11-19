@@ -13,6 +13,7 @@ import { useSetCrumbs } from '../components/NavBar'
 import { LIKELY_TRANSCRIPTION_ERROR } from '../components/evaluation/lineFilter'
 import { percent } from '../components/evaluation/format'
 import { EditModelDialog } from '../components/models/EditModelDialog'
+import { scoreOf } from '../components/evaluation/score'
 import { EvaluateDialog } from '../components/models/EvaluateDialog'
 import { EvaluationTabs } from '../components/models/EvaluationTabs'
 import { ModelDetails } from '../components/models/ModelDetails'
@@ -163,11 +164,11 @@ function ModelView({ model, run, models, trainings, evaluations, error, setError
   const base = run?.base_model_id != null ? models.find((m) => m.id === run.base_model_id) ?? null
     : model?.trained_from != null ? models.find((m) => m.id === model.trained_from) ?? null : null
   const ofModel = useMemo(() => (model ? evaluations.filter((ev) => ev.model_id === model.id) : []), [evaluations, model])
-  const scored = ofModel.filter((ev) => ev.status === 'done' && ev.cer !== null)
+  const scored = ofModel.filter((ev) => ev.status === 'done' && scoreOf(ev) !== null)
   const shownFirst = (run && headlineScore(scored.filter((ev) => ev.training_id === run.id && ev.source.jobs !== undefined)))
     ?? (run && headlineScore(scored.filter((ev) => ev.source.snapshot === run.id)))
     ?? headlineScore(scored)
-  const shownFirstId = shownFirst?.id ?? null
+  const shownFirstId = model?.task === 'ocr' ? shownFirst?.id ?? null : null
 
   useEffect(() => {
     setLikely(null)
@@ -248,7 +249,7 @@ function ModelView({ model, run, models, trainings, evaluations, error, setError
             {model && can('recognize') && model.task === 'ocr' && !model.archived && (
               <Link to={`/try?ocr=${model.id}`} className={buttonClass({ size: 'xs' })}>Try this model</Link>
             )}
-            {model && canEdit && model.task === 'ocr' && !model.archived && (
+            {model && canEdit && (model.task === 'ocr' || model.task === 'lines') && !model.archived && (
               <Button size="xs" onClick={() => setEvaluating(true)}>Evaluate…</Button>
             )}
             {model && managesModels && !model.is_default && !model.archived && (

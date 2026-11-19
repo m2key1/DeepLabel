@@ -333,6 +333,17 @@ def _reading_key(poly):
     return (sum(pt[1] for pt in poly) / len(poly), sum(pt[0] for pt in poly) / len(poly))
 
 
+def detect_lines(conn, job_id: str, stage, line_mode: str, img, elements):
+    """What the line model finds on a page, the way its dataset reads it: in each element's
+    crop, or once on the whole page and routed to the elements. Elements read as one box
+    are not sent. Returns (element boxes, lines per element, orphans)."""
+    el_boxes = [json.loads(e['bbox']) for e in elements]
+    detect = _lines_per_page if line_mode == 'per_page' else _lines_per_crop
+    full_bbox = {i for i, e in enumerate(elements) if e['class_name'] in FULL_BBOX_CLASSES}
+    per_element, orphans = detect(stage, img, el_boxes, skip=full_bbox, rings=_rings(conn, job_id, elements))
+    return el_boxes, per_element, orphans
+
+
 def _full_bbox_lines(elements, el_boxes, polygons_per_element):
     full_bbox = {i for i, e in enumerate(elements) if e['class_name'] in FULL_BBOX_CLASSES}
     for i in full_bbox:
@@ -381,11 +392,7 @@ def phase_lines(conn, job_id: str, stage, line_mode: str):
         elements = conn.execute(
             "SELECT * FROM elements WHERE page_id = ? AND kind = 'content' AND deleted = 0 ORDER BY order_idx",
             (page['id'],)).fetchall()
-        el_boxes = [json.loads(e['bbox']) for e in elements]
-
-        detect = _lines_per_page if line_mode == 'per_page' else _lines_per_crop
-        full_bbox = {i for i, e in enumerate(elements) if e['class_name'] in FULL_BBOX_CLASSES}
-        polygons_per_element, orphans = detect(stage, img, el_boxes, skip=full_bbox, rings=_rings(conn, job_id, elements))
+        el_boxes, polygons_per_element, orphans = detect_lines(conn, job_id, stage, line_mode, img, elements)
         _full_bbox_lines(elements, el_boxes, polygons_per_element)
 
         for element, polygons in zip(elements, polygons_per_element):

@@ -540,6 +540,8 @@ CREATE TABLE IF NOT EXISTS evaluations (
     line_count INTEGER,
     -- Per-dataset scores as JSON, when the scored material spans several datasets.
     breakdown TEXT,
+    -- A line model's scores as JSON: its lines counted against the checked outlines.
+    metrics TEXT,
     owner TEXT NOT NULL DEFAULT '',
     pid INTEGER,
     fingerprint TEXT,
@@ -1136,6 +1138,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
     eval_cols = {row[1] for row in conn.execute('PRAGMA table_info(evaluations)')}
     if 'fingerprint' not in eval_cols:
         conn.execute('ALTER TABLE evaluations ADD COLUMN fingerprint TEXT')
+    if 'metrics' not in eval_cols:
+        conn.execute('ALTER TABLE evaluations ADD COLUMN metrics TEXT')
     if 'gt_text' not in page_cols:
         conn.execute('ALTER TABLE pages ADD COLUMN gt_text TEXT')
     if 'gt_source' not in page_cols:

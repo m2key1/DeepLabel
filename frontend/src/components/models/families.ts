@@ -1,12 +1,15 @@
 import type { Evaluation, OcrDecode, RegistryModel, Training } from '../../api'
+import { countsLines, scoreOf } from '../evaluation/score'
 
 // The mode a score is shown in: what Automatic reads with - a token decoder's own reading,
 // else the reranked beam - then beam, the only mode older runs scored their test sets in.
 const HEADLINE_ORDER: OcrDecode[] = ['decoder', 'rescored', 'beam', 'greedy']
 
-/** Of a model's scores on one material, the one shown for it. */
+/** Of a model's scores on one material, the one shown for it. A line model has no
+ *  decoding, so its newest stands. */
 export function headlineScore(evaluations: Evaluation[]): Evaluation | undefined {
   return HEADLINE_ORDER.map((mode) => evaluations.find((ev) => ev.decode === mode)).find(Boolean)
+    ?? evaluations.find((ev) => ev.decode === '')
 }
 
 export type ScoreKind = 'test' | 'valid' | 'eval' | 'training'
@@ -74,17 +77,22 @@ function trainingScore(metrics: Record<string, unknown> | null): Score | null {
   return other ? { value: other[1], metric: other[0], kind: 'training', lowerIsBetter: /loss/i.test(other[0]) } : null
 }
 
-/** Test-set CER in the mode Automatic reads with, else validation CER, marked as such. */
+/** The test-set score - an OCR model's CER in the mode Automatic reads with, a line
+ *  model's F1 - else the validation one, marked as such. */
 export function versionScore(model: RegistryModel, run: Training | null, evaluations: Evaluation[]): Score | null {
-  const scored = evaluations.filter((ev) => ev.model_id === model.id && ev.status === 'done' && ev.cer !== null)
-  const cer = (ev: Evaluation | undefined, kind: ScoreKind): Score | null =>
-    ev ? { value: ev.cer!, metric: 'CER', kind, lowerIsBetter: true } : null
+  const scored = evaluations.filter((ev) => ev.model_id === model.id && ev.status === 'done' && scoreOf(ev) !== null)
+  const score = (ev: Evaluation | undefined, kind: ScoreKind): Score | null => {
+    if (!ev) return null
+    return countsLines(ev)
+      ? { value: scoreOf(ev)!, metric: 'F1', kind, lowerIsBetter: false }
+      : { value: ev.cer!, metric: 'CER', kind, lowerIsBetter: true }
+  }
   if (run) {
     const test = headlineScore(scored.filter((ev) => ev.training_id === run.id && ev.source.jobs !== undefined))
     const valid = headlineScore(scored.filter((ev) => ev.source.snapshot === run.id))
-    return cer(test, 'test') ?? cer(valid, 'valid') ?? trainingScore(model.metrics)
+    return score(test, 'test') ?? score(valid, 'valid') ?? trainingScore(model.metrics)
   }
-  return cer(headlineScore(scored), 'eval') ?? trainingScore(model.metrics)
+  return score(headlineScore(scored), 'eval') ?? trainingScore(model.metrics)
 }
 
 export function better(a: Score | null, b: Score | null): boolean {

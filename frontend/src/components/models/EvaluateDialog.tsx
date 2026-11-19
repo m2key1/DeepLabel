@@ -4,6 +4,7 @@ import type { Group, Job, OcrDecode, RegistryModel } from '../../api'
 import { DatasetPicker } from './DatasetPicker'
 import { Modal, modalBtn, modalPrimaryBtn } from '../Modal'
 import { useAutoClear } from '../../messages'
+import { plural } from '../../util'
 
 interface EvaluateDialogProps {
   model: RegistryModel
@@ -12,6 +13,7 @@ interface EvaluateDialogProps {
 }
 
 export function EvaluateDialog({ model, onClose, onStarted }: EvaluateDialogProps) {
+  const countsLines = model.task === 'lines'
   const [jobs, setJobs] = useState<Job[] | null>(null)
   const [groups, setGroups] = useState<Group[]>([])
   const [allCounts, setAllCounts] = useState<Record<string, number>>({})
@@ -32,14 +34,15 @@ export function EvaluateDialog({ model, onClose, onStarted }: EvaluateDialogProp
         setJobs(rows)
         if (rows.length) {
           const ids = rows.map((j) => j.id)
-          const [all, test] = await Promise.all([trainingPreview('ocr', ids, 'all'), trainingPreview('ocr', ids, 'test')])
+          const task = countsLines ? 'lines' : 'ocr'
+          const [all, test] = await Promise.all([trainingPreview(task, ids, 'all'), trainingPreview(task, ids, 'test')])
           setAllCounts(all.counts)
           setTestCounts(test.counts)
         }
       })
       .catch((e: Error) => setError(e.message))
     listGroups().then(setGroups).catch(() => undefined)
-  }, [])
+  }, [countsLines])
 
   const toggle = (id: string) =>
     setChosen((prev) => {
@@ -84,8 +87,10 @@ export function EvaluateDialog({ model, onClose, onStarted }: EvaluateDialogProp
   return (
     <Modal title={`Evaluate ${model.name}`} onClose={onClose}>
       <p className="mb-2 text-xs text-ink-muted">
-        Scores the model's output against the checked lines of the chosen datasets. Nothing is
-        written to the datasets.
+        {countsLines
+          ? "Finds the lines on the chosen datasets' lines-checked pages and counts them against the checked outlines."
+          : "Scores the model's output against the checked lines of the chosen datasets."}
+        {' '}Nothing is written to the datasets.
       </p>
       <div className="mb-1 text-sm font-medium text-ink">Datasets</div>
       <DatasetPicker
@@ -108,26 +113,30 @@ export function EvaluateDialog({ model, onClose, onStarted }: EvaluateDialogProp
           ))}
         </fieldset>
       )}
-      <label className="mb-1 block text-sm font-medium text-ink" htmlFor="eval-decode">
-        Decoding
-      </label>
-      <select
-        id="eval-decode"
-        value={decode}
-        onChange={(e) => setDecode(e.target.value as OcrDecode)}
-        className={`${inputClass} mb-4`}
-      >
-        <option value="beam">Beam search with the model's language model</option>
-        <option value="rescored">Beam search reranked by the decoder head (no language model)</option>
-        <option value="greedy">Fast - raw greedy CTC output</option>
-      </select>
+      {!countsLines && <>
+        <label className="mb-1 block text-sm font-medium text-ink" htmlFor="eval-decode">
+          Decoding
+        </label>
+        <select
+          id="eval-decode"
+          value={decode}
+          onChange={(e) => setDecode(e.target.value as OcrDecode)}
+          className={`${inputClass} mb-4`}
+        >
+          <option value="beam">Beam search with the model's language model</option>
+          <option value="rescored">Beam search reranked by the decoder head (no language model)</option>
+          <option value="greedy">Fast - raw greedy CTC output</option>
+        </select>
+      </>}
       {error && (
         <p data-testid="dialog-error" className="mb-2 text-sm text-danger">
           {error}
         </p>
       )}
       <div className="flex items-center justify-between">
-        <span className="text-xs text-ink-muted">{totalLines} checked lines selected</span>
+        <span className="text-xs text-ink-muted">
+          {countsLines ? plural(totalLines, 'lines-checked page') : plural(totalLines, 'checked line')} selected
+        </span>
         <div className="flex gap-2">
           <button onClick={onClose} className={modalBtn}>
             Cancel

@@ -7,7 +7,8 @@ import { useSetCrumbs } from '../components/NavBar'
 import { ErrorsTab } from '../components/evaluation/ErrorsTab'
 import { HeadlineShort } from '../components/evaluation/Headline'
 import { LinesTab } from '../components/evaluation/LinesTab'
-import { DECODE_NAMES } from '../components/job/processing'
+import { LineEvaluation } from '../components/evaluation/LineEvaluation'
+import { decodeName } from '../components/evaluation/score'
 import { count } from '../components/evaluation/format'
 import { Badge } from '../components/ui/Badge'
 import { Button, buttonClass } from '../components/ui/Button'
@@ -88,7 +89,7 @@ function EvaluationView({ id }: { id: string | undefined }) {
     ] : [
       { label: 'Models', to: '/models' },
       { label: 'Evaluations', to: '/models/evaluations' },
-      { label: evaluation ? `${evaluation.model_name ?? 'model'} · ${evaluation.decode}` : `Evaluation ${evalId}` },
+      { label: evaluation ? [evaluation.model_name ?? 'model', evaluation.decode].filter(Boolean).join(' · ') : `Evaluation ${evalId}` },
     ])
     return () => setCrumbs([])
   }, [setCrumbs, evaluation, evalId, checkedJob])
@@ -106,6 +107,7 @@ function EvaluationView({ id }: { id: string | undefined }) {
 
   const canRun = isAdmin || evaluation.owner === user
   const noun = checkedJob ? 'check' : 'evaluation'
+  const countsLines = evaluation.model_task === 'lines'
   const modelLink = (
     <Link to={`/models/${evaluation.model_id}`} className="hover:text-accent-ink">
       <span data-testid="evaluation-title">{evaluation.model_name ?? `Model ${evaluation.model_id}`}</span>
@@ -131,7 +133,7 @@ function EvaluationView({ id }: { id: string | undefined }) {
       <PageHeader
         title={checkedJob ? 'Transcription check' : modelLink}
         actions={<>
-          {evaluation.decodes.length > 1 && (
+          {evaluation.decode && evaluation.decodes.length > 1 && (
             <span className="flex items-center gap-2" data-testid="decode-switch">
               <span className="text-xs text-ink-subtle">Decode</span>
               <Segmented value={evaluation.decode} onChange={switchDecode}
@@ -159,7 +161,7 @@ function EvaluationView({ id }: { id: string | undefined }) {
           <> for run <Link to={`/models/runs/${evaluation.training_id}`} data-testid="evaluation-run"
                          className="text-accent-ink hover:underline">{evaluation.training_name ?? evaluation.training_id}</Link></>
         )}
-        {` · ${DECODE_NAMES[evaluation.decode]} · ${formatDate(evaluation.created_at)} · `}
+        {` · ${[decodeName(evaluation), formatDate(evaluation.created_at)].filter(Boolean).join(' · ')} · `}
         <Badge tone={STATUS_TONE[evaluation.status]}>{evaluation.status}</Badge>
         {evaluation.hidden_lines > 0 && (
           <span data-testid="hidden-lines" className="block text-xs text-ink-subtle">
@@ -177,9 +179,10 @@ function EvaluationView({ id }: { id: string | undefined }) {
         <EmptyState>This {noun} failed{evaluation.error ? `: ${evaluation.error}` : ''}.</EmptyState>
       )}
       {(evaluation.status === 'queued' || evaluation.status === 'running') && (
-        <EmptyState>This {noun} is {evaluation.status}; its lines appear here when it finishes.</EmptyState>
+        <EmptyState>This {noun} is {evaluation.status}; its {countsLines ? 'pages' : 'lines'} appear here when it finishes.</EmptyState>
       )}
-      {evaluation.status === 'done' && lineRows === 0 && (
+      {evaluation.status === 'done' && evaluation.metrics && <LineEvaluation evalId={evaluation.id} scores={evaluation.metrics} />}
+      {evaluation.status === 'done' && !countsLines && lineRows === 0 && (
         <EmptyState>
           {evaluation.hidden_lines > 0
             ? 'Every line of this evaluation belongs to a dataset you cannot open.'

@@ -635,6 +635,24 @@ class TestEvaluationBreakdown:
         conn.close()
 
 
+class TestEvaluationMetrics:
+    def test_metrics_are_added_and_start_empty(self, tmp_path):
+        db = tmp_path / 'app.db'
+        conn = store.connect(db)
+        conn.execute("INSERT INTO models (id, task, name, checkpoint) VALUES (1, 'lines', 'M', '/c')")
+        conn.execute("INSERT INTO evaluations (id, model_id, owner) VALUES (1, 1, 'root')")
+        conn.commit()
+        conn.close()
+        strip_column(db, 'evaluations', ['id', 'model_id', 'owner'])
+
+        conn = store.connect(db)
+        assert 'metrics' in cols(conn, 'evaluations')
+        assert conn.execute('SELECT metrics FROM evaluations WHERE id = 1').fetchone()[0] is None
+        conn.close()
+        # Connecting again finds the column there and leaves it.
+        store.connect(db).close()
+
+
 class TestDecodeRelabel:
     """'rescored' used to mean whatever the engine felt like: with an LM configured it
     ran beam search, and every job and evaluation recorded the wrong name for what it

@@ -198,7 +198,8 @@ class TestWhenTheyAreScheduled:
         local = inspect.getsource(trainer.run_local)
         assert 'create_baseline' not in submit
         assert 'create_baseline' not in local
-        assert 'create_baseline' in inspect.getsource(trainer.register_result)
+        assert '_schedule_scores' in inspect.getsource(trainer.register_result)
+        assert 'create_baseline' in inspect.getsource(trainer._schedule_scores)
 
 
 class TestScoringWhatCameOut:
@@ -264,6 +265,25 @@ class TestAnEmptyValidSplit:
 
         assert [(e['model_id'], json.loads(e['source'])) for e in evaluations(conn)] == [
             (model_id, {'jobs': ['j-test'], 'test_pages': True}), (1, {'jobs': ['j-test'], 'test_pages': True})]
+
+
+class TestScoringALinesRun:
+    """A line model is scored on its run's test pages like an OCR model, base and new
+    alike; its validation is its trainer's own score, so nothing more is scheduled."""
+
+    def test_its_test_pages_are_scored_for_the_new_model_and_its_base(self, conn, tmp_path):
+        conn.execute("UPDATE models SET task = 'lines' WHERE id = 1")
+        conn.execute("UPDATE trainings SET task = 'lines', snapshot_counts = ?, test_job_ids = ? WHERE id = 1",
+                     (json.dumps({'train': 6, 'val': 2}), json.dumps(['j-test'])))
+        conn.commit()
+        out = tmp_path / 'trainings' / '1' / 'output'
+        out.mkdir(parents=True)
+        (out / trainer.CHECKPOINT_NAME).write_bytes(b'ckpt')
+
+        model_id = trainer.register_result(conn, trainer.get_training(conn, 1), out)
+
+        assert [(e['model_id'], e['decode'], json.loads(e['source'])) for e in evaluations(conn)] == [
+            (model_id, '', {'jobs': ['j-test'], 'test_pages': True}), (1, '', {'jobs': ['j-test'], 'test_pages': True})]
 
 
 class TestTheCeiling:

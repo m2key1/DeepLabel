@@ -12,6 +12,7 @@ from PIL import Image
 
 from app import config, linecrop
 from app.caches import counted_page
+from app.text_job import FULL_BBOX_CLASSES
 from app.train_snapshot import checked_by
 
 # Images decoded at once. A line crop is a few hundred kilobytes as RGB, so this is tens
@@ -109,3 +110,37 @@ def job_batches(conn, job_ids: list[str], held: int = HELD_AT_ONCE,
             image.close()
     if batch:
         yield batch
+
+
+class LinePage(NamedTuple):
+    job_id: str
+    page_id: int
+    source_file: str
+    line_mode: str
+    elements: list
+    truth: list
+
+
+def line_pages(conn, job_ids: list[str], test_pages_only: bool = False):
+    """Lines-checked pages of live datasets with what a line model is scored on there: the
+    page's regions, how its dataset reads (per region or the whole page), and the checked
+    outlines. A region read as one box is left out on both sides, as the model never sees it."""
+    boxed = ', '.join('?' * len(FULL_BBOX_CLASSES))
+    for job_id in job_ids:
+        job = conn.execute('SELECT line_mode FROM jobs WHERE id = ?', (job_id,)).fetchone()
+        if job is None:
+            continue
+        pages = conn.execute(
+            'SELECT id, source_file FROM pages '
+            f'WHERE job_id = ? AND lines_checked = 1 AND {counted_page()} {"AND is_test = 1 " if test_pages_only else ""}'
+            'ORDER BY idx', (job_id,)).fetchall()
+        for page in pages:
+            elements = conn.execute(
+                "SELECT * FROM elements WHERE page_id = ? AND kind = 'content' AND deleted = 0 ORDER BY order_idx",
+                (page['id'],)).fetchall()
+            truth = conn.execute(
+                'SELECT l.id, l.polygon FROM lines l JOIN elements e ON l.element_id = e.id '
+                f'WHERE e.page_id = ? AND l.deleted = 0 AND e.deleted = 0 AND e.class_name NOT IN ({boxed}) '
+                'ORDER BY e.order_idx, l.order_idx', (page['id'], *sorted(FULL_BBOX_CLASSES))).fetchall()
+            yield LinePage(job_id, page['id'], page['source_file'], job['line_mode'], elements,
+                           [(row['id'], json.loads(row['polygon'])) for row in truth])

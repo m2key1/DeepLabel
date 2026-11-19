@@ -75,7 +75,7 @@ export function ocrTestEvaluation(trained: Evaluation, base: Evaluation | null):
   const asScores = (ev: Evaluation): FinalEvaluation => ({
     metric: 'CER',
     overall: { CER: ev.cer ?? NaN, instances: ev.line_count ?? NaN },
-    by_dataset: Object.fromEntries((ev.breakdown ?? []).map((row) => [row.job_id, { CER: row.cer, instances: row.lines }])),
+    by_dataset: Object.fromEntries((ev.breakdown ?? []).map((row) => [row.job_id, { CER: row.cer ?? NaN, instances: row.lines ?? NaN }])),
   })
   return { trained: asScores(trained), base: base ? asScores(base) : undefined }
 }

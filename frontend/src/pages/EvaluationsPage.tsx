@@ -6,6 +6,8 @@ import { useSetCrumbs } from '../components/NavBar'
 import { percent } from '../components/evaluation/format'
 import { ScoreChange } from '../components/evaluation/ScoreChange'
 import { scoreGrid } from '../components/evaluation/scoreGrid'
+import { SCORE_MEANING, countsLines } from '../components/evaluation/score'
+import { Segmented } from '../components/ui/Segmented'
 import type { GridColumn } from '../components/evaluation/scoreGrid'
 import { buildFamilies } from '../components/models/families'
 import { Badge } from '../components/ui/Badge'
@@ -45,6 +47,7 @@ export function EvaluationsPage() {
   const [params, setParams] = useSearchParams()
   const query = params.get('q') ?? ''
   const showArchived = params.has('archived')
+  const task: 'ocr' | 'lines' = params.get('task') === 'lines' ? 'lines' : 'ocr'
 
   useEffect(() => {
     Promise.all([listModels(true), listTrainings(), listEvaluations()])
@@ -66,9 +69,10 @@ export function EvaluationsPage() {
 
   const grid = useMemo(() => scoreGrid(trainings, evaluations), [trainings, evaluations])
   const families = useMemo(() => {
-    const ocr = (models ?? []).filter((m) => m.task === 'ocr')
-    return buildFamilies(ocr, trainings, evaluations).sort((a, b) => Number(b.holdsDefault) - Number(a.holdsDefault))
-  }, [models, trainings, evaluations])
+    const ofTask = (models ?? []).filter((m) => m.task === task)
+    return buildFamilies(ofTask, trainings, evaluations).sort((a, b) => Number(b.holdsDefault) - Number(a.holdsDefault))
+  }, [models, trainings, evaluations, task])
+  const linesScored = evaluations.some(countsLines)
 
   const needle = query.trim().toLowerCase()
   const groups = families.map((family) => ({
@@ -96,13 +100,16 @@ export function EvaluationsPage() {
   return (
     <div className={pageShell}>
       <PageHeader title="Evaluations">
-        Character error rate in Automatic decoding, lower is better, with the change against the
-        model each was trained from.
+        The {SCORE_MEANING[task]}, with the change against the model each was trained from.
       </PageHeader>
+      {linesScored && (
+        <Segmented className="mb-3 w-fit" value={task} onChange={(next) => setParam('task', next === 'lines' ? 'lines' : null)}
+                   options={[{ value: 'ocr', label: 'OCR' }, { value: 'lines', label: 'Lines' }]} />
+      )}
       {error && <p className="mb-2 text-sm text-danger">{error}</p>}
       {models !== null && !anyScored ? (
         <EmptyState action={<Link to="/models" className={buttonClass()}>Models</Link>}>
-          No model has been evaluated yet.
+          No {task === 'lines' ? 'line' : 'OCR'} model has been evaluated yet.
         </EmptyState>
       ) : (
         <>
@@ -156,8 +163,8 @@ export function EvaluationsPage() {
                             <td key={column.key} data-material={column.key}
                                 className={`${tableCell} whitespace-nowrap px-3 text-right font-mono text-xs tabular-nums`}>
                               {cell ? <>
-                                <Link to={cell.to} className="hover:text-accent-ink">{percent(cell.cer)}</Link>
-                                <ScoreChange change={cell.change} />
+                                <Link to={cell.to} className="hover:text-accent-ink">{percent(cell.value)}</Link>
+                                <ScoreChange change={cell.change} higherIsBetter={task === 'lines'} />
                               </> : <span className="text-ink-subtle">-</span>}
                             </td>
                           )

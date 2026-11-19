@@ -839,16 +839,52 @@ export interface Evaluation {
   source: { snapshot?: number; jobs?: string[]; test_pages?: boolean; check?: boolean }
   /** What was scored, named and redacted server-side; absent on a create response. */
   source_label?: string
-  /** Per-dataset scores when the material spans several datasets; names resolved server-side. */
-  breakdown?: { job_id: string; name: string; cer: number; wer: number; lines: number }[] | null
-  decode: OcrDecode
+  /** Per-dataset scores when the material spans several datasets; names resolved server-side.
+   *  An OCR model's are its CER, WER and lines; a line model's, its line counts. */
+  breakdown?: ({ job_id: string; name: string; cer?: number; wer?: number; lines?: number } & Partial<LineScores>)[] | null
+  /** Empty for a line model, which has no decoding. */
+  decode: OcrDecode | ''
   status: EvaluationStatus
   error: string | null
   cer: number | null
   wer: number | null
   line_count: number | null
+  /** A line model's lines counted against the checked outlines; null for an OCR model. */
+  metrics?: LineScores | null
   owner: string
   created_at: string
+}
+
+/** A line model's lines against the checked outlines: each checked line found, missed,
+ *  merged, split or loose, the found lines over none extra, and how well the matches fit. */
+export interface LineScores {
+  truth: number
+  detected: number
+  found: number
+  missed: number
+  merged: number
+  split: number
+  loose: number
+  extra: number
+  precision: number | null
+  recall: number | null
+  f1: number | null
+  /** Mean overlap of the matched outlines. */
+  iou: number | null
+  /** Median height of a matched outline against its checked one. */
+  height_ratio: number | null
+}
+
+export type LineKind = 'found' | 'missed' | 'merged' | 'split' | 'loose'
+
+export type EvaluatedPage = LineScores & { page_id: number; job_id: string; page_idx: number | null; filename: string | null }
+
+export type EvaluatedPageOutlines = EvaluatedPage & {
+  outlines: {
+    truth: { line_id: number; polygon: [number, number][]; kind: LineKind }[]
+    /** 'other' is a found line that only takes part in a merge, split or loose outline. */
+    detected: { polygon: [number, number][]; kind: 'found' | 'extra' | 'other' }[]
+  }
 }
 
 export type SplitStrategy = 'uniform' | 'stratified' | 'holdout'
@@ -1867,6 +1903,15 @@ export function listEvaluations(): Promise<{ evaluations: Evaluation[] }> {
 
 export type TranscriptionCheck = Evaluation & { model_name: string | null }
 
+/** A line model's evaluation page by page, worst first, without the outlines. */
+export function getEvaluationPages(evalId: number): Promise<{ pages: EvaluatedPage[] }> {
+  return request(`/api/evaluations/${evalId}/pages`)
+}
+
+export function getEvaluationPage(evalId: number, pageId: number): Promise<EvaluatedPageOutlines> {
+  return request(`/api/evaluations/${evalId}/pages/${pageId}`)
+}
+
 /** Read every checked line of a dataset with a model, to find wrong transcriptions. */
 export function startCheck(jobId: string, modelId: number): Promise<Evaluation> {
   return request(`/api/jobs/${jobId}/checks`, json('POST', { model_id: modelId }))
@@ -1890,6 +1935,8 @@ export function uncheckLine(lineId: number, revision: number): Promise<Spanned<L
 
 export interface EvaluationDetail extends Omit<Evaluation, 'breakdown'> {
   model_name: string | null
+  /** Whether it scored an OCR model's reading or a line model's outlines. */
+  model_task: ModelTask | null
   training_name: string | null
   /** The decodes this model was scored with on the same material, this one included. */
   decodes: { decode: OcrDecode; evaluation_id: number }[]

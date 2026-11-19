@@ -508,11 +508,25 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   name the model's page. The search narrows the rows to the models it names and the columns
   to where they were scored; the six datasets most models were scored on are shown, and
   **Show all** adds the rest. Archived models stay out unless **Show archived** is ticked.
+  Once a line model has been scored, **OCR** and **Lines** switch between the two tables;
+  a line model's cell is its F1, higher is better.
 - Evaluate any OCR model on any dataset's checked lines with **Evaluate...** on its page; a
   dataset with test pages is scored on those, unless **All pages** is chosen. Training runs
   are evaluated automatically on their validation split and test pages, the new model and its
   base once each, in the decoding Automatic reads them with; any other decoding is a click on
   **Evaluate...** away. The scores a run, a model and the model families show are those.
+- Evaluate a line model the same way, on the pages of the chosen datasets marked as having
+  their lines checked. It finds their lines the way each dataset reads - in each checked
+  region where the page has regions, else on the whole page - and each found line is matched
+  to a checked outline when the two overlap by at least half. Every checked line is then
+  **found**, **missed**, **merged** (one found line runs over it and another, as across
+  table columns), **split** (cut up across several found lines) or **loose** (found, but its
+  outline is too far off to count), and a found line over no checked line is **extra**. The
+  headline is F1 of the matches, as a lines training run reports it, beside precision,
+  recall, how much the matched outlines overlap and how tall they are against the checked
+  ones. The evaluation's page lists its pages worst first and draws the chosen page's
+  checked outlines in the colour of what they were counted as, with the found lines dashed
+  over them. A finished lines run gets its new model and its base scored on its test pages.
 - A queued or running evaluation can be cancelled by its owner or an admin. It keeps its
   place in the list without scores, and **Retry** runs it again.
 - Each evaluation has a page with its CER, WER and line count, and the same **Lines** and

@@ -231,6 +231,8 @@ export async function listEvaluations(): Promise<
     wer: number | null
     line_count: number | null
     breakdown: { job_id: string; name: string; cer: number; wer: number; lines: number }[] | null
+    /** A line model's counts against the checked outlines. */
+    metrics?: Record<string, number | null> | null
   }[]
 > {
   const res = await backendFetch('/api/evaluations')

@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app import config
 from app import decode as decode_modes
 from app import caches, data_use, eval_lines, eval_metrics, evaluator, preflight, registry, store, trainer
-from app.deps import can_access_job, current_user, get_db, require_job_access, require_role
+from app.deps import can_access_job, current_user, get_db, require_job_access, require_page_access, require_role
 
 router = APIRouter(tags=['evaluations'])
 
@@ -65,13 +65,15 @@ class EvaluationCreate(BaseModel):
 @router.post('/api/evaluations')
 def create_evaluation(body: EvaluationCreate, conn=Depends(get_db),
                       user: dict = Depends(require_role('admin', 'member'))):
-    """Score a model against a dataset's reviewed lines or a training's frozen split."""
+    """Score a model against a dataset's reviewed lines or a training's frozen split - an
+    OCR model on checked lines, a line model on the outlines of lines-checked pages."""
     model = registry.get_model(conn, body.model_id)
     if model is None:
         raise HTTPException(404, 'model not found')
-    if model['task'] != 'ocr':
-        raise HTTPException(400, 'only OCR models can be evaluated for now')
-    if body.decode not in decode_modes.OCR_DECODES:
+    if model['task'] not in ('ocr', 'lines'):
+        raise HTTPException(400, 'only OCR and line models can be evaluated')
+    reads_text = model['task'] == 'ocr'
+    if reads_text and body.decode not in decode_modes.OCR_DECODES:
         raise HTTPException(400, f'decode must be one of {", ".join(decode_modes.OCR_DECODES)}')
     if not body.job_ids:
         raise HTTPException(400, 'select at least one dataset')
@@ -81,16 +83,51 @@ def create_evaluation(body: EvaluationCreate, conn=Depends(get_db),
             raise HTTPException(404, f'dataset {job_id} not found')
     data_use.require(conn, body.job_ids, 'test')
     test_pages = body.pages == 'test' or (body.pages is None and _have_test_pages(conn, body.job_ids))
-    if test_pages:
-        counts = trainer.eligible_counts(conn, 'ocr', body.job_ids, pages='test')
-        if sum(counts.values()) == 0:
-            raise HTTPException(400, 'the test pages of the selected datasets contain no checked lines')
-    elif sum(trainer.eligible_counts(conn, 'ocr', body.job_ids, pages='all').values()) == 0:
-        raise HTTPException(400, 'the selected datasets contain no checked lines')
+    material = 'checked lines' if reads_text else 'lines-checked pages'
+    counts = trainer.eligible_counts(conn, model['task'], body.job_ids, pages='test' if test_pages else 'all')
+    if sum(counts.values()) == 0:
+        where = 'the test pages of the selected datasets' if test_pages else 'the selected datasets'
+        raise HTTPException(400, f'{where} contain no {material}')
     source = {'jobs': body.job_ids, **({'test_pages': True} if test_pages else {})}
-    eval_id = evaluator.create(conn, body.model_id, source, body.decode, user['username'])
+    eval_id = evaluator.create(conn, body.model_id, source, body.decode if reads_text else '', user['username'])
     return evaluator.payload(
         conn.execute('SELECT * FROM evaluations WHERE id = ?', (eval_id,)).fetchone())
+
+
+def _page_records(conn, eval_id: int, user: dict) -> list[dict]:
+    """A line model's evaluation, one record per page, leaving out datasets the viewer
+    cannot open."""
+    path = evaluator.pages_path(eval_id)
+    if not path.exists():
+        return []
+    records = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line]
+    return [record for record in records if can_access_job(conn, record['job_id'], user)]
+
+
+@router.get('/api/evaluations/{eval_id}/pages')
+def evaluation_pages(eval_id: int, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """A line model's evaluation page by page, worst first: each page's counts and where it
+    sits, without its outlines."""
+    _evaluation_or_404(conn, eval_id)
+    pages = []
+    for record in _page_records(conn, eval_id, user):
+        page = conn.execute('SELECT idx, filename FROM pages WHERE id = ?', (record['page_id'],)).fetchone()
+        pages.append({**{key: value for key, value in record.items() if key != 'outlines'},
+                      'page_idx': page['idx'] if page else None, 'filename': page['filename'] if page else None})
+    pages.sort(key=lambda page: (page['f1'] is None, page['f1'] if page['f1'] is not None else 0))
+    return {'pages': pages}
+
+
+@router.get('/api/evaluations/{eval_id}/pages/{page_id}')
+def evaluation_page(eval_id: int, page_id: int, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """One page of a line model's evaluation: the checked outlines and the found ones, each
+    with what it was counted as."""
+    _evaluation_or_404(conn, eval_id)
+    require_page_access(conn, page_id, user)
+    record = next((r for r in _page_records(conn, eval_id, user) if r['page_id'] == page_id), None)
+    if record is None:
+        raise HTTPException(404)
+    return record
 
 
 class CheckCreate(BaseModel):
@@ -196,6 +233,7 @@ def get_evaluation(eval_id: int, conn=Depends(get_db), user: dict = Depends(curr
     ev['source_label'] = _source_label(conn, ev['source'], user)
     model = registry.get_model(conn, ev['model_id'])
     ev['model_name'] = model['name'] if model else None
+    ev['model_task'] = model['task'] if model else None
     training = conn.execute('SELECT name FROM trainings WHERE id = ?',
                             (ev['training_id'],)).fetchone() if ev['training_id'] else None
     ev['training_name'] = training['name'] if training else None

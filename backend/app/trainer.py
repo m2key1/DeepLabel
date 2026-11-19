@@ -318,28 +318,35 @@ def register_result(conn, training: dict, out_dir: Path) -> int:
         weights.store_model_files(conn, model_id)
     except OSError as error:
         print(f'weight store: model {model_id} not stored: {error}', file=sys.stderr)
-    if training['task'] == 'ocr':
-        # Both scores are scheduled here, when the run has something to be compared with.
-        # Scheduling the baseline at submit put a long local GPU job beside the snapshot
-        # transfer, and on 2026-09-11 the two together took the machine off the network.
+    if training['task'] in ('ocr', 'lines'):
+        _schedule_scores(conn, training, model_id)
+    return model_id
+
+
+def _schedule_scores(conn, training: dict, model_id: int) -> None:
+    """What a finished run is scored on, now that it has something to be compared with.
+    Scheduling the baseline at submit put a long local GPU job beside the snapshot transfer,
+    and on 2026-09-11 the two together took the machine off the network."""
+    reads_text = training['task'] == 'ocr'
+    if reads_text:
         evaluator.create_baseline(conn, training)
         evaluator.create_result_eval(conn, training, model_id)
-        # A test set is never trained on and never steers the run - it is scored once,
-        # base model and new model alike, so "did it help?" has an untouched answer.
-        test_ids = [job_id for job_id in json.loads(training.get('test_job_ids') or '[]')
-                    if data_use.allowed(conn, job_id, 'test')]
-        if test_ids:
-            test_source = {'jobs': test_ids, 'test_pages': True}
-            if training.get('human_checked_only'):
-                test_source['human_checked_only'] = True
-            # One headline number per model, in the mode a dataset reading with it uses.
-            evaluator.create(conn, model_id, test_source, evaluator.automatic(conn, model_id),
-                             training['owner'], training['id'])
-            if training['base_model_id'] and registry.get_model(conn, training['base_model_id']):
-                evaluator.create(conn, training['base_model_id'], test_source,
-                                 evaluator.automatic(conn, training['base_model_id']),
-                                 training['owner'], training['id'])
-    return model_id
+    # A test set is never trained on and never steers the run - it is scored once, base
+    # model and new model alike, so "did it help?" has an untouched answer.
+    test_ids = [job_id for job_id in json.loads(training.get('test_job_ids') or '[]')
+                if data_use.allowed(conn, job_id, 'test')]
+    if not test_ids:
+        return
+    test_source = {'jobs': test_ids, 'test_pages': True}
+    if reads_text and training.get('human_checked_only'):
+        test_source['human_checked_only'] = True
+    scored = [model_id]
+    if training['base_model_id'] and registry.get_model(conn, training['base_model_id']):
+        scored.append(training['base_model_id'])
+    for scored_id in scored:
+        # One headline number per model; an OCR model read in the mode a dataset reading with it uses.
+        evaluator.create(conn, scored_id, test_source, evaluator.automatic(conn, scored_id) if reads_text else '',
+                         training['owner'], training['id'])
 
 
 def get_training(conn, training_id: int) -> dict | None:

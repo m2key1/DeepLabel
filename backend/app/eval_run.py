@@ -3,9 +3,11 @@ import itertools
 import json
 from pathlib import Path
 
-from app import backend_client, config, data_use, eval_material, evaluator, store
+from PIL import Image
+
+from app import backend_client, config, data_use, eval_material, evaluator, line_scores, registry, store, text_job
 from app.eval_metrics import line_record
-from app.remote_models import RemoteOcrEngine
+from app.remote_models import RemoteLines, RemoteOcrEngine
 from app.scoring import corpus_scores, group_breakdown
 
 
@@ -54,6 +56,43 @@ def score(conn, evaluation: dict, make_engine, lines_out: Path | None) -> None:
                         breakdown=group_breakdown(references, hypotheses, groups))
 
 
+def _page_record(page, detected: list, scored) -> dict:
+    """One page as its evaluation page draws it: both sets of outlines, each with its kind,
+    and the page's own counts."""
+    return {'page_id': page.page_id, 'job_id': page.job_id, **line_scores.totals([scored]),
+            'outlines': {'truth': [{'line_id': line_id, 'polygon': polygon, 'kind': kind}
+                                   for (line_id, polygon), kind in zip(page.truth, scored.truth)],
+                         'detected': [{'polygon': polygon, 'kind': kind}
+                                      for polygon, kind in zip(detected, scored.detected)]}}
+
+
+def score_lines(conn, evaluation: dict, make_stage, pages_out: Path) -> None:
+    """Find the lines of every lines-checked page the way its dataset reads, count them
+    against the checked outlines, and record the totals, per dataset when there are several."""
+    source = json.loads(evaluation['source'])
+    pages = list(eval_material.line_pages(conn, source.get('jobs', []), source.get('test_pages', False)))
+    if not pages:
+        evaluator.finish(conn, evaluation['id'], status='error', error='no lines-checked pages to evaluate on')
+        return
+    stage = make_stage()
+    by_job: dict[str, list] = {}
+    with pages_out.open('w', encoding='utf-8') as records:
+        for page in pages:
+            with Image.open(page.source_file) as opened:
+                image = opened.convert('RGB')
+            _, per_element, orphans = text_job.detect_lines(conn, page.job_id, stage, page.line_mode, image,
+                                                            page.elements)
+            image.close()
+            detected = [polygon for polygons in per_element for polygon in polygons] + orphans
+            scored = line_scores.score_page([polygon for _, polygon in page.truth], detected)
+            by_job.setdefault(page.job_id, []).append(scored)
+            records.write(json.dumps(_page_record(page, detected, scored)) + '\n')
+    summary = line_scores.totals([scored for pages_of_job in by_job.values() for scored in pages_of_job])
+    breakdown = {job_id: line_scores.totals(scored) for job_id, scored in by_job.items()} if len(by_job) > 1 else None
+    evaluator.finish(conn, evaluation['id'], status='done', metrics=json.dumps(summary),
+                     line_count=summary['truth'], breakdown=json.dumps(breakdown) if breakdown else None)
+
+
 def main():
     """An evaluation, read on the model's backend by the app's own interpreter."""
     parser = argparse.ArgumentParser()
@@ -74,6 +113,10 @@ def main():
     if client is None:
         evaluator.finish(conn, evaluation['id'], status='error',
                             error=f'model {evaluation["model_id"]} is not on a configured model backend')
+        return
+    if registry.get_model(conn, evaluation['model_id'])['task'] == 'lines':
+        score_lines(conn, evaluation, lambda: RemoteLines(conn, client, evaluation['model_id']),
+                    evaluator.pages_path(evaluation['id']))
         return
     score(conn, evaluation,
           lambda: RemoteOcrEngine(conn, client, evaluation['model_id'], evaluation['decode']),

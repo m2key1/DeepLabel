@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ConventionFlag, Evaluation, LayoutTemplate, ModelUsage, OcrDecode, RegistryModel, Training } from '../../api'
 import { conventionLabel } from '../conventionLabel'
+import { percent } from '../evaluation/format'
+import { decodeName } from '../evaluation/score'
 import { DECODE_NAMES } from '../job/processing'
 import { Badge } from '../ui/Badge'
 import { Section } from '../ui/Section'
@@ -51,7 +53,12 @@ function EvaluationLine({ ev, canRun, onRetry, onCancel }: {
   return (
     <div>
       <span data-testid="eval-row" className="block text-xs text-ink-muted">
-        {ev.status === 'done' && ev.cer !== null ? (
+        {ev.status === 'done' && ev.metrics ? (
+          <>
+            <span className="font-medium text-ink">F1 {percent(ev.metrics.f1)}</span>
+            {` · ${ev.metrics.truth} checked lines`}
+          </>
+        ) : ev.status === 'done' && ev.cer !== null ? (
           <>
             <span className="font-medium text-ink">CER {ev.cer.toFixed(4)}</span>
             {ev.wer !== null && ` · WER ${ev.wer.toFixed(4)}`}
@@ -60,7 +67,7 @@ function EvaluationLine({ ev, canRun, onRetry, onCancel }: {
         ) : (
           <span className={ev.status === 'error' ? 'text-danger' : ''}>{ev.status}{ev.error ? ` - ${ev.error}` : ''}</span>
         )}
-        {` · ${DECODE_NAMES[ev.decode]} · ${ev.source_label ?? ''} · ${formatDate(ev.created_at)}`}
+        {` · ${[decodeName(ev), ev.source_label ?? '', formatDate(ev.created_at)].filter(Boolean).join(' · ')}`}
         <Link to={`/evaluations/${ev.id}`} data-testid="evaluation-page" className="ml-2 text-ink-subtle hover:text-accent-ink">
           open
         </Link>
@@ -83,7 +90,8 @@ function EvaluationLine({ ev, canRun, onRetry, onCancel }: {
       </span>
       {open && ev.breakdown?.map((row) => (
         <span key={row.job_id} data-testid="breakdown-row" className="block pl-4 text-xs text-ink-subtle">
-          {row.name}: CER {row.cer.toFixed(4)} · WER {row.wer.toFixed(4)} · {row.lines} lines
+          {row.name}: {ev.metrics ? `F1 ${percent(row.f1)} · ${row.truth} checked lines`
+            : `CER ${row.cer?.toFixed(4)} · WER ${row.wer?.toFixed(4)} · ${row.lines} lines`}
         </span>
       ))}
     </div>

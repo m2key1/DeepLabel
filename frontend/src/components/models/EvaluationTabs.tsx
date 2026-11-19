@@ -4,7 +4,7 @@ import { getEvaluation, getEvaluationSummary } from '../../api'
 import type { EvalSummary, Evaluation, EvaluationDetail } from '../../api'
 import { ErrorsTab } from '../evaluation/ErrorsTab'
 import { LinesTab } from '../evaluation/LinesTab'
-import { DECODE_NAMES } from '../job/processing'
+import { decodeName } from '../evaluation/score'
 import { Select } from '../ui/Field'
 import { materialOf } from './runFacts'
 
@@ -47,7 +47,7 @@ export function EvaluationTabs({ tab, evaluations, shownFirst, materialName, can
           <Select size="xs" data-testid="scored-on" value={String(chosen)} className="w-72"
                   onChange={(e) => choose(e.target.value)}>
             {evaluations.map((ev) => (
-              <option key={ev.id} value={ev.id}>{materialName(materialOf(ev))} · {DECODE_NAMES[ev.decode]}</option>
+              <option key={ev.id} value={ev.id}>{materialName(materialOf(ev))} · {decodeName(ev)}</option>
             ))}
           </Select>
         </label>

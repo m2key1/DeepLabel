@@ -17,6 +17,11 @@ def lines_path(eval_id: int) -> Path:
     return config.EVALS_DIR / f'{eval_id}.lines.jsonl'
 
 
+def pages_path(eval_id: int) -> Path:
+    """Where a line model's evaluation writes one record per scored page."""
+    return config.EVALS_DIR / f'{eval_id}.pages.jsonl'
+
+
 def get_evaluation(conn, eval_id: int) -> dict | None:
     row = conn.execute('SELECT * FROM evaluations WHERE id = ?', (eval_id,)).fetchone()
     return dict(row) if row else None
@@ -31,6 +36,7 @@ def payload(row) -> dict:
     ev = dict(row)
     ev['source'] = json.loads(ev['source'] or '{}')
     ev['breakdown'] = json.loads(ev['breakdown']) if ev.get('breakdown') else None
+    ev['metrics'] = json.loads(ev['metrics']) if ev.get('metrics') else None
     ev.pop('pid', None)
     return ev
 
@@ -259,7 +265,9 @@ def run_local(conn, eval_id: int):
         return
     if finished['status'] != 'done':
         lines_path(eval_id).unlink(missing_ok=True)
-    if finished['status'] == 'done':
+        pages_path(eval_id).unlink(missing_ok=True)
+    # A line model's pages stay on file as written; only an OCR model's lines are imported.
+    if finished['status'] == 'done' and not finished['metrics']:
         try:
             eval_lines.import_file(conn, eval_id, lines_path(eval_id))
         except Exception as exc:

@@ -15,9 +15,9 @@ export function formatScore(score: Score | null): string {
 }
 
 const scoreTitle: Record<Score['kind'], string> = {
-  test: "CER on its run's test set, default decode",
-  valid: "CER on its run's validation split, default decode",
-  eval: 'CER of its newest evaluation, default decode',
+  test: "its score on its run's test set, read as Automatic reads",
+  valid: "its score on its run's validation split, read as Automatic reads",
+  eval: 'the score of its newest evaluation, read as Automatic reads',
   training: "the trainer's own validation figure",
 }
 

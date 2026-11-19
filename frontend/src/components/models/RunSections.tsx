@@ -4,6 +4,7 @@ import type { Evaluation, Preflight, ProgressPoint, RegistryModel, Training } fr
 import { trainedAugmentationLabel } from '../augment/pipeline'
 import { percent } from '../evaluation/format'
 import { ScoreChange } from '../evaluation/ScoreChange'
+import { SCORE_MEANING, scoreOf } from '../evaluation/score'
 import { cardChrome } from '../ui/Card'
 import { tableCell, tableHeadRow, tableRow } from '../ui/Table'
 import { headlineScore } from './families'
@@ -35,13 +36,13 @@ export function ScoresTable({ model, base, run, evaluations, materialName }: {
   evaluations: Evaluation[]
   materialName: (key: string) => string
 }) {
-  const done = evaluations.filter((ev) => ev.status === 'done' && ev.cer !== null
+  const done = evaluations.filter((ev) => ev.status === 'done' && scoreOf(ev) !== null
     && (run ? ev.training_id === run.id : ev.model_id === model.id))
   const materials = [...new Set(done.filter((ev) => ev.model_id === model.id).map(materialOf))]
     .sort((a, b) => (a === 'valid' ? -1 : b === 'valid' ? 1 : a.localeCompare(b)))
   if (materials.length === 0) return null
   const rows = [{ role: 'new', model }, ...(base && run ? [{ role: 'base', model: base }] : [])]
-  const scoreOf = (modelId: number, material: string) =>
+  const evaluationOf = (modelId: number, material: string) =>
     headlineScore(done.filter((ev) => ev.model_id === modelId && materialOf(ev) === material))
   // A test set spanning several datasets is shown per dataset too, from its breakdown.
   const columns = materials.flatMap((material) => {
@@ -51,14 +52,16 @@ export function ScoresTable({ model, base, run, evaluations, materialName }: {
               label: jobs.length > 1 ? 'All test pages' : materialName(material) }]
   })
   const valueOf = (modelId: number, column: (typeof columns)[number]) => {
-    const ev = scoreOf(modelId, column.material)
+    const ev = evaluationOf(modelId, column.material)
     if (!ev) return null
-    const cer = column.job ? ev.breakdown?.find((row) => row.job_id === column.job)?.cer : ev.cer!
-    return cer === undefined ? null : { cer, to: `?tab=lines&eval=${ev.id}${column.job ? `&job=${column.job}` : ''}` }
+    const value = scoreOf(ev, column.job)
+    // A line model's evaluation has no lines tab: its score opens its own page.
+    const to = model.task === 'ocr' ? `?tab=lines&eval=${ev.id}${column.job ? `&job=${column.job}` : ''}` : `/evaluations/${ev.id}`
+    return value === null ? null : { value, to }
   }
   return (
     <Block testid="model-scores" title="Scores"
-           action={<span className="text-xs text-ink-subtle">character error rate in Automatic decoding, lower is better</span>}>
+           action={<span className="text-xs text-ink-subtle">{SCORE_MEANING[model.task === 'lines' ? 'lines' : 'ocr']}</span>}>
       <div className={`${cardChrome} overflow-x-auto`}>
         <table className="w-full border-collapse text-sm">
           <thead>
@@ -78,12 +81,12 @@ export function ScoresTable({ model, base, run, evaluations, materialName }: {
                 {columns.map((c) => {
                   const shown = valueOf(row.id, c)
                   const against = role === 'new' && base && run ? valueOf(base.id, c) : null
-                  const change = shown && against ? shown.cer - against.cer : null
+                  const change = shown && against ? shown.value - against.value : null
                   return (
                     <td key={c.key} data-material={c.key} className={`${tableCell} px-3 text-right font-mono text-xs tabular-nums`}>
-                      {shown ? <Link to={shown.to} className="hover:text-accent-ink">{percent(shown.cer)}</Link>
+                      {shown ? <Link to={shown.to} className="hover:text-accent-ink">{percent(shown.value)}</Link>
                         : <span className="font-sans text-ink-subtle">not run</span>}
-                      <ScoreChange change={change} />
+                      <ScoreChange change={change} higherIsBetter={model.task === 'lines'} />
                     </td>
                   )
                 })}

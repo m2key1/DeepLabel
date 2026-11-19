@@ -603,10 +603,8 @@ def _bounds(points: list) -> tuple:
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def iou(first: list, second: list) -> float:
-    """Intersection over union of two line regions. Symmetric, unlike coverage: a box that
-    grew to swallow another covers it completely but still scores low here, which is what
-    keeps a systematically enlarged re-detection from reading as the same line."""
+def overlap_area(first: list, second: list) -> float:
+    """Area two line regions share."""
     if len(first) < 3 or len(second) < 3:
         return 0.0
     # Most pairs put to this on a page are nowhere near each other, and the triangle sum
@@ -615,9 +613,17 @@ def iou(first: list, second: list) -> float:
     bx0, by0, bx1, by1 = _bounds(second)
     if ax0 >= bx1 or bx0 >= ax1 or ay0 >= by1 or by0 >= ay1:
         return 0.0
-    own_first, own_second = polygon_area(first), polygon_area(second)
     # Neither ring can share more than it covers; holding that exactly is what makes a
     # ring against its own copy score 1 rather than a hair over.
-    overlap = min(_shared_area(first, second), own_first, own_second)
-    union = own_first + own_second - overlap
+    return min(_shared_area(first, second), polygon_area(first), polygon_area(second))
+
+
+def iou(first: list, second: list) -> float:
+    """Intersection over union of two line regions. Symmetric, unlike coverage: a box that
+    grew to swallow another covers it completely but still scores low here, which is what
+    keeps a systematically enlarged re-detection from reading as the same line."""
+    overlap = overlap_area(first, second)
+    if overlap == 0:
+        return 0.0
+    union = polygon_area(first) + polygon_area(second) - overlap
     return overlap / union if union > 0 else 0.0
