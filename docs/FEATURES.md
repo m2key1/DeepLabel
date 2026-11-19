@@ -465,6 +465,13 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   agreement.
 - Tune epochs, batch size, learning rate, early stopping and every other setting the
   trainer offers; empty fields use the trainer's defaults, which are shown.
+- A run from a trained model stops early by default: after 10 validations without a better
+  score it ends and keeps its best epoch. A run from scratch trains every epoch unless early
+  stopping is switched on, and the form warns when a run of more than 10 epochs has none.
+- A running run whose validation has not improved for 10 epochs says so under **How it
+  went**. Where its trainer can (DeepOCR), **Stop and keep epoch N** ends it at once as
+  finished, with its best epoch as the model; the same button sits beside **Cancel**, which
+  keeps nothing.
 - For OCR, optionally fit a language model to the training text. A model that reads with its
   own decoder never consults one, so for such a base the form says it only changes the beam
   and rescored readings. For line models, choose the line shape to train on.

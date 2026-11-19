@@ -11,6 +11,9 @@ from app.deps import can_access_job, current_user, get_db, require_job_access, r
 
 router = APIRouter(tags=['training'])
 
+# Validations without a better score after which a run from a trained model stops (decision 313).
+DEFAULT_PATIENCE = 10
+
 
 def _is_admin(user: dict) -> bool:
     return user.get('role') == 'admin'
@@ -176,7 +179,8 @@ class TrainingCreate(BaseModel):
     batch_size: int | None = None
     gpu_type: str | None = None
     gpu_count: int | None = None
-    hyperparams: dict[str, bool | int | float | str] = {}
+    # A null switches a knob off, where a run would otherwise get a default for it.
+    hyperparams: dict[str, bool | int | float | str | None] = {}
     val_fraction: float = 0.1
     split_strategy: str = 'uniform'
     valid_job_ids: list[str] = []
@@ -352,8 +356,9 @@ def _validate_settings(conn, body: TrainingCreate, user: dict) -> dict:
         raise HTTPException(400, 'a language model is only fitted for an OCR run')
     if body.build_lm and not _builds_lm(train):
         raise HTTPException(400, f'model backend "{client.backend.name}" builds no language model')
+    knobs = tunables.declared(train)
     try:
-        hyperparams = tunables.validate(body.hyperparams, tunables.declared(train))
+        hyperparams = tunables.validate(_with_defaults(body.hyperparams, body.base_model_id, knobs), knobs)
     except tunables.TunableError as e:
         raise HTTPException(400, str(e))
     if body.split_strategy not in ('uniform', 'stratified', 'holdout'):
@@ -397,6 +402,15 @@ def _validate_settings(conn, body: TrainingCreate, user: dict) -> dict:
     if sum(counts.values()) == 0:
         raise HTTPException(400, 'the selected datasets contain no checked material for this task')
     return hyperparams
+
+
+def _with_defaults(values: dict, base_model_id: int | None, knobs) -> dict:
+    """The knobs a run sets, a null being one switched off, with early stopping on for a run
+    from a trained model whose backend offers it (decision 313)."""
+    chosen = {key: value for key, value in values.items() if value is not None}
+    if base_model_id is not None and 'patience' not in values and any(knob.key == 'patience' for knob in knobs):
+        chosen['patience'] = DEFAULT_PATIENCE
+    return chosen
 
 
 @router.post('/api/trainings')
@@ -471,7 +485,8 @@ def training_progress(training_id: int, conn=Depends(get_db), user: dict = Depen
     datasets, _hidden = _dataset_names(conn, ids, user)
     mine = user['role'] == 'admin' or training['owner'] == user['username']
     return {'points': points, 'log_tail': trainer.read_log_tail(training) if mine else '',
-            'updated_at': updated_at, 'datasets': datasets}
+            'updated_at': updated_at, 'datasets': datasets,
+            'can_finish': mine and training['status'] == 'running' and trainer.can_finish(conn, training)}
 
 
 @router.delete('/api/trainings/{training_id}')
@@ -531,6 +546,23 @@ def retry_training(training_id: int, conn=Depends(get_db), user: dict = Depends(
         threading.Thread(target=_submit_slurm_bg, args=(training_id, attempt), daemon=True).start()
     return trainer.training_payload(
         conn.execute('SELECT * FROM trainings WHERE id = ?', (training_id,)).fetchone())
+
+
+@router.post('/api/trainings/{training_id}/finish')
+def finish_training(training_id: int, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """End a running training now as finished, with the best epoch it reached as its model."""
+    training = trainer.get_training(conn, training_id)
+    if training is None:
+        raise HTTPException(404)
+    if user['role'] != 'admin' and training['owner'] != user['username']:
+        raise HTTPException(403, 'not permitted')
+    if training['status'] != 'running':
+        raise HTTPException(409, f'this training is {training["status"]} - only a running one can be stopped')
+    try:
+        trainer.finish(conn, training)
+    except trainer.CannotFinish as e:
+        raise HTTPException(409, str(e))
+    return {'ok': True}
 
 
 @router.post('/api/trainings/{training_id}/cancel')

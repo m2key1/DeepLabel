@@ -1,12 +1,18 @@
 import type { PreflightResult, ProgressPoint, Training } from '../../api'
 
 export interface Check {
-  id: 'error' | 'best-early' | 'memory' | 'restarts' | 'preflight' | 'likely-errors'
+  id: 'error' | 'best-early' | 'stalled' | 'memory' | 'restarts' | 'preflight' | 'likely-errors'
   tone: 'danger' | 'warn' | 'info'
   text: string
   /** The tab that shows it, and the lines filter where that is the Lines tab. */
   show?: { tab: 'training' | 'data' | 'lines'; label: string }
+  /** The best epoch of a running run, which it can still be stopped at and keep. */
+  keep?: number
 }
+
+// A running run whose validation has not improved for this many epochs is past its best: the
+// patience early stopping uses by default (decision 313).
+export const STALLED_AFTER = 10
 
 // A run whose best epoch came this early and that ended this much worse kept training long
 // after it had learned what it could.
@@ -44,7 +50,10 @@ export function runChecks({ run, points, preflight, likelyErrors }: {
   if (curve.length > 1) {
     const best = curve.reduce((b, p) => (p.value < b.value ? p : b))
     const last = curve[curve.length - 1]
-    if (best.epoch <= last.epoch / 2 && last.value - best.value > WORSE_BY * Math.abs(best.value)) {
+    if (run.status === 'running' && last.epoch - best.epoch >= STALLED_AFTER) {
+      checks.push({ id: 'stalled', tone: 'warn', text: `Validation has not improved since epoch ${best.epoch}`,
+                    show: { tab: 'training', label: 'See the curve' }, keep: best.epoch })
+    } else if (best.epoch <= last.epoch / 2 && last.value - best.value > WORSE_BY * Math.abs(best.value)) {
       checks.push({ id: 'best-early', tone: 'warn', text: `Best after epoch ${best.epoch} of ${last.epoch}, worse after`,
                     show: { tab: 'training', label: 'See the curve' } })
     }

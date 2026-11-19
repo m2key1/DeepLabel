@@ -55,6 +55,8 @@ const labelClass = 'mb-1 block text-xs font-medium text-ink-muted'
 // Knobs the dialog lays out by hand (the top row and the early-stop pair) rather than
 // in their manifest group.
 const HAND_RENDERED = new Set(['learning_rate', 'patience'])
+// Validations without improving before a run stops early, unless set otherwise (decision 313).
+const DEFAULT_PATIENCE = 10
 
 const VAL_PERCENTS = ['5', '10', '15', '20', '30']
 const LEFT_OUT_DEBOUNCE_MS = 300
@@ -206,9 +208,12 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
     from && restoredTarget ? String(from.batch_size ?? '') : '')
   const [learningRate, setLearningRate] = useState(
     typeof from?.hyperparams.learning_rate === 'number' ? String(from.hyperparams.learning_rate) : '')
-  const [earlyStop, setEarlyStop] = useState(typeof from?.hyperparams.patience === 'number')
+  // Untouched, a run from a trained model stops early and one from scratch does not (decision
+  // 313); a rerun keeps what its run chose.
+  const [earlyStopChoice, setEarlyStop] = useState<boolean | null>(
+    from ? typeof from.hyperparams.patience === 'number' : null)
   const [patience, setPatience] = useState(
-    typeof from?.hyperparams.patience === 'number' ? String(from.hyperparams.patience) : '10')
+    typeof from?.hyperparams.patience === 'number' ? String(from.hyperparams.patience) : String(DEFAULT_PATIENCE))
   // Without a preference a run starts on the first card the deployment lists.
   const firstGpu = Object.keys(gpuTypes)[0] ?? ''
   const [gpuType, setGpuType] = useState(from?.gpu_type ?? firstGpu)
@@ -362,6 +367,10 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
   const totalItems = humanOnly ? checkedInChosen - settledInChosen : checkedInChosen
   const trainPages = humanOnly ? humanCheckedPages : pages
   const epochsDefault = formatDefault(options?.columns.epochs)
+  const offersEarlyStop = !!options?.tunables.some((t) => t.key === 'patience')
+  const earlyStop = earlyStopChoice ?? (offersEarlyStop && baseId !== '')
+  const patienceOrDefault = patience.trim() === '' ? DEFAULT_PATIENCE : Number(patience)
+  const plannedEpochs = Number(epochs.trim() || options?.columns.epochs || 0)
   const lrDefault = formatDefault(options?.tunables.find((t) => t.key === 'learning_rate')?.default)
   const batchDefault = String(
     (target === 'local' ? options?.batch.local : options?.batch.cluster[gpuType]) ?? 'auto')
@@ -434,7 +443,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
       hyperparams: {
         ...tunedValues(options?.tunables ?? [], tuned),
         ...(learningRate.trim() === '' ? {} : { learning_rate: Number(learningRate) }),
-        ...(earlyStop && patience.trim() !== '' ? { patience: Number(patience) } : {}),
+        ...(offersEarlyStop ? { patience: earlyStop ? patienceOrDefault : null } : {}),
       },
       val_fraction: Number(valPct) / 100,
       split_strategy: strategy,
@@ -937,7 +946,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
           `${epochs.trim() || epochsDefault} epochs`,
           `batch ${batchSize.trim() || batchDefault}`,
           `lr ${learningRate.trim() || lrDefault}`,
-          earlyStop ? `early stop after ${patience.trim() || '10'}` : 'no early stop',
+          earlyStop ? `early stop after ${patienceOrDefault}` : 'no early stop',
           `${valPct}% ${strategy === 'uniform' ? 'random' : 'per-dataset'} validation split`,
           ...(testIds.length ? [`test: ${testIds.map((id) => jobs?.find((j) => j.id === id)?.name ?? '').join(', ')}`] : []),
           ...(target === 'slurm' ? [`${gpuCount}x ${GPU_LABELS[gpuType] ?? gpuType}`] : []),
@@ -945,6 +954,11 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
           ...(tunedCount > 0 ? [`${tunedCount} more knob${tunedCount === 1 ? '' : 's'} tuned`] : []),
         ].join(' · ')}
       </p>
+      {offersEarlyStop && !earlyStop && plannedEpochs > DEFAULT_PATIENCE && (
+        <p data-testid="no-early-stop-warning" className="mb-1 text-xs text-warn">
+          Early stop is off: all {plannedEpochs} epochs run, even after validation stops improving.
+        </p>
+      )}
       {totalItems > 0 && expectedValPages < 1 && (
         <p data-testid="empty-val-warning" className="mb-1 text-xs text-warn">
           At {valPct}% none of the {totalPages} eligible page{totalPages === 1 ? '' : 's'} would

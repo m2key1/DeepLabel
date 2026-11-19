@@ -1893,6 +1893,8 @@ export function trainingProgress(
   updated_at: number | null
   /** Job id to display name for every dataset the run touches, redacted per access. */
   datasets: Record<string, string>
+  /** Whether the caller may end this running run now, keeping its best epoch. */
+  can_finish: boolean
 }> {
   return request(`/api/trainings/${trainingId}/progress`)
 }
@@ -2339,7 +2341,8 @@ export interface TrainingRequest {
   batch_size: number | null
   gpu_type?: string | null
   gpu_count?: number | null
-  hyperparams: Record<string, TunableValue>
+  /** A null switches a knob off where the run would otherwise get a default for it. */
+  hyperparams: Record<string, TunableValue | null>
   val_fraction: number
   split_strategy: SplitStrategy
   valid_job_ids: string[]
@@ -2512,6 +2515,11 @@ export function getTrainingPreflight(trainingId: number): Promise<Preflight> {
 
 export function cancelTraining(trainingId: number): Promise<{ ok: boolean }> {
   return request(`/api/trainings/${trainingId}/cancel`, { method: 'POST' })
+}
+
+/** End a running run now as finished, with the best epoch it reached as its model. */
+export function finishTraining(trainingId: number): Promise<{ ok: boolean }> {
+  return request(`/api/trainings/${trainingId}/finish`, { method: 'POST' })
 }
 
 /** Submit a failed run again, keeping the snapshot it already cut. */

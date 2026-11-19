@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  cancelEvaluation, cancelTraining, deleteTraining, getLayoutTemplates, getModelUsage, getTrainingPreflight,
+  cancelEvaluation, cancelTraining, deleteTraining, finishTraining, getLayoutTemplates, getModelUsage, getTrainingPreflight,
   listConventionFlags, listEvaluationLines, listEvaluations, listModels, listTrainings, patchModel, retryEvaluation,
   retryTraining, trainingProgress,
 } from '../api'
@@ -69,6 +69,7 @@ function useRunData(run: Training | null) {
   const [points, setPoints] = useState<ProgressPoint[]>([])
   const [log, setLog] = useState('')
   const [datasets, setDatasets] = useState<Record<string, string>>({})
+  const [canFinish, setCanFinish] = useState(false)
   const runId = run?.id ?? null
   const preflightId = run?.preflight_id ?? null
   const finished = run ? isFinished(run.status) : true
@@ -78,6 +79,7 @@ function useRunData(run: Training | null) {
       setPoints(r.points)
       setLog(r.log_tail)
       setDatasets(r.datasets)
+      setCanFinish(r.can_finish)
     }).catch(() => {})
   }, [runId])
   useEffect(read, [read])
@@ -87,7 +89,7 @@ function useRunData(run: Training | null) {
     if (runId === null || preflightId === null) return
     return pollPreflight(() => getTrainingPreflight(runId), setPreflight, 2000, { retry: true })
   }, [runId, preflightId])
-  return { preflight, points, log, datasets }
+  return { preflight, points, log, datasets, canFinish: canFinish && !finished }
 }
 
 /** A model in the registry, with the run that made it when it was trained here. */
@@ -145,7 +147,7 @@ function ModelView({ model, run, models, trainings, evaluations, error, setError
   const [evaluating, setEvaluating] = useState(false)
   const [likely, setLikely] = useState<number | null>(null)
   useAutoClear(error, setError)
-  const { preflight, points, log, datasets } = useRunData(run)
+  const { preflight, points, log, datasets, canFinish } = useRunData(run)
   const modelId = model?.id ?? null
 
   useEffect(() => {
@@ -210,6 +212,8 @@ function ModelView({ model, run, models, trainings, evaluations, error, setError
 
   const finished = run ? isFinished(run.status) : true
   const mine = run !== null && canEdit && (isAdmin || run.owner === user)
+  const kept = bestEpoch(points)
+  const keepBest = () => run && finishTraining(run.id).then(refresh).catch((e: Error) => setError(e.message))
   const managesModels = can('models.manage')
   const ownsModel = model !== null && model.owner === user
   const family = model ? buildFamilies(models.filter((m) => m.task === model.task), trainings, evaluations)
@@ -265,6 +269,12 @@ function ModelView({ model, run, models, trainings, evaluations, error, setError
               <Link to={`/models/train?task=${run.task}&from=${run.id}`} data-testid="rerun-training"
                     className={buttonClass({ size: 'xs' })} title="Open the training form on this run's settings">Rerun…</Link>
             )}
+            {run && !model && canFinish && kept !== null && run.phase !== 'finishing' && (
+              <Button size="xs" data-testid="finish-training" onClick={keepBest}
+                      title="End the run now as finished, with this epoch's weights as its model">
+                Stop and keep epoch {kept}
+              </Button>
+            )}
             {run && !model && !finished && mine && (
               <Button size="xs" onClick={() => cancelTraining(run.id).then(refresh).catch((e: Error) => setError(e.message))}>Cancel</Button>
             )}
@@ -293,6 +303,7 @@ function ModelView({ model, run, models, trainings, evaluations, error, setError
         {run && <TrainingFacts run={run} points={points} onAllSettings={() => show('training')} />}
         {run && (
           <HowItWent checks={checks} finished={finished}
+                     onKeep={canFinish && run.phase !== 'finishing' ? keepBest : undefined}
                      onShow={(check) => check.show?.tab === 'lines' && shownFirstId !== null
                        ? show('lines', { eval: String(shownFirstId), cer_min: String(LIKELY_TRANSCRIPTION_ERROR.cer_min),
                                          conf_min: String(LIKELY_TRANSCRIPTION_ERROR.conf_min) })

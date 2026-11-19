@@ -1,11 +1,12 @@
 # Model backends
 
-Contract version **1.6**. 1.1 added batches per card, gradient accumulation,
+Contract version **1.7**. 1.1 added batches per card, gradient accumulation,
 learning-rate scaling, the out-of-memory fallback, resuming, declared metrics and the
 final evaluation (6.9); 1.2 added builtin weight facts (5.2), `default_epochs` (6.2) and
 the trainer's default augmentation stack (7.1); 1.3 added a builtin base for a training
 (6.5, 6.6); 1.4 added boxes to the augmentation preview (7.1); 1.5 added line outlines to it;
-1.6 added the card's memory and each version's size, so backends that fit share a card (3.9).
+1.6 added the card's memory and each version's size, so backends that fit share a card (3.9);
+1.7 added `finish`: ending a running training early, keeping its best epoch (6.5, 6.6).
 
 A *model backend* is a small HTTP service that wraps one model type, with its own image,
 GPU and dependencies. DeepLabel knows a backend only by its URL and a shared secret. It
@@ -720,7 +721,8 @@ DeepLabel  GET /v1/train/{id}/progress                 rsync progress.jsonl + lo
   "metrics": [{"key": "cer", "label": "CER", "unit": "fraction", "better": "lower", "headline": true}],
   "default_epochs": 20,
   "outputs": ["weights", "lm", "lm_dict"],
-  "resume": true
+  "resume": true,
+  "finish": true
 }
 ```
 
@@ -737,6 +739,9 @@ angle) or `box` (the upright one). A run chooses its own in the training form. A
 that declares none trains on polygons. A detector that learns a shrunk core of every line
 (DB-style) does better with `rotated`: the shrink falls apart on an outline that steps
 around ascenders and word gaps.
+
+A backend that declares `finish: true` can end a running run early as finished, keeping the
+best epoch it reached (6.5, 6.6); DeepLabel then offers "Stop and keep epoch N" beside Cancel.
 
 An `ocr` backend may also declare `conventions: true`: its runs condition on each dataset's
 transcription-convention flags (6.3) and can teach the base model flags it does not know yet.
@@ -823,6 +828,7 @@ copied into the run directory as `base/<role>` for the cluster.
 | `GET /v1/train/{train_id}` | `{"train_id", "state": "queued|fetching|running|done|error|cancelled", "phase": "fetching snapshot 812/31426", "error": null, "progress_lines": 418, "log_tail": "..."}` |
 | `GET /v1/train/{train_id}/progress?from=<line>` | `application/x-ndjson`: progress lines from that index on |
 | `POST /v1/train/{train_id}/cancel` | stops the entrypoint (`SIGTERM`, then `SIGKILL` after 30 s); state `cancelled` |
+| `POST /v1/train/{train_id}/finish` | if `finish`: leaves `finish` in the run's `TRAIN_OUTPUT` for the entrypoint (6.6); `202`, phase `finishing`. `409 not_running` or `409 not_supported` otherwise |
 | `GET /v1/train/{train_id}/artifacts` | the entrypoint's `artifacts.json` with sizes and hashes |
 | `GET /v1/train/{train_id}/artifacts/{name}` | the file |
 | `DELETE /v1/train/{train_id}` | DeepLabel has stored everything; the backend deletes the run |
@@ -884,6 +890,15 @@ It writes into `TRAIN_OUTPUT`:
 
 Exit code 0 means success. On failure the last log line that names an exception is what
 DeepLabel shows.
+
+**Finishing early** (`finish: true`): when a file named `finish` appears in `TRAIN_OUTPUT`,
+the entrypoint ends the run as finished: it stops training, writes the files above for the
+best epoch it reached, and exits 0. The backend writes the file for a local run; DeepLabel
+writes it beside a cluster run's output, so the same entrypoint finishes both. The SDK's
+`train.run_until_finished(command, output)` runs a trainer until it exits or the file appears,
+stops it then, and says which happened; `train.finish_requested(output)` is the check for a
+trainer that loops in Python. An entrypoint asked to finish before its first validation has
+nothing to keep and fails.
 
 **Progress events** (`progress.jsonl`, format `deeplabel-progress/1`): one JSON object per
 line.

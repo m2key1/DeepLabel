@@ -512,7 +512,7 @@ def _settings(conn, request: dict, train_samples: int) -> dict:
             'build_lm': bool(request.get('build_lm')),
             'line_shape': trainer.line_shape_for(conn, task, request.get('base_model_id'), request.get('line_shape')),
             'augmentation': _augmentation_label(conn, request),
-            'tuned': sorted((request.get('hyperparams') or {}).keys())}
+            'tuned': sorted(key for key, value in (request.get('hyperparams') or {}).items() if value is not None)}
 
 
 def _split_findings(split: dict, request: dict) -> list[dict]:

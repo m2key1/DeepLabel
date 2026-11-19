@@ -13,9 +13,15 @@ class FakeTrainer:
                 {'key': 'freeze_backbone', 'kind': 'bool'},
             ],
             **(train or {})}
+        self.calls: list[tuple[str, str]] = []
 
     def info(self) -> dict:
         return {'train': self.train, 'gpu': {}}
+
+    def _call(self, method: str, path: str, body: bytes | None = None, content_type: str | None = None,
+              timeout: float = 0) -> dict:
+        self.calls.append((method, path))
+        return {}
 
 
 def seed_defaults(conn) -> None:

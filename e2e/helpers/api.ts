@@ -188,6 +188,8 @@ export interface TrainingRow {
   valid_job_ids: string[]
   test_job_ids: string[]
   hyperparams: Record<string, number | boolean>
+  /** What the trainer reported on finishing, such as its validation score. */
+  metrics: Record<string, unknown> | null
   snapshot_counts: Record<string, number> | null
   augmentation: { transform: Record<string, unknown> } | null
   augmentation_name: string

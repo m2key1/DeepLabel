@@ -516,7 +516,7 @@ def run_scaling(conn, task: str, target: str, gpu_type: str | None, gpu_count: i
     gpus = 1 if target == 'local' else (gpu_count or 1)
     target_batch = resources.get('effective_batch')
     roles = {t['key']: t.get('role') for t in train.get('tunables') or []}
-    chosen = hyperparams or {}
+    chosen = {key: value for key, value in (hyperparams or {}).items() if value is not None}
     knob = next((key for key, role in roles.items() if role == 'accumulation'), None)
     if knob in chosen:
         accumulation, steps = None, int(chosen[knob])
@@ -561,6 +561,36 @@ def run_local(conn, training_id: int):
 
 
 CANCELLABLE_STATUSES = ('queued', 'preparing', 'running')
+# The file a cluster run's entrypoint watches for in its output: ending it as finished (6.5).
+FINISH_NAME = 'finish'
+
+
+class CannotFinish(RuntimeError):
+    """The run's backend cannot end it early, with the sentence to say so."""
+
+
+def can_finish(conn, training: dict) -> bool:
+    """Whether the run's model backend can end it early, keeping its best epoch."""
+    try:
+        client = remote_training.training_backend(conn, training)
+        return bool((client.info().get('train') or {}).get('finish'))
+    except (remote_training.CannotTrain, backend_client.BackendError):
+        return False
+
+
+def finish(conn, training: dict) -> None:
+    """Ask a running run to end now as finished, with the best epoch it reached as its model
+    (decision 313): through its backend for a local run, by the finish file beside its output
+    for a cluster run. The run then completes the way any other does."""
+    client = remote_training.training_backend(conn, training)
+    if not (client.info().get('train') or {}).get('finish'):
+        raise CannotFinish(f'model backend "{client.backend.name}" cannot end a run early - cancel it instead')
+    if training['target'] == 'slurm':
+        _check(_ssh(['touch', f'{config.SLURM_REMOTE_DIR}/{training["id"]}/output/{FINISH_NAME}']),
+               'asking the cluster run to finish')
+    else:
+        backend_client.Training(client, training['backend_train_id']).finish()
+    set_state(conn, training['id'], phase='finishing')
 
 
 def cancel(conn, training_id: int) -> bool:

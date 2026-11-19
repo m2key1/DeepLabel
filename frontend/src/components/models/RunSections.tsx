@@ -5,6 +5,7 @@ import { trainedAugmentationLabel } from '../augment/pipeline'
 import { percent } from '../evaluation/format'
 import { ScoreChange } from '../evaluation/ScoreChange'
 import { SCORE_MEANING, scoreOf } from '../evaluation/score'
+import { Button } from '../ui/Button'
 import { cardChrome } from '../ui/Card'
 import { tableCell, tableHeadRow, tableRow } from '../ui/Table'
 import { headlineScore } from './families'
@@ -211,10 +212,12 @@ const TONE_CLASS: Record<Check['tone'], string> = {
 const TONE_LABEL: Record<Check['tone'], string> = { danger: 'FAILED', warn: 'CHECK', info: 'NOTE' }
 
 /** Only what happened: one line per check that fired, each with where to look. */
-export function HowItWent({ checks, finished, onShow }: {
+export function HowItWent({ checks, finished, onShow, onKeep }: {
   checks: Check[]
   finished: boolean
   onShow: (check: Check) => void
+  /** Ends the run at its best epoch; absent where the run cannot be ended that way. */
+  onKeep?: () => void
 }) {
   return (
     <Block testid="how-it-went" title="How it went">
@@ -234,6 +237,9 @@ export function HowItWent({ checks, finished, onShow }: {
               <button type="button" onClick={() => onShow(check)} className="text-xs text-accent-ink hover:underline">
                 {check.show.label}
               </button>
+            )}
+            {check.keep !== undefined && onKeep && (
+              <Button size="xs" data-testid="keep-best" onClick={onKeep}>Stop and keep epoch {check.keep}</Button>
             )}
           </li>
         ))}

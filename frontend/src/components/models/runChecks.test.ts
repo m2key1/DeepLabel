@@ -22,6 +22,18 @@ describe('How it went', () => {
                                   show: { tab: 'training' } })
   })
 
+  it('tells a running run whose validation has not improved for ten epochs that it can stop at its best', () => {
+    const cers = [0.0222, ...Array(10).fill(0.03)]
+    expect(runChecks({ run: run({ status: 'running' }), points: curve(cers), ...quiet })).toEqual([{
+      id: 'stalled', tone: 'warn', text: 'Validation has not improved since epoch 1',
+      show: { tab: 'training', label: 'See the curve' }, keep: 1 }])
+  })
+
+  it('does not stall a running run nine epochs past its best, nor a finished one', () => {
+    expect(ids({ run: run({ status: 'running' }), points: curve([0.0222, ...Array(9).fill(0.03)]), ...quiet })).toEqual(['best-early'])
+    expect(ids({ run: run(), points: curve([0.0222, ...Array(10).fill(0.03)]), ...quiet })).toEqual(['best-early'])
+  })
+
   it('lets a late best or a flat tail pass', () => {
     expect(ids({ run: run(), points: curve([0.3, 0.2, 0.25, 0.21]), ...quiet })).toEqual([])
     expect(ids({ run: run(), points: curve([0.2, 0.205, 0.205, 0.205]), ...quiet })).toEqual([])

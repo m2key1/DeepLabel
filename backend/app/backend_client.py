@@ -372,6 +372,10 @@ class Training:
     def cancel(self) -> None:
         self.client._call('POST', f'/v1/train/{self.id}/cancel', b'{}', 'application/json')
 
+    def finish(self) -> None:
+        """End the run now as finished, with the best epoch it reached as its result (6.5)."""
+        self.client._call('POST', f'/v1/train/{self.id}/finish', b'{}', 'application/json')
+
     def artifacts(self) -> dict:
         return self.client._call('GET', f'/v1/train/{self.id}/artifacts')
 

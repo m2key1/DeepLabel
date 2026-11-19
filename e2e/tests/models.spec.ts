@@ -63,9 +63,9 @@ test.describe('Scenario: the model registry', () => {
     await page.getByLabel('Validation split').selectOption('30')
     await page.getByLabel('Epochs', { exact: true }).fill('1')
     await page.getByLabel('Learning rate').fill('0.00005')
-    // Early stop is off by default; enabling it sends the patience along.
-    await expect(page.getByLabel('Patience')).toBeDisabled()
-    await page.getByTestId('early-stop-toggle').check()
+    // A run from a trained model stops early by default (decision 313); its patience is sent along.
+    await expect(page.getByTestId('early-stop-toggle')).toBeChecked()
+    await expect(page.getByLabel('Patience')).toBeEnabled()
     await page.getByLabel('Patience').fill('5')
     // Every other knob sits in a manifest group, blank until tuned. Two are tuned here:
     // a number and a switch, so both value types travel to the record.

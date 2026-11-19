@@ -46,6 +46,8 @@ the version in the app's footer opens.
   flagged line is fixed from its row (#126).
 - Line models are evaluated against checked outlines: found, missed, merged, split and extra lines,
   with both sets of outlines drawn over the scan (#130).
+- A run past its best can be stopped at once, keeping its best epoch as the model, where its
+  model backend can do so (DeepOCR) (#125).
 
 ### Changed
 
@@ -54,6 +56,8 @@ the version in the app's footer opens.
 - Every evaluated model is one row of one table, a column per test set and one score per cell (#124).
 - A model family draws its versions as one line and names them in full (#53, #91).
 - A finished OCR run is scored in Automatic decoding only (#122).
+- A run from a trained model stops early by default, after 10 validations without a better score,
+  and the training form warns when a long run has no early stopping (#125).
 - Line crops are cut plainly, without painting out what lies outside the outline (#129).
 - Models that fit on the card stay loaded together instead of being swapped for every page (#128).
 - Line corrections are saved unchecked; checking is a step of its own.
