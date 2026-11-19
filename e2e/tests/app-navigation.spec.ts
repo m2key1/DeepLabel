@@ -63,7 +63,8 @@ test.describe('Scenario: finding out which release this is and where to report a
       await page.goto(path)
       await expect(footer.getByTestId('app-version')).toHaveText('DeepLabel 0.1.0')
     }
-    await expect(footer.getByRole('link', { name: 'DeepLabel 0.1.0' })).toHaveAttribute('href', `${repo}/tree/v0.1.0`)
+    // The release's own page, with what it changed.
+    await expect(footer.getByRole('link', { name: 'DeepLabel 0.1.0' })).toHaveAttribute('href', `${repo}/releases/tag/v0.1.0`)
     await expect(footer.getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', `${repo}/blob/main/docs/FEATURES.md`)
     await expect(footer.getByRole('link', { name: 'Source on GitHub' })).toHaveAttribute('href', repo)
     await expect(footer.getByRole('link', { name: 'Report a problem' })).toHaveAttribute('href', `${repo}/issues/new`)

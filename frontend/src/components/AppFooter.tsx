@@ -5,8 +5,8 @@ const REPO = 'https://github.com/m2key1/DeepLabel'
 
 const linkClass = 'hover:text-accent-ink hover:underline'
 
-/** The release this deployment runs and where its source and docs live, so a bug report
- *  can say which version it is about and where to file it. */
+/** The release this deployment runs - opening its notes - and where its source and docs
+ *  live, so a bug report can say which version it is about and where to file it. */
 export function AppFooter() {
   const [meta, setMeta] = useState<AppMeta | null>(null)
   useEffect(() => {
@@ -18,7 +18,7 @@ export function AppFooter() {
             className="mt-10 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line px-4 py-3 text-xs text-ink-subtle">
       {meta && (
         <span data-testid="app-version" className="font-mono">
-          <a href={`${REPO}/tree/v${meta.version}`} target="_blank" rel="noreferrer" className={linkClass}>
+          <a href={`${REPO}/releases/tag/v${meta.version}`} target="_blank" rel="noreferrer" className={linkClass}>
             DeepLabel {meta.version}
           </a>
           {meta.commit && (

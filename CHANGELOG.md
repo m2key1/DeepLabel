@@ -1,0 +1,91 @@
+# Changelog
+
+What changed in each release of DeepLabel, newest first. Versions follow
+[semantic versioning](https://semver.org): the major number rises for a change that needs
+action from whoever runs or calls DeepLabel, the minor for new features, the patch for fixes.
+Every release is also a [GitHub release](https://github.com/m2key1/DeepLabel/releases), which
+the version in the app's footer opens.
+
+## [Unreleased]
+
+### Added
+
+- A recognition API: pages or line images in, lines and text out, nothing stored (#93). Big
+  requests can be queued and fetched later (#96), lines can carry their confidence bands (#97),
+  layout regions can be found first (#98), and a request's pages can be kept as a dataset (#99).
+  Each account's reading is counted, with an optional monthly cap (#94); a token can be limited to
+  chosen models (#110), and an admin can grant a viewer recognition alone (#113).
+- A Try page to read your own scans with any model (#95): the text beside the scan and as tall as
+  it, following the hovered line (#119), what a scan is waiting on (#108), TIFF scans (#118), a
+  choice of reading order (#120), and new scans shown at once (#121).
+- Shared notes on datasets and pages.
+- Test data: pages marked as test pages stay out of training, a training can be scored on several
+  test sets, and each is shown on its own.
+- Per-dataset limits on its use for training, scoring, external LLMs and export by others.
+- PAGE XML, ALTO, hOCR and TEI import and export with the full layout (#61), the scans in every
+  archive export, and a zip of scans taken as pages.
+- Text datasets from a IIIF manifest, with their lines exported as Web Annotations.
+- A step-by-step New job wizard with page picking and convention flags; a dataset's settings
+  change in the same steps.
+- A catalog of convention flags with descriptions and examples (#56, #57); an OCR training can
+  teach a model new flags.
+- Augmentation pipelines for layout and line models, previewed on checked pages; the catalog is
+  re-read when a backend is updated (#50).
+- Layout element shapes per dataset: aligned boxes, rotated boxes or polygons (#64).
+- An Automatic OCR decoding that reads each model the way that suits it (#101), including a
+  token decoder's own reading (#102, #103).
+- An offer to re-run steps whose model has been replaced, and models marked as another's new
+  version.
+- A queue drawn as a timeline with estimated start times (#55).
+- Sign-in, sign-up with an admin's approval, and passwords on DeepLabel's own pages (#67), with a
+  live strength meter (#76); a username works as well as an email (#75).
+- A footer with the version and links to the documentation, the source and the issues.
+- Every page fits phones and tablets (#87, #104).
+- A keyboard map of the shortcuts (#31) and a character keyboard that finds characters by name (#33).
+- A transcription check: a model reads a dataset's checked lines to find wrong ground truth, and a
+  flagged line is fixed from its row (#126).
+- Line models are evaluated against checked outlines: found, missed, merged, split and extra lines,
+  with both sets of outlines drawn over the scan (#130).
+
+### Changed
+
+- A model and the run that made it are one page, opening on what it learned from and how the
+  training went (#123); a run shows the epochs it was left to train for (#115).
+- Every evaluated model is one row of one table, a column per test set and one score per cell (#124).
+- A model family draws its versions as one line and names them in full (#53, #91).
+- A finished OCR run is scored in Automatic decoding only (#122).
+- Line crops are cut plainly, without painting out what lies outside the outline (#129).
+- Models that fit on the card stay loaded together instead of being swapped for every page (#128).
+- Line corrections are saved unchecked; checking is a step of its own.
+- The page editor: labels on every box in edit mode (#77), lines that stay in the box they lie in
+  (#71), a class pressed over gathered shapes draws a tight box (#74), Ctrl draws over a selected
+  shape (#70), and edits show at once and are saved in the background, each one revision-checked
+  (#72, #81, #82).
+- Scans scroll sideways with Shift and the wheel (#68), and the held wheel button pans (#69).
+- The transcript loads a page at a time, searches on the server and fills the window (#47, #48).
+- The dataset page, the viewer bar, the dataset list, the runs table and the people table are
+  regrouped around what is used most.
+- Large uploads are sent in parts.
+- Log out ends the Authentik session as well (#66).
+- New API tokens last a year by default (#34); "Opening a page" settings are now "Default
+  visibility" (#32).
+
+### Fixed
+
+- A skipped layout is no longer called found, and a page names the step it failed in (#43).
+- Checked lines stay checked through an ALTO export and import (#59).
+- The app finds the backend and the sign-in service again after their containers are recreated (#51).
+- A late answer can no longer set off a second reload of the dataset page (#65).
+- A save on its way when a page is left still reaches the server (#92).
+- The run page's Data tab no longer scrolls the whole window (#117); a zoomed training chart has a
+  Reset zoom button (#116).
+- The editors keep their place in a narrow window (#109), and a hint cut short there shows in full
+  on hover (#111).
+- A taken dataset name is refused on the first step of New job.
+
+## [0.1.0] - 2026-10-23
+
+The first public release.
+
+[Unreleased]: https://github.com/m2key1/DeepLabel/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/m2key1/DeepLabel/releases/tag/v0.1.0

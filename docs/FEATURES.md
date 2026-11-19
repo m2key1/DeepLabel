@@ -1,7 +1,8 @@
 # Features
 
 A short guide to what DeepLabel does and how to use it. The [README](../README.md) has the
-overview and setup.
+overview and setup, and [CHANGELOG.md](../CHANGELOG.md) what each release changed. The version
+in the footer of every page opens the running release's notes on GitHub.
 
 ## Contents
 
