@@ -2,6 +2,7 @@
  *  The catalogue itself comes from the server, so a capability this build has never
  *  heard of still appears - under its own name, which is better than not at all. */
 const LABELS: Record<string, { short: string; hint: string }> = {
+  // No longer granted - a role decides them now - but an account's history still names them.
   'pipeline.layout': { short: 'Layout', hint: 'Detect layout boxes, on a new dataset or again' },
   'pipeline.lines': { short: 'Lines', hint: 'Detect lines, on a new dataset or again' },
   'pipeline.ocr': { short: 'Read', hint: 'Read lines, on a new dataset or again' },

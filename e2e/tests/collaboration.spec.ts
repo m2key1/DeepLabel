@@ -38,7 +38,7 @@ function feedRevision(tab: Page): Promise<number> {
 async function correctAs(username: string, lineId: number, text: string) {
   return backendFetch(`/api/lines/${lineId}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...identity(username, 'member') },
+    headers: { 'Content-Type': 'application/json', ...identity(username, 'manager') },
     body: JSON.stringify({ corrected_text: text }),
   })
 }
@@ -108,7 +108,7 @@ test.describe('Scenario: one person in two tabs', () => {
 test.describe('Scenario: two people on one page', () => {
   test('a colleague\'s correction appears without reloading', async ({ page }) => {
     const colleague = `live-${Date.now()}`
-    seedSession('member', colleague)
+    seedSession('manager', colleague)
     const { jobId, pageId } = await seedSharedPage(colleague)
     const line = await firstLine(jobId, pageId)
 
@@ -125,7 +125,7 @@ test.describe('Scenario: two people on one page', () => {
 
   test('saving over a colleague\'s edit is refused, and either version can be kept', async ({ page }) => {
     const colleague = `clash-${Date.now()}`
-    seedSession('member', colleague)
+    seedSession('manager', colleague)
     const { jobId, pageId } = await seedSharedPage(colleague)
     const line = await firstLine(jobId, pageId)
 

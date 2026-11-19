@@ -26,9 +26,9 @@ test.describe('Scenario: the shortcut sheet is in front of the page', () => {
 test.describe("Scenario: an admin reading the list as someone else", () => {
   test('"only mine" means that person\'s datasets under the lens', async ({ page }) => {
     const member = `lens-mine-${Date.now()}`
-    seedSession('member', member)
+    seedSession('manager', member)
     const theirsName = uniqueName('Their own dataset')
-    const theirs = await createJob(theirsName, 1, undefined, identity(member, 'member'))
+    const theirs = await createJob(theirsName, 1, undefined, identity(member, 'manager'))
     await waitForJobStatus(theirs, 'done')
 
     await page.goto(`/?as=${encodeURIComponent(member)}`)

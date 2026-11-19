@@ -12,13 +12,10 @@ from app.main import app
 
 SECRET = 'test-secret'
 ADMIN = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'root', 'X-Auth-Role': 'admin'}
-MEMBER_CAPS = 'pipeline.layout pipeline.lines pipeline.ocr train.local'
-ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'member',
-         'X-Auth-Caps': MEMBER_CAPS}
-BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'member',
-       'X-Auth-Caps': MEMBER_CAPS}
-# Alice, once an admin has taken layout detection from her.
-ALICE_NO_LAYOUT = {**ALICE, 'X-Auth-Caps': 'pipeline.lines pipeline.ocr train.local'}
+ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'manager', 'X-Auth-Caps': ''}
+# Bob checks lines: on a dataset he was given he may look at what a run would replace,
+# but running models is a Manager's.
+BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'reviewer', 'X-Auth-Caps': ''}
 
 POLY = '[[0,0],[1,0],[1,1],[0,1]]'
 
@@ -240,24 +237,14 @@ class TestRefusals:
         assert client.get('/api/pages/1/run', headers=BOB).status_code == 200
         refused = run(client, 'layout', headers=BOB)
         assert refused.status_code == 403
-        assert refused.json()['detail'] == 'only the owner or an admin may re-run Seeded'
+        assert refused.json()['detail'] == 'only a Manager may re-run Seeded'
 
     def test_an_admin_may_run_any_page(self, client, conn):
         assert run(client, 'ocr', headers=ADMIN).status_code == 200
         assert job(conn)['status'] == 'queued'
 
-    def test_a_phase_taken_from_the_owner_is_refused_on_their_own_page(self, client, conn):
-        """The same capability the whole-dataset re-run asks for: one page at a time is
-        not a way round it."""
-        response = run(client, 'layout', headers=ALICE_NO_LAYOUT)
-
-        assert response.status_code == 403
-        assert response.json()['detail'] == 'not permitted: pipeline.layout'
-        assert job(conn)['status'] == 'done'
-        assert conn.execute('SELECT COUNT(*) c FROM elements WHERE deleted = 0').fetchone()['c'] == 1
-
-    def test_a_phase_the_owner_still_holds_runs_on_the_same_page(self, client, conn):
-        assert run(client, 'ocr', headers=ALICE_NO_LAYOUT).status_code == 200
+    def test_the_owner_runs_any_phase_on_their_page_without_a_granted_capability(self, client, conn):
+        assert run(client, 'layout', headers=ALICE).status_code == 200
         assert job(conn)['status'] == 'queued'
 
 
@@ -377,19 +364,12 @@ class TestRunningManyPagesAtOnce:
         assert response.status_code == 400
         assert response.json()['detail'] == 'phase must be layout, lines or ocr'
 
-    def test_a_phase_taken_from_the_owner_is_refused_for_a_selection_too(self, client, conn):
-        response = self.run_pages(client, 'layout', [1, 2], headers=ALICE_NO_LAYOUT)
-
-        assert response.status_code == 403
-        assert response.json()['detail'] == 'not permitted: pipeline.layout'
-        assert job(conn)['status'] == 'done'
-        assert self.run_pages(client, 'ocr', [1, 2], headers=ALICE_NO_LAYOUT).status_code == 200
-
     def test_an_assignee_may_not_queue_a_batch_either(self, client, conn):
         conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'bob')")
         conn.commit()
 
         assert self.run_pages(client, 'ocr', [1, 2], headers=BOB).status_code == 403
+        assert job(conn)['status'] == 'done'
 
     def test_a_dataset_already_running_is_refused(self, client, conn):
         conn.execute("UPDATE jobs SET status = 'running' WHERE id = 'j1'")

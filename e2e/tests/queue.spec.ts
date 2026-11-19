@@ -4,7 +4,7 @@ import {
 } from '../helpers/api'
 
 const DEV = identity('dev', 'admin')
-const OTHER = identity('quentin', 'member')
+const OTHER = identity('quentin', 'manager')
 
 const rows = (page: import('@playwright/test').Page) => page.getByTestId('queue-row')
 

@@ -209,7 +209,7 @@ test.describe('Scenario: a cluster submit while the cluster is out of reach', ()
       // itself - but opening the session takes the admin's second factor, so no Reconnect.
       const username = `cluster-watcher-${Date.now()}`
       const context = await browser.newContext()
-      await useSession(context, seedSession('member', username))
+      await useSession(context, seedSession('manager', username))
       const memberPage = await context.newPage()
       const memberView = async () => (await memberPage.request.get('/api/trainings')).json()
       // Before the grant the cluster is none of theirs, and nothing about it is reported.
@@ -247,11 +247,11 @@ test.describe("Scenario: rerunning somebody else's run", () => {
 
       const username = `rerunner-${Date.now()}`
       const context = await browser.newContext()
-      await useSession(context, seedSession('member', username))
+      await useSession(context, seedSession('manager', username))
       const memberPage = await context.newPage()
       // Backend oracle for the premise: the dataset is served to the admin and not to them.
       expect((await listJobs()).some((j) => j.id === datasetId)).toBe(true)
-      expect((await listJobs(identity(username, 'member'))).some((j) => j.id === datasetId)).toBe(false)
+      expect((await listJobs(identity(username, 'manager'))).some((j) => j.id === datasetId)).toBe(false)
 
       await memberPage.goto(`/models/train?task=ocr&from=${source.id}`)
       await expect(memberPage.getByRole('heading', { name: `Rerun ${sourceName}` })).toBeVisible()
@@ -262,7 +262,7 @@ test.describe("Scenario: rerunning somebody else's run", () => {
 
       // Shared, the same page carries the dataset over and has nothing left to name.
       await shareJob(datasetId, [username])
-      await expect.poll(async () => (await listJobs(identity(username, 'member'))).some((j) => j.id === datasetId))
+      await expect.poll(async () => (await listJobs(identity(username, 'manager'))).some((j) => j.id === datasetId))
         .toBe(true)
       await memberPage.reload()
       await expect(memberPage.getByText('6 checked lines selected')).toBeVisible()

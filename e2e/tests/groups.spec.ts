@@ -77,7 +77,7 @@ test.describe('Scenario: organizing datasets in groups', () => {
 test.describe('Scenario: what a group name gives away', () => {
   test('a member is not handed the names of projects they cannot reach', async ({ page, browser }) => {
     const username = `grouped-${Date.now()}`
-    const token = seedSession('member', username)
+    const token = seedSession('manager', username)
 
     const theirs = uniqueName('Theirs')
     const notTheirs = uniqueName('Not theirs')

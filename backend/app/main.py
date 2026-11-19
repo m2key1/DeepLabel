@@ -7,6 +7,7 @@ from PIL import Image
 
 from app import (augmentations, caches, config, dataset_sync, geometry, jobs, llm_gt, llm_ocr,
                  llm_queue, store, trainer, training, weights)
+from app.deps import LEGACY_ROLES
 from app.routes import (augmentations as augmentation_routes, backend_api, bulk, contributors, conventions, elements,
                         evaluations, exports, groups, lines, llm, maps, models, pages, people, pipeline, presence,
                         recognize, reference as reference_routes, trainings, transcript)
@@ -58,6 +59,7 @@ async def auth_gate(request: Request, call_next):
             return JSONResponse({'detail': 'forbidden'}, status_code=403)
         username = request.headers.get('X-Auth-User')
         role = request.headers.get('X-Auth-Role')
+        role = LEGACY_ROLES.get(role, role)
         if not username or not role:
             return JSONResponse({'detail': 'not authenticated'}, status_code=401)
         recognition = RECOGNITION.fullmatch(request.url.path) is not None

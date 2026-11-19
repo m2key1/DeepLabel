@@ -23,6 +23,7 @@ import { Section } from '../components/ui/Section'
 import { SectionNav, SectionNavAction, SectionPicker } from '../components/ui/SectionNav'
 import { StatRow, StatTile } from '../components/ui/StatTile'
 import { pageShell } from '../components/ui/page'
+import { ROLE_DESCRIPTION, ROLE_LABEL } from '../lib/roles'
 import { NotFoundPage } from './NotFoundPage'
 
 const OVERVIEW = 'overview'
@@ -83,7 +84,7 @@ function Header({ person, own, groups }: { person: Person; own: boolean; groups:
         <h1 data-testid="profile-name" className="font-serif text-xl font-semibold">{name}</h1>
         <div className="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
           {person.display_name && <span data-testid="profile-username" className="font-mono text-xs">{person.username}</span>}
-          <Badge data-testid="profile-role">{person.role}</Badge>
+          <Badge data-testid="profile-role" title={ROLE_DESCRIPTION[person.role]}>{ROLE_LABEL[person.role]}</Badge>
           {!isNaN(since.getTime()) && (
             <span data-testid="profile-since">Member since {MEMBER_SINCE.format(since)}</span>
           )}

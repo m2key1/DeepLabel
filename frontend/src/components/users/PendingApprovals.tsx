@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { approveUser, rejectUser, type AppUser, type Role } from '../../api'
+import { ROLES, ROLE_DESCRIPTION, ROLE_LABEL } from '../../lib/roles'
 import { formatDate, formatRelative } from '../../util'
 import { Button } from '../ui/Button'
 import { Select } from '../ui/Field'
 import { Section } from '../ui/Section'
 
-const ROLES: Role[] = ['viewer', 'member', 'admin']
+// Lowest first: a new person starts with the least and is given more.
+const LOWEST_FIRST = [...ROLES].reverse()
 
 function Waiting({ user, onDecided, onError }: {
   user: AppUser
@@ -36,8 +38,9 @@ function Waiting({ user, onDecided, onError }: {
         <span className="text-ink-muted">Role</span>
         <Select size="sm" data-testid="pending-role" value={role} disabled={busy}
                 onChange={(e) => setRole(e.target.value as Role)}>
-          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+          {LOWEST_FIRST.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
         </Select>
+        <span data-testid="pending-role-description" className="text-xs text-ink-muted">{ROLE_DESCRIPTION[role]}</span>
       </label>
       <span className="flex gap-2">
         <Button size="sm" variant="primary" data-testid="approve" disabled={busy}

@@ -7,10 +7,9 @@ from app.main import app
 
 SECRET = 'test-secret'
 ADMIN = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'root', 'X-Auth-Role': 'admin'}
-OWNER = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'member',
-         'X-Auth-Caps': 'pipeline.layout pipeline.lines pipeline.ocr'}
-DISCARDING_OWNER = {**OWNER, 'X-Auth-Caps': 'pipeline.layout pipeline.lines pipeline.ocr pipeline.discard'}
-SHARED = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'member'}
+OWNER = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'manager', 'X-Auth-Caps': ''}
+# A Reviewer the dataset is shared with: running models on it is not his.
+SHARED = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'reviewer'}
 
 # Three OCR models (v2 the default, v1 its predecessor, a fine-tune of v1), two line
 # models and two layout models. Pages 1 and 2 were laid out by layout 10, their lines found
@@ -181,9 +180,8 @@ class TestSwitchAndRun:
         conn.execute("UPDATE pages SET layout_checked = 1 WHERE id = 1")
         conn.execute("UPDATE models SET is_default = (id = 11) WHERE task = 'layout'")
 
-        # Retiring a layout sign-off is throwing checked work away, which is its own permission.
-        assert api.post('/api/jobs/j1/newer-models', json={'tasks': ['layout']}, headers=OWNER).status_code == 403
-        response = api.post('/api/jobs/j1/newer-models', json={'tasks': ['layout']}, headers=DISCARDING_OWNER)
+        # Retiring a layout sign-off throws checked work away, which is the dataset's Managers' to do.
+        response = api.post('/api/jobs/j1/newer-models', json={'tasks': ['layout']}, headers=OWNER)
 
         assert response.status_code == 200, response.text
         assert conn.execute('SELECT COUNT(*) FROM elements WHERE deleted = 0').fetchone()[0] == 0
@@ -204,6 +202,6 @@ class TestSwitchAndRun:
 
         assert 'layout' not in offers(api)
 
-    def test_someone_who_is_not_the_owner_cannot(self, client):
+    def test_a_reviewer_it_is_shared_with_cannot(self, client):
         api, _ = client
         assert api.post('/api/jobs/j1/newer-models', json={'tasks': ['ocr']}, headers=SHARED).status_code == 403

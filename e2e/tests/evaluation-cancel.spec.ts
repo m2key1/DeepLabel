@@ -68,7 +68,7 @@ test.describe('Scenario: stopping an evaluation', () => {
 
   test('a member is offered Cancel on their own rows only', async ({ page }) => {
     const member = uniqueName('quinn').toLowerCase().replace(/[^a-z0-9]/g, '')
-    await useSession(page.context(), seedSession('member', member))
+    await useSession(page.context(), seedSession('manager', member))
     const entry = (id: number, owner: string) => ({
       kind: 'evaluation', id, name: `Eval of ${owner}`, owner, status: 'queued', phase: null,
       created_at: '2026-01-03 00:00:00', queued_at: '2026-01-03 00:00:00', started_at: null,

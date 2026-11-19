@@ -17,7 +17,7 @@ def fake(tmp_path, monkeypatch):
     fake.add('alice@example.org', 'alice-password', name='Alice')
     conn = store.connect(config.DB_PATH)
     store.upsert_user(conn, 'root@example.org', 'root@example.org', 'admin', email='root@example.org')
-    store.upsert_user(conn, 'alice@example.org', 'alice@example.org', 'member', email='alice@example.org')
+    store.upsert_user(conn, 'alice@example.org', 'alice@example.org', 'manager', email='alice@example.org')
     conn.close()
     return fake
 
@@ -65,7 +65,7 @@ class TestInvitations:
         return signed_in(as_user).post('/api/users/invitations', json={'email': email, 'name': name, 'role': role})
 
     def test_an_unknown_email_gets_an_account_and_a_deeplabel_link(self, fake):
-        response = self.invite(' Julia@Example.org ', role='member', name='Julia D')
+        response = self.invite(' Julia@Example.org ', role='manager', name='Julia D')
 
         assert response.status_code == 200
         body = response.json()
@@ -77,14 +77,14 @@ class TestInvitations:
             'email': 'julia@example.org', 'purpose': 'invite'}
 
     def test_the_invited_person_sets_a_password_and_is_in_with_their_role_without_waiting(self, fake):
-        link = self.invite('julia@example.org', role='member').json()['link']
+        link = self.invite('julia@example.org', role='manager').json()['link']
         client = browser()
 
         response = client.post('/api/set-password', json={'token': token_of(link), 'password': 'julias-password'})
 
         assert response.status_code == 200 and response.json() == {'next': '/'}
         me = client.get('/api/me').json()
-        assert (me['user'], me['role'], me['pending']) == ('julia@example.org', 'member', False)
+        assert (me['user'], me['role'], me['pending']) == ('julia@example.org', 'manager', False)
         assert client.get('/validate').status_code == 200
         assert fake.by(email='julia@example.org')['password'] == 'julias-password'
 
@@ -255,15 +255,15 @@ class TestSignUpAndApproval:
         assert admin.get('/api/users/pending').json() == {'count': 1}
         mia = account('mia@example.org')
 
-        approved = admin.post(f"/api/users/{mia['id']}/approve", json={'role': 'member'})
+        approved = admin.post(f"/api/users/{mia['id']}/approve", json={'role': 'manager'})
 
         assert approved.status_code == 200
-        assert (approved.json()['pending'], approved.json()['role']) == (0, 'member')
+        assert (approved.json()['pending'], approved.json()['role']) == (0, 'manager')
         assert admin.get('/api/users/pending').json() == {'count': 0}
         assert client.get('/validate').status_code == 200
         assert client.get('/api/me').json()['pending'] is False
         history = admin.get(f"/api/users/{mia['id']}/audit").json()['entries']
-        assert [(e['field'], e['old_value'], e['new_value']) for e in history] == [('approved', 'pending', 'member')]
+        assert [(e['field'], e['old_value'], e['new_value']) for e in history] == [('approved', 'pending', 'manager')]
 
     def test_a_rejected_sign_up_is_switched_off_here_and_in_authentik(self, open_sign_up):
         client = browser()
@@ -376,7 +376,7 @@ class TestWeakPasswordAtSignIn:
     def weak(self, fake):
         fake.add('olaf@example.org', 'olaf123')
         conn = store.connect(config.DB_PATH)
-        store.upsert_user(conn, 'olaf@example.org', 'olaf@example.org', 'member', email='olaf@example.org')
+        store.upsert_user(conn, 'olaf@example.org', 'olaf@example.org', 'manager', email='olaf@example.org')
         conn.close()
         return fake
 

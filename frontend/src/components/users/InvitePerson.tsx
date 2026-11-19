@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { inviteUser, type Invitation, type Role } from '../../api'
+import { ROLES, ROLE_DESCRIPTION, ROLE_LABEL } from '../../lib/roles'
 import { useAutoClear } from '../../messages'
 import { Button } from '../ui/Button'
 import { Input, Select } from '../ui/Field'
 import { Section } from '../ui/Section'
 import { PasswordLinkBox } from './PasswordLinkBox'
 
-const ROLES: Role[] = ['viewer', 'member', 'admin']
+// Lowest first: a new person starts with the least and is given more.
+const LOWEST_FIRST = [...ROLES].reverse()
 
 export function InvitePerson() {
   const [email, setEmail] = useState('')
@@ -65,8 +67,9 @@ export function InvitePerson() {
         <label className="flex items-center gap-2 text-sm">
           <span className="text-ink-muted">Role</span>
           <Select size="md" data-testid="invite-role" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+            {LOWEST_FIRST.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
           </Select>
+          <span data-testid="invite-role-description" className="text-xs text-ink-muted">{ROLE_DESCRIPTION[role]}</span>
         </label>
         <Button variant="primary" size="md" onClick={invite} disabled={busy || !email.trim()}>
           {busy ? 'Creating link…' : 'Create link'}

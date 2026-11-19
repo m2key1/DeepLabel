@@ -8,7 +8,7 @@ interface Auth {
   user: string
   role: Role
   isAdmin: boolean
-  canEdit: boolean // member or admin - anyone who isn't read-only
+  canEdit: boolean // anyone who isn't read-only
   /** What this person may ask the backend for, resolved from their role and the
    *  exceptions an admin made. The backend checks it too - this only decides whether
    *  a control is worth showing. */

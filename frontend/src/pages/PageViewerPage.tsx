@@ -110,6 +110,7 @@ import { errorRates, percent } from '../lib/errorRate'
 import { DECORATIVE, LINE_CLASS, isEditable } from '../lib/layoutClasses'
 import { composedEdit, displayed, sameText } from '../lib/text'
 import { useAuth } from '../auth'
+import { reaches } from '../lib/roles'
 import { useCommand } from '../commands'
 import { comboLabel, eventCombo, useSettings } from '../settings'
 import { beyondPlain, orderByGroups } from '../palette'
@@ -221,8 +222,8 @@ const ELEMENT_PENS: Record<ElementShape, { label: string; hint: string; editHint
 }
 
 export function PageViewerPage() {
-  const { user, isAdmin, canEdit, can } = useAuth()
-  const canReread = canEdit && can('pipeline.ocr')
+  const { canEdit } = useAuth()
+  const canReread = canEdit
   const { hotkeys: hk, keyboard: vkbd, keyboardMode, keyboardSource, pageOverlays,
           save: saveSettings } = useSettings()
   const { id, pageId } = useParams<{ id: string; pageId: string }>()
@@ -239,6 +240,10 @@ export function PageViewerPage() {
   // id rather than a flag, so a page with nothing on it cannot leave it armed for the next.
   const pendingFirstLine = useRef<number | null>(null)
   const [job, setJob] = useState<JobDetail | null>(null)
+  // Checking a line, a box or a page is a Reviewer's; running models and the page's test
+  // flag are a Manager's. An Annotator corrects and sees what was checked.
+  const canCheck = reaches(job?.my_role, 'reviewer')
+  const canManage = reaches(job?.my_role, 'manager')
   // What the OCR model resizes a line to, for the loupe. Null until a run has recorded it.
   const [ocrModel, setOcrModel] = useState<RegistryModel | null>(null)
   // What the server last sent. What is shown is this with every edit not yet in it laid
@@ -793,6 +798,7 @@ export function PageViewerPage() {
   }
 
   const toggleLineChecked = async (line: Line, checked: boolean) => {
+    if (!canCheck) return
     const pend = pendingOrient.get(line.id)
     const orientation = checked && pend !== undefined ? pend : undefined // persist rotation on check
     applyLine({ ...line, checked, ...(orientation !== undefined ? { orientation } : {}) })
@@ -812,6 +818,7 @@ export function PageViewerPage() {
   }
 
   const toggleElementChecked = async (el: PageElement, checked: boolean) => {
+    if (!canCheck) return
     const mark = (t: PageElement): PageElement =>
       t.id === el.id ? { ...t, checked, lines: t.lines.map((l) => ({ ...l, checked })) } : t
     setPage((p) => (p ? { ...p, elements: p.elements.map(mark) } : p))
@@ -869,7 +876,7 @@ export function PageViewerPage() {
     const settled = edits.push(edit)
     recordEdit(settled.then((result) => result.span, () => undefined), localSteps(page, after, realId))
   }
-  const editDeps = () => ({ pageId: page!.id, book, aspect })
+  const editDeps = () => ({ pageId: page!.id, book, aspect, drawsChecked: canCheck })
   const kindOf = (className: string): PageElement['kind'] => (containerClasses.has(className) ? 'container' : 'content')
 
   queueHooks.current = {
@@ -1080,7 +1087,7 @@ export function PageViewerPage() {
   }
 
   const toggleLayoutChecked = () => {
-    if (!page) return
+    if (!page || !canCheck) return
     const next = !page.layout_checked
     pushEdit(setPageFlag(editDeps(), page, 'layout_checked', next))
     setJob((j) =>
@@ -1090,7 +1097,7 @@ export function PageViewerPage() {
 
   // Dataset-wide marking, not one of the page's edits: shown at once, put back if refused.
   const toggleTestPage = async () => {
-    if (!page) return
+    if (!page || !canManage) return
     const next = !page.is_test
     setPage((p) => (p ? { ...p, is_test: next } : p))
     try {
@@ -1102,7 +1109,7 @@ export function PageViewerPage() {
   }
 
   const toggleLinesChecked = () => {
-    if (!page) return
+    if (!page || !canCheck) return
     pushEdit(setPageFlag(editDeps(), page, 'lines_checked', !page.lines_checked))
   }
 
@@ -2222,7 +2229,7 @@ export function PageViewerPage() {
   const checkAndAdvance = (line: Line) => {
     const list = reviewMode ? reviewLines : stage === 'element' ? listLines : sortedPageLines
     const at = list.findIndex((l) => l.id === line.id)
-    void toggleLineChecked(line, true)
+    if (canCheck) void toggleLineChecked(line, true)
     if (reviewMode) return gotoQueued(1)
     if (at !== -1 && at + 1 < list.length) return activateLine(list[at + 1].id)
     // Last line of the page: on to the next one, first line focused. Within an element the
@@ -3076,9 +3083,10 @@ export function PageViewerPage() {
         <input
           type="checkbox"
           checked={line.checked}
+          disabled={!canCheck}
           onChange={(e) => toggleLineChecked(line, e.target.checked)}
-          title="Checked"
-          className="cursor-pointer accent-accent"
+          title={canCheck ? 'Checked' : line.checked ? 'Checked by a Reviewer' : 'Waiting for a Reviewer to check it'}
+          className="cursor-pointer accent-accent disabled:cursor-default"
         />
       </label>
       {editingId === line.id ? (
@@ -3562,12 +3570,16 @@ export function PageViewerPage() {
     return (
       <>
         <div className="space-y-1">
-          <Toggle on={!!page?.layout_checked} onClick={toggleLayoutChecked} className="w-full">
-            Layout complete <span className="opacity-60">{comboLabel(hk.verify)}</span>
-          </Toggle>
-          <Toggle on={!!page?.lines_checked} onClick={toggleLinesChecked} className="w-full">
-            Lines complete
-          </Toggle>
+          {canCheck && (
+            <>
+              <Toggle on={!!page?.layout_checked} onClick={toggleLayoutChecked} className="w-full">
+                Layout complete <span className="opacity-60">{comboLabel(hk.verify)}</span>
+              </Toggle>
+              <Toggle on={!!page?.lines_checked} onClick={toggleLinesChecked} className="w-full">
+                Lines complete
+              </Toggle>
+            </>
+          )}
           <div className="flex gap-1">
             <Button size="xs" onClick={deleteCurrent} disabled={curSelId() === null} className="flex-1">
               Delete
@@ -3745,7 +3757,7 @@ export function PageViewerPage() {
               return note
             }} />
           )}
-          {page && job && (isAdmin || job.owner === user)
+          {page && job && canManage
             ? <TestPageSwitch on={page.is_test} onClick={toggleTestPage} data-testid="page-test-toggle" />
             : page?.is_test && <TestDataChip data-testid="page-test-chip">Test page</TestDataChip>}
           {page && <PresenceBanner entries={onPage(page.id)} />}
@@ -3829,16 +3841,18 @@ export function PageViewerPage() {
             {canEdit && page && (
               <>
                 {!textOnly && <BarDivider />}
-                <RunMenu
-                  pageId={page.id}
-                  jobId={jobId}
-                  llmModelIds={job?.llm_model_ids ?? []}
-                  busy={runningJob}
-                  onRun={runPhase}
-                  onReadPage={() => setReadOpen(true)}
-                  onRemoveReadings={() => setRemoveOpen(true)}
-                  onError={setError}
-                />
+                {canManage && (
+                  <RunMenu
+                    pageId={page.id}
+                    jobId={jobId}
+                    llmModelIds={job?.llm_model_ids ?? []}
+                    busy={runningJob}
+                    onRun={runPhase}
+                    onReadPage={() => setReadOpen(true)}
+                    onRemoveReadings={() => setRemoveOpen(true)}
+                    onError={setError}
+                  />
+                )}
                 {!textOnly && <ButtonGroup aria-label="Turn the scan">
                   {([[-90, 'anticlockwise'], [90, 'clockwise']] as const).map(([degrees, way]) => (
                     <GroupButton
@@ -3922,7 +3936,6 @@ export function PageViewerPage() {
           autocheck={job.llm_autocheck ?? false}
           consensusWithOcr={job.llm_consensus_with_ocr ?? false}
           prompt={job.llm_prompt ?? ''}
-          canOwn={isAdmin || job.owner === user}
           keptInHouse={!job.data_use.external_llm}
           onClose={() => setReadOpen(false)}
           onStarted={() => {
@@ -4210,9 +4223,11 @@ export function PageViewerPage() {
                       <input
                         type="checkbox"
                         checked={selected.checked}
+                        disabled={!canCheck}
                         onChange={(e) => toggleElementChecked(selected, e.target.checked)}
-                        title="Mark entry and all its lines checked"
-                        className="cursor-pointer accent-accent"
+                        title={canCheck ? 'Mark entry and all its lines checked'
+                          : selected.checked ? 'Checked by a Reviewer' : 'Waiting for a Reviewer to check it'}
+                        className="cursor-pointer accent-accent disabled:cursor-default"
                       />
                       <span
                         data-testid="selected-class"

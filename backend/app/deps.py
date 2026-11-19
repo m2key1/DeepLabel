@@ -55,6 +55,19 @@ def require_role(*roles: str):
     return dep
 
 
+# Each role may do everything the one before it may.
+ROLES = ('viewer', 'annotator', 'reviewer', 'manager', 'admin')
+WRITERS = ROLES[1:]
+ROLE_NAMES = {'viewer': 'Viewer', 'annotator': 'Annotator', 'reviewer': 'Reviewer', 'manager': 'Manager',
+              'admin': 'Admin'}
+# An account the auth service has not moved to these roles yet keeps what it could do.
+LEGACY_ROLES = {'member': 'manager'}
+
+
+def role_reaches(role: str, least: str) -> bool:
+    return role in ROLES and ROLES.index(role) >= ROLES.index(least)
+
+
 def has_capability(user: dict, capability: str) -> bool:
     """An admin may do everything, whatever the header says - that is what the role is.
     Everyone else carries the set the auth service resolved for them."""
@@ -124,43 +137,77 @@ def accessible_job(conn, job_id: str, user: dict) -> dict:
     return job
 
 
-def require_job_owner(conn, job_id: str, user: dict) -> None:
-    """Admins pass; everyone else must own the dataset. 404 keeps hidden datasets hidden."""
-    require_job_access(conn, job_id, user)
-    row = conn.execute('SELECT owner FROM jobs WHERE id = ?', (job_id,)).fetchone()
+def role_given(owner: str, user: dict) -> str:
+    """The role someone acts with on a dataset they can open: their account's, except that
+    whoever created a dataset manages it, whatever their account role."""
+    if user['role'] in ('admin', 'viewer'):
+        return user['role']
+    return 'manager' if owner == user['username'] else user['role']
+
+
+def role_on_job(conn, job_id: str, user: dict) -> str | None:
+    """The role someone acts with on a dataset, or None when they cannot open it."""
+    if not can_access_job(conn, job_id, user):
+        return None
+    return role_given(conn.execute('SELECT owner FROM jobs WHERE id = ?', (job_id,)).fetchone()['owner'], user)
+
+
+def require_job_role(conn, job_id: str, user: dict, least: str) -> None:
+    """404 for a dataset the caller cannot open, 403 where their role falls short."""
+    role = role_on_job(conn, job_id, user)
+    if role is None:
+        raise HTTPException(404)
+    if not role_reaches(role, least):
+        raise HTTPException(403, f'not permitted: this takes a {ROLE_NAMES[least]}')
+
+
+def require_job_manager(conn, job_id: str, user: dict) -> None:
+    require_job_role(conn, job_id, user, 'manager')
+
+
+_JOB_OF = {
+    'page': 'SELECT job_id FROM pages WHERE id = ?',
+    'element': 'SELECT p.job_id FROM elements e JOIN pages p ON e.page_id = p.id WHERE e.id = ?',
+    'region': 'SELECT p.job_id FROM regions r JOIN pages p ON r.page_id = p.id WHERE r.id = ?',
+    'line': 'SELECT p.job_id FROM lines l JOIN elements e ON l.element_id = e.id '
+            'JOIN pages p ON e.page_id = p.id WHERE l.id = ?',
+}
+
+
+def job_of(conn, kind: str, target_id: int) -> str:
+    """The dataset a page, element, region or line belongs to; 404 when there is none."""
+    row = conn.execute(_JOB_OF[kind], (target_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
-    if user['role'] != 'admin' and row['owner'] != user['username']:
-        raise HTTPException(403, 'not permitted')
+    return row[0]
+
+
+def require_role_on(conn, kind: str, target_id: int, user: dict, least: str) -> None:
+    require_job_role(conn, job_of(conn, kind, target_id), user, least)
+
+
+def draws_checked(conn, page_id: int, user: dict) -> bool:
+    """Whether what this person draws on a page counts as checked: a Reviewer's does,
+    while an Annotator's waits for one to look."""
+    return role_reaches(role_on_job(conn, job_of(conn, 'page', page_id), user), 'reviewer')
+
+
+def _require_access_to(conn, kind: str, target_id: int, user: dict) -> None:
+    if user['role'] == 'admin':
+        return
+    require_job_access(conn, job_of(conn, kind, target_id), user)
 
 
 def require_page_access(conn, page_id: int, user: dict) -> None:
-    if user['role'] == 'admin':
-        return
-    row = conn.execute('SELECT job_id FROM pages WHERE id = ?', (page_id,)).fetchone()
-    if row is None:
-        raise HTTPException(404)
-    require_job_access(conn, row['job_id'], user)
+    _require_access_to(conn, 'page', page_id, user)
 
 
 def require_element_access(conn, element_id: int, user: dict) -> None:
-    if user['role'] == 'admin':
-        return
-    row = conn.execute('SELECT p.job_id job_id FROM elements e JOIN pages p ON e.page_id = p.id '
-                       'WHERE e.id = ?', (element_id,)).fetchone()
-    if row is None:
-        raise HTTPException(404)
-    require_job_access(conn, row['job_id'], user)
+    _require_access_to(conn, 'element', element_id, user)
 
 
 def require_region_access(conn, region_id: int, user: dict) -> None:
-    if user['role'] == 'admin':
-        return
-    row = conn.execute('SELECT p.job_id job_id FROM regions r JOIN pages p ON r.page_id = p.id '
-                       'WHERE r.id = ?', (region_id,)).fetchone()
-    if row is None:
-        raise HTTPException(404)
-    require_job_access(conn, row['job_id'], user)
+    _require_access_to(conn, 'region', region_id, user)
 
 
 def conflict_detail(conn, revision_id: int | None, message: str | None = None,
@@ -195,10 +242,4 @@ def require_unchanged(conn, target_type: str, target_id: int, expected: int | No
 
 
 def require_line_access(conn, line_id: int, user: dict) -> None:
-    if user['role'] == 'admin':
-        return
-    row = conn.execute('SELECT p.job_id job_id FROM lines l JOIN elements e ON l.element_id = e.id '
-                       'JOIN pages p ON e.page_id = p.id WHERE l.id = ?', (line_id,)).fetchone()
-    if row is None:
-        raise HTTPException(404)
-    require_job_access(conn, row['job_id'], user)
+    _require_access_to(conn, 'line', line_id, user)

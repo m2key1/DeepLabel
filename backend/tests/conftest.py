@@ -35,6 +35,16 @@ def _drained_training_queue():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_dataset_sync_queue(monkeypatch):
+    """app.dataset_sync keeps one queue for the whole process too, and a route that
+    changes a dataset puts its id there; a test asserting on what a backfill queued would
+    otherwise read an id an earlier test left behind."""
+    import queue
+    from app import dataset_sync
+    monkeypatch.setattr(dataset_sync, '_queue', queue.Queue())
+
+
+@pytest.fixture(autouse=True)
 def _isolated_weight_store(tmp_path_factory, monkeypatch):
     """A registered training result is copied into the weight store; never the real one."""
     monkeypatch.setattr('app.config.WEIGHTS_DIR', tmp_path_factory.mktemp('weights'))

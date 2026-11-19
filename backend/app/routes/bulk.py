@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app import store
-from app.deps import can_access_job, check_capability, current_user, get_db
+from app.deps import can_access_job, current_user, get_db
 from app.routes import pipeline
 from app.routes.jobs import JobPatch, apply_patch
 
@@ -114,13 +114,8 @@ def _each(conn, jobs: list[dict], run) -> dict:
 @router.post('/api/bulk/rerun')
 def bulk_rerun(body: BulkRerun, conn=Depends(get_db), user: dict = Depends(current_user)):
     """Re-run the pipeline from a phase over a selection of datasets."""
-    # The same permissions one dataset asks for; a selection is not a way around them.
-    pipeline.require_phase(user, pipeline.Rerun(
-        from_phase=body.from_phase, force=body.force,
-        keep_checked=body.keep_checked, keep_text=body.keep_text))
     jobs = _selected(conn, body.job_ids, user)
-    for job in jobs:
-        pipeline.require_rerun_owner(job, user)
+    _require_rerun_manager(conn, jobs, user)
     if body.from_phase not in pipeline.RERUN_FROM:
         raise HTTPException(400, f'from_phase must be one of {sorted(pipeline.RERUN_FROM)}')
     return _each(conn, jobs, lambda job: pipeline.rerun_one(
@@ -131,18 +126,18 @@ def bulk_rerun(body: BulkRerun, conn=Depends(get_db), user: dict = Depends(curre
 @router.post('/api/bulk/reocr')
 def bulk_reocr(body: BulkReocr, conn=Depends(get_db), user: dict = Depends(current_user)):
     """Re-read lines over a selection of datasets."""
-    check_capability(user, 'pipeline.ocr')
     if body.scope not in ('pending', 'unchecked'):
         raise HTTPException(400, 'scope must be pending or unchecked')
     jobs = _selected(conn, body.job_ids, user)
+    _require_rerun_manager(conn, jobs, user)
     return _each(conn, jobs, lambda job: pipeline.reocr_one(conn, job['id'], body.scope, user))
 
 
 @router.post('/api/bulk/redetect')
 def bulk_redetect(body: Selection, conn=Depends(get_db), user: dict = Depends(current_user)):
     """Re-detect lines over a selection of datasets."""
-    check_capability(user, 'pipeline.lines')
     jobs = _selected(conn, body.job_ids, user)
+    _require_rerun_manager(conn, jobs, user)
     return _each(conn, jobs, lambda job: pipeline.redetect_one(conn, job['id']))
 
 
@@ -177,8 +172,15 @@ def bulk_move(body: BulkMove, conn=Depends(get_db), user: dict = Depends(current
         conn, job['id'], job, patch, fields, user) or None)
 
 
+def _require_rerun_manager(conn, jobs: list[dict], user: dict) -> None:
+    """A selection is refused as a whole, naming the first dataset the caller may not
+    re-run - one dataset's permission is not a way around another's."""
+    for job in jobs:
+        pipeline.require_rerun_manager(conn, job, user)
+
+
 def _refuse_rerun(conn, job, body, user) -> None:
-    pipeline.require_rerun_owner(job, user)
+    pipeline.require_rerun_manager(conn, job, user)
     pipeline.require_rerun(conn, job, body.from_phase, body.force)
 
 

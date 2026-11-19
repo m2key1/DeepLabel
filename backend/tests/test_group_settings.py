@@ -11,9 +11,9 @@ from app.main import app
 
 SECRET = 'test-secret'
 ADMIN = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'root', 'X-Auth-Role': 'admin'}
-ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'member'}
-BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'member'}
-STRANGER = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'mallory', 'X-Auth-Role': 'member'}
+ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'manager'}
+BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'manager'}
+STRANGER = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'mallory', 'X-Auth-Role': 'manager'}
 
 
 @pytest.fixture
@@ -126,15 +126,17 @@ class TestWhenOneDatasetCannotTakeIt:
 
     def test_a_refused_dataset_keeps_the_settings_it_had_before_the_refusal(self, client, conn):
         """checked comes before ocr_decode in the patch; a dataset refusing the second
-        must not be left having taken the first."""
+        must not be left having taken the first. Alice reviews Bob's dataset and manages
+        her own."""
         conn.execute("UPDATE jobs SET owner = 'bob' WHERE id = 'j1'")
         conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'alice')")
         conn.commit()
 
-        response = patch(client, {'checked': True, 'ocr_decode': 'greedy'})
+        response = patch(client, {'checked': True, 'ocr_decode': 'greedy'},
+                         headers={**ALICE, 'X-Auth-Role': 'reviewer'})
 
         assert response.json()['skipped'] == [
-            {'id': 'j1', 'name': 'Volume I', 'reason': 'not permitted'}]
+            {'id': 'j1', 'name': 'Volume I', 'reason': 'not permitted: this takes a Manager'}]
         assert jobs(conn, 'checked')['j1'] == 0
         assert jobs(conn, 'checked')['j2'] == 1
 

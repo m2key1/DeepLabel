@@ -339,8 +339,8 @@ test.describe('Scenario: a token that can only recognize', () => {
       await page.goto('/settings?section=tokens')
       await expect(page.getByLabel('Access').locator('option', { hasText: 'Recognition only' })).toHaveCount(1)
 
-      const username = uniqueName('member').replace(/\s/g, '-')
-      const session = seedSession('member', username)
+      const username = uniqueName('manager').replace(/\s/g, '-')
+      const session = seedSession('manager', username)
       const context = await browser.newContext({ storageState: { cookies: [], origins: [] } })
       await useSession(context, session)
       const member = await context.newPage()

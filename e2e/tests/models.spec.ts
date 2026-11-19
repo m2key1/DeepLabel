@@ -746,9 +746,9 @@ test.describe('Scenario: the model registry', () => {
   test('a member manages the model their training produced, global knobs stay admin-only', async () => {
     const trainer = `trainer-${Date.now()}`
     const rival = `rival-${Date.now()}`
-    seedSession('member', trainer)
-    seedSession('member', rival)
-    const mine = identity(trainer, 'member')
+    seedSession('manager', trainer)
+    seedSession('manager', rival)
+    const mine = identity(trainer, 'manager')
 
     const jobId = await createJob(uniqueName('Members data'), 1, undefined, mine)
     await waitForJobStatus(jobId, 'done')
@@ -779,7 +779,7 @@ test.describe('Scenario: the model registry', () => {
     })).rejects.toThrow(/403/)
     await expect(backendFetch(`/api/models/${model.id}`, {
       method: 'PATCH',
-      headers: { ...identity(rival, 'member'), 'Content-Type': 'application/json' },
+      headers: { ...identity(rival, 'manager'), 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: 'hijacked' }),
     })).rejects.toThrow(/403/)
 
@@ -803,17 +803,17 @@ test.describe('Scenario: the model registry', () => {
 
     const username = `local-only-${Date.now()}`
     const context = await browser.newContext()
-    await useSession(context, seedSession('member', username))
+    await useSession(context, seedSession('manager', username))
     const memberPage = await context.newPage()
     await expect(await openTrainDialog(memberPage)).toHaveCount(0)
     // Local training stays available to them, so an empty dialog cannot pass this.
     await expect(memberPage.getByRole('button', { name: 'Next', exact: true })).toBeVisible()
 
-    const jobId = await createJob(uniqueName('Cluster attempt'), 1, undefined, identity(username, 'member'))
+    const jobId = await createJob(uniqueName('Cluster attempt'), 1, undefined, identity(username, 'manager'))
     await waitForJobStatus(jobId, 'done')
     await expect(createTraining(
       { task: 'ocr', name: uniqueName('Sneaky'), dataset_job_ids: [jobId], target: 'slurm' },
-      identity(username, 'member'),
+      identity(username, 'manager'),
     )).rejects.toThrow(/403/)
     await context.close()
   })
@@ -897,7 +897,7 @@ test.describe('Scenario: the model registry', () => {
     async ({ page, browser }) => {
       const username = `cluster-grant-${Date.now()}`
       const context = await browser.newContext()
-      await useSession(context, seedSession('member', username))
+      await useSession(context, seedSession('manager', username))
       const memberPage = await context.newPage()
 
       const openTrainDialog = async (p: typeof page) => {
@@ -932,7 +932,7 @@ test.describe('Scenario: the model registry', () => {
       // Unlocking stays with admins: they hold the second factor.
       await expect(memberPage.getByRole('button', { name: 'Connect to cluster' })).toHaveCount(0)
 
-      const jobId = await createJob(uniqueName('Granted'), 1, undefined, identity(username, 'member'))
+      const jobId = await createJob(uniqueName('Granted'), 1, undefined, identity(username, 'manager'))
       await waitForJobStatus(jobId, 'done')
       // Through their own session, so nginx resolves the grant into the header the
       // backend reads - posting straight at the backend would carry no grant at all.

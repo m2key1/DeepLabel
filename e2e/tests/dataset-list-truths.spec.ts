@@ -1,10 +1,10 @@
 import { test, expect } from '../helpers/test'
 import {
-  backendFetch, correctLine, createGroup, createJob, getJob, identity, jobPageIds, listJobs,
+  BACKEND, backendFetch, correctLine, createGroup, createJob, getJob, identity, jobPageIds, listJobs,
   moveJobToGroup, pageLines, seedCompletedJob, shareJob, uniqueName, waitForJobStatus,
 } from '../helpers/api'
 import { scanPng } from '../helpers/image'
-import { asSession, seedSession, useSession } from '../helpers/session'
+import { seedSession, useSession } from '../helpers/session'
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -75,18 +75,20 @@ test.describe('Scenario: a group action says what it will change', () => {
     })
 
   test('moving a selection names the datasets it could not move', async ({ browser }) => {
+    // A Reviewer manages what they made, so only their own dataset is theirs to move.
     const username = `mover-${Date.now()}`
-    const session = seedSession('member', username)
+    const session = seedSession('reviewer', username)
     const ownName = uniqueName('Mine to move')
-    const own = await createJob(ownName, 1, undefined, identity(username, 'member'))
+    const own = await createJob(ownName, 1, undefined, identity(username, 'reviewer'))
     const sharedName = uniqueName('Only shared with me')
     const shared = await seedCompletedJob(sharedName, 1)
     await shareJob(shared, [username])
     await waitForJobStatus(own, 'done')
 
     const targetName = uniqueName('Member target')
-    const created = await asSession(session, '/api/groups', {
+    const created = await fetch(`${BACKEND}/api/groups`, {
       method: 'POST', body: JSON.stringify({ name: targetName }),
+      headers: { 'X-Frontend-Secret': 'e2e-secret', 'Content-Type': 'application/json', ...identity(username, 'manager') },
     })
     expect(created.status).toBe(200)
     const target = (await created.json()) as { id: number }

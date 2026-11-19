@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process'
 import type { BrowserContext, Page } from '@playwright/test'
 import { FRONTEND } from './frontend'
 
-export type SeededRole = 'viewer' | 'member' | 'admin'
+export type SeededRole = 'viewer' | 'annotator' | 'reviewer' | 'manager' | 'admin'
 
 // Creates a user with a live session directly in the auth container's database;
 // the dev bypass can only ever mint admin sessions for the dev user.

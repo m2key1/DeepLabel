@@ -515,7 +515,7 @@ def get_person(username: str, user: dict = Depends(current_user)):
     return person
 
 
-@app.get('/api/users/names', dependencies=[Depends(require_role('admin', 'member'))])
+@app.get('/api/users/names', dependencies=[Depends(require_role('admin', 'manager'))])
 def get_user_names():
     """Just usernames, for assignment pickers - members may not read roles or status."""
     conn = store.connect(config.DB_PATH)
@@ -764,22 +764,22 @@ def patch_user(user_id: int, body: UserPatch, me: dict = Depends(require_admin_s
         role_name = body.role or before['role']
         if role_name == 'viewer' and _grants_a_write(body):
             raise HTTPException(409, f'{_actor(dict(before))} is a viewer, and a viewer may not write '
-                                     'at all - promote the account to member before granting it anything '
+                                     'at all - give the account a role that writes before granting it anything '
                                      'that writes')
         if role_name != before['role']:
             # Exceptions were made against the old role, so the new one starts clean.
             dropped = {'exceptions': store.overrides_of(before), 'dormant_grants': store.dormant_grants(before)}
             store.set_user_role(conn, user_id, role_name)
             store.log_user_change(conn, user_id, _actor(me), 'role', before['role'], role_name)
-            store.clear_exceptions(conn, user_id)
+            store.clear_exceptions(conn, user_id, role_name)
             for field, grants in dropped.items():
                 if grants:
                     store.log_user_change(conn, user_id, _actor(me), field,
                                           json.dumps(grants, sort_keys=True), '{}')
             before = store.get_user(conn, user_id)
         if body.permissions is not None:
-            # A member's training capabilities live in their grant columns, so a tick in
-            # the matrix is the same change as one in the Training column.
+            # A writing role's training capabilities live in its grant columns, so a tick
+            # in the matrix is the same change as one in the Training column.
             for cap, column in store.grant_columns(role_name).items():
                 if cap in body.permissions:
                     setattr(body, column, body.permissions.pop(cap))

@@ -531,7 +531,7 @@ test.describe('Scenario: the corpus wording is the assignee\'s working tool', ()
     const jobId = await seedCorpusJob(uniqueName('Assignee wording'), 1, 380)
     const member = `member-${Date.now()}`
     await shareJob(jobId, [member])
-    await useSession(page.context(), seedSession('member', member))
+    await useSession(page.context(), seedSession('manager', member))
 
     await page.goto(`/jobs/${jobId}/corpus`)
     const wording = 'Transcribe the leaf as it stands. The edition reads:\n{{reference}}'

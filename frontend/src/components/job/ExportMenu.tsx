@@ -10,7 +10,7 @@ export function exportBlocked(job: Pick<Job, 'owner' | 'data_use'>, user: string
 export function ExportBlockedNote({ owner }: { owner: string }) {
   return (
     <p data-testid="export-blocked" className="w-64 px-2.5 py-2 text-xs text-ink-muted">
-      The owner keeps exports of this dataset to themselves. Ask {owner} for a copy.
+      Its creator keeps exports of this dataset to themselves. Ask {owner} for a copy.
     </p>
   )
 }

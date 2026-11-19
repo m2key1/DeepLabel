@@ -12,8 +12,8 @@ from pydantic import BaseModel
 
 from app import (blobs, caches, candidates, config, dataset_sync, geometry, layout_templates, llm_ocr, page_rows,
                  provenance, reading_order, renditions, revert, rotation, serializers, store, training)
-from app.deps import (IMMUTABLE_CACHE, current_user, get_db, get_user, require_job_access,
-                      require_page_access, require_role, require_unchanged)
+from app.deps import (IMMUTABLE_CACHE, WRITERS, current_user, get_db, get_user, require_job_access,
+                      require_job_manager, require_page_access, require_role, require_role_on, require_unchanged)
 from app.routes.jobs import Note
 
 router = APIRouter(tags=['pages'])
@@ -290,6 +290,8 @@ def patch_page(page_id: int, body: PagePatch, conn=Depends(get_db), user: str = 
                auth: dict = Depends(current_user)):
     """Update one page's review flags, rotation or deleted state."""
     require_page_access(conn, page_id, auth)
+    if body.layout_checked is not None or body.lines_checked is not None:
+        require_role_on(conn, 'page', page_id, auth, 'reviewer')
     row = conn.execute('SELECT job_id, deleted, status FROM pages WHERE id = ?', (page_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
@@ -358,7 +360,7 @@ class PageTurn(BaseModel):
 
 @router.post('/api/pages/{page_id}/turn')
 def turn_page(page_id: int, body: PageTurn, conn=Depends(get_db), user: str = Depends(get_user),
-              auth: dict = Depends(current_user), _editor=Depends(require_role('admin', 'member'))):
+              auth: dict = Depends(current_user), _editor=Depends(require_role(*WRITERS))):
     """Turn a scan the right way up, and everything drawn on it with it. The turn is kept
     rather than carried: what comes back is the page as if it had been scanned that way."""
     require_page_access(conn, page_id, auth)
@@ -379,7 +381,7 @@ class PagesPatch(BaseModel):
 def patch_pages(job_id: str, body: PagesPatch, conn=Depends(get_db), user: str = Depends(get_user),
                 auth: dict = Depends(current_user)):
     """Apply the same change to several pages at once."""
-    require_job_access(conn, job_id, auth)
+    require_job_manager(conn, job_id, auth)
     """Soft-delete or restore pages in bulk. Nothing is removed from disk here."""
     job = store.get_job(conn, job_id)
     if job is None:

@@ -66,8 +66,8 @@ test.describe('Scenario: creating a dataset', () => {
   test('a member creates a dataset, owns it, and shares it with a colleague', async ({ page, context }) => {
     const member = `maria-${Date.now()}`
     const colleague = `karl-${Date.now()}`
-    const token = seedSession('member', member)
-    seedSession('member', colleague)
+    const token = seedSession('manager', member)
+    seedSession('manager', colleague)
     await useSession(context, token)
 
     const name = uniqueName('Member upload')

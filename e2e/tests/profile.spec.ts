@@ -27,7 +27,7 @@ async function seedWork(author: string, colleague: string) {
   const openId = await seedCompletedJob(open, 1)
   await shareJob(hiddenId, [author])
   await shareJob(openId, [author, colleague])
-  const as = { ...identity(author, 'member'), 'Content-Type': 'application/json' }
+  const as = { ...identity(author, 'manager'), 'Content-Type': 'application/json' }
   const linesOf = async (jobId: string) => {
     const [pageId] = await jobPageIds(jobId)
     const detail = await getPageDetail(jobId, pageId)
@@ -73,8 +73,8 @@ test.describe('Scenario: a person\'s profile', () => {
       const stamp = Date.now()
       const author = `ada-${stamp}`
       const colleague = `bob-${stamp}`
-      const session = seedSession('member', author, { email: `${author}@example.org`, displayName: 'Ada Lovelace' })
-      seedSession('member', colleague)
+      const session = seedSession('manager', author, { email: `${author}@example.org`, displayName: 'Ada Lovelace' })
+      seedSession('manager', colleague)
       const { hidden, open } = await seedWork(author, colleague)
 
       const own = await profileOf(session, author)
@@ -91,7 +91,7 @@ test.describe('Scenario: a person\'s profile', () => {
 
       await expect(page.getByTestId('profile-name')).toHaveText('Ada Lovelace')
       await expect(page.getByTestId('profile-username')).toHaveText(author)
-      await expect(page.getByTestId('profile-role')).toHaveText('member')
+      await expect(page.getByTestId('profile-role')).toHaveText('Manager')
       await expect(page.getByTestId('profile-email')).toHaveText(`${author}@example.org`)
       await expect(page.getByTestId('profile-since')).toContainText('Member since')
 
@@ -138,8 +138,8 @@ test.describe('Scenario: a person\'s profile', () => {
       const stamp = Date.now()
       const author = `cleo-${stamp}`
       const colleague = `dan-${stamp}`
-      const authorSession = seedSession('member', author, { email: `${author}@example.org`, displayName: 'Cleo Profile' })
-      const colleagueSession = seedSession('member', colleague)
+      const authorSession = seedSession('manager', author, { email: `${author}@example.org`, displayName: 'Cleo Profile' })
+      const colleagueSession = seedSession('manager', colleague)
       const { hidden, open } = await seedWork(author, colleague)
 
       // The backend: the numbers count everything, the names only what the viewer may open.
@@ -159,7 +159,7 @@ test.describe('Scenario: a person\'s profile', () => {
       await expect(theirs).toHaveURL(new RegExp(`/people/${author}$`))
 
       await expect(theirs.getByTestId('profile-name')).toHaveText('Cleo Profile')
-      await expect(theirs.getByTestId('profile-role')).toHaveText('member')
+      await expect(theirs.getByTestId('profile-role')).toHaveText('Manager')
       await expect(stat(theirs, 'lines_corrected')).toHaveText(/\D2$/)
       await expect(stat(theirs, 'datasets_shared')).toHaveText(/\D2$/)
       await expect(theirs.getByTestId('profile-email')).toHaveCount(0)

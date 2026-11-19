@@ -8,9 +8,9 @@ from PIL import Image
 from pydantic import BaseModel, field_validator
 
 from app import caches, candidates, config, geometry, linecrop, serializers, store, training
-from app.deps import (IMMUTABLE_CACHE, check_capability, current_user, get_db, get_user,
-                      require_line_access, require_page_access, require_unchanged)
-from app.routes.pipeline import PHASE_CAPABILITY
+from app.deps import (IMMUTABLE_CACHE, current_user, get_db, get_user, job_of, require_job_manager,
+                      require_line_access, require_page_access, require_role_on, require_unchanged, role_on_job,
+                      role_reaches)
 
 router = APIRouter(tags=['lines'])
 
@@ -39,6 +39,8 @@ def patch_line(line_id: int, body: LinePatch, conn=Depends(get_db), user: str = 
                auth: dict = Depends(current_user)):
     """Correct a line's text, geometry, orientation or reviewed flag."""
     require_line_access(conn, line_id, auth)
+    if _checks(body.checked, 'corrected_text' in body.model_fields_set):
+        require_role_on(conn, 'line', line_id, auth, 'reviewer')
     row = _line_row(conn, line_id)
     if row is None:
         raise HTTPException(404)
@@ -138,6 +140,12 @@ def _line_row(conn, line_id: int):
         'JOIN jobs j ON j.id = p.job_id WHERE l.id = ?', (line_id,)).fetchone()
 
 
+def _checks(checked: bool | None, with_text: bool) -> bool:
+    """Whether a save marks the line checked or unchecked as such. A corrected text left
+    unchecked is an Annotator's edit, which takes any check off with it."""
+    return bool(checked) or (checked is False and not with_text)
+
+
 def _unwritable(conn, item: LineText, row, auth: dict) -> str | None:
     if row is None:
         return 'not found'
@@ -145,6 +153,8 @@ def _unwritable(conn, item: LineText, row, auth: dict) -> str | None:
         require_line_access(conn, item.id, auth)
     except HTTPException:
         return 'not found'
+    if item.checked and not role_reaches(role_on_job(conn, job_of(conn, 'line', item.id), auth), 'reviewer'):
+        return 'checking takes a Reviewer'
     if row['deleted']:
         return 'deleted'
     if item.revision is not None and store.latest_revision(conn, 'line', item.id) != item.revision:
@@ -204,15 +214,17 @@ def reocr_line(line_id: int, conn=Depends(get_db), _user: str = Depends(get_user
     """Manually flag one line for re-OCR; the batch worker re-queues its job on the usual
     cadence and the OCR phase re-reads it (old text stays until the fresh read lands)."""
     require_line_access(conn, line_id, auth)
-    check_capability(auth, PHASE_CAPABILITY['ocr'])
     row = conn.execute(
         'SELECT l.id, p.job_id FROM lines l JOIN elements e ON l.element_id = e.id '
         'JOIN pages p ON e.page_id = p.id WHERE l.id = ? AND l.deleted = 0', (line_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
-    conn.execute('UPDATE lines SET needs_ocr = 1 WHERE id = ?', (line_id,))
     # The batch worker only re-queues datasets that OCR at all, so an imported one has
-    # to be given the phase here - otherwise the line spins for good.
+    # to be given the phase here - otherwise the line spins for good. That switches
+    # reading on for the whole dataset, a Manager's setting.
+    if not conn.execute('SELECT run_ocr FROM jobs WHERE id = ?', (row['job_id'],)).fetchone()['run_ocr']:
+        require_job_manager(conn, row['job_id'], auth)
+    conn.execute('UPDATE lines SET needs_ocr = 1 WHERE id = ?', (line_id,))
     store.enable_ocr_phase(conn, row['job_id'])
     conn.commit()
     return serializers.get_line(conn, line_id)

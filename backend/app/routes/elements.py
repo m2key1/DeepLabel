@@ -8,8 +8,8 @@ from pydantic import BaseModel
 
 from app import (caches, candidates, config, dataset_sync, geometry, layout_shapes, layout_templates, serializers,
                  store, training)
-from app.deps import (IMMUTABLE_CACHE, current_user, get_db, get_user, require_element_access,
-                      require_page_access, require_unchanged)
+from app.deps import (IMMUTABLE_CACHE, current_user, get_db, get_user, draws_checked, require_element_access,
+                      require_page_access, require_role_on, require_unchanged)
 
 router = APIRouter(tags=['elements'])
 
@@ -63,6 +63,8 @@ def patch_element(element_id: int, body: ElementPatch, conn=Depends(get_db),
                   user: str = Depends(get_user)):
     """Update one element's class, geometry, reading order or reviewed flag."""
     require_element_access(conn, element_id, auth)
+    if body.checked is not None:
+        require_role_on(conn, 'element', element_id, auth, 'reviewer')
     if conn.execute('SELECT id FROM elements WHERE id = ?', (element_id,)).fetchone() is None:
         raise HTTPException(404)
     store.write_lock(conn)
@@ -148,11 +150,12 @@ def create_element(page_id: int, body: ElementCreate, conn=Depends(get_db),
     order_idx = conn.execute(
         'SELECT COALESCE(MAX(order_idx), -1) + 1 n FROM elements WHERE page_id = ?', (page_id,)).fetchone()['n']
     mark = store.begin_span(conn)
-    # A human just drew it, so it is reviewed by construction.
+    # A Reviewer who drew it has looked at it by construction; an Annotator's box waits for one.
     cur = conn.execute(
         'INSERT INTO elements (page_id, order_idx, class_name, raw_class_name, bbox, conf, kind, checked, polygon) '
-        'VALUES (?,?,?,?,?,?,?,1,?)',
-        (page_id, order_idx, class_name, raw, json.dumps(bbox), None, kind, json.dumps(ring) if ring else None))
+        'VALUES (?,?,?,?,?,?,?,?,?)',
+        (page_id, order_idx, class_name, raw, json.dumps(bbox), None, kind, int(draws_checked(conn, page_id, auth)),
+         json.dumps(ring) if ring else None))
     store.log_element(conn, cur.lastrowid, user, 'create')
     geometry.refile_lines(conn, page_id)
     geometry.resequence_page(conn, page_id)

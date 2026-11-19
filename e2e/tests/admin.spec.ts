@@ -14,25 +14,20 @@ async function editOneLineAs(jobId: string, username: string) {
   const line = detail.elements.flatMap((e: { lines: { id: number }[] }) => e.lines)[0]
   await backendFetch(`/api/lines/${line.id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...identity(username, 'member') },
+    headers: { 'Content-Type': 'application/json', ...identity(username, 'manager') },
     body: JSON.stringify({ checked: true }),
   })
 }
 
 test.describe('Scenario: what each person may ask for', () => {
-  test('a capability taken from one person is refused for them and nobody else',
+  test('a capability given to one person reaches the backend for them and nobody else',
     async ({ page }) => {
       const username = `caps-${Date.now()}`
-      const session = seedSession('member', username)
+      const session = seedSession('manager', username)
       const adminSession = seedSession('admin', `admin-${Date.now()}`)
-      // Their own dataset, so the capability is the only thing that can refuse the re-run.
-      const jobId = await createJob(uniqueName('Caps'), 1, undefined, identity(username, 'member'))
-      await waitForJobStatus(jobId, 'done')
 
-      const reread = () => fetch(`${FRONTEND}/api/jobs/${jobId}/rerun`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', cookie: `sid=${session}` },
-        body: JSON.stringify({ from_phase: 'ocr' }),
+      const recognitionOffer = () => fetch(`${FRONTEND}/api/recognize`, {
+        headers: { cookie: `sid=${session}` },
       }).then((r) => r.status)
       const capsOf = async () => {
         const res = await fetch(`${FRONTEND}/api/users`, { headers: { cookie: `sid=${adminSession}` } })
@@ -47,30 +42,30 @@ test.describe('Scenario: what each person may ask for', () => {
       await expect(heading('train.local')).toHaveText('Train locally')
       await expect(heading('train.cluster')).toHaveText('Train cluster')
       const row = page.getByTestId('user-row').filter({ has: page.getByText(username) })
-      const cell = row.locator('[data-testid="permission-cell"][data-cap="pipeline.ocr"]')
-      // The member role allows it, and nothing has been said about this person.
-      await expect(cell).toBeChecked()
+      const cell = row.locator('[data-testid="permission-cell"][data-cap="recognize"]')
+      // The Manager role does not carry the recognition API, and nothing has been said about this person.
+      await expect(cell).not.toBeChecked()
       await expect(cell).not.toHaveAttribute('data-overridden', 'true')
+      await expect.poll(recognitionOffer).toBe(403)
 
       await cell.click()
-      await expect(cell).not.toBeChecked()
+      await expect(cell).toBeChecked()
       await expect(cell).toHaveAttribute('data-overridden', 'true')
       // Auth-service oracle: the exception is stored, and only the exception.
-      await expect.poll(async () => (await capsOf()).permissions).toEqual({ 'pipeline.ocr': false })
-      await expect.poll(async () => (await capsOf()).capabilities)
-        .toEqual(['pipeline.layout', 'pipeline.lines', 'train.local'])
+      await expect.poll(async () => (await capsOf()).permissions).toEqual({ recognize: true })
+      await expect.poll(async () => (await capsOf()).capabilities).toEqual(['recognize', 'train.local'])
 
-      // And the backend refuses them - which only happens if the set travelled there,
+      // And the backend lets them through - which only happens if the set travelled there,
       // through nginx and /validate, rather than being a thing the admin page knows.
-      await expect.poll(reread).toBe(403)
+      await expect.poll(recognitionOffer).toBe(200)
 
-      // Given back, the same request goes through. Same locator, so a broken selector
-      // cannot make the refusal above look like a pass.
+      // Taken back, the same request is refused again. Same locator, so a broken selector
+      // cannot make the grant above look like a pass.
       await cell.click()
-      await expect(cell).toBeChecked()
+      await expect(cell).not.toBeChecked()
       await expect(cell).not.toHaveAttribute('data-overridden', 'true')
       await expect.poll(async () => (await capsOf()).permissions).toEqual({})
-      await expect.poll(reread).toBe(200)
+      await expect.poll(recognitionOffer).toBe(403)
     })
 
   test('an admin cannot take a capability off themselves', async ({ page }) => {
@@ -94,11 +89,11 @@ test.describe('Scenario: managing users', () => {
     await expect(page.getByTestId('user-row').filter({ hasText: username })).toHaveAttribute('data-viewer', 'true')
     const role = (await accountControls(page, username)).getByTestId('role-select')
     await expect(role).toHaveValue('viewer')
-    await role.selectOption('member')
-    await expect(role).toHaveValue('member')
+    await role.selectOption('manager')
+    await expect(role).toHaveValue('manager')
 
     await page.reload()
-    await expect((await accountControls(page, username)).getByTestId('role-select')).toHaveValue('member')
+    await expect((await accountControls(page, username)).getByTestId('role-select')).toHaveValue('manager')
     await expect(page.getByTestId('user-row').filter({ hasText: username })).not.toHaveAttribute('data-viewer', 'true')
 
     await expect((await accountControls(page, 'dev')).getByTestId('role-select')).toBeDisabled()
@@ -106,7 +101,7 @@ test.describe('Scenario: managing users', () => {
 
   test('being here just now is what the dot means, your own row included', async ({ page }) => {
     const idle = `idle-${Date.now()}`
-    seedStaleUser('member', idle, 7)
+    seedStaleUser('manager', idle, 7)
 
     await page.goto('/admin')
     const mine = page.getByTestId('user-row').filter({ hasText: '(you)' })
@@ -124,7 +119,7 @@ test.describe('Scenario: managing users', () => {
 
   test('details show what a person reaches and has done, and sign them out everywhere', async ({ page }) => {
     const username = `inspect-${Date.now()}`
-    const token = seedSession('member', username)
+    const token = seedSession('manager', username)
     const jobName = uniqueName('Inspect')
     const jobId = await seedCompletedJob(jobName)
     await shareJob(jobId, [username])
@@ -162,8 +157,8 @@ test.describe('Scenario: managing users', () => {
     await page.goto('/admin')
     const row = page.getByTestId('user-row').filter({ hasText: username })
     const role = (await accountControls(page, username)).getByTestId('role-select')
-    await role.selectOption('member')
-    await expect(role).toHaveValue('member')
+    await role.selectOption('manager')
+    await expect(role).toHaveValue('manager')
     // Controlled checkbox: it flips once the PATCH answers, so wait rather than check().
     await row.locator('[data-testid="permission-cell"][data-cap="train.cluster"]').click()
     await expect(row.locator('[data-testid="permission-cell"][data-cap="train.cluster"]')).toBeChecked()
@@ -171,7 +166,7 @@ test.describe('Scenario: managing users', () => {
     const audit = page.getByTestId('user-detail').getByTestId('user-audit')
     await expect(audit.getByRole('listitem')).toHaveCount(2)
     await expect(audit.getByRole('listitem').nth(0)).toHaveText(new RegExp(`^granted "Train cluster" to ${username}`))
-    await expect(audit.getByRole('listitem').nth(1)).toContainText('role: viewer → member')
+    await expect(audit.getByRole('listitem').nth(1)).toContainText('role: viewer → manager')
     await expect(audit).toContainText('by dev')
   })
 })
@@ -179,7 +174,7 @@ test.describe('Scenario: managing users', () => {
 test.describe('Scenario: what an admin may and may not see', () => {
   test('Settings shows only your own tokens, the Admin page shows everyone\'s', async ({ page }) => {
     const username = `tokens-${Date.now()}`
-    const session = seedSession('member', username)
+    const session = seedSession('manager', username)
     const theirToken = `their-${Date.now()}`
     const created = await fetch(`${FRONTEND}/api/tokens`, {
       method: 'POST',
@@ -220,7 +215,7 @@ test.describe('Scenario: what an admin may and may not see', () => {
 
   test('the local GPU and the cluster are granted independently', async ({ page }) => {
     const username = `grants-${Date.now()}`
-    const session = seedSession('member', username)
+    const session = seedSession('manager', username)
     const targets = async () => {
       const res = await fetch(`${FRONTEND}/api/trainings`, { headers: { cookie: `sid=${session}` } })
       return (await res.json()).targets
@@ -247,7 +242,7 @@ test.describe('Scenario: what an admin may and may not see', () => {
 
   test('the SLURM account an admin sets is charged to that person\'s runs', async ({ page }) => {
     const username = `account-${Date.now()}`
-    const session = seedSession('member', username)
+    const session = seedSession('manager', username)
     const account = `p_e2e${Date.now()}`
     const adminSession = seedSession('admin', `admin-${Date.now()}`)
     const jobName = uniqueName('Charged')

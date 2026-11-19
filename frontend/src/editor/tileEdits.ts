@@ -19,6 +19,8 @@ export interface TileEditDeps {
   pageId: number
   book: RevisionBook
   className(classId: number): string
+  /** Whether what this person draws counts as checked, as the server saves it: a Reviewer's does. */
+  drawsChecked: boolean
 }
 
 export function tileEdit(d: TileEditDeps, change: TileChange, label: string): Edit<Region[], Saved> {
@@ -43,7 +45,7 @@ export function tileEdit(d: TileEditDeps, change: TileChange, label: string): Ed
       const present = new Set(kept.map((r) => r.id))
       const drawn = creates.filter((c) => !present.has(ctx.id(c.temp))).map((c, i): Region => ({
         id: ctx.id(c.temp), order_idx: kept.length + i, class_id: c.class_id, class_name: d.className(c.class_id),
-        points: c.points, holes: c.holes ?? [], kind: c.kind ?? 'polygon', checked: true, revision: 0,
+        points: c.points, holes: c.holes ?? [], kind: c.kind ?? 'polygon', checked: d.drawsChecked, revision: 0,
       }))
       return drawn.length ? [...kept, ...drawn] : kept
     },

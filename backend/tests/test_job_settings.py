@@ -11,9 +11,11 @@ from app.main import app
 
 SECRET = 'test-secret'
 ADMIN = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'root', 'X-Auth-Role': 'admin'}
-ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'member'}
-BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'member'}
-STRANGER = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'mallory', 'X-Auth-Role': 'member'}
+ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'manager'}
+# Bob and Max both work on Alice's dataset: Bob checks lines, Max manages.
+BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'reviewer'}
+MAX = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'max', 'X-Auth-Role': 'manager'}
+STRANGER = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'mallory', 'X-Auth-Role': 'manager'}
 
 
 @pytest.fixture
@@ -30,7 +32,7 @@ def conn(tmp_path, monkeypatch):
         INSERT INTO jobs (id, name, owner, status, task) VALUES
             ('j1', 'Volume I', 'alice', 'done', 'text'),
             ('j2', 'Volume II', 'alice', 'done', 'text');
-        INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'bob');
+        INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'bob'), ('j1', 'max');
     """)
     connection.commit()
     yield connection
@@ -53,26 +55,34 @@ def job(conn, job_id='j1'):
     return conn.execute('SELECT * FROM jobs WHERE id = ?', (job_id,)).fetchone()
 
 
-class TestWhatAnyoneWorkingOnItMaySet:
+class TestWhatAReviewerMaySet:
     def test_marking_the_dataset_reviewed(self, client, conn):
         assert patch(client, {'checked': True}, headers=BOB).status_code == 200
         assert job(conn)['checked'] == 1
 
+
+class TestWhatAManagerItIsSharedWithMaySet:
     def test_turning_automatic_re_detection_off(self, client, conn):
-        assert patch(client, {'auto_redetect': False}, headers=BOB).status_code == 200
+        assert patch(client, {'auto_redetect': False}, headers=MAX).status_code == 200
         assert job(conn)['auto_redetect'] == 0
 
     def test_the_line_width_a_mask_export_draws_with(self, client, conn):
-        """Tuned by whoever is looking at the mask, since it only changes the next export."""
-        assert patch(client, {'line_width': 7}, headers=BOB).status_code == 200
+        assert patch(client, {'line_width': 7}, headers=MAX).status_code == 200
         assert job(conn)['line_width'] == 7
 
     def test_a_line_width_outside_what_a_mask_can_use_is_refused(self, client):
-        assert patch(client, {'line_width': 0}, headers=BOB).status_code == 400
-        assert patch(client, {'line_width': 999}, headers=BOB).status_code == 400
+        assert patch(client, {'line_width': 0}, headers=MAX).status_code == 400
+        assert patch(client, {'line_width': 999}, headers=MAX).status_code == 400
+
+    def test_renaming_it_and_choosing_how_it_reads(self, client, conn):
+        response = patch(client, {'name': 'Renamed by Max', 'ocr_decode': 'greedy', 'llm_consensus_min': 3},
+                         headers=MAX)
+        assert response.status_code == 200, response.text
+        assert (job(conn)['name'], job(conn)['ocr_decode'], job(conn)['llm_consensus_min']) == \
+            ('Renamed by Max', 'greedy', 3)
 
 
-class TestWhatOnlyTheOwnerMaySet:
+class TestWhatOnlyAManagerMaySet:
     @pytest.mark.parametrize('body', [
         {'name': 'Renamed'},
         {'group_id': 1},
@@ -85,9 +95,13 @@ class TestWhatOnlyTheOwnerMaySet:
         {'run_layout': False},
         {'llm_consensus_with_ocr': True},
         {'llm_consensus_min': 3},
+        {'auto_redetect': False},
+        {'line_width': 7},
     ])
-    def test_an_assignee_is_refused(self, client, body):
-        assert patch(client, body, headers=BOB).status_code == 403
+    def test_a_reviewer_is_refused(self, client, body):
+        response = patch(client, body, headers=BOB)
+        assert response.status_code == 403
+        assert response.json()['detail'] == 'not permitted: this takes a Manager'
 
     @pytest.mark.parametrize('body', [
         {'name': 'Renamed'},
@@ -185,9 +199,9 @@ class TestTheLanguageModelSettings:
         assert patch(client, {'llm_consensus_min': 3}).status_code == 200
         assert job(conn)['llm_consensus_min'] == 3
 
-    def test_an_assignee_leaves_the_threshold_as_it_was(self, client, conn):
+    def test_a_reviewer_leaves_the_threshold_as_it_was(self, client, conn):
         """How many must agree decides what settles, like autocheck and who counts as a
-        reader, so an assignee's attempt changes nothing."""
+        reader, so a Reviewer's attempt changes nothing."""
         assert patch(client, {'llm_consensus_min': 1}, headers=BOB).status_code == 403
         assert job(conn)['llm_consensus_min'] == 2
 
@@ -255,14 +269,9 @@ class TestSharing:
 
         assert response.json()['shared_with'] == ['bob', 'carol']
 
-    def test_an_assignee_cannot_re_share_it(self, client):
+    def test_a_reviewer_cannot_re_share_it(self, client):
         assert client.put('/api/jobs/j1/share', json={'usernames': ['mallory']},
                           headers=BOB).status_code == 403
-
-
-# Deleting is a capability a member does not have by default; these two were given it.
-ALICE_MAY_DELETE = {**ALICE, 'X-Auth-Caps': 'dataset.delete'}
-BOB_MAY_DELETE = {**BOB, 'X-Auth-Caps': 'dataset.delete'}
 
 
 class TestDeleting:
@@ -271,7 +280,7 @@ class TestDeleting:
         directory.mkdir(parents=True)
         (directory / 'runner.log').write_text('log')
 
-        assert client.delete('/api/jobs/j1', headers=ALICE_MAY_DELETE).status_code == 200
+        assert client.delete('/api/jobs/j1', headers=ALICE).status_code == 200
 
         assert job(conn) is None
         assert not directory.exists()
@@ -282,24 +291,21 @@ class TestDeleting:
         store.log_revision(conn, 'page', 1, 'j1', 'alice', 'update', {'id': 1})
         conn.commit()
 
-        client.delete('/api/jobs/j1', headers=ALICE_MAY_DELETE)
+        client.delete('/api/jobs/j1', headers=ALICE)
 
         assert conn.execute(
             "SELECT COUNT(*) c FROM revisions WHERE job_id = 'j1'").fetchone()['c'] == 0
 
-    def test_owning_it_is_not_enough_without_the_capability(self, client, conn):
-        response = client.delete('/api/jobs/j1', headers=ALICE)
+    def test_a_reviewer_it_is_shared_with_cannot_delete_it(self, client, conn):
+        response = client.delete('/api/jobs/j1', headers=BOB)
 
         assert response.status_code == 403
-        assert response.json()['detail'] == 'not permitted: dataset.delete'
+        assert response.json()['detail'] == 'not permitted: this takes a Manager'
         assert job(conn)['name'] == 'Volume I'
 
-    def test_an_assignee_cannot_delete_it_even_with_the_capability(self, client, conn):
-        response = client.delete('/api/jobs/j1', headers=BOB_MAY_DELETE)
-
-        assert response.status_code == 403
-        assert response.json()['detail'] == 'not permitted'
-        assert job(conn) is not None
+    def test_a_manager_it_is_shared_with_deletes_it_without_any_granted_capability(self, client, conn):
+        assert client.delete('/api/jobs/j1', headers=MAX).status_code == 200
+        assert job(conn) is None
 
     def test_a_dataset_that_does_not_exist_is_a_404(self, client):
         assert client.delete('/api/jobs/nope', headers=ADMIN).status_code == 404
@@ -313,7 +319,7 @@ class TestCancelling:
         assert client.post('/api/jobs/j1/cancel', headers=ALICE).status_code == 200
         assert job(conn)['status'] == 'cancelled'
 
-    def test_an_assignee_cannot_stop_it(self, client):
+    def test_a_reviewer_cannot_stop_it(self, client):
         assert client.post('/api/jobs/j1/cancel', headers=BOB).status_code == 403
 
     def test_a_dataset_that_does_not_exist_is_a_404(self, client):
@@ -506,8 +512,9 @@ class TestTheDiplomaticWording:
         assert patch(client, {'gt_prompt': 'x' * 8001}).status_code == 400
 
     @pytest.mark.parametrize('column', ['gt_prompt', 'llm_prompt'])
-    def test_an_assignee_sets_either_wording(self, client, conn, column):
-        response = patch(client, {column: 'Read {{reference}} as written'}, headers=BOB)
+    def test_a_manager_it_is_shared_with_sets_either_wording(self, client, conn, column):
+        assert patch(client, {column: 'Read {{reference}}'}, headers=BOB).status_code == 403
+        response = patch(client, {column: 'Read {{reference}} as written'}, headers=MAX)
 
         assert response.status_code == 200, response.text
         assert job(conn)[column] == 'Read {{reference}} as written'
@@ -547,7 +554,7 @@ class TestTheTranscriptionConvention:
         assert client.get('/api/jobs/j1', headers=ALICE).json()['ocr_convention'] == {
             'long_s': True, 'oblique_hyphen': False}
 
-    def test_an_assignee_leaves_the_convention_as_it_was(self, client, conn):
+    def test_a_reviewer_leaves_the_convention_as_it_was(self, client, conn):
         """It decides what every unchecked line will read as, like the model choice."""
         assert patch(client, {'ocr_convention': {'long_s': True}}, headers=BOB).status_code == 403
         assert job(conn)['ocr_convention'] == '{}'

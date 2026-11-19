@@ -16,7 +16,7 @@ def client(tmp_path, monkeypatch):
     from app.main import app
     conn = store.connect(config.DB_PATH)
     store.upsert_user(conn, ADMIN_SUBJECT, 'root', 'admin')
-    store.upsert_user(conn, MEMBER_SUBJECT, 'alice', 'member')
+    store.upsert_user(conn, MEMBER_SUBJECT, 'alice', 'manager')
     conn.close()
     yield TestClient(app)
 

@@ -18,13 +18,15 @@ OWNED_IDS = ('{job_id}', '{page_id}', '{element_id}', '{line_id}', '{region_id}'
 # up to the owning dataset; the rest are local to one router and do the same.
 ACCESS_CHECKS = {
     'require_job_access', 'require_page_access', 'require_element_access',
-    'require_line_access', 'require_region_access', 'can_access_job', 'require_job_owner',
+    'require_line_access', 'require_region_access', 'can_access_job',
+    # The same, and then the caller's role on that dataset.
+    'require_job_manager', 'require_job_role', 'require_role_on',
     '_require_map_job', '_require_manager', '_own_reference', '_reference_scope',
     '_pipeline_or_404', '_owned_training', 'get_training', 'accessible_job',
-    # The layout class routes' check: require_job_access, then a role that may edit.
+    # The layout class routes' check: require_job_manager by another name.
     '_editing',
     # Shared with the bulk router so one dataset and a whole selection are gated by the
-    # same code. It calls require_job_access and then the owner check; a route that
+    # same code. It calls require_job_access and then the Manager check; a route that
     # delegates to it is as gated as one that inlines them.
     'reocr_one',
 }

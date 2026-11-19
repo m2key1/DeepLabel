@@ -16,16 +16,8 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { controlClass } from '../components/ui/Field'
 import { PageHeader } from '../components/ui/PageHeader'
 import { pageShell } from '../components/ui/page'
+import { ROLES, ROLE_DESCRIPTION, ROLE_LABEL } from '../lib/roles'
 import { useAutoClear } from '../messages'
-
-const ROLES: Role[] = ['admin', 'member', 'viewer']
-
-const ROLE_HINT: Record<Role, string> = {
-  admin: 'Full access: pipeline, deletion, user management.',
-  member: 'Annotate, run layout, lines and OCR, train locally; '
-    + 'no discarding checked work, deleting datasets, managing models or admin actions.',
-  viewer: 'Read-only.',
-}
 
 const ACCOUNT_LIST_ID = 'slurm-accounts'
 
@@ -66,10 +58,11 @@ function AccountControls({ user, self, onPatch }: { user: AppUser; self: boolean
       <label className="flex items-center gap-2">
         <span className="text-ink-muted">Role</span>
         <select data-testid="role-select" value={user.role} disabled={self}
-                title={self ? 'You cannot change your own role' : ROLE_HINT[user.role]}
+                title={self ? 'You cannot change your own role' : undefined}
                 onChange={(e) => onPatch({ role: e.target.value as Role })} className={controlClass('sm')}>
-          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+          {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
         </select>
+        <span data-testid="role-description" className="text-xs text-ink-muted">{ROLE_DESCRIPTION[user.role]}</span>
       </label>
       <label className="flex items-center gap-2">
         <span className="text-ink-muted">SLURM account</span>

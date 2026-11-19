@@ -102,7 +102,7 @@ another of your datasets already has stops the Source step, with a link to that 
 - A file identical to one already in the dataset is kept as a *duplicate* and skipped
   everywhere. A file that cannot be read as an image is marked *unreadable* with the
   reason; the rest of the dataset is processed as usual.
-- The owner of a dataset can add pages later from the dataset page.
+- Anyone who may work on a dataset, an Annotator or above, can add pages to it later from the dataset page.
 - A large volume sent with the Python client arrives in parts; the dataset shows as *uploading* until the last part is in. If the upload broke off, resume it from the client, or start it as it is with **Start processing**.
 
 ## The dataset page
@@ -130,7 +130,7 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
 - A page is test data or not. No training uses a test page, nor any page with the same scan;
   a run leaves those out and says how many ("12 pages left out: same scan as test pages in
   Zollbuecher").
-- The owner of a dataset, or an admin, marks pages as test data: one page with its **Test**
+- A dataset's Managers and its creator mark pages as test data: one page with its **Test**
   cell in the page table or **Test page** in the page viewer, a selection with **Mark as test
   pages**, or the whole dataset with **Test data** in the dataset's title.
 - **Test data** shows how much of the dataset is test data. Choosing the whole dataset there
@@ -141,8 +141,8 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
 
 ## Data use
 
-What a dataset may be used for is its owner's call. Four switches, all on unless the owner
-turns one off, apply to everyone, the owner and admins included:
+What a dataset may be used for is its Managers' call. Four switches, all on unless a Manager
+turns one off, apply to everyone, its creator and admins included:
 
 - **Training:** the dataset may train or validate a model. Switched off, the training form
   does not offer it ("2 datasets you can open are not offered") and a run that was already
@@ -151,8 +151,8 @@ turns one off, apply to everyone, the owner and admins included:
 - **External LLM providers:** its pages may go to LLM connections an admin has not marked
   **Self-hosted** (Settings, on the connection). Switched off, only self-hosted models can
   read it, and a reading queued earlier is not sent.
-- **Export by others:** the people it is shared with, admins included, may export it. The
-  owner always can. Viewing and editing, reading it in Transcript included, are not affected.
+- **Export by others:** Managers other than its creator, admins included, may export it. Its
+  creator always can. Viewing and editing, reading it in Transcript included, are not affected.
 
 The switches are set on the wizard's Review step and changed later on the same step of the
 dataset's **Settings**. There it also lists the models already trained, validated or scored
@@ -616,12 +616,20 @@ in Authentik, which nobody has to see or visit.
   account can sign in at once but only sees a page saying it waits for an admin; it opens
   DeepLabel by itself once approved. So does anyone signing in for the first time who was
   not invited.
-- Each account has a role - admin, member or viewer - which sets its permissions:
-  re-running phases, discarding checked work, deleting datasets, managing models,
-  training and the recognition API (admins only, unless granted). Admins can grant or
-  remove single permissions per person on the **Admin** page. A viewer writes nothing, so
-  the one permission a viewer can be given is the recognition API, which writes nothing
-  either: an account that only reads scans through the API.
+- Each account has one role, as in Label Studio, and each role may do everything the one
+  below it may:
+  - **Viewer:** opens pages, text and results, and changes nothing.
+  - **Annotator:** also corrects text, lines and regions, adds pages to the datasets it can
+    open and creates datasets. What an Annotator draws waits for a Reviewer to check it.
+  - **Reviewer:** also marks lines, boxes, tiles and pages checked.
+  - **Manager:** also runs models again, reads with LLMs, changes a dataset's settings and
+    data use, marks test pages, exports, trains, deletes and shares.
+  - **Admin:** everything, everywhere, including people and settings.
+  Whoever created a dataset manages it, whatever their role.
+- On top of the role, admins grant or take away per person what uses a shared resource:
+  managing models, training locally or on the cluster, and the recognition API. A Viewer
+  writes nothing, so the one grant a Viewer takes is the recognition API, which writes
+  nothing either: an account that only reads scans through the API.
   Buttons you cannot use are not shown.
 - The Admin page shows everyone in one table, grouped by role, with a dot per permission.
   Each role's own line shows what its people get, and an amber dot marks an exception made

@@ -15,10 +15,10 @@ from app.main import app
 
 SECRET = 'test-secret'
 ADMIN = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'root', 'X-Auth-Role': 'admin'}
-MEMBER_CAPS = 'pipeline.layout pipeline.lines pipeline.ocr train.local'
-ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'member',
-         'X-Auth-Caps': MEMBER_CAPS}
-BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'member'}
+# Alice is a Reviewer: she manages the datasets she made, and only checks the rest.
+ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'reviewer', 'X-Auth-Caps': ''}
+BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'reviewer', 'X-Auth-Caps': ''}
+BOB_MANAGER = {**BOB, 'X-Auth-Role': 'manager'}
 
 
 @pytest.fixture
@@ -125,23 +125,21 @@ def test_a_repeated_id_runs_once(client, conn):
     assert [c['id'] for c in r.json()['changed']] == ['j1']
 
 
-def test_a_selection_asks_for_the_same_permissions_one_dataset_does(client, conn):
-    """A member may re-read their own datasets, so they may re-read a selection of them -
-    but throwing away what somebody checked is a permission they do not have, and a
-    selection is not a way around that."""
+def test_a_selection_of_her_own_datasets_is_hers_to_re_run_and_discard(client, conn):
+    """Whoever made a dataset manages it, so a selection of her own re-runs, throwing
+    away what was checked included, with no capability granted for it."""
     allowed = client.post('/api/bulk/rerun', json={'job_ids': ['j1'], 'from_phase': 'ocr'},
                           headers=ALICE)
 
     assert allowed.status_code == 200
     assert status_of(conn, 'j1') == 'queued'
 
-    refused = client.post('/api/bulk/rerun',
-                          json={'job_ids': ['j2'], 'from_phase': 'ocr', 'keep_checked': False},
-                          headers=ALICE)
+    discarding = client.post('/api/bulk/rerun',
+                             json={'job_ids': ['j2'], 'from_phase': 'ocr', 'keep_checked': False},
+                             headers=ALICE)
 
-    assert refused.status_code == 403
-    assert refused.json()['detail'] == 'not permitted: pipeline.discard'
-    assert status_of(conn, 'j2') == 'done'
+    assert discarding.status_code == 200, discarding.text
+    assert status_of(conn, 'j2') == 'queued'
 
 
 def test_an_admin_may_rerun_a_selection(client, conn):
@@ -158,9 +156,9 @@ def test_an_admin_may_rerun_a_selection(client, conn):
     assert status_of(conn, 'j3') == 'running', 'a dataset outside the selection is untouched'
 
 
-def test_a_shared_dataset_is_still_its_owner_s_to_re_run(client, conn):
-    """Being given a dataset carries re-reading it, not re-running it: one dataset of
-    somebody else's refuses the whole selection, so none of it is half re-run."""
+def test_a_dataset_shared_with_a_reviewer_is_still_its_managers_to_re_run(client, conn):
+    """One dataset she was only given refuses the whole selection, so none of it is half
+    re-run."""
     conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j9', 'alice')")
     conn.commit()
 
@@ -168,7 +166,7 @@ def test_a_shared_dataset_is_still_its_owner_s_to_re_run(client, conn):
                           headers=ALICE)
 
     assert refused.status_code == 403
-    assert refused.json()['detail'] == 'only the owner or an admin may re-run Not hers'
+    assert refused.json()['detail'] == 'only a Manager may re-run Not hers'
     assert status_of(conn, 'j1') == 'done'
     assert status_of(conn, 'j9') == 'done'
     assert [r['id'] for r in conn.execute(
@@ -386,7 +384,7 @@ def test_a_rerun_preview_marks_a_dataset_the_caller_does_not_own_as_blocked(clie
 
     assert preview['datasets'] == 1
     assert preview['blocked'] == [
-        {'id': 'j9', 'name': 'Not hers', 'reason': 'only the owner or an admin may re-run Not hers'}]
+        {'id': 'j9', 'name': 'Not hers', 'reason': 'only a Manager may re-run Not hers'}]
 
 
 def test_a_rerun_preview_needs_the_phase_it_previews(client):
@@ -403,22 +401,21 @@ def test_an_empty_selection_is_refused(client):
     assert r.status_code == 422
 
 
-def test_the_capability_is_what_decides_on_a_dataset_shared_with_you(client, conn):
-    """Sharing a dataset carries re-reading it now, so what settles this is whether the
-    person may re-read at all - not whether the dataset is theirs."""
+def test_the_role_is_what_decides_on_a_dataset_shared_with_you(client, conn):
+    """On a dataset he was given, a Reviewer may not re-read and a Manager may - the same
+    person, the same dataset, only the role differs."""
     conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'bob')")
     conn.commit()
-    without = {**BOB, 'X-Auth-Caps': 'pipeline.layout pipeline.lines'}
 
     refused = client.post('/api/bulk/reocr', json={'job_ids': ['j1'], 'scope': 'unchecked'},
-                          headers=without)
+                          headers=BOB)
 
     assert refused.status_code == 403, 'a permission refusal, as one dataset would answer it'
-    assert refused.json()['detail'] == 'not permitted: pipeline.ocr'
+    assert refused.json()['detail'] == 'only a Manager may re-run Volume I'
     assert status_of(conn, 'j1') == 'done'
 
     allowed = client.post('/api/bulk/reocr', json={'job_ids': ['j1'], 'scope': 'unchecked'},
-                          headers={**BOB, 'X-Auth-Caps': MEMBER_CAPS})
+                          headers=BOB_MANAGER)
 
     assert allowed.status_code == 200
     assert status_of(conn, 'j1') == 'queued'

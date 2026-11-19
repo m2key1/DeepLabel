@@ -40,6 +40,7 @@ import { usePresence } from '../presence'
 import { STATUS_TONE, compactCount, overallProgress } from '../util'
 import { useAutoClear } from '../messages'
 import { usePolling } from '../hooks/usePolling'
+import { reaches } from '../lib/roles'
 import { cardChrome, popoverChrome } from '../components/ui/Card'
 
 const RAIL_KEY = 'deeplabel.rail-collapsed'
@@ -195,15 +196,15 @@ const BULK_LABEL: Record<BulkAction, string> = {
 /** What a run over a selection is called and where it starts from. Alignment is a re-run
  *  from its own phase - it re-matches transcriptions and keeps the OCR - so it is the same
  *  request with different words rather than a fourth endpoint. */
-const RUNS: { key: BulkAction; phase?: string; label: string; capability?: string }[] = [
+const RUNS: { key: BulkAction; phase?: string; label: string }[] = [
   { key: 'reocr', label: 'Re-read OCR…' },
   { key: 'rerun', phase: 'ocr', label: 'Re-run…' },
   { key: 'rerun', phase: 'align', label: 'Alignment…' },
-  { key: 'redetect', label: 'Re-detect lines…', capability: 'pipeline.lines' },
+  { key: 'redetect', label: 'Re-detect lines…' },
 ]
 
 export function JobsPage() {
-  const { user, isAdmin, canEdit, can } = useAuth()
+  const { user, isAdmin, canEdit, role } = useAuth()
   const { onJob } = usePresence()
   const navigate = useNavigate()
   const [jobs, setJobs] = useState<Job[] | null>(null)
@@ -578,7 +579,12 @@ export function JobsPage() {
       return next
     })
 
-  const offeredRuns = RUNS.filter((r) => !r.capability || can(r.capability))
+  // Running models is a Manager's: offered where the person manages at least one of the
+  // datasets, and refused as a whole, naming the dataset, where they do not manage them all.
+  const managesAny = (ids: Iterable<string>) => {
+    const wanted = new Set(ids)
+    return (jobs ?? []).some((j) => wanted.has(j.id) && reaches(j.my_role, 'manager'))
+  }
 
   /** Everything a dataset can be asked to do, asked of a selection instead. The cost is
    *  looked up first so the confirmation says what it will actually run, not "are you
@@ -605,13 +611,12 @@ export function JobsPage() {
              outcome.skipped.map((s) => `${s.name} (${s.reason})`).join(', '))
   }
 
-  /** The datasets in a re-run the caller does not own. Any one of them refuses the whole
+  /** The datasets in a run the caller does not manage. Any one of them refuses the whole
    *  request, so they are named before it is sent rather than skipped like a busy one. */
-  const notYoursToRerun = (action: BulkAction, ids: string[]): Job[] =>
-    action !== 'rerun' || isAdmin ? []
-      : ids.map((id) => jobs?.find((j) => j.id === id))
-        .filter((job): job is Job => job !== undefined && job.owner !== user)
-  const refusedBy = pending ? notYoursToRerun(pending.action, pending.ids) : []
+  const notYoursToRun = (ids: string[]): Job[] =>
+    ids.map((id) => jobs?.find((j) => j.id === id))
+      .filter((job): job is Job => job !== undefined && !reaches(job.my_role, 'manager'))
+  const refusedBy = pending ? notYoursToRun(pending.ids) : []
   const leftAlone = pending?.preview?.blocked.filter((b) => !refusedBy.some((j) => j.id === b.id)) ?? []
 
   const runBulk = async () => {
@@ -656,7 +661,7 @@ export function JobsPage() {
 
   const actionsFor = (job: Job) => ({
     job,
-    canManage: isAdmin || job.owner === user,
+    canManage: reaches(job.my_role, 'manager'),
     openInfo: infoJob === job.id,
     openDownload: downloadMenu === job.id,
     openMenu: openMenu === job.id,
@@ -940,7 +945,7 @@ export function JobsPage() {
               Select all
             </Button>
           )}
-          {rows.length > 0 && (
+          {rows.length > 0 && managesAny(rows.map((j) => j.id)) && (
             // The same actions a dataset offers, aimed at every dataset in this group.
             // It fills the same selection the checkboxes do, so there is one code path.
             <span className="relative">
@@ -956,7 +961,7 @@ export function JobsPage() {
               {groupMenu === key && (
                 <div ref={groupPlacement.ref}
                      className={`${groupPlacement.className} right-0 z-20 w-44 overflow-hidden ${popoverChrome} py-1`}>
-                  {offeredRuns.map((r) => (
+                  {RUNS.map((r) => (
                     <button key={r.label} className={menuItem}
                             onClick={() => void askBulk(
                               r.key, rows.map((j) => j.id),
@@ -1164,7 +1169,7 @@ export function JobsPage() {
             Cards
           </GroupButton>
         </div>
-        {canEdit && (creatingGroup ? (
+        {reaches(role, 'manager') && (creatingGroup ? (
           <input
             autoFocus
             value={groupDraft}
@@ -1190,7 +1195,7 @@ export function JobsPage() {
     <div className="absolute inset-x-0 top-0 z-20 flex min-h-full flex-wrap items-center gap-2 border-b border-line bg-surface px-4 py-2"
          data-testid="bulk-bar">
       <span className="font-mono text-xs tabular-nums">{selected.size} selected</span>
-      {offeredRuns.map((r) => (
+      {managesAny(selected) && RUNS.map((r) => (
         <Button key={r.label} size="xs"
                 onClick={() => void askBulk(
                   r.key, [...selected], `${selected.size} selected datasets`, r.phase)}>
@@ -1335,7 +1340,7 @@ export function JobsPage() {
               </div>
               {refusedBy.length > 0 && (
                 <p role="alert" data-testid="preview-refused" className="mt-2 text-xs text-danger">
-                  Nothing will be re-run: only the owner or an admin may re-run{' '}
+                  Nothing will be re-run: only a Manager may re-run{' '}
                   {refusedBy.map((j) => j.name).join(', ')}.
                 </p>
               )}

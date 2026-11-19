@@ -4,7 +4,7 @@ import {
   createJob, getPageDetail, identity, jobPageIds, seedCompletedJob, setElementBbox, shareJob, uniqueName,
   waitForJobStatus,
 } from '../helpers/api'
-import { asSession, seedSession, useSession, userRecord } from '../helpers/session'
+import { asSession, seedSession, useSession, type SeededRole } from '../helpers/session'
 
 // The stub layout's Paragraph box with x1 pulled in past the staleness threshold, so its
 // lines no longer match it and a re-detection has something to do.
@@ -24,9 +24,9 @@ async function moveParagraph(jobId: string) {
   await setElementBbox(paragraph.id, MOVED_PARAGRAPH)
 }
 
-async function signedInMember(browser: Browser, prefix: string) {
+async function signedIn(browser: Browser, role: SeededRole, prefix: string) {
   const username = `${prefix}-${Date.now()}`
-  const session = seedSession('member', username)
+  const session = seedSession(role, username)
   const context = await browser.newContext()
   await useSession(context, session)
   return { username, session, context, page: await context.newPage() }
@@ -34,7 +34,7 @@ async function signedInMember(browser: Browser, prefix: string) {
 
 async function ownDataset(username: string, prefix: string) {
   const name = uniqueName(prefix)
-  const id = await createJob(name, 1, undefined, identity(username, 'member'))
+  const id = await createJob(name, 1, undefined, identity(username, 'manager'))
   await waitForJobStatus(id, 'done')
   return { id, name }
 }
@@ -42,7 +42,7 @@ async function ownDataset(username: string, prefix: string) {
 test.describe('Scenario: a member re-detects lines over a selection', () => {
   test('the datasets with nothing to re-detect are named and left alone, the rest re-detected',
     async ({ browser }) => {
-      const { username, context, page } = await signedInMember(browser, 'redetector')
+      const { username, context, page } = await signedIn(browser, 'manager', 'redetector')
       const stale = await ownDataset(username, 'Redetect own stale')
       const fresh = await ownDataset(username, 'Redetect own fresh')
       const sharedName = uniqueName('Redetect shared stale')
@@ -78,31 +78,31 @@ test.describe('Scenario: a member re-detects lines over a selection', () => {
       await context.close()
     })
 
-  test('a member without the line-detection capability is not offered it', async ({ page, browser }) => {
-    const { username, session, context, page: memberPage } = await signedInMember(browser, 'no-redetect')
-    const own = await ownDataset(username, 'Redetect refused')
-    await moveParagraph(own.id)
-    const before = await paragraphLineIds(own.id)
+  test('a Reviewer given a dataset is not offered re-detecting it', async ({ page, browser }) => {
+    const given = uniqueName('Redetect refused')
+    const givenId = await createJob(given, 1)
+    await waitForJobStatus(givenId, 'done')
+    await moveParagraph(givenId)
+    const before = await paragraphLineIds(givenId)
 
-    const record = await userRecord(page, username)
-    const revoked = await page.request.patch(`/api/users/${record.id}`, {
-      data: { permissions: { 'pipeline.lines': false } },
-    })
-    expect(revoked.status()).toBe(200)
-    await expect.poll(async () => (await userRecord(page, username)).capabilities)
-      .toEqual(['pipeline.layout', 'pipeline.ocr', 'train.local'])
+    // Its admin creator is offered the re-detect on the same bar, so the locator is sound.
+    await page.goto('/')
+    await page.getByTestId('job-card').filter({ hasText: given }).getByRole('checkbox').check()
+    await expect(page.getByTestId('bulk-bar').getByRole('button', { name: 'Re-detect lines…' })).toBeVisible()
 
-    await memberPage.goto('/')
-    await memberPage.getByTestId('job-card').filter({ hasText: own.name }).getByRole('checkbox').check()
-    const bar = memberPage.getByTestId('bulk-bar')
-    await expect(bar.getByRole('button', { name: 'Re-run…' })).toBeVisible()
+    const { username, session, context, page: reviewerPage } = await signedIn(browser, 'reviewer', 'no-redetect')
+    await shareJob(givenId, [username])
+    await reviewerPage.goto('/')
+    await reviewerPage.getByTestId('job-card').filter({ hasText: given }).getByRole('checkbox').check()
+    const bar = reviewerPage.getByTestId('bulk-bar')
+    await expect(bar).toContainText('1 selected')
     await expect(bar.getByRole('button', { name: 'Re-detect lines…' })).toHaveCount(0)
 
     const refused = await asSession(session, '/api/bulk/redetect', {
-      method: 'POST', body: JSON.stringify({ job_ids: [own.id] }),
+      method: 'POST', body: JSON.stringify({ job_ids: [givenId] }),
     })
     expect(refused.status).toBe(403)
-    expect(await paragraphLineIds(own.id)).toEqual(before)
+    expect(await paragraphLineIds(givenId)).toEqual(before)
     await context.close()
   })
 })

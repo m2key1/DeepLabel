@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app import augmentations, registry, trainer
-from app.deps import current_user, get_db, require_job_access, require_role
+from app.deps import WRITERS, current_user, get_db, require_job_access, require_role
 
 router = APIRouter(tags=['augmentations'])
 
@@ -70,7 +70,7 @@ def _row(conn, pipeline_id: int, user: dict) -> dict:
 
 @router.post('/api/augmentations/pipelines')
 def create_pipeline(body: PipelineCreate, conn=Depends(get_db),
-                    user: dict = Depends(require_role('admin', 'member'))):
+                    user: dict = Depends(require_role(*WRITERS))):
     """Save a pipeline, private to the caller. The spec is built for real by the
     model venv before it is stored, so a saved pipeline always loads."""
     if body.task not in registry.TASKS:
@@ -93,7 +93,7 @@ class PipelineUpdate(BaseModel):
 
 @router.patch('/api/augmentations/pipelines/{pipeline_id}')
 def update_pipeline(pipeline_id: int, body: PipelineUpdate, conn=Depends(get_db),
-                    user: dict = Depends(require_role('admin', 'member'))):
+                    user: dict = Depends(require_role(*WRITERS))):
     """Rename a pipeline or replace its steps. Runs that used it keep the copy they
     froze at submit, so editing never rewrites history."""
     pipeline = _owned(conn, pipeline_id, user)
@@ -115,7 +115,7 @@ def update_pipeline(pipeline_id: int, body: PipelineUpdate, conn=Depends(get_db)
 
 @router.delete('/api/augmentations/pipelines/{pipeline_id}')
 def delete_pipeline(pipeline_id: int, conn=Depends(get_db),
-                    user: dict = Depends(require_role('admin', 'member'))):
+                    user: dict = Depends(require_role(*WRITERS))):
     """Delete a pipeline. Deleting the task default leaves the task on the train
     module's built-in stack; runs keep their frozen copies."""
     _owned(conn, pipeline_id, user)
@@ -150,7 +150,7 @@ def _copy_name(name: str, label: str) -> str:
 
 @router.post('/api/augmentations/pipelines/{pipeline_id}/duplicate')
 def duplicate_pipeline(pipeline_id: int, conn=Depends(get_db),
-                       user: dict = Depends(require_role('admin', 'member'))):
+                       user: dict = Depends(require_role(*WRITERS))):
     """Copy a pipeline the caller can see into their own list, to tweak from there."""
     pipeline = augmentations.get_pipeline(conn, pipeline_id)
     if pipeline is None or not augmentations.visible_to(pipeline, user):

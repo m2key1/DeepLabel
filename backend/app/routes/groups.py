@@ -80,7 +80,7 @@ def share_group(group_id: int, body: GroupShare, conn=Depends(get_db),
 
 @router.post('/api/groups')
 def create_group(body: GroupBody, conn=Depends(get_db),
-                 user: dict = Depends(require_role('admin', 'member'))):
+                 user: dict = Depends(require_role('admin', 'manager'))):
     """Create a dataset group."""
     name = body.name.strip()
     if not name:

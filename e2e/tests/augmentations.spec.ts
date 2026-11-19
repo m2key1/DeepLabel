@@ -165,7 +165,7 @@ test.describe('Scenario: augmentation pipelines', () => {
     const defaultId = (await augmentPipelines('ocr', DEV)).pipelines.find((p) => p.name === pipelineName)!.id
 
     const member = uniqueName('aug').replace(/\s/g, '-').toLowerCase()
-    await useSession(context, seedSession('member', member))
+    await useSession(context, seedSession('manager', member))
     await page.goto('/augmentations')
     // The default is the only pipeline of someone else's a member ever sees.
     await expect(page.getByTestId('pipeline-row')).toHaveCount(1)
@@ -182,7 +182,7 @@ test.describe('Scenario: augmentation pipelines', () => {
     await page.getByTestId('duplicate-pipeline').click()
     await expect(page.getByTestId('pipeline-row')).toHaveCount(2)
     await expect(page.getByTestId('save-pipeline')).toBeVisible()
-    const mine = (await augmentPipelines('ocr', identity(member, 'member'))).pipelines
+    const mine = (await augmentPipelines('ocr', identity(member, 'manager'))).pipelines
       .find((p) => p.name === `${pipelineName} (copy)`)!
     expect(mine.owner).toBe(member)
     expect(mine.is_default).toBe(false)
@@ -196,7 +196,7 @@ test.describe('Scenario: augmentation pipelines', () => {
       method: 'POST', headers: { ...DEV, 'Content-Type': 'application/json' },
       body: JSON.stringify({ default: false }),
     })
-    expect((await augmentPipelines('ocr', identity(member, 'member'))).pipelines.map((p) => p.name))
+    expect((await augmentPipelines('ocr', identity(member, 'manager'))).pipelines.map((p) => p.name))
       .not.toContain(pipelineName)
   })
 

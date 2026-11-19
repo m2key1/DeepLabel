@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 from app import config, corpus, data_use, ingest, llm, llm_gt, store
 from app.caches import counted_page
-from app.deps import accessible_job, current_user, get_db, require_job_access, require_job_owner
+from app.deps import accessible_job, current_user, get_db, require_job_access, require_job_manager
 from app.routes.selection import selected_pages
 
 router = APIRouter(tags=['reference'])
@@ -57,7 +57,7 @@ def upload_documents(job_id: str, files: list[UploadFile] = None, conn=Depends(g
     is a separate, explicit step - so a corpus can be corrected a file at a time without
     every upload moving every page's reference.
     """
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     if not files:
         raise HTTPException(400, 'no files uploaded')
     texts, skipped = {}, []
@@ -91,7 +91,7 @@ def delete_document(job_id: str, name: str, conn=Depends(get_db),
                     user: dict = Depends(current_user)):
     """Drop one document from the corpus. Spans already cut from it are left until the
     next cut, which is the only thing that rewrites them."""
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     if not corpus.remove_document(conn, job_id, name):
         raise HTTPException(404, 'no such document')
     conn.commit()
@@ -131,7 +131,7 @@ def cut_reference(job_id: str, conn=Depends(get_db), user: dict = Depends(curren
     whose span moves are read again by the next diplomatic run rather than silently
     keeping ground truth produced from the old one.
     """
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
@@ -196,7 +196,7 @@ def groundtruth_read(job_id: str, body: GroundTruthRequest | None = None,
     What comes back becomes the page's ground truth, recorded as machine-made: alignment
     offers it to the lines and never checks one off, so a person still decides.
     """
-    require_job_access(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
@@ -230,5 +230,5 @@ def groundtruth_cancel(job_id: str, conn=Depends(get_db), user: dict = Depends(c
                        _on=Depends(require_enabled)):
     """Drop the readings not yet sent. Anything already in flight is paid for, so it is
     left to finish and be kept."""
-    require_job_access(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     return {'cancelled': llm_gt.cancel(conn, job_id)}

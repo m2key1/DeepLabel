@@ -100,6 +100,8 @@ export interface Job {
   id: string
   name: string
   owner: string
+  /** The role the caller acts with on this dataset; whoever created it manages it. */
+  my_role: Role
   status: JobStatus
   phase: Phase | null
   counters: Counters
@@ -675,7 +677,7 @@ export interface ModelPicks {
   ocr: number | null
 }
 
-export type Role = 'admin' | 'member' | 'viewer'
+export type Role = 'admin' | 'manager' | 'reviewer' | 'annotator' | 'viewer'
 
 export type ModelTask = 'layout' | 'lines' | 'ocr'
 
@@ -3567,12 +3569,6 @@ export function getPageCandidates(pageId: number): Promise<{ candidates: LineCan
 }
 
 export type PagePhase = 'layout' | 'lines' | 'ocr'
-
-/** The capability each phase asks the backend for, on one page, a selection or a whole
- *  dataset alike. Alignment destroys nothing, so it asks for none. */
-export const PHASE_CAPABILITY: Record<PagePhase, string> = {
-  layout: 'pipeline.layout', lines: 'pipeline.lines', ocr: 'pipeline.ocr',
-}
 
 /** What running each phase on a page would replace, so the menu can say it beforehand. */
 export interface PageRunCosts {

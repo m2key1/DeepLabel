@@ -1225,7 +1225,7 @@ test.describe('Scenario: annotating a map tile', () => {
 test.describe('Scenario: two people on one tile', () => {
   test('a colleague\'s shape appears without reloading', async ({ page }) => {
     const colleague = `tile-live-${Date.now()}`
-    seedSession('member', colleague)
+    seedSession('manager', colleague)
     const jobId = await seedMapJob(uniqueName('Tile live'))
     await shareJob(jobId, [colleague])
     const [tileId] = await tileIds(jobId)
@@ -1235,7 +1235,7 @@ test.describe('Scenario: two people on one tile', () => {
     const classes = await jobClasses(jobId)
     const theirs = await backendFetch(`/api/pages/${tileId}/regions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...identity(colleague, 'member') },
+      headers: { 'Content-Type': 'application/json', ...identity(colleague, 'manager') },
       body: JSON.stringify({ class_id: classes.find((c) => c.id !== 0)!.id, points: SQUARE }),
     })
 

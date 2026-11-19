@@ -467,12 +467,13 @@ class TestSettlingAgain:
             ('Joh. Bapt. Mayr, Cooperator', 'llm:consensus@2')
         assert client.get('/api/jobs/j1/llm/status', headers=ALICE).json()['pending'] == 0
 
-    def test_it_is_the_owners_call_like_the_settings_it_applies(self, client, conn, readings):
+    def test_it_is_a_managers_call_like_the_settings_it_applies(self, client, conn, readings):
         conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'bob')")
         conn.commit()
+        reviewing = {**BOB, 'X-Auth-Role': 'reviewer'}
 
-        assert client.get('/api/jobs/j1/llm/settle', headers=BOB).status_code == 403
-        assert client.post('/api/jobs/j1/llm/settle', headers=BOB).status_code == 403
+        assert client.get('/api/jobs/j1/llm/settle', headers=reviewing).status_code == 403
+        assert client.post('/api/jobs/j1/llm/settle', headers=reviewing).status_code == 403
         assert client.post('/api/jobs/j1/llm/settle', headers=ADMIN).status_code == 200
 
     def test_a_stranger_is_not_told_the_dataset_exists(self, client, readings):

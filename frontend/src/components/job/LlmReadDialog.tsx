@@ -15,7 +15,6 @@ import { Hint } from '../ui/Hint'
 const SEEN_HINT =
   'Every page is sent with this wording and these pictures. What a dataset carries of its '
   + 'own is used in place of yours, for this dataset alone.'
-const OWNER_ONLY = "Only the dataset's owner can change this."
 const AGREE_HINT =
   'Readings are compared after normalising Unicode, whitespace, quotes and dashes, and '
   + 'models are counted rather than answers. A line that enough of them read the same way is '
@@ -82,10 +81,7 @@ interface LlmReadDialogProps {
   consensusWithOcr: boolean
   /** The dataset's own wording, which replaces the models'. Empty uses theirs. */
   prompt: string
-  /** Owner or admin. What settles a line, and whether that checks it off, is theirs alone
-   *  to decide - the backend refuses those two settings to anyone else. */
-  canOwn: boolean
-  /** The owner keeps the pages from LLM providers outside the house: only models on a
+  /** The dataset keeps its pages from LLM providers outside the house: only models on a
    *  connection an admin marked self-hosted may read them. */
   keptInHouse: boolean
   onClose: () => void
@@ -96,7 +92,7 @@ interface LlmReadDialogProps {
 
 export function LlmReadDialog({
   jobId, pageIds, pageCount, selected, consensusMin, autocheck, consensusWithOcr, prompt,
-  canOwn, keptInHouse, onClose, onStarted, onError,
+  keptInHouse, onClose, onStarted, onError,
 }: LlmReadDialogProps) {
   const [models, setModels] = useState<(LlmModel & { shared: boolean; self_hosted: boolean })[]>([])
   const [chosen, setChosen] = useState<number[]>(selected)
@@ -159,8 +155,7 @@ export function LlmReadDialog({
   const start = async () => {
     setBusy(true)
     try {
-      // Only what was changed here is written back. Some of these are the owner's to set,
-      // and an assignee who left them alone is reading, not changing the dataset.
+      // Only what was changed here is written back.
       const changed = {
         ...(minAgree !== consensusMin ? { llm_consensus_min: minAgree } : {}),
         ...(autoCheck !== autocheck ? { llm_autocheck: autoCheck } : {}),
@@ -195,9 +190,8 @@ export function LlmReadDialog({
       : `${pictures.count} image${pictures.count === 1 ? '' : 's'}${pictures.inherited ? ' of yours' : ''}`,
   ].join(' · ')
 
-  const ownerTitle = canOwn ? undefined : OWNER_ONLY
-  const ownerLabel = `flex items-center gap-2 ${canOwn ? 'cursor-pointer' : 'cursor-not-allowed'}`
-  const ownerBox = `accent-accent ${canOwn ? 'cursor-pointer' : 'cursor-not-allowed'}`
+  const settingLabel = 'flex cursor-pointer items-center gap-2'
+  const settingBox = 'cursor-pointer accent-accent'
 
   return (
     <Modal title="Transcribe the pages with language models" onClose={onClose}>
@@ -295,35 +289,29 @@ export function LlmReadDialog({
               max={10}
               value={minAgree}
               onChange={(e) => setMinAgree(Number(e.target.value))}
-              disabled={!canOwn}
-              title={ownerTitle}
               aria-label="Models that must agree"
               data-testid="llm-consensus-min"
               className="w-14"
             />
             must agree
           </label>
-          <label className={ownerLabel} title={ownerTitle}>
+          <label className={settingLabel}>
             <input
               type="checkbox"
               checked={withOcr}
               onChange={(e) => setWithOcr(e.target.checked)}
-              disabled={!canOwn}
-              title={ownerTitle}
               data-testid="llm-consensus-with-ocr"
-              className={ownerBox}
+              className={settingBox}
             />
             Count Deep OCR as one of them
           </label>
-          <label className={ownerLabel} title={ownerTitle}>
+          <label className={settingLabel}>
             <input
               type="checkbox"
               checked={autoCheck}
               onChange={(e) => setAutoCheck(e.target.checked)}
-              disabled={!canOwn}
-              title={ownerTitle}
               data-testid="llm-autocheck"
-              className={ownerBox}
+              className={settingBox}
             />
             Mark settled lines reviewed
           </label>

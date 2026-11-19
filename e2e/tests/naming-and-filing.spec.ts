@@ -7,7 +7,7 @@ import {
 test.describe('Scenario: filing a dataset under a project', () => {
   test('a member cannot file a dataset under a project they cannot see', async () => {
     const member = `filer-${Date.now()}`
-    const asMember = identity(member, 'member')
+    const asMember = identity(member, 'manager')
     const own = await createJob(uniqueName('Filer own'), 1, undefined, asMember)
     await waitForJobStatus(own, 'done')
     const openName = uniqueName('Their own project')

@@ -19,6 +19,7 @@ ADMIN = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'root', 'X-Auth-Role': 'adm
 ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'member'}
 BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'member'}
 ALICE_READER = {**ALICE, 'X-Auth-Caps': 'pipeline.ocr'}
+BOB_ANNOTATING = {**BOB, 'X-Auth-Role': 'annotator'}
 
 C_ACUTE = '\N{LATIN SMALL LETTER C WITH ACUTE}'
 ACUTE = '\N{COMBINING ACUTE ACCENT}'
@@ -484,16 +485,24 @@ class TestRemovingAndRereading:
 
         assert client.post('/api/lines/1/reocr', headers=ALICE_READER).status_code == 404
 
-    def test_reading_one_line_again_needs_the_ocr_capability_like_the_whole_dataset(self, client, conn):
-        """Queueing the line also switches reading on for the dataset, a setting a member
-        cannot change themselves."""
-        conn.execute("UPDATE jobs SET run_ocr = 0 WHERE id = 'j1'")
+    def test_an_annotator_reads_one_line_again(self, client, conn):
+        conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'bob')")
         conn.commit()
 
-        response = client.post('/api/lines/1/reocr', headers=ALICE)
+        assert client.post('/api/lines/1/reocr', headers=BOB_ANNOTATING).status_code == 200
+        assert line(conn, 1)['needs_ocr'] == 1
+
+    def test_on_a_dataset_that_does_not_read_it_takes_a_manager(self, client, conn):
+        """Queueing the line also switches reading on for the dataset, a setting only its
+        Managers change."""
+        conn.execute("UPDATE jobs SET run_ocr = 0 WHERE id = 'j1'")
+        conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'bob')")
+        conn.commit()
+
+        response = client.post('/api/lines/1/reocr', headers=BOB_ANNOTATING)
 
         assert response.status_code == 403
-        assert response.json()['detail'] == 'not permitted: pipeline.ocr'
+        assert response.json()['detail'] == 'not permitted: this takes a Manager'
         assert line(conn, 1)['needs_ocr'] == 0
         assert conn.execute("SELECT run_ocr FROM jobs WHERE id = 'j1'").fetchone()[0] == 0
 

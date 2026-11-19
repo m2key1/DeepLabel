@@ -1,18 +1,17 @@
 import { Fragment, type ReactNode } from 'react'
 import type { AppUser, Role } from '../../api'
+import { ROLES, ROLE_DESCRIPTION, ROLE_LABEL } from '../../lib/roles'
 import { formatDate, formatRelative, isOnline } from '../../util'
 import { Avatar, AvatarLink } from '../ui/Avatar'
 import { capabilityHint, capabilityLabel } from './capabilities'
 
-const ROLE_ORDER: Role[] = ['admin', 'member', 'viewer']
-const ROLE_TITLE: Record<Role, string> = { admin: 'Admins', member: 'Members', viewer: 'Viewers' }
-const ROLE_NOTE: Partial<Record<Role, string>> = { admin: 'may do everything', viewer: 'read only' }
+const ROLE_TITLE: Record<Role, string> = {
+  admin: 'Admins', manager: 'Managers', reviewer: 'Reviewers', annotator: 'Annotators', viewer: 'Viewers',
+}
 
-// The columns read as a sentence: run a step, throw something away, manage models, train,
-// use the API.
+// The columns read as a sentence: manage models, train, use the API. What someone may do
+// with a dataset's data is their role's, described on the role's own line.
 const GROUPS: { title: string; caps: string[] }[] = [
-  { title: 'run', caps: ['pipeline.layout', 'pipeline.lines', 'pipeline.ocr'] },
-  { title: 'throw away', caps: ['pipeline.discard', 'dataset.delete'] },
   { title: 'models', caps: ['models.manage'] },
   { title: 'train', caps: ['train.local', 'train.cluster'] },
   { title: 'API', caps: ['recognize'] },
@@ -31,10 +30,10 @@ function cellTitle(user: AppUser, cap: string, self: boolean, allowed: boolean, 
                    grantable: boolean): string {
   const name = user.username || user.subject
   if (user.role === 'admin') return 'Admins may do everything'
-  if (user.role === 'viewer' && !grantable) return `${name} is a viewer and may not write at all - promote the account to member first`
+  if (user.role === 'viewer' && !grantable) return `${name} is a Viewer and may not write at all - give the account a role that writes first`
   if (self) return 'You cannot change your own permissions'
-  if (overridden) return `${allowed ? 'Granted' : 'Taken away'} for ${name} - the ${user.role} role says otherwise. Click to go back to the role.`
-  return `${capabilityHint(cap)} - as the ${user.role} role allows. Click to make an exception.`
+  if (overridden) return `${allowed ? 'Granted' : 'Taken away'} for ${name} - the ${ROLE_LABEL[user.role]} role says otherwise. Click to go back to the role.`
+  return `${capabilityHint(cap)} - as the ${ROLE_LABEL[user.role]} role allows. Click to make an exception.`
 }
 
 /** Who may do what, in one table: people under their role, and the role's own line just
@@ -83,7 +82,7 @@ export function RightsTable({ users, capabilities, roles, viewerGrantable, myId,
             <th className="px-2 py-1.5 text-right font-medium">Seen</th>
           </tr>
         </thead>
-        {ROLE_ORDER.map((role) => {
+        {ROLES.map((role) => {
           const people = users.filter((u) => u.role === role)
           const defaults = roles[role] ?? []
           return (
@@ -91,7 +90,7 @@ export function RightsTable({ users, capabilities, roles, viewerGrantable, myId,
               <tr data-testid="role-row" data-role={role} className="bg-raised">
                 <td className="py-1.5 pl-2 font-semibold">
                   {ROLE_TITLE[role]}
-                  {ROLE_NOTE[role] && <span className="ml-1.5 text-xs font-normal text-ink-subtle">{ROLE_NOTE[role]}</span>}
+                  <span className="ml-1.5 text-xs font-normal text-ink-subtle">{ROLE_DESCRIPTION[role]}</span>
                 </td>
                 {caps.map((cap) => (
                   <td key={cap} className={`text-center ${edge(cap)}`} title={`${ROLE_TITLE[role]} ${defaults.includes(cap) ? 'may' : 'may not'}: ${capabilityHint(cap)}`}>
@@ -127,7 +126,7 @@ export function RightsTable({ users, capabilities, roles, viewerGrantable, myId,
                           {self && <span className="text-xs text-ink-subtle">(you)</span>}
                           {!user.active && <span className="text-xs text-danger">Disabled</span>}
                           {role === 'viewer' && (
-                            <span data-testid="promote-first" className="sr-only">promote to member to grant anything that writes</span>
+                            <span data-testid="promote-first" className="sr-only">give the account a role that writes to grant anything that writes</span>
                           )}
                         </span>
                       </td>

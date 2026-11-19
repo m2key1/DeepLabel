@@ -48,6 +48,9 @@ class JobSummary(BaseModel):
     ocr_convention_read: list[str] | None
     data_use: DataUse
     layout_shape: str = 'box'
+    # The role the caller acts with on this dataset: admin, manager, reviewer, annotator
+    # or viewer. Its creator manages it whatever their account role.
+    my_role: str
 
 
 class PageSummary(BaseModel):

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
-  ALL_USES, PHASE_CAPABILITY, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromIiif,
+  ALL_USES, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromIiif,
   createJobFromPath, iiifThumbnailUrl, ApiError, getEnabledTasks, getLayoutShapeChanges, getLayoutTemplates, getMapModels, importJob, isTileTask, listConventionFlags,
   checkJobName, listModels, listUsableLlmModels, renameJob, reocr, reocrPreview, setDataUse as saveDataUse, setJobLlmSettings,
   setJobModels, setJobProcessing, setNewPagesTest, uploadJob,
@@ -104,7 +104,7 @@ const READING_OFF = 'OCR is off for this dataset, so nothing is matched or cut u
 /** A new dataset, step by step; or, given `edit`, the same steps for a dataset that
  *  exists: what it runs, its models and its data use, filled in as they stand. */
 export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
-  const { isAdmin, canEdit, can } = useAuth()
+  const { isAdmin, canEdit } = useAuth()
   useCrumb(edit ? `${edit.name} · Settings` : 'New job')
   const navigate = useNavigate()
   const [name, setName] = useState(edit?.name ?? '')
@@ -155,12 +155,10 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   }, [edit?.id, shape, savedShape])
   const [templates, setTemplates] = useState<LayoutTemplate[]>([])
   const [templateId, setTemplateId] = useState<number | null>(null)
-  // A phase the person may not run starts off and stays off; the backend refuses it too.
-  // Layout starts off as well.
-  const granted = (key: keyof typeof PHASE_CAPABILITY) => can(PHASE_CAPABILITY[key])
+  // Layout starts off.
   const [phases, setPhases] = useState<Phases>(() => (edit
     ? { layout: edit.run_layout, lines: edit.run_lines, ocr: edit.run_ocr, predict: edit.run_predict, tile: edit.run_tile }
-    : { layout: false, lines: granted('lines'), ocr: granted('ocr'), predict: true, tile: false }))
+    : { layout: false, lines: true, ocr: true, predict: true, tile: false }))
   // Two registries, two states: mapModels are the mapseg checkpoints a map job predicts
   // with, models are the text pipeline's trained layout/lines/ocr models.
   const [mapModels, setMapModels] = useState<MapModel[] | null>(null)
@@ -979,8 +977,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
               </label>
               <div className="space-y-2">
                 {PHASE_CHOICES.map(([key, label, hint]) => {
-                  const locked = !granted(key)
-                  const disabled = locked || (key === 'ocr' && !phases.lines)
+                  const disabled = key === 'ocr' && !phases.lines
                   const checked = key === 'ocr' ? phases.lines && phases.ocr : phases[key]
                   return (
                     <label
@@ -1004,13 +1001,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
                       />
                       <span>
                         <span className="block font-medium text-ink">{label}</span>
-                        {locked ? (
-                          <span data-testid={`phase-locked-${key}`} className="block text-xs text-ink-muted">
-                            You have not been granted {label} - an admin can grant it on the Admin page.
-                          </span>
-                        ) : (
-                          <span className="block text-xs text-ink-muted">{hint}</span>
-                        )}
+                        <span className="block text-xs text-ink-muted">{hint}</span>
                       </span>
                     </label>
                   )

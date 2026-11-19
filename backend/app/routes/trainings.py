@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from app import (augmentations, backend_client, config, data_use, line_shapes, preflight, registry,
                  remote_training, slurm_session, store, train_snapshot, trainer, tunables)
-from app.deps import can_access_job, current_user, get_db, require_job_access, require_role
+from app.deps import WRITERS, can_access_job, current_user, get_db, require_job_access, require_job_manager, require_role
 
 router = APIRouter(tags=['training'])
 
@@ -247,7 +247,7 @@ def _preflight_payload(conn, found: dict, user: dict) -> dict:
 
 @router.post('/api/trainings/preflights')
 def create_preflight(body: PreflightCreate, conn=Depends(get_db),
-                     user: dict = Depends(require_role('admin', 'member'))):
+                     user: dict = Depends(require_role(*WRITERS))):
     """Start reviewing the material a training with these settings would be cut from.
     Answers at once; the review is computed in the background and polled."""
     _validate_settings(conn, body, user)
@@ -316,7 +316,7 @@ def _validate_settings(conn, body: TrainingCreate, user: dict) -> dict:
     if not body.dataset_job_ids:
         raise HTTPException(400, 'select at least one dataset')
     for job_id in body.dataset_job_ids:
-        require_job_access(conn, job_id, user)
+        require_job_manager(conn, job_id, user)
         if store.get_job(conn, job_id) is None:
             raise HTTPException(404, f'dataset {job_id} not found')
     data_use.require(conn, body.dataset_job_ids, 'training')
@@ -415,7 +415,7 @@ def _with_defaults(values: dict, base_model_id: int | None, knobs) -> dict:
 
 @router.post('/api/trainings')
 def create_training(body: TrainingCreate, conn=Depends(get_db),
-                    user: dict = Depends(require_role('admin', 'member'))):
+                    user: dict = Depends(require_role(*WRITERS))):
     """Start a training run on the local GPU or the cluster."""
     hyperparams = _validate_settings(conn, body, user)
     name = body.name.strip()

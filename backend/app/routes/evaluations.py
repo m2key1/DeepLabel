@@ -9,7 +9,8 @@ from pydantic import BaseModel
 from app import config
 from app import decode as decode_modes
 from app import caches, data_use, eval_lines, eval_metrics, evaluator, preflight, registry, store, trainer
-from app.deps import can_access_job, current_user, get_db, require_job_access, require_page_access, require_role
+from app.deps import (WRITERS, can_access_job, current_user, get_db, require_job_access, require_job_manager,
+                      require_page_access, require_role)
 
 router = APIRouter(tags=['evaluations'])
 
@@ -64,7 +65,7 @@ class EvaluationCreate(BaseModel):
 
 @router.post('/api/evaluations')
 def create_evaluation(body: EvaluationCreate, conn=Depends(get_db),
-                      user: dict = Depends(require_role('admin', 'member'))):
+                      user: dict = Depends(require_role(*WRITERS))):
     """Score a model against a dataset's reviewed lines or a training's frozen split - an
     OCR model on checked lines, a line model on the outlines of lines-checked pages."""
     model = registry.get_model(conn, body.model_id)
@@ -78,7 +79,7 @@ def create_evaluation(body: EvaluationCreate, conn=Depends(get_db),
     if not body.job_ids:
         raise HTTPException(400, 'select at least one dataset')
     for job_id in body.job_ids:
-        require_job_access(conn, job_id, user)
+        require_job_manager(conn, job_id, user)
         if store.get_job(conn, job_id) is None:
             raise HTTPException(404, f'dataset {job_id} not found')
     data_use.require(conn, body.job_ids, 'test')
@@ -136,11 +137,11 @@ class CheckCreate(BaseModel):
 
 @router.post('/api/jobs/{job_id}/checks')
 def start_check(job_id: str, body: CheckCreate, conn=Depends(get_db),
-                user: dict = Depends(require_role('admin', 'member'))):
+                user: dict = Depends(require_role(*WRITERS))):
     """Read every checked line of a dataset with a model, in the mode Automatic reads with,
     to find transcriptions that look nothing like the reading. Stored as an evaluation but
     never a score of the model, which may have trained on these very lines."""
-    require_job_access(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     model = registry.get_model(conn, body.model_id)
     if model is None:
         raise HTTPException(404, 'model not found')
@@ -347,7 +348,7 @@ class ReviewFilter(BaseModel):
 
 @router.post('/api/evaluations/{eval_id}/review')
 def send_to_review(eval_id: int, body: ReviewFilter, conn=Depends(get_db),
-                   user: dict = Depends(require_role('admin', 'member'))):
+                   user: dict = Depends(require_role(*WRITERS))):
     """Flag every line in the filter for its dataset's review queue."""
     _evaluation_or_404(conn, eval_id)
     flagged = eval_lines.flag_for_review(

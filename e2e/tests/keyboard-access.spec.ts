@@ -135,7 +135,7 @@ test.describe('Scenario: working the dialogs and menus from the keyboard', () =>
     const jobId = await seedCompletedJob(uniqueName('Nav keys'), 1)
     await shareJob(jobId, [username])
     const colleague = await browser.newContext()
-    await useSession(colleague, seedSession('member', username))
+    await useSession(colleague, seedSession('manager', username))
     await (await colleague.newPage()).goto(`/jobs/${jobId}`)
     await expect.poll(async () => ((await backendFetch('/api/presence')).users as { username: string }[])
       .some((u) => u.username === username)).toBe(true)

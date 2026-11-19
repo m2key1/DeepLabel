@@ -1,5 +1,6 @@
-"""Making a dataset or adding pages to one queues its phases, so it asks for the grants a
-re-run of those phases asks for (D55). A refusal names the capability and writes nothing."""
+"""Making a dataset or adding pages to one runs its phases without a grant being asked for:
+running the models on what someone makes or adds is part of making it (#131, decision 318).
+Only a Viewer, who writes nothing, is refused - and then nothing is made."""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -8,22 +9,23 @@ from app.deps import get_db
 from app.main import app
 
 SECRET = 'test-secret'
-MEMBER = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'member'}
-EVERY_PHASE = {**MEMBER, 'X-Auth-Caps': 'pipeline.layout pipeline.lines pipeline.ocr'}
-NO_LAYOUT = {**MEMBER, 'X-Auth-Caps': 'pipeline.lines pipeline.ocr'}
-NO_OCR = {**MEMBER, 'X-Auth-Caps': 'pipeline.layout pipeline.lines'}
+ANNOTATOR = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'annotator', 'X-Auth-Caps': ''}
+VIEWER = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'vera', 'X-Auth-Role': 'viewer', 'X-Auth-Caps': ''}
 PNG = b'\x89PNG\r\n\x1a\n'
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    """Bob's two volumes, both shared with Alice."""
     monkeypatch.setattr('app.config.FRONTEND_SECRET', SECRET)
     monkeypatch.setattr('app.config.JOBS_DIR', tmp_path / 'jobs')
     conn = store.connect(tmp_path / 'app.db')
-    conn.execute("INSERT INTO jobs (id, name, owner, status, run_layout, run_lines, run_ocr) "
-                 "VALUES ('read', 'Read volume', 'alice', 'done', 0, 1, 1)")
-    conn.execute("INSERT INTO jobs (id, name, owner, status, run_layout, run_lines, run_ocr) "
-                 "VALUES ('unread', 'Unread volume', 'alice', 'done', 1, 1, 0)")
+    conn.executescript("""
+        INSERT INTO jobs (id, name, owner, status, run_layout, run_lines, run_ocr)
+            VALUES ('read', 'Read volume', 'bob', 'done', 0, 1, 1),
+                   ('unread', 'Unread volume', 'bob', 'done', 1, 1, 0);
+        INSERT INTO job_assignees (job_id, username) VALUES ('read', 'alice'), ('unread', 'alice');
+    """)
     conn.commit()
     app.dependency_overrides[get_db] = lambda: conn
     yield TestClient(app), conn
@@ -51,47 +53,34 @@ def page_count(conn, job_id) -> int:
 
 
 class TestCreate:
-    def test_a_phase_not_granted_is_refused_by_name_and_nothing_is_made(self, client):
+    def test_an_annotator_makes_a_dataset_that_runs_every_phase(self, client):
         api, conn = client
-        response = create(api, NO_LAYOUT, run_layout=True, run_lines=True, run_ocr=True)
-        assert response.status_code == 403
-        assert response.json()['detail'] == 'not permitted: pipeline.layout'
-        assert job_names(conn) == ['Read volume', 'Unread volume']
-        assert not config.JOBS_DIR.exists() or list(config.JOBS_DIR.iterdir()) == []
-
-    def test_the_same_person_may_make_it_with_that_phase_off(self, client):
-        api, conn = client
-        response = create(api, NO_LAYOUT, run_layout=False, run_lines=True, run_ocr=True)
-        assert response.status_code == 200
+        response = create(api, ANNOTATOR, run_layout=True, run_lines=True, run_ocr=True)
+        assert response.status_code == 200, response.text
         job = store.get_job(conn, response.json()['job_id'])
-        assert (job['run_layout'], job['run_lines'], job['run_ocr']) == (0, 1, 1)
+        assert (job['owner'], job['run_layout'], job['run_lines'], job['run_ocr']) == ('alice', 1, 1, 1)
 
-    def test_reading_without_lines_never_runs_so_it_needs_no_grant(self, client):
+    def test_reading_without_lines_never_runs(self, client):
         api, conn = client
-        response = create(api, NO_OCR, run_layout=True, run_lines=False, run_ocr=True)
+        response = create(api, ANNOTATOR, run_layout=True, run_lines=False, run_ocr=True)
         assert response.status_code == 200
         job = store.get_job(conn, response.json()['job_id'])
         assert (job['run_layout'], job['run_lines'], job['run_ocr']) == (1, 0, 0)
 
-    def test_every_phase_granted_is_let_through(self, client):
+    def test_a_viewer_makes_nothing(self, client):
         api, conn = client
-        response = create(api, EVERY_PHASE, run_layout=True, run_lines=True, run_ocr=True)
-        assert response.status_code == 200
-        assert job_names(conn) == ['New volume', 'Read volume', 'Unread volume']
+        response = create(api, VIEWER, run_layout=True, run_lines=True, run_ocr=True)
+        assert response.status_code == 403
+        assert response.json()['detail'] == 'read-only account'
+        assert job_names(conn) == ['Read volume', 'Unread volume']
+        assert not config.JOBS_DIR.exists() or list(config.JOBS_DIR.iterdir()) == []
 
 
 class TestAppend:
-    def test_adding_pages_to_a_dataset_that_reads_needs_the_reading_grant(self, client):
+    @pytest.mark.parametrize('job_id', ['read', 'unread'])
+    def test_an_annotator_adds_pages_to_a_dataset_they_were_given(self, client, job_id):
         api, conn = client
-        response = append(api, 'read', NO_OCR)
-        assert response.status_code == 403
-        assert response.json()['detail'] == 'not permitted: pipeline.ocr'
-        assert page_count(conn, 'read') == 0
-        assert store.get_job(conn, 'read')['status'] == 'done'
-
-    def test_a_phase_the_dataset_does_not_run_needs_no_grant(self, client):
-        api, conn = client
-        response = append(api, 'unread', NO_OCR)
-        assert response.status_code == 200
-        assert page_count(conn, 'unread') == 1
-        assert store.get_job(conn, 'unread')['status'] == 'queued'
+        response = append(api, job_id, ANNOTATOR)
+        assert response.status_code == 200, response.text
+        assert page_count(conn, job_id) == 1
+        assert store.get_job(conn, job_id)['status'] == 'queued'

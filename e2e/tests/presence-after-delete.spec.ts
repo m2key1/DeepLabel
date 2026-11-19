@@ -10,7 +10,7 @@ test.describe('Scenario: someone was in a dataset that has just been deleted', (
     await shareJob(jobId, [colleague])
     await backendFetch('/api/presence', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...identity(colleague, 'member') },
+      headers: { 'Content-Type': 'application/json', ...identity(colleague, 'manager') },
       body: JSON.stringify({ tab: 'tab-1', job_id: jobId }),
     })
     const before = (await backendFetch('/api/presence')).users as Entry[]

@@ -19,7 +19,7 @@ async function whereIs(username: string): Promise<PresenceUser | null> {
 test.describe('Scenario: seeing who is where', () => {
   test('a colleague on a page shows up on Admin, the dataset and the page, and moves on', async ({ page, browser }) => {
     const username = `present-${Date.now()}`
-    const token = seedSession('member', username)
+    const token = seedSession('manager', username)
     const jobName = uniqueName('Presence')
     const jobId = await seedCompletedJob(jobName)
     await shareJob(jobId, [username])
@@ -62,7 +62,7 @@ test.describe('Scenario: seeing who is where', () => {
 
   test('switching sharing off makes a person invisible at once, and the choice sticks', async ({ browser }) => {
     const username = `unseen-${Date.now()}`
-    const token = seedSession('member', username)
+    const token = seedSession('manager', username)
     const colleague = await browser.newContext()
     await useSession(colleague, token)
     const theirTab = await colleague.newPage()

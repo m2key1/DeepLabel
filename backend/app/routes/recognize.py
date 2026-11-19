@@ -10,7 +10,7 @@ from starlette.datastructures import UploadFile
 
 from app import recognize, recognize_async
 from app.backend_client import BackendError
-from app.deps import current_user, get_db, require_capability, require_role
+from app.deps import WRITERS, current_user, get_db, require_capability, require_role
 
 router = APIRouter(tags=['recognition'])
 may_recognize = require_capability('recognize')
@@ -89,7 +89,7 @@ def offered(conn=Depends(get_db), user: dict = Depends(may_recognize)):
 
 def _may_keep(request: Request, user: dict) -> None:
     """Keeping writes a dataset, so it asks what writing one asks."""
-    if user['role'] not in ('admin', 'member'):
+    if user['role'] not in WRITERS:
         raise HTTPException(403, 'keeping writes a dataset, which a read-only account may not do')
     if request.headers.get('X-Auth-Readonly') == '1':
         raise HTTPException(403, 'keeping writes a dataset, which a read-only token may not do')

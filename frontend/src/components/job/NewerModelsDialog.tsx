@@ -1,15 +1,11 @@
 import { useState } from 'react'
 import { declineNewerModels, runNewerModels } from '../../api'
 import type { ModelTask, NewerModelOffer } from '../../api'
-import { useAuth } from '../../auth'
 import { plural } from '../../util'
 import { Modal, modalBtn, modalPrimaryBtn } from '../Modal'
 
 const STEP: Record<ModelTask, string> = { layout: 'Layout', lines: 'Lines', ocr: 'OCR' }
 const ORDER: ModelTask[] = ['layout', 'lines', 'ocr']
-const CAPABILITY: Record<ModelTask, string> = {
-  layout: 'pipeline.layout', lines: 'pipeline.lines', ocr: 'pipeline.ocr',
-}
 
 /** What running the step again would do, said before it is ticked. */
 function effect(offer: NewerModelOffer): { text: string; replaces: boolean } {
@@ -40,14 +36,10 @@ export function NewerModelsDialog({ jobId, name, offers, onClose, onStarted, onE
   onStarted: () => void
   onError: (message: string) => void
 }) {
-  const { can } = useAuth()
   const rows = ORDER.flatMap((task) => offers.filter((o) => o.task === task))
-  const blocked = (offer: NewerModelOffer) => !can(CAPABILITY[offer.task]) ? 'You may not run this step.'
-    : offer.task === 'layout' && offer.layout_checked && !can('pipeline.discard')
-      ? 'Pages are marked layout complete, and you may not discard checked work.' : null
   // Re-reading leaves checked lines alone, so it is the one step ticked for you.
   const [ticked, setTicked] = useState<Set<ModelTask>>(
-    () => new Set(rows.filter((o) => o.task === 'ocr' && !blocked(o)).map((o) => o.task)))
+    () => new Set(rows.filter((o) => o.task === 'ocr').map((o) => o.task)))
   const [busy, setBusy] = useState(false)
   const firstTicked = ORDER.find((task) => ticked.has(task))
 
@@ -79,15 +71,14 @@ export function NewerModelsDialog({ jobId, name, offers, onClose, onStarted, onE
       <div className="mb-3 space-y-2" data-testid="newer-models">
         {rows.map((offer) => {
           const { text, replaces } = effect(offer)
-          const reason = blocked(offer)
           const runsAnyway = !ticked.has(offer.task) && firstTicked !== undefined
             && ORDER.indexOf(firstTicked) < ORDER.indexOf(offer.task)
           const on = ticked.has(offer.task)
           return (
             <label key={offer.task} data-testid="newer-model" data-task={offer.task}
-                   className={`flex gap-3 rounded-md border p-3 ${reason ? 'opacity-60' : 'cursor-pointer'} ${
+                   className={`flex cursor-pointer gap-3 rounded-md border p-3 ${
                      on ? 'border-accent bg-accent-wash/40' : 'border-line hover:border-line-strong'}`}>
-              <input type="checkbox" checked={on} disabled={!!reason} onChange={() => toggle(offer.task)}
+              <input type="checkbox" checked={on} onChange={() => toggle(offer.task)}
                      aria-label={`Run ${STEP[offer.task]} with ${offer.to.name}`}
                      className="mt-0.5 size-4 shrink-0 accent-accent" />
               <span className="min-w-0 flex-1">
@@ -104,8 +95,7 @@ export function NewerModelsDialog({ jobId, name, offers, onClose, onStarted, onE
                       className={`mt-0.5 block text-xs ${replaces ? 'text-warn' : 'text-ink-muted'}`}>
                   {text}
                 </span>
-                {reason && <span className="mt-0.5 block text-xs text-ink-subtle">{reason}</span>}
-                {runsAnyway && !reason && (
+                {runsAnyway && (
                   <span className="mt-0.5 block text-xs text-ink-subtle">
                     Runs again after {STEP[firstTicked!].toLowerCase()} either way; tick it to use {offer.to.name}.
                   </span>

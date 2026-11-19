@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app import config, consensus, data_use, llm, llm_client, llm_ocr, store
-from app.deps import current_user, get_db, require_job_access, require_job_owner, require_page_access
+from app.deps import current_user, get_db, require_job_access, require_job_manager, require_page_access
 from app.routes.selection import selected_pages
 
 router = APIRouter(tags=['llm'])
@@ -434,7 +434,7 @@ def read_dataset(job_id: str, body: ReadRequest | None = None, conn=Depends(get_
                  user: dict = Depends(current_user), _on=Depends(require_enabled)):
     """Queue a language-model reading of every page. Runs beside the GPU pipeline rather
     than behind it, and is billed to whoever asked - it uses their own credentials."""
-    require_job_access(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     if store.get_job(conn, job_id) is None:
         raise HTTPException(404)
     chosen = _job_models(conn, job_id, body)
@@ -471,7 +471,7 @@ def cancel_reads(job_id: str, body: CancelRequest | None = None, conn=Depends(ge
     """Drop the readings not yet sent, on the whole dataset or the pages given. With
     `in_flight`, a reading already sent is dropped too and its answer discarded when it
     lands - what stopping one page's reading from its chip does."""
-    require_job_access(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     page_ids = selected_pages(conn, job_id, body.page_ids if body else None)
     return {'cancelled': llm_ocr.cancel(conn, job_id, page_ids, in_flight=bool(body and body.in_flight))}
 
@@ -480,7 +480,7 @@ def cancel_reads(job_id: str, body: CancelRequest | None = None, conn=Depends(ge
 def retry_reads(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user),
                 _on=Depends(require_enabled)):
     """Ask again for this dataset's failed readings only, billed to whoever asks."""
-    require_job_access(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     if store.get_job(conn, job_id) is None:
         raise HTTPException(404)
     return llm_ocr.retry_failed(conn, job_id, user)
@@ -499,7 +499,7 @@ def remove_readings(job_id: str, model_id: int | None = None, conn=Depends(get_d
                     user: dict = Depends(current_user)):
     """Delete the readings of this dataset's scans - every model's, or `model_id`'s -
     wherever they landed. Asking again pays again; a checked line keeps its reading."""
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     return llm_ocr.remove(conn, job_id, model_id)
 
 
@@ -532,7 +532,7 @@ def _live_page(conn, page_id: int):
 def settle_preview(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
     """How many lines already read the current agreement settings would settle or un-settle.
     The owner's question, like the settings it is about: an assignee cannot change them."""
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     return consensus.settle_preview(conn, job_id)
 
 
@@ -541,5 +541,5 @@ def settle_again(job_id: str, conn=Depends(get_db), user: dict = Depends(current
                  _on=Depends(require_enabled)):
     """Apply the agreement settings to the lines already read, from the readings on file.
     Saving a setting never does this by itself; no model is asked."""
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     return consensus.settle_job(conn, job_id)

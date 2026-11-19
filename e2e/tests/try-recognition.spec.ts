@@ -29,7 +29,7 @@ test.describe('Scenario: trying recognition on a scan of your own', () => {
       await expect(page.getByTestId('try-ocr-model')).toHaveValue(String(reader.id))
 
       const context = await browser.newContext({ storageState: { cookies: [], origins: [] } })
-      await useSession(context, seedSession('member', `try-${Date.now()}`))
+      await useSession(context, seedSession('manager', `try-${Date.now()}`))
       const member = await context.newPage()
       await member.goto('/')
       await expect(member.getByRole('link', { name: 'Models', exact: true })).toBeVisible()

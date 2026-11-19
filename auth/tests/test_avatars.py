@@ -24,8 +24,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(config, 'AVATAR_DIR', tmp_path / 'avatars')
     from app.main import app
     conn = store.connect(config.DB_PATH)
-    store.upsert_user(conn, SUBJECT, 'alice', 'member')
-    store.upsert_user(conn, OTHER, 'bob', 'member')
+    store.upsert_user(conn, SUBJECT, 'alice', 'manager')
+    store.upsert_user(conn, OTHER, 'bob', 'manager')
     conn.close()
     yield TestClient(app)
 

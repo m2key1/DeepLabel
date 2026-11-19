@@ -7,7 +7,7 @@ import { regionSteps, tileEdit } from './tileEdits'
 const tri = (x: number): Ring => [[x, 0.1], [x + 0.1, 0.1], [x + 0.1, 0.2]]
 const region = (id: number, x: number): Region =>
   ({ id, order_idx: id, class_id: 1, class_name: 'water', points: tri(x), holes: [], kind: 'polygon', checked: true, revision: 0 })
-const deps = { pageId: 3, book: new RevisionBook(), className: (id: number) => (id === 2 ? 'road' : 'water') }
+const deps = { pageId: 3, book: new RevisionBook(), className: (id: number) => (id === 2 ? 'road' : 'water'), drawsChecked: true }
 const same: EditContext = { id: (id) => id }
 const tile = () => [region(1, 0.1), region(2, 0.5)]
 

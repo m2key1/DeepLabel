@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL DEFAULT '',
     display_name TEXT NOT NULL DEFAULT '',
-    role TEXT NOT NULL DEFAULT 'member',
+    role TEXT NOT NULL DEFAULT 'manager',
     active INTEGER NOT NULL DEFAULT 1,
     -- Training is granted per person and per target, because the two cost different
     -- things: the local GPU is one card everyone shares, the cluster is someone's
@@ -109,16 +109,16 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
 """
 
-ROLES = ('admin', 'member', 'viewer')
+# One role per account, as in Label Studio: each may do everything the one after it may.
+ROLES = ('admin', 'manager', 'reviewer', 'annotator', 'viewer')
+# The roles that write: their training grants are kept in the grant columns below.
+WRITER_ROLES = ('manager', 'reviewer', 'annotator')
 
-# What a person may ask the backend to do, beyond reading and editing what they can
-# already see. Ordered, because the admin page lays them out in this order.
+# What spends a shared resource, or the model registry everyone uses, and so is switched
+# per person on top of their role. What someone may do with a dataset's data - re-running
+# models, discarding checked work, deleting - is their role's. Ordered, because the admin
+# page lays them out in this order.
 CAPABILITIES = (
-    'pipeline.layout',   # detect the layout boxes again
-    'pipeline.lines',    # detect the lines again
-    'pipeline.ocr',      # read the lines again
-    'pipeline.discard',  # the answers that throw checked work away
-    'dataset.delete',
     'models.manage',     # register, rename, retire and default a model
     'train.local',
     'train.cluster',
@@ -130,9 +130,9 @@ CAPABILITIES = (
 # set - so a role gaining a capability later reaches everybody who never overrode it.
 ROLE_CAPS = {
     'admin': frozenset(CAPABILITIES),
-    # A member runs the pipeline over the datasets they can already open, but does not
-    # throw away what somebody checked, delete a dataset or touch the model registry.
-    'member': frozenset({'pipeline.layout', 'pipeline.lines', 'pipeline.ocr', 'train.local'}),
+    'manager': frozenset({'train.local'}),
+    'reviewer': frozenset(),
+    'annotator': frozenset(),
     'viewer': frozenset(),
 }
 
@@ -141,10 +141,10 @@ ROLE_CAPS = {
 VIEWER_GRANTABLE = frozenset({'recognize'})
 
 # The two grants that predate this and have their own columns. They are capabilities like
-# any other now, but for a member these columns are where they are kept: the Training
-# column on the admin page and the permission matrix both write here, so the two cannot
-# disagree. An admin has every capability and a viewer may not write at all, so the
-# columns never meant anything for either.
+# any other now, but for the writing roles these columns are where they are kept: the
+# Training column on the admin page and the permission matrix both write here, so the two
+# cannot disagree. An admin has every capability and a viewer may not write at all, so
+# the columns never meant anything for either.
 GRANT_COLUMNS = {'train.local': 'train_local', 'train.cluster': 'train_cluster'}
 
 
@@ -153,7 +153,7 @@ def role_caps(role: str) -> frozenset:
 
 
 def grant_columns(role: str) -> dict:
-    return GRANT_COLUMNS if role == 'member' else {}
+    return GRANT_COLUMNS if role in WRITER_ROLES else {}
 
 
 def effective_caps(user) -> set:
@@ -190,12 +190,12 @@ def stored_overrides(user) -> dict:
 
 def dormant_grants(user) -> dict:
     """What is kept for this person that their role ignores: the grants stored on a
-    viewer account, and the training columns of anyone but a member, read as a member's."""
-    if user['role'] == 'member':
+    viewer account, and the training columns of an admin or viewer, read as a Manager's."""
+    if user['role'] in WRITER_ROLES:
         return {}
-    member = role_caps('member')
+    manager = role_caps('manager')
     dormant = {cap: bool(user[column]) for cap, column in GRANT_COLUMNS.items()
-               if bool(user[column]) is not (cap in member)}
+               if bool(user[column]) is not (cap in manager)}
     if user['role'] == 'viewer':
         dormant.update({cap: True for cap, allowed in _stored_permissions(user).items()
                         if allowed and cap not in GRANT_COLUMNS and cap not in VIEWER_GRANTABLE})
@@ -214,6 +214,7 @@ def _stored_permissions(user) -> dict:
 
 # One-off data moves, numbered in PRAGMA user_version so a connection runs each only once.
 TRAINING_OVERRIDES_MOVED = 1
+ROLES_RENAMED = 2
 
 
 def _move_training_overrides_to_columns(conn: sqlite3.Connection) -> None:
@@ -222,7 +223,8 @@ def _move_training_overrides_to_columns(conn: sqlite3.Connection) -> None:
     it won in the capability set, so it wins here too and moves into the column it
     belongs in. Where it matched the default the set ignored it and the column counted,
     so it is dropped and the column stays."""
-    member = role_caps('member')
+    # Written before the roles were renamed; a Manager's training default is a member's.
+    member = role_caps('manager')
     rows = conn.execute("SELECT id, permissions FROM users WHERE role = 'member' "
                         """AND permissions LIKE '%"train.%'""").fetchall()
     for row in rows:
@@ -288,6 +290,12 @@ def connect(db_path: Path) -> sqlite3.Connection:
     if conn.execute('PRAGMA user_version').fetchone()[0] < TRAINING_OVERRIDES_MOVED:
         _move_training_overrides_to_columns(conn)
         conn.execute(f'PRAGMA user_version = {TRAINING_OVERRIDES_MOVED}')
+    if conn.execute('PRAGMA user_version').fetchone()[0] < ROLES_RENAMED:
+        # A member kept every power they had on their own datasets and on what was shared
+        # with them; an admin narrows anyone to Reviewer or Annotator on the Admin page.
+        conn.execute("UPDATE users SET role = 'manager' WHERE role = 'member'")
+        conn.execute("UPDATE invitations SET role = 'manager' WHERE role = 'member'")
+        conn.execute(f'PRAGMA user_version = {ROLES_RENAMED}')
     conn.commit()
     return conn
 
@@ -334,9 +342,11 @@ def upsert_user(conn: sqlite3.Connection, subject: str, username: str, role: str
     username is logged because the backend attributes work by that name."""
     row = conn.execute('SELECT * FROM users WHERE subject = ?', (subject,)).fetchone()
     if row is None:
-        conn.execute('INSERT INTO users (subject, username, email, display_name, role, pending) '
-                     'VALUES (?, ?, ?, ?, ?, ?)',
-                     (subject, username or '', email or '', display_name or '', role or 'member', int(pending)))
+        role = role or 'manager'
+        conn.execute('INSERT INTO users (subject, username, email, display_name, role, pending, train_local, '
+                     'train_cluster) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                     (subject, username or '', email or '', display_name or '', role, int(pending),
+                      *grant_column_defaults(role)))
     else:
         reported = {'username': username, 'email': email, 'display_name': display_name}
         for field, value in reported.items():
@@ -467,12 +477,17 @@ def set_user_role(conn: sqlite3.Connection, user_id: int, role: str):
     conn.execute('UPDATE users SET role = ? WHERE id = ?', (role, user_id))
 
 
-def clear_exceptions(conn: sqlite3.Connection, user_id: int):
-    """Back to exactly what the role says, grant columns included: they hold a member's
-    training exceptions, and a member's default is what they must read for anyone else."""
-    member = role_caps('member')
+def grant_column_defaults(role: str) -> tuple[int, int]:
+    """train_local and train_cluster as the role has them: a writing role's own, and a
+    Manager's for an admin or viewer, whose columns mean nothing until a role writes."""
+    defaults = role_caps(role if role in WRITER_ROLES else 'manager')
+    return int('train.local' in defaults), int('train.cluster' in defaults)
+
+
+def clear_exceptions(conn: sqlite3.Connection, user_id: int, role: str):
+    """Back to exactly what the role says, grant columns included."""
     conn.execute('UPDATE users SET permissions = ?, train_local = ?, train_cluster = ? WHERE id = ?',
-                 ('{}', int('train.local' in member), int('train.cluster' in member), user_id))
+                 ('{}', *grant_column_defaults(role), user_id))
 
 
 def set_user_permissions(conn: sqlite3.Connection, user_id: int, overrides: dict):
@@ -621,8 +636,9 @@ def count_pending(conn: sqlite3.Connection) -> int:
 
 
 def approve_user(conn: sqlite3.Connection, user_id: int, role: str):
-    """Let a pending account in with this role. Never commits."""
-    conn.execute('UPDATE users SET pending = 0, role = ? WHERE id = ?', (role, user_id))
+    """Let a pending account in with this role, starting from its grants. Never commits."""
+    conn.execute('UPDATE users SET pending = 0, role = ?, train_local = ?, train_cluster = ? WHERE id = ?',
+                 (role, *grant_column_defaults(role), user_id))
 
 
 def invite(conn: sqlite3.Connection, email: str, role: str, invited_by: str):

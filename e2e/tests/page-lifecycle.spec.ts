@@ -1,6 +1,6 @@
 import { test, expect } from '../helpers/test'
 import {
-  OCR_AUTHOR, backendFetch, createJob, datasetInfo, getJob, getPageDetail,
+  BACKEND, OCR_AUTHOR, backendFetch, createJob, datasetInfo, getJob, getPageDetail,
   getReocrPreview, greedyLines, identity, jobPageIds, listRegistryModels, markLinesChecked,
   moveJobToGroup, pageDeletedFlags, pageLines, patchJob, seedCompletedJob, setPagesDeleted,
   shareJob, stripLayoutFrom, uniqueName, waitForJobStatus,
@@ -9,7 +9,7 @@ import type { DatasetInfo } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { textPdf } from '../helpers/pdf'
 import { openViewer } from '../helpers/viewer'
-import { asSession, seedSession, useSession } from '../helpers/session'
+import { seedSession, useSession } from '../helpers/session'
 
 async function selectEveryRow(page: import('@playwright/test').Page, rows: number) {
   await expect(page.locator('tbody tr')).toHaveCount(rows)
@@ -193,19 +193,20 @@ test.describe('Scenario: one change applied to a group holding a dataset that is
   // time. A dataset that is already queued, or that a selection cannot move because it is
   // not yours, is named with its reason and left alone rather than failing the rest."
   test('group settings name the dataset that refused and still change the rest', async ({ browser }) => {
+    // A Reviewer manages what they made and nothing else they were given, so their own
+    // group can hold a dataset whose settings are not theirs to change.
     const username = `grouper-${Date.now()}`
-    const session = seedSession('member', username)
-    // The group is the member's own, made the way they would make it: through the front
-    // door with their session, since the seeding admin's groups would not be theirs to manage.
-    const groupName = uniqueName('Member project')
-    const created = await asSession(session, '/api/groups', {
+    const session = seedSession('reviewer', username)
+    const groupName = uniqueName('Reviewer project')
+    const created = await fetch(`${BACKEND}/api/groups`, {
       method: 'POST', body: JSON.stringify({ name: groupName }),
+      headers: { 'X-Frontend-Secret': 'e2e-secret', 'Content-Type': 'application/json', ...identity(username, 'manager') },
     })
     expect(created.status).toBe(200)
     const group = (await created.json()) as { id: number }
 
     const ownName = uniqueName('Mine to set')
-    const own = await createJob(ownName, 1, undefined, identity(username, 'member'))
+    const own = await createJob(ownName, 1, undefined, identity(username, 'reviewer'))
     const theirsName = uniqueName('Only shared with me')
     const theirs = await seedCompletedJob(theirsName, 1)
     await shareJob(theirs, [username])
@@ -232,11 +233,10 @@ test.describe('Scenario: one change applied to a group holding a dataset that is
     const skipped = page.getByTestId('group-settings-skip')
     await expect(skipped).toHaveCount(1)
     // The same words a single dataset's PATCH would have refused with.
-    await expect(skipped).toHaveText(`${theirsName} - not permitted`)
+    await expect(skipped).toHaveText(`${theirsName} - not permitted: this takes a Manager`)
     await expect(skipped).toHaveAttribute('data-job', theirs)
 
-    // Backend oracle: the member's own dataset changed, the one merely shared with them
-    // did not.
+    // Backend oracle: their own dataset changed, the one merely shared with them did not.
     await expect.poll(async () => (await getJob(own)).ocr_decode).toBe('greedy')
     expect((await getJob(theirs)).ocr_decode).toBe('auto')
     await context.close()

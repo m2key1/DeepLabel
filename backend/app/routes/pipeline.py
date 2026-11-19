@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app import candidates, characters, config, ingest, layout_classes, newer_models, registry, store
-from app.deps import (check_capability, current_user, get_db, get_user, require_capability,
-                      require_job_access, require_page_access, require_role)
+from app.deps import (current_user, get_db, get_user, require_job_access, require_job_manager, require_page_access,
+                      role_on_job, role_reaches)
 
 router = APIRouter(tags=['pipeline'])
 
@@ -79,12 +79,11 @@ def redetect_one(conn, job_id: str) -> dict:
 
 @router.post('/api/jobs/{job_id}/redetect')
 def redetect_lines(job_id: str, body: Redetect | None = None, conn=Depends(get_db),
-                   me: dict = Depends(current_user),
-                   _may=Depends(require_capability('pipeline.lines'))):
+                   me: dict = Depends(current_user)):
     """Queue the job so the runner's stale pass picks the work up. Every other phase
     selects its own work by status and finds none on a finished job, so nothing else
     is redone."""
-    require_job_access(conn, job_id, me)
+    require_job_manager(conn, job_id, me)
     user = me['username']
     job = store.get_job(conn, job_id)
     if job is None:
@@ -189,7 +188,7 @@ def reocr_one(conn, job_id: str, scope: str, user: dict) -> dict:
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
-    check_capability(user, 'pipeline.ocr')
+    require_rerun_manager(conn, job, user)
     if scope not in ('pending', 'unchecked'):
         raise HTTPException(400, 'scope must be pending or unchecked')
     require_reocr_work(conn, job, scope)
@@ -304,10 +303,9 @@ def rerun_job(job_id: str, body: Rerun, conn=Depends(get_db), me: dict = Depends
     """Re-run the pipeline from a phase, discarding what that phase produced -
     except alignment, which only re-matches transcriptions against the text on hand."""
     require_job_access(conn, job_id, me)
-    require_phase(me, body)
     job = store.get_job(conn, job_id)
     if job is not None:
-        require_rerun_owner(job, me)
+        require_rerun_manager(conn, job, me)
     user = me['username']
     result = rerun_one(conn, job_id, body.from_phase, body.force, user,
                        keep_checked=body.keep_checked, keep_text=body.keep_text)
@@ -315,31 +313,11 @@ def rerun_job(job_id: str, body: Rerun, conn=Depends(get_db), me: dict = Depends
     return result
 
 
-# Which capability each phase asks for. Alignment re-matches what is already there and
-# destroys nothing, so anyone who can open the dataset may run it.
-PHASE_CAPABILITY = {
-    'layout': 'pipeline.layout',
-    'start': 'pipeline.layout',
-    'lines': 'pipeline.lines',
-    'ocr': 'pipeline.ocr',
-}
-
-
-def require_phase(user: dict, body: 'Rerun') -> None:
-    """Running a phase again and throwing away what somebody checked are two different
-    permissions: the second is what turns a re-run into a loss."""
-    needed = PHASE_CAPABILITY.get(body.from_phase)
-    if needed:
-        check_capability(user, needed)
-    if body.force or not body.keep_checked or not body.keep_text:
-        check_capability(user, 'pipeline.discard')
-
-
-def require_rerun_owner(job: dict, user: dict) -> None:
-    """Re-running a whole dataset is its owner's call, as running a phase on one of its
-    pages is: being given a dataset carries re-reading it, not re-running it."""
-    if job['owner'] != user['username'] and user['role'] != 'admin':
-        raise HTTPException(403, f"only the owner or an admin may re-run {job['name']}")
+def require_rerun_manager(conn, job: dict, user: dict) -> None:
+    """Running models again on a dataset, discarding checked work included, is its
+    Managers' call; Annotators and Reviewers correct what is there."""
+    if not role_reaches(role_on_job(conn, job['id'], user), 'manager'):
+        raise HTTPException(403, f"only a Manager may re-run {job['name']}")
 
 
 def switch_on_phase(conn, job: dict, phase: str) -> None:
@@ -441,19 +419,19 @@ def _owned_job(conn, job_id: str, user: dict) -> dict:
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
-    require_rerun_owner(job, user)
+    require_rerun_manager(conn, job, user)
     return job
 
 
 @router.get('/api/jobs/{job_id}/newer-models')
 def newer_models_offer(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
     """The steps a newer model could be run for, old and new model, and what running each
-    would cost. Asked of the owner and admins only, since only they may run them."""
+    would cost. Offered to the dataset's Managers only, since only they may run them."""
     require_job_access(conn, job_id, user)
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
-    if job['owner'] != user['username'] and user['role'] != 'admin':
+    if not role_reaches(role_on_job(conn, job_id, user), 'manager'):
         return {'offers': []}
     return {'offers': newer_models.offers(conn, job)}
 
@@ -485,10 +463,6 @@ def newer_models_run(job_id: str, body: NewerModelsRun, conn=Depends(get_db),
         raise HTTPException(400, f'only these steps have a newer model: {", ".join(sorted(offered)) or "none"}')
     first = next(task for task in registry.TASKS if task in tasks)
     force = first == 'layout' and offered['layout']['layout_checked'] > 0
-    for task in tasks:
-        check_capability(user, PHASE_CAPABILITY[task])
-    if force:
-        check_capability(user, 'pipeline.discard')
     for task in tasks:
         newer_models.switch_to(conn, job, offered[task])
     for task in set(offered) - tasks:
@@ -568,12 +542,10 @@ class NotRunnable(Exception):
         self.reason = reason
 
 
-def _valid_phase(phase: str, user: dict) -> str:
-    """A phase this deployment runs, and one this person may run - the same capability a
-    whole-dataset re-run from that phase asks for."""
+def _valid_phase(phase: str) -> str:
+    """A phase this deployment runs."""
     if phase not in PHASES:
         raise HTTPException(400, f'phase must be {", ".join(PHASES[:-1])} or {PHASES[-1]}')
-    check_capability(user, PHASE_CAPABILITY[phase])
     return phase
 
 
@@ -582,7 +554,7 @@ def _runnable_job(conn, job_id: str, user: dict) -> dict:
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
-    require_rerun_owner(job, user)
+    require_rerun_manager(conn, job, user)
     if job['status'] in ('queued', 'running'):
         raise HTTPException(409, 'the dataset is already queued or running')
     return job
@@ -682,7 +654,7 @@ def run_page(page_id: int, body: RunPhase, conn=Depends(get_db),
         (page_id,)).fetchone()
     if page is None:
         raise HTTPException(404)
-    _valid_phase(body.phase, user)
+    _valid_phase(body.phase)
     _runnable_job(conn, page['job_id'], user)
     costs = _page_costs(conn, page_id)
     try:
@@ -703,7 +675,7 @@ def run_pages(job_id: str, body: RunPages, conn=Depends(get_db),
     for a re-read of forty pages should not be refused because one of them is finished. A
     page id from another dataset is a mistake worth reporting, so that is still a 404."""
     require_job_access(conn, job_id, user)
-    _valid_phase(body.phase, user)
+    _valid_phase(body.phase)
     _runnable_job(conn, job_id, user)
     if not body.page_ids:
         raise HTTPException(400, 'no pages given')

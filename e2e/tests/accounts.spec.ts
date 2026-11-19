@@ -26,7 +26,7 @@ async function signUp(page: Page, email: string, password = 'violet hinge saddle
 
 /** Invite someone through the API as the admin and set their password through the link,
  *  as the person would: the setup for the scenarios about passwords. */
-async function invited(admin: Page, browser: Browser, role = 'member', password = 'ember sparrow tundra kiln') {
+async function invited(admin: Page, browser: Browser, role = 'manager', password = 'ember sparrow tundra kiln') {
   const email = freshEmail('julia')
   const invitation = await admin.request.post(`${site}/api/users/invitations`, { data: { email, role } })
   expect(invitation.ok()).toBe(true)
@@ -79,10 +79,10 @@ test.describe('Scenario: accounts on DeepLabel\'s own pages', () => {
     expect(waiting).toBeGreaterThan(0)
     await expect(admin.getByTestId('admin-pending')).toHaveText(String(waiting))
     const row = admin.locator(`[data-testid="pending-user"][data-user="${email}"]`)
-    await row.getByTestId('pending-role').selectOption('member')
+    await row.getByTestId('pending-role').selectOption('manager')
     await row.getByTestId('approve').click()
     await expect(row).toHaveCount(0)
-    await expect.poll(() => me(page)).toMatchObject({ user: email, pending: false, role: 'member' })
+    await expect.poll(() => me(page)).toMatchObject({ user: email, pending: false, role: 'manager' })
     expect(await pendingCount(admin)).toBe(waiting - 1)
 
     await page.reload()
@@ -111,7 +111,7 @@ test.describe('Scenario: accounts on DeepLabel\'s own pages', () => {
     await admin.goto(`${site}/admin`)
     const invite = admin.getByTestId('invite-person')
     await invite.getByRole('textbox', { name: 'Email' }).fill(email)
-    await invite.getByTestId('invite-role').selectOption('member')
+    await invite.getByTestId('invite-role').selectOption('manager')
     await invite.getByRole('button', { name: 'Create link' }).click()
     const url = await admin.getByTestId('password-link-url').textContent()
     expect(url).toMatch(new RegExp(`^${site}/set-password\\?token=`))
@@ -128,7 +128,7 @@ test.describe('Scenario: accounts on DeepLabel\'s own pages', () => {
     await page.getByTestId('set-password-submit').click()
 
     await expect(page).toHaveURL(`${site}/`)
-    await expect.poll(() => me(page)).toMatchObject({ user: email, role: 'member', pending: false })
+    await expect.poll(() => me(page)).toMatchObject({ user: email, role: 'manager', pending: false })
 
     const again = await fresh(browser)
     await again.goto(url!)
@@ -184,13 +184,13 @@ test.describe('Scenario: accounts on DeepLabel\'s own pages', () => {
     // Invited, so not held back for approval; the account already has a guessable password.
     const admin = await signedInPage(browser, ROOT, ROOT_PASSWORD)
     expect((await admin.request.post(`${site}/api/users/invitations`,
-      { data: { email: 'olaf@example.org', role: 'member' } })).ok()).toBe(true)
+      { data: { email: 'olaf@example.org', role: 'manager' } })).ok()).toBe(true)
 
     await page.goto(`${site}/sign-in`)
     expect(await submit(page, 'olaf@example.org', 'olaf1234')).toBe(200)
 
     await expect(page.getByTestId('choose-new-password')).toBeVisible()
-    expect(await me(page)).toMatchObject({ user: 'olaf@example.org', role: 'member' })
+    expect(await me(page)).toMatchObject({ user: 'olaf@example.org', role: 'manager' })
     expect((await page.request.get(`${site}/api/jobs`, { maxRedirects: 0 })).status()).toBe(403)
     await page.getByTestId('new-password').fill('olaf12345')
     await expect(page.getByTestId('password-strength-message')).toHaveText('Too easy to guess - add another word.')

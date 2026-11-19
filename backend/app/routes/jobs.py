@@ -15,8 +15,9 @@ from pydantic import BaseModel, Field
 from app import (blobs, caches, config, consensus, conventions, corpus, data_use, decode, evaluator, geometry,
                  iiif, imports, ingest, jobs, layout_shapes, layout_templates, llm, map_classes, model_registry,
                  page_rows, queue_eta, reading_order, recognize, registry, schemas, store, trainer)
-from app.deps import (can_access_job, can_reach_group, check_capability, current_user, get_db, get_user,
-                      require_job_access, require_job_owner, require_role)
+from app.deps import (ROLE_NAMES, WRITERS, can_access_job, can_reach_group, current_user, get_db, get_user,
+                      require_job_access, require_job_manager, require_job_role, require_role, role_given,
+                      role_on_job, role_reaches)
 
 
 class UncappedUploadRequest(Request):
@@ -109,18 +110,6 @@ def _job_payload(conn, row, shared_with: list[str] | None = None) -> dict:
     return job
 
 
-PHASE_CAPABILITIES = (('run_layout', 'pipeline.layout'), ('run_lines', 'pipeline.lines'),
-                     ('run_ocr', 'pipeline.ocr'))
-
-
-def _require_phase_grants(user: dict, **phases: bool) -> None:
-    """Making a dataset or adding pages to one queues its phases, so it asks for the grants
-    a re-run of those phases would."""
-    for phase, capability in PHASE_CAPABILITIES:
-        if phases[phase]:
-            check_capability(user, capability)
-
-
 @router.post('/api/jobs')
 def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: str = Form('text'),
                page_reading_order: str = Form(reading_order.AUTO),
@@ -136,7 +125,7 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
                ocr_convention: str = Form('{}'), data_use: str = Form('{}'),
                layout_shape: str = Form('box'),
                files: list[UploadFile] = None, conn=Depends(get_db),
-               user: str = Depends(get_user), _editor=Depends(require_role('admin', 'member'))):
+               user: str = Depends(get_user), _editor=Depends(require_role(*WRITERS))):
     """Create a dataset from uploaded files - a .txt beside an image is ingested as that page's transcription.
     With `hold`, it waits as 'uploading' while more batches are added, until it is started."""
     _valid_layout_shape(layout_shape)
@@ -157,10 +146,6 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
     # Everything that can refuse the request is asked before a file is written.
     if is_map:
         run_layout = run_lines = run_ocr = False
-    granted_layout, granted_lines, granted_ocr, _ = ingest.coherent_phases(
-        run_layout, run_lines, run_ocr, line_mode)
-    _require_phase_grants(_editor, run_layout=granted_layout, run_lines=granted_lines,
-                          run_ocr=granted_ocr)
     run_predict = run_predict and is_map  # prediction is a map-only phase
     run_tile = run_tile and is_map        # tiling is a map-only phase
     tile_size = _valid_map_phases(run_tile, run_predict, tile_size)
@@ -269,7 +254,7 @@ def _require_layout_template(conn, template_id: int | None) -> None:
 @router.post('/api/jobs/import')
 def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str = Form('{}'),
                file: UploadFile = None, conn=Depends(get_db),
-               user: str = Depends(get_user), _editor=Depends(require_role('admin', 'member'))):
+               user: str = Depends(get_user), _editor=Depends(require_role(*WRITERS))):
     """Transkribus/eScriptorium-style export: pages arrive segmented and
     transcribed, so no pipeline phase has to run - only the ingest phase, which
     builds the renditions the viewer needs."""
@@ -358,7 +343,7 @@ class IiifJob(JobOptions):
     canvases: list[str]
 
 
-def _checked_options(conn, body: JobOptions, grants) -> dict:
+def _checked_options(conn, body: JobOptions) -> dict:
     """What a JSON-created dataset will run, once everything that can refuse it has been asked."""
     ingest.valid_task(body.task)
     ingest.valid_line_mode(body.line_mode)
@@ -371,7 +356,6 @@ def _checked_options(conn, body: JobOptions, grants) -> dict:
     run_layout, run_lines, run_ocr, line_mode = ingest.coherent_phases(
         not is_map and body.run_layout, not is_map and body.run_lines,
         not is_map and body.run_ocr, body.line_mode)
-    _require_phase_grants(grants, run_layout=run_layout, run_lines=run_lines, run_ocr=run_ocr)
     run_predict = body.run_predict and is_map  # prediction is a map-only phase
     run_tile = body.run_tile and is_map        # tiling is a map-only phase
     tile_size = _valid_map_phases(run_tile, run_predict, body.tile_size)
@@ -411,7 +395,7 @@ def _insert_job(conn, job_id: str, user: str, body: JobOptions, o: dict,
 def create_job_from_path(body: PathJob, conn=Depends(get_db), user: str = Depends(get_user),
                          _admin=Depends(require_role('admin'))):
     """Create a dataset from a directory that already sits on the backend host."""
-    o = _checked_options(conn, body, _admin)
+    o = _checked_options(conn, body)
     is_map = o['is_map']
     extensions = config.IMAGE_EXTENSIONS if is_map else config.INGEST_EXTENSIONS
     root, sources, skipped_symlinks = ingest.scan_path(body.server_path, extensions=extensions)
@@ -453,7 +437,7 @@ class IiifInspect(BaseModel):
 
 
 @router.post('/api/iiif/inspect')
-def inspect_iiif(body: IiifInspect, user: str = Depends(get_user), _editor=Depends(require_role('admin', 'member'))):
+def inspect_iiif(body: IiifInspect, user: str = Depends(get_user), _editor=Depends(require_role(*WRITERS))):
     """A manifest's pages, or a collection's members, for the New dataset form to choose from."""
     if not body.url.strip():
         raise HTTPException(400, 'give the address of a IIIF manifest or collection')
@@ -478,12 +462,12 @@ def _page_filename(position: int, label: str) -> str:
 
 @router.post('/api/jobs/iiif')
 def create_job_from_iiif(body: IiifJob, conn=Depends(get_db), user: str = Depends(get_user),
-                         _editor=Depends(require_role('admin', 'member'))):
+                         _editor=Depends(require_role(*WRITERS))):
     """Create a text dataset from canvases of a IIIF manifest. The manifest is read again
     here rather than trusted from the form; each page's image is downloaded at ingest."""
     if body.task != 'text':
         raise HTTPException(400, 'a IIIF manifest makes a text dataset')
-    o = _checked_options(conn, body, _editor)
+    o = _checked_options(conn, body)
     manifest = _read_iiif(body.manifest)
     if manifest['kind'] != 'manifest':
         raise HTTPException(400, 'this is a collection - choose one of its manifests')
@@ -515,7 +499,7 @@ def create_job_from_iiif(body: IiifJob, conn=Depends(get_db), user: str = Depend
 @router.post('/api/jobs/{job_id}/iiif/retry')
 def retry_iiif_downloads(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
     """Download again the IIIF pages whose image could not be fetched."""
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     _require_appendable(conn, job_id)
     retried = conn.execute(
         "UPDATE pages SET status = 'pending', error = NULL "
@@ -541,7 +525,7 @@ def _queue_unless_held(conn, job_id: str) -> None:
 @router.post('/api/jobs/{job_id}/start')
 def start_held(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
     """Queue a dataset that waited while its upload arrived in batches."""
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
@@ -585,9 +569,8 @@ def append_uploads(job_id: str, files: list[UploadFile] = None, as_test: bool | 
                    conn=Depends(get_db), user: dict = Depends(current_user)):
     """Add pages to an existing dataset by upload. `as_test` says whether they are test
     pages; left out, they follow the dataset's "New pages are test pages"."""
-    require_job_owner(conn, job_id, user)
+    require_job_role(conn, job_id, user, 'annotator')
     job = _require_appendable(conn, job_id)
-    _require_phase_grants(user, **{phase: bool(job[phase]) for phase, _ in PHASE_CAPABILITIES})
     if not files:
         raise HTTPException(400, 'no files uploaded')
     is_map = ingest.is_tile_task(job['task'])
@@ -632,7 +615,6 @@ def append_path(job_id: str, body: AppendPath, conn=Depends(get_db),
                 _admin=Depends(require_role('admin'))):
     """Add pages to an existing dataset from a directory on the backend host."""
     job = _require_appendable(conn, job_id)
-    _require_phase_grants(_admin, **{phase: bool(job[phase]) for phase, _ in PHASE_CAPABILITIES})
     is_map = ingest.is_tile_task(job['task'])
     tiling = bool(job.get('run_tile'))
     _require_map_runner(is_map and (tiling or bool(job['run_predict'])))
@@ -678,6 +660,7 @@ def list_jobs(conn=Depends(get_db), user: dict = Depends(current_user)):
     for row in rows:
         job = _job_payload(conn, row, shared.get(row['id'], []))
         job.update(progress.get(job['id'], empty))
+        job['my_role'] = role_given(row['owner'], user)
         payloads.append(job)
     return payloads
 
@@ -740,6 +723,7 @@ def get_job(job_id: str, pages: bool = True, conn=Depends(get_db),
         raise HTTPException(404)
     data_use.note_admin_visit(conn, job_id, user)
     job = _job_payload(conn, row)
+    job['my_role'] = role_given(row['owner'], user)
     job['unreadable'] = [{**dict(r), 'iiif': bool(r['iiif'])} for r in conn.execute(
         "SELECT id, filename, error, iiif FROM pages WHERE job_id = ? AND deleted = 0 AND status = 'unreadable' "
         'ORDER BY idx', (job_id,))]
@@ -1002,8 +986,6 @@ def _patch_processing(conn, job_id: str, job, body: JobPatch, fields: set, user:
     It takes effect from the next run: nothing already recognised is discarded, and the
     runner reads these when it starts, so changing them mid-run would have the phases
     disagree with the pages they are producing. Hence the refusal while one is in flight."""
-    if user['role'] != 'admin' and job['owner'] != user['username']:
-        raise HTTPException(403, 'not permitted')
     if ingest.is_tile_task(job['task'] or 'text'):
         raise HTTPException(400, 'a tile dataset runs no text phases')
     if job['status'] in ('queued', 'running'):
@@ -1056,9 +1038,18 @@ def layout_shape_changes(job_id: str, shape: str, conn=Depends(get_db), user: di
     return layout_shapes.changes(conn, [job_id], shape)
 
 
+# Every setting a dataset takes is its Managers', except marking the whole dataset checked.
+FIELD_ROLE = {'checked': 'reviewer'}
+
+
 def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict) -> None:
-    """Every setting a dataset takes, applied to one. Each field carries its own gate, so
-    a member changing what annotators change is let through while the rest is refused."""
+    """Every setting a dataset takes, applied to one, after the caller's role there is
+    shown to reach each field asked for."""
+    role = role_on_job(conn, job_id, user)
+    for field in fields:
+        least = FIELD_ROLE.get(field, 'manager')
+        if not role_reaches(role, least):
+            raise HTTPException(403, f'not permitted: this takes a {ROLE_NAMES[least]}')
     if 'checked' in fields and body.checked is not None:
         conn.execute('UPDATE jobs SET checked = ? WHERE id = ?', (int(body.checked), job_id))
     if 'auto_redetect' in fields and body.auto_redetect is not None:
@@ -1069,12 +1060,8 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
         conn.execute('UPDATE jobs SET reading_order = ? WHERE id = ?', (body.reading_order, job_id))
         resequence_job(conn, job_id)
     if 'layout_shape' in fields and body.layout_shape is not None:
-        if user['role'] != 'admin' and job['owner'] != user['username']:
-            raise HTTPException(403, 'not permitted')
         set_layout_shape(conn, job_id, body.layout_shape, user['username'])
     if 'tile_size' in fields and body.tile_size is not None:
-        if user['role'] != 'admin' and job['owner'] != user['username']:
-            raise HTTPException(403, 'not permitted')
         if not job['run_tile']:
             raise HTTPException(400, 'only a dataset that cuts its maps into tiles has a tile size')
         if job['status'] in ('queued', 'running'):
@@ -1082,20 +1069,12 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
         conn.execute('UPDATE jobs SET tile_size = ? WHERE id = ?',
                      (_valid_tile_size(body.tile_size), job_id))
     if 'line_width' in fields and body.line_width is not None:
-        # Member-editable like the review flags: it only changes how the next export
-        # rasterizes, so annotators tune it after looking at a mask.
         conn.execute('UPDATE jobs SET line_width = ? WHERE id = ?',
                      (_valid_line_width(body.line_width), job_id))
     if 'name' in fields and body.name is not None:
-        # Renaming is as weighty as creating or deleting a dataset: owner or admin,
-        # unlike the review flags above, which any assigned member sets while working.
-        if user['role'] != 'admin' and job['owner'] != user['username']:
-            raise HTTPException(403, 'not permitted')
         name = ingest.require_unique_name(conn, body.name, exclude_id=job_id)
         conn.execute('UPDATE jobs SET name = ? WHERE id = ?', (name, job_id))
     if 'group_id' in fields:
-        if user['role'] != 'admin' and job['owner'] != user['username']:
-            raise HTTPException(403, 'not permitted')
         # Filing shares the dataset with the group's people and shows the group to the
         # filer, so a group they cannot reach answers as one that does not exist.
         if body.group_id is not None and not can_reach_group(conn, body.group_id, user):
@@ -1104,25 +1083,18 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
     for task, column in MODEL_COLUMNS.items():
         if column not in fields:
             continue
-        if user['role'] != 'admin' and job['owner'] != user['username']:
-            raise HTTPException(403, 'not permitted')
         chosen = getattr(body, column)
         # Keeping the model already pinned is no new choice, even if it was archived since.
         if chosen is not None and chosen != job[column]:
             _require_model_choice(conn, chosen, task)
         conn.execute(f'UPDATE jobs SET {column} = ? WHERE id = ?', (chosen, job_id))
     if 'new_pages_test' in fields and body.new_pages_test is not None:
-        if user['role'] != 'admin' and job['owner'] != user['username']:
-            raise HTTPException(403, 'not permitted')
         conn.execute('UPDATE jobs SET new_pages_test = ? WHERE id = ?', (int(body.new_pages_test), job_id))
     for column in ('gt_autocheck', 'gt_ordered'):
         # Whether alignment checks lines off, and whether the transcription is complete and
-        # in reading order so that order alone may - the owner's claim to make, as checking
-        # a line puts it in the training corpus. Read by the next Alignment run.
+        # in reading order so that order alone may. Read by the next Alignment run.
         if column not in fields or getattr(body, column) is None:
             continue
-        if user['role'] != 'admin' and job['owner'] != user['username']:
-            raise HTTPException(403, 'not permitted')
         conn.execute(f'UPDATE jobs SET {column} = ? WHERE id = ?',
                      (int(getattr(body, column)), job_id))
     if 'gt_prompt' in fields and body.gt_prompt is not None:
@@ -1147,26 +1119,14 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
         conn.execute('UPDATE jobs SET llm_model_ids = ? WHERE id = ?',
                      (json.dumps(body.llm_model_ids), job_id))
     if 'llm_consensus_min' in fields and body.llm_consensus_min is not None:
-        # How many must agree decides what settles, so it is the owner's call like
-        # autocheck below.
-        if user['role'] != 'admin' and job['owner'] != user['username']:
-            raise HTTPException(403, 'not permitted')
         if not 1 <= body.llm_consensus_min <= 10:
             raise HTTPException(400, 'between 1 and 10 models must agree')
         conn.execute('UPDATE jobs SET llm_consensus_min = ? WHERE id = ?',
                      (body.llm_consensus_min, job_id))
     if 'llm_autocheck' in fields and body.llm_autocheck is not None:
-        # Checking a line off puts it in the training corpus under a human's authority,
-        # so who may turn that on is the owner's call, not any assignee's.
-        if user['role'] != 'admin' and job['owner'] != user['username']:
-            raise HTTPException(403, 'not permitted')
         conn.execute('UPDATE jobs SET llm_autocheck = ? WHERE id = ?',
                      (int(body.llm_autocheck), job_id))
     if 'llm_consensus_with_ocr' in fields and body.llm_consensus_with_ocr is not None:
-        # Who counts as a reader decides what settles, and therefore what a training run
-        # can be handed - the owner's call for the same reason autocheck is.
-        if user['role'] != 'admin' and job['owner'] != user['username']:
-            raise HTTPException(403, 'not permitted')
         conn.execute('UPDATE jobs SET llm_consensus_with_ocr = ? WHERE id = ?',
                      (int(body.llm_consensus_with_ocr), job_id))
     if 'llm_prompt' in fields and body.llm_prompt is not None:
@@ -1177,13 +1137,9 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
         # told - the shipped rules included, or not.
         conn.execute('UPDATE jobs SET llm_prompt = ? WHERE id = ?', (prompt, job_id))
     if 'ocr_decode' in fields and body.ocr_decode is not None:
-        if user['role'] != 'admin' and job['owner'] != user['username']:
-            raise HTTPException(403, 'not permitted')
         conn.execute('UPDATE jobs SET ocr_decode = ? WHERE id = ?',
                      (_valid_ocr_decode(body.ocr_decode), job_id))
     if 'ocr_convention' in fields and body.ocr_convention is not None:
-        if user['role'] != 'admin' and job['owner'] != user['username']:
-            raise HTTPException(403, 'not permitted')
         conn.execute('UPDATE jobs SET ocr_convention = ? WHERE id = ?',
                      (json.dumps(_valid_convention(body.ocr_convention)), job_id))
         conventions.note(conn, [name for name, on in body.ocr_convention.items() if on])
@@ -1231,7 +1187,7 @@ class Share(BaseModel):
 @router.put('/api/jobs/{job_id}/share')
 def share_job(job_id: str, body: Share, conn=Depends(get_db), user: dict = Depends(current_user)):
     """Replace the set of users a dataset is shared with."""
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     names = sorted({n.strip() for n in body.usernames if n.strip()})
     conn.execute('DELETE FROM job_assignees WHERE job_id = ?', (job_id,))
     conn.executemany('INSERT INTO job_assignees (job_id, username) VALUES (?, ?)',
@@ -1251,14 +1207,14 @@ def _data_use_payload(conn, job_id: str) -> dict:
 def get_data_use(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
     """What the dataset may be used for, the models already made from it, and the admins
     who opened it while it restricted its use."""
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     return _data_use_payload(conn, job_id)
 
 
 @router.put('/api/jobs/{job_id}/data-use')
 def put_data_use(job_id: str, body: dict[str, bool], conn=Depends(get_db), user: dict = Depends(current_user)):
     """Switch uses on or off. Models already trained on the dataset stay as they are."""
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     uses = _valid_data_use(body)
     before = store.job_row_to_dict(conn.execute('SELECT * FROM jobs WHERE id = ?', (job_id,)).fetchone())['data_use']
     changed = {use: on for use, on in uses.items() if before[use] != on}
@@ -1289,7 +1245,7 @@ class TestPages(BaseModel):
 @router.post('/api/jobs/{job_id}/test-pages')
 def mark_test_pages(job_id: str, body: TestPages, conn=Depends(get_db), user: dict = Depends(current_user)):
     """Mark pages as test data, which no training uses, or unmark them."""
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     if body.page_ids is None:
         conn.execute('UPDATE pages SET is_test = ? WHERE job_id = ?', (int(body.test), job_id))
         conn.execute('UPDATE jobs SET new_pages_test = ? WHERE id = ?', (int(body.test), job_id))
@@ -1313,7 +1269,7 @@ def test_page_counts(conn, job_id: str) -> dict:
 @router.post('/api/jobs/{job_id}/cancel')
 def cancel(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
     """Stop a queued or running dataset job."""
-    require_job_owner(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
@@ -1325,10 +1281,8 @@ def cancel(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)
 
 @router.delete('/api/jobs/{job_id}')
 def delete_job(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
-    """Delete a dataset and everything derived from it. Owning it is not enough: deleting
-    is a capability of its own, which a member does not have unless an admin grants it."""
-    require_job_owner(conn, job_id, user)
-    check_capability(user, 'dataset.delete')
+    """Delete a dataset and everything derived from it."""
+    require_job_manager(conn, job_id, user)
     if store.get_job(conn, job_id) is None:
         raise HTTPException(404)
     jobs.cancel_job(conn, job_id)

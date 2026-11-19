@@ -115,21 +115,21 @@ test.describe('Scenario: a dataset page left open to a run that is over in a mom
   })
 })
 
-test.describe('Scenario: re-reading one line is a re-read like any other', () => {
-  test('someone without the OCR capability cannot queue a single line either', async () => {
+test.describe('Scenario: re-reading one line is a correction aid (#131)', () => {
+  test('an Annotator re-reads one line, but not the whole dataset', async () => {
     const jobId = await seedCompletedJob(uniqueName('Line re-read gate'), 1)
     await shareJob(jobId, ['bob'])
     const [pageId] = await jobPageIds(jobId)
     const [line] = await pageLines(jobId, pageId)
     // Sent straight to the backend with no capabilities at all.
-    const bob = { ...json, 'X-Frontend-Secret': 'e2e-secret', 'X-Auth-User': 'bob', 'X-Auth-Role': 'member',
+    const bob = { ...json, 'X-Frontend-Secret': 'e2e-secret', 'X-Auth-User': 'bob', 'X-Auth-Role': 'annotator',
                   'X-Auth-Caps': '' }
     const post = (path: string, body: object) =>
       backendFetch(path, { method: 'POST', headers: bob, body: JSON.stringify(body) })
 
     await expect(post(`/api/jobs/${jobId}/reocr`, { scope: 'unchecked' })).rejects.toThrow(/403/)
-    await expect(post(`/api/lines/${line.id}/reocr`, {})).rejects.toThrow(/403/)
-    // Nothing was queued on bob's behalf.
+    // Nothing was queued for the dataset on bob's behalf.
     expect((await getJob(jobId)).status).toBe('done')
+    expect((await post(`/api/lines/${line.id}/reocr`, {})).needs_ocr).toBe(true)
   })
 })

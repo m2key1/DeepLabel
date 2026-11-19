@@ -123,8 +123,8 @@ test.describe('Scenario: registering language models for pre-annotation', () => 
 
     const colleague = `member-${Date.now()}`
     const theirOwnName = uniqueName('Their endpoint')
-    await seedLlmConnection(theirOwnName, ['stub-perfect'], identity(colleague, 'member'))
-    await useSession(page.context(), seedSession('member', colleague))
+    await seedLlmConnection(theirOwnName, ['stub-perfect'], identity(colleague, 'manager'))
+    await useSession(page.context(), seedSession('manager', colleague))
     await page.goto('/settings?section=llm')
 
     // The published one is there, read-only; the private one does not exist for them.
@@ -146,7 +146,7 @@ test.describe('Scenario: registering language models for pre-annotation', () => 
     // The backend agrees, and refuses the write the UI never offers.
     // Published connections are instance-wide, so this asks about these two by name
     // rather than about the whole list.
-    const theirs = (await llmSettings(identity(colleague, 'member'))).connections
+    const theirs = (await llmSettings(identity(colleague, 'manager'))).connections
     expect(theirs.map((c) => c.name)).toContain(publishedName)
     expect(theirs.map((c) => c.name)).not.toContain(privateName)
     expect(theirs.find((c) => c.name === publishedName)!.editable).toBe(false)
@@ -156,7 +156,7 @@ test.describe('Scenario: registering language models for pre-annotation', () => 
       headers: {
         'X-Frontend-Secret': 'e2e-secret',
         'Content-Type': 'application/json',
-        ...identity(colleague, 'member'),
+        ...identity(colleague, 'manager'),
       },
       body: JSON.stringify({ name: 'Hijacked' }),
     })

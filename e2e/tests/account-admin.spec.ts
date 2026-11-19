@@ -24,7 +24,7 @@ test.describe('Scenario: disabling an account', () => {
   test('disabling an account ends its sessions and tokens at once, and enabling it later restores neither',
     async ({ page }) => {
       const username = `doomed-${Date.now()}`
-      const session = seedSession('member', username)
+      const session = seedSession('manager', username)
       const minted = await asSession(session, '/api/tokens', {
         method: 'POST', body: JSON.stringify({ name: 'laptop' }),
       })
@@ -214,7 +214,7 @@ test.describe('Scenario: how long a token lives, and when it was last used', () 
     async ({ browser }) => {
       // A newcomer, so the tab starts empty.
       const context = await browser.newContext({ storageState: { cookies: [], origins: [] } })
-      await useSession(context, seedSession('member', uniqueName('newcomer').replace(/\s/g, '-')))
+      await useSession(context, seedSession('manager', uniqueName('newcomer').replace(/\s/g, '-')))
       const page = await context.newPage()
       await page.goto('/settings?section=tokens')
       const tab = page.getByTestId('api-tokens')
@@ -244,7 +244,7 @@ test.describe('Scenario: a token that has expired', () => {
   test('an expired token is listed greyed and counted apart from the live ones',
     async ({ page, browser }) => {
       const username = `expiry-${Date.now()}`
-      const session = seedSession('member', username)
+      const session = seedSession('manager', username)
       for (const name of ['stale', 'live']) {
         const minted = await asSession(session, '/api/tokens', {
           method: 'POST', body: JSON.stringify({ name }),
@@ -391,7 +391,7 @@ test.describe('Scenario: what you see of others, and what they see of you', () =
   test('"show where others are" off hides presence everywhere while the backend still lists people, and the state on your profile names the setting',
     async ({ page, browser }) => {
       const colleague = `colleague-${Date.now()}`
-      const token = seedSession('member', colleague)
+      const token = seedSession('manager', colleague)
       const jobId = await seedCompletedJob(uniqueName('Together'), 1)
       await shareJob(jobId, [colleague])
       const [pageId] = await jobPageIds(jobId)
@@ -477,8 +477,8 @@ test.describe('Scenario: a colleague\'s face and your own other tabs', () => {
     const colleague = `pictured-${stamp}`
     const viewerName = `looker-${stamp}`
     const memberName = `peer-${stamp}`
-    const colleagueSession = seedSession('member', colleague)
-    const sessions = { viewer: seedSession('viewer', viewerName), member: seedSession('member', memberName) }
+    const colleagueSession = seedSession('manager', colleague)
+    const sessions = { viewer: seedSession('viewer', viewerName), manager: seedSession('manager', memberName) }
     const jobId = await seedCompletedJob(uniqueName('Faces'), 1)
     await shareJob(jobId, [colleague, viewerName, memberName])
     const [pageId] = await jobPageIds(jobId)
@@ -495,7 +495,7 @@ test.describe('Scenario: a colleague\'s face and your own other tabs', () => {
     await (await theirs.newPage()).goto(`/jobs/${jobId}/pages/${pageId}`)
     await expect.poll(async () => (await whereIs(colleague))?.page_id ?? null).toBe(pageId)
 
-    for (const role of ['member', 'viewer'] as const) {
+    for (const role of ['manager', 'viewer'] as const) {
       const context = await browser.newContext()
       await useSession(context, sessions[role])
       const tab = await context.newPage()
@@ -514,7 +514,7 @@ test.describe('Scenario: a colleague\'s face and your own other tabs', () => {
   test('a setting changed in one tab reaches the other tab of the same browser at once, both ways',
     async ({ browser }) => {
       const context = await browser.newContext()
-      await useSession(context, seedSession('member', `onebrowser-${Date.now()}`))
+      await useSession(context, seedSession('manager', `onebrowser-${Date.now()}`))
       const stored = async () => (await (await context.request.get('/api/settings')).json()).share_activity
       const tabA = await context.newPage()
       await tabA.goto('/settings?section=together')
@@ -541,7 +541,7 @@ test.describe('Scenario: a colleague\'s face and your own other tabs', () => {
       const username = `twotabs-${Date.now()}`
       const contexts = await Promise.all([browser.newContext(), browser.newContext()])
       const [tabA, tabB] = await Promise.all(contexts.map(async (context) => {
-        await useSession(context, seedSession('member', username))
+        await useSession(context, seedSession('manager', username))
         const tab = await context.newPage()
         await tab.goto('/settings?section=together')
         return tab
@@ -566,12 +566,12 @@ test.describe('Scenario: an admin reads the list as one person sees it', () => {
   test('the lens shows exactly the datasets the access record says that person reaches',
     async ({ page }) => {
       const username = `lens-${Date.now()}`
-      seedSession('member', username)
+      seedSession('manager', username)
       const ownedName = uniqueName('Owned')
       const sharedName = uniqueName('Shared')
       const viaGroupName = uniqueName('Via group')
       const hiddenName = uniqueName('Hidden')
-      const owned = await createJob(ownedName, 1, undefined, identity(username, 'member'))
+      const owned = await createJob(ownedName, 1, undefined, identity(username, 'manager'))
       await waitForJobStatus(owned, 'done')
       const shared = await seedCompletedJob(sharedName, 1)
       await shareJob(shared, [username])

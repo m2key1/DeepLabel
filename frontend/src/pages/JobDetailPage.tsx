@@ -27,7 +27,6 @@ import {
   setPageLayoutChecked,
   setPagesDeleted,
   runPagesPhase,
-  PHASE_CAPABILITY,
   uploadPages,
   listPageRows,
   retryIiifDownloads,
@@ -82,7 +81,6 @@ import { ActionMenu } from '../components/job/ActionMenu'
 import { SwitchKnob } from '../components/ui/SwitchKnob'
 import { AddPagesDialog } from '../components/job/AddPagesDialog'
 import { UploadProgress, type UploadState } from '../components/ui/UploadProgress'
-import { PHASE_CHOICES } from '../components/job/processing'
 import { MaskExportDialog } from '../components/job/MaskExportDialog'
 import { PurgeDialog } from '../components/job/PurgeDialog'
 import { RedetectDialog } from '../components/job/RedetectDialog'
@@ -107,6 +105,7 @@ import { menuTrigger, useDismiss } from '../components/ui/menu'
 import { useAutoClear } from '../messages'
 import { Check } from '../components/ui/Field'
 import { usePolling } from '../hooks/usePolling'
+import { reaches } from '../lib/roles'
 import { cardChrome, popoverChrome } from '../components/ui/Card'
 
 
@@ -213,7 +212,7 @@ function thumbWidth(page: PageSummary): number {
 }
 
 export function JobDetailPage() {
-  const { user, isAdmin, canEdit, can } = useAuth()
+  const { user, isAdmin, canEdit } = useAuth()
   const { id } = useParams<{ id: string }>()
   const jobId = id!
   const navigate = useNavigate()
@@ -372,19 +371,20 @@ export function JobDetailPage() {
   const active = job !== null && (job.status === 'queued' || job.status === 'running')
   // Sent in parts by the client: it waits until the last part is in, then is started.
   const uploading = job?.status === 'uploading'
-  // What the backend lets through for the settings that decide how the dataset is
-  // processed, and for queueing work on it: the owner, or an admin.
-  const canOwn = job !== null && (isAdmin || job.owner === user)
+  // The settings that decide how the dataset is processed, and running models on it, are
+  // its Managers'; correcting it and adding pages is anyone's who may write.
+  const canManage = reaches(job?.my_role, 'manager')
+  const canCheck = reaches(job?.my_role, 'reviewer')
   // Both tile tasks share the job page, tile grid, review flags and mask export; only
   // the geometry inside a tile differs, which lives in the editor.
   const isMap = !!job && isTileTask(job.task)
   // Asked once a visit, when the dataset is at rest: a newer model for a step it ran.
   const askedNewer = useRef(false)
   useEffect(() => {
-    if (!canOwn || isMap || active || uploading || askedNewer.current) return
+    if (!canManage || isMap || active || uploading || askedNewer.current) return
     askedNewer.current = true
     getNewerModels(jobId).then((r) => setNewerModels(r.offers)).catch(() => undefined)
-  }, [jobId, canOwn, isMap, active, uploading])
+  }, [jobId, canManage, isMap, active, uploading])
   const lineJob = job?.task === 'map_lines'
   // Nothing detected the boxes, so the lines are what gets reviewed and counted.
   const noLayout = !!job && !isMap && !job.run_layout
@@ -608,10 +608,7 @@ export function JobDetailPage() {
   const pages = rows
 
   const actionClass = buttonClass({ variant: 'outline', size: 'xs' })
-  // New pages run the dataset's phases, so adding them asks for what running those does.
-  const ungrantedPhase = job === null ? undefined
-    : PHASE_CHOICES.find(([key]) => job[`run_${key}`] && !can(PHASE_CAPABILITY[key]))?.[1]
-  const canAppend = canOwn && !active && !ungrantedPhase
+  const canAppend = reaches(job?.my_role, 'annotator') && !active
 
   // Map jobs have no transcriptions, so a .txt only rides along for text datasets.
   const acceptRe = isMap ? /\.(jpe?g|png|tiff?|bmp|webp)$/i : /\.(jpe?g|png|tiff?|bmp|webp|pdf|txt)$/i
@@ -899,7 +896,7 @@ export function JobDetailPage() {
           <span className="text-ink-subtle">-</span>
         )
       case 'test':
-        return canOwn ? (
+        return canManage ? (
           <TestPageSwitch
             compact
             on={!!page.is_test}
@@ -1019,8 +1016,9 @@ export function JobDetailPage() {
                 </select>
               </div>
             )}
-            <BarDivider />
-            {canOwn && uploading && (
+            {/* Everything right of here is a Manager's: running, exporting, settings. */}
+            {canManage && <BarDivider />}
+            {canManage && uploading && (
               <Button
                 size="xs"
                 data-testid="start-job"
@@ -1041,37 +1039,33 @@ export function JobDetailPage() {
               trigger={<><PlayIcon /> Run</>}
               caret
               actions={[
-                // Re-running the dataset is its owner's call, and a permission per phase on top:
-                // the entry is there for an owner who may run at least one of them - and the
-                // dialog offers only those.
-                ...(canEdit && can('pipeline.ocr') && !active && !uploading && !isMap && reocrCount > 0 ? [{
+                ...(canManage && !active && !uploading && !isMap && reocrCount > 0 ? [{
                   label: `Re-read ${plural(reocrCount, 'line')}`,
                   hint: 'Edited or newly drawn since they were last read',
                   testId: 'reocr-run',
                   pending: reocrCount,
                   onSelect: () => reocr(jobId).then(refetch).catch((e: Error) => setError(e.message)),
                 }] : []),
-                ...(canEdit && can('pipeline.lines') && !active && !isMap && stale?.elements ? [{
+                ...(canManage && !active && !isMap && stale?.elements ? [{
                   label: `Re-detect lines in ${plural(stale.elements, 'box', 'boxes')}`,
                   hint: 'Boxes whose shape changed since their lines were found',
                   testId: 'redetect-open',
                   pending: stale.elements,
                   onSelect: () => setRedetectOpen(true),
                 }] : []),
-                ...(canEdit && canOwn && !active && !uploading && !isMap
-                  && ['pipeline.layout', 'pipeline.lines', 'pipeline.ocr'].some(can) ? [{
+                ...(canManage && !active && !uploading && !isMap ? [{
                   label: 'Re-run phases…',
                   hint: 'Run layout, lines, OCR or alignment again on every page',
                   testId: 'rerun-open',
                   onSelect: () => setRerunOpen(true),
                 }] : []),
-                ...(canEdit && !isMap ? [{
+                ...(canManage && !isMap ? [{
                   label: 'Transcribe with LLMs…',
                   hint: 'Language models read the pages, and their reading is matched to the lines',
                   testId: 'llm-read-open',
                   onSelect: () => { setLlmPages(undefined); setLlmOpen(true) },
                 }] : []),
-                ...(canEdit && !isMap ? [{
+                ...(canManage && !isMap ? [{
                   label: 'Check transcriptions…',
                   hint: 'A model reads the checked lines, and those that look nothing like their text are listed',
                   testId: 'check-open',
@@ -1090,9 +1084,9 @@ export function JobDetailPage() {
                   </Button>
                 )}
                 {/* Only polylines are stroked; a polygon job's masks are filled areas, so
-                    the width would steer nothing there. Hidden from viewers, who cannot
-                    PATCH the job - an input that always 403s is worse than no input. */}
-                {lineJob && canEdit && (
+                    the width would steer nothing there. Shown only to those who may change
+                    it - an input that always 403s is worse than no input. */}
+                {lineJob && canManage && (
                   <label
                     className="flex items-center gap-1.5 text-sm text-ink-muted"
                     title="Stroke width in pixels traced lines are rasterized with in exported masks. The JSON sidecar always keeps the exact coordinates."
@@ -1117,10 +1111,10 @@ export function JobDetailPage() {
                 {/* The title lives on the wrapper: a disabled button takes no pointer
                     events, so its own tooltip would never appear — and "why is this off"
                     is exactly what needs saying then. */}
-                {exportBlocked(job, user) ? (
+                {!canManage ? null : exportBlocked(job, user) ? (
                   <span data-testid="export-blocked" className="text-xs text-ink-muted"
                         title={`Ask ${job.owner} for a copy`}>
-                    Exports are kept to the owner
+                    Exports are kept to its creator
                   </span>
                 ) : (<>
                 <span title={job.tiles_reviewed
@@ -1156,7 +1150,7 @@ export function JobDetailPage() {
                   </Button>
                 )}
               </>
-            ) : (
+            ) : canManage && (
               <div className="relative">
                 <Button
                   size="xs"
@@ -1183,15 +1177,15 @@ export function JobDetailPage() {
               title="Layout classes, language model readings and clean-up"
               trigger={<KebabIcon />}
               actions={[
-                ...(!isMap ? [{
+                ...(canManage && !isMap ? [{
                   label: 'Layout classes…',
                   hint: 'Their names, colours, and which are containers',
                   testId: 'layout-classes',
                   onSelect: () => setClassesOpen(true),
                 }] : []),
-                // Owner or admin, like the agreement settings they apply; offered once readings
+                // A Manager's, like the agreement settings they apply; offered once readings
                 // are on file, since there is nothing to settle or remove before.
-                ...(canOwn && !isMap && (llmStatus?.done ?? 0) > 0 ? [{
+                ...(canManage && !isMap && (llmStatus?.done ?? 0) > 0 ? [{
                   label: 'Re-apply LLM agreement…',
                   hint: 'Match the readings on file again under the agreement rules - no model is asked',
                   testId: 'llm-settle-again',
@@ -1202,7 +1196,7 @@ export function JobDetailPage() {
                   testId: 'remove-readings',
                   onSelect: () => setRemoveReadingsOpen(true),
                 }] : []),
-                ...(canOwn && !isMap ? [{
+                ...(canManage && !isMap ? [{
                   label: 'Settings…',
                   hint: 'What it runs, its models and conventions, what its data may be used for',
                   testId: 'settings-open',
@@ -1228,7 +1222,7 @@ export function JobDetailPage() {
               testPages={chipCounts['test-pages'] ?? 0}
               pages={job.pages_live ?? 0}
               newPagesTest={job.new_pages_test ?? false}
-              canOwn={canOwn}
+              canManage={canManage}
               onSwitch={(on) => {
                 setJob((p) => (p ? { ...p, new_pages_test: on } : p))
                 setNewPagesTest(jobId, on).catch((err: Error) => setError(err.message))
@@ -1237,13 +1231,19 @@ export function JobDetailPage() {
             />
           )}
           <DataUseChips value={job.data_use} />
-          <CompleteSwitch on={job.checked} onChange={(checked) => {
-            setJob((p) => (p ? { ...p, checked } : p))
-            setJobChecked(jobId, checked).catch((err: Error) => setError(err.message))
-          }} />
+          {canCheck ? (
+            <CompleteSwitch on={job.checked} onChange={(checked) => {
+              setJob((p) => (p ? { ...p, checked } : p))
+              setJobChecked(jobId, checked).catch((err: Error) => setError(err.message))
+            }} />
+          ) : job.checked && (
+            <Badge data-testid="job-complete" tone="ok" icon={<CheckIcon />} title="A Reviewer marked it complete">
+              Complete
+            </Badge>
+          )}
         </div>
         {!!job.unreadable?.length && (
-          <UnreadablePages pages={job.unreadable} onRetry={canOwn && !active ? async () => {
+          <UnreadablePages pages={job.unreadable} onRetry={canManage && !active ? async () => {
             try {
               await retryIiifDownloads(jobId)
               refetch()
@@ -1297,7 +1297,6 @@ export function JobDetailPage() {
           autocheck={job.llm_autocheck ?? false}
           consensusWithOcr={job.llm_consensus_with_ocr ?? false}
           prompt={job.llm_prompt ?? ''}
-          canOwn={canOwn}
           keptInHouse={!job.data_use.external_llm}
           onClose={() => setLlmOpen(false)}
           onStarted={(outcome) => {
@@ -1319,7 +1318,7 @@ export function JobDetailPage() {
         <PurgeDialog jobId={jobId} onClose={() => setPurgeOpen(false)} onPurged={refetch} onError={setError} />
       )}
       {classesOpen && (
-        <LayoutClassesDialog jobId={jobId} canEdit={canEdit} onClose={() => setClassesOpen(false)} onChanged={refetch} />
+        <LayoutClassesDialog jobId={jobId} canEdit={canManage} onClose={() => setClassesOpen(false)} onChanged={refetch} />
       )}
       {removeReadingsOpen && (
         <RemoveReadingsDialog jobId={jobId} onClose={() => setRemoveReadingsOpen(false)}
@@ -1349,7 +1348,7 @@ export function JobDetailPage() {
           <button onClick={() => setSelected(new Set())} className={actionClass}>
             Clear
           </button>
-          {canEdit && !isMap && selectedLive > 0 && (
+          {canManage && !isMap && selectedLive > 0 && (
             <button
               data-testid="bulk-llm-read"
               className={actionClass}
@@ -1361,43 +1360,39 @@ export function JobDetailPage() {
               Transcribe with LLMs
             </button>
           )}
-          {canEdit && canOwn && !isMap && selectedLive > 0 && (
+          {canManage && !isMap && selectedLive > 0 && (
             <>
-              {can('pipeline.lines') && (
-                <button data-testid="bulk-run-lines" className={actionClass}
-                        onClick={() => runOnSelection('lines')}
-                        title="Detect the lines on these pages again">
-                  Detect lines
-                </button>
-              )}
-              {can('pipeline.ocr') && (
-                <button data-testid="bulk-run-ocr" className={actionClass}
-                        onClick={() => runOnSelection('ocr')}
-                        title="Read the text of these pages again, leaving checked lines alone">
-                  Re-read text
-                </button>
-              )}
+              <button data-testid="bulk-run-lines" className={actionClass}
+                      onClick={() => runOnSelection('lines')}
+                      title="Detect the lines on these pages again">
+                Detect lines
+              </button>
+              <button data-testid="bulk-run-ocr" className={actionClass}
+                      onClick={() => runOnSelection('ocr')}
+                      title="Read the text of these pages again, leaving checked lines alone">
+                Re-read text
+              </button>
             </>
           )}
-          {canOwn && !isMap && selectedLive > 0 && (
+          {canManage && !isMap && selectedLive > 0 && (
             <button data-testid="bulk-test-pages" className={actionClass}
                     onClick={() => markTest(selectedPages.map((p) => p.id), !allTest)}>
               {allTest ? 'Unmark test pages' : 'Mark as test pages'}
             </button>
           )}
-          {selectedLive > 0 && (
+          {canCheck && selectedLive > 0 && (
             <button onClick={bulkLayoutChecked} data-testid="bulk-layout-checked" className={actionClass}>
               {isMap
                 ? (allChecked ? 'Mark unreviewed' : 'Mark reviewed')
                 : (allChecked ? 'Mark layout incomplete' : 'Mark layout complete')}
             </button>
           )}
-          {canEdit && selectedDeleted > 0 && (
+          {canManage && selectedDeleted > 0 && (
             <button onClick={() => bulkDelete(false)} className={actionClass}>
               Restore {selectedDeleted}
             </button>
           )}
-          {canEdit && selectedLive > 0 && (
+          {canManage && selectedLive > 0 && (
             <button
               onClick={() => bulkDelete(true)}
               className="rounded border border-line-strong px-2 py-1 text-xs font-medium text-danger hover:border-danger"
@@ -1588,10 +1583,9 @@ export function JobDetailPage() {
         </div>
       )}
       {upload && <div className="mt-3"><UploadProgress progress={upload} /></div>}
-      {canOwn && !active && !upload && (
+      {canAppend && !upload && (
         <button
           data-testid="add-pages"
-          disabled={!canAppend}
           onClick={() => fileInput.current?.click()}
           className="mt-3 w-full rounded-md border-2 border-dashed border-line-strong px-3 py-3 text-sm text-ink-muted hover:border-accent hover:text-accent-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:text-ink-muted"
         >
@@ -1609,17 +1603,12 @@ export function JobDetailPage() {
           )}
         </button>
       )}
-      {canOwn && !active && !upload && !isMap && (
+      {canManage && !active && !upload && !isMap && (
         <label className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 text-xs text-ink-muted">
           <input type="checkbox" data-testid="add-as-test" checked={addAsTest ?? job.new_pages_test ?? false}
                  onChange={(e) => setAddAsTest(e.target.checked)} className="cursor-pointer accent-accent" />
           Add as test pages
         </label>
-      )}
-      {canOwn && !active && ungrantedPhase && (
-        <p data-testid="add-pages-locked" className="mt-1 text-center text-xs text-ink-muted">
-          Adding pages runs {ungrantedPhase} on them, which you have not been granted.
-        </p>
       )}
       <input
         ref={fileInput}
@@ -1799,11 +1788,11 @@ function CompleteSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean)
   )
 }
 
-function TestDataControls({ testPages, pages, newPagesTest, canOwn, onSwitch, onMarkAll }: {
+function TestDataControls({ testPages, pages, newPagesTest, canManage, onSwitch, onMarkAll }: {
   testPages: number
   pages: number
   newPagesTest: boolean
-  canOwn: boolean
+  canManage: boolean
   onSwitch: (on: boolean) => void
   onMarkAll: (test: boolean) => void
 }) {
@@ -1811,7 +1800,7 @@ function TestDataControls({ testPages, pages, newPagesTest, canOwn, onSwitch, on
   const state = testPages === 0 ? 'none' : testPages === pages && newPagesTest ? 'whole' : 'some'
   const label = state === 'none' ? 'No test pages' : state === 'whole' ? 'Test set' : 'Test pages'
   const value = state === 'some' ? `${testPages}/${pages}` : undefined
-  if (!canOwn) {
+  if (!canManage) {
     return state !== 'none' && <TestDataChip data-testid="job-test-pages" value={value}>{label}</TestDataChip>
   }
   return (

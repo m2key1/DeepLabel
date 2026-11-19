@@ -89,13 +89,13 @@ test.describe('Scenario: an answer that arrives late does not overwrite a newer 
     await staleHeld
     expect(stale!.body).toContain(`"username":"${username}"`)
 
-    await role.selectOption('member')
-    await expect.poll(async () => (await userRecord(page, username)).role).toBe('member')
+    await role.selectOption('manager')
+    await expect.poll(async () => (await userRecord(page, username)).role).toBe('manager')
     const delivered = page.waitForResponse((r) => r.request() === stale!.route.request())
     await stale!.route.fulfill({ status: 200, contentType: 'application/json', body: stale!.body })
     await delivered
     await pause(APPLY_MS)
-    await expect(role).toHaveValue('member')
+    await expect(role).toHaveValue('manager')
   })
 
   test("the transcription dialog's cost is the one for the scope now picked", async ({ page }) => {

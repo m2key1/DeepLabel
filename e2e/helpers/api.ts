@@ -16,11 +16,11 @@ export function uniqueName(prefix: string): string {
   return `${prefix} ${Date.now()}-${Math.floor(Math.random() * 1000)}`
 }
 
-export function identity(username: string, role: 'admin' | 'member' | 'viewer'): Record<string, string> {
+export function identity(username: string, role: 'admin' | 'manager' | 'reviewer' | 'annotator' | 'viewer'): Record<string, string> {
   const headers: Record<string, string> = { 'X-Auth-User': username, 'X-Auth-Role': role }
-  // What nginx forwards for a default member: the pipeline phases and training on the local
-  // GPU, not the cluster. Tests that need other grants set the header themselves.
-  if (role !== 'viewer') headers['X-Auth-Caps'] = 'pipeline.layout pipeline.lines pipeline.ocr train.local'
+  // What nginx forwards for a default Manager: training on the local GPU, not the cluster.
+  // Tests that need other grants set the header themselves.
+  if (role !== 'viewer') headers['X-Auth-Caps'] = 'train.local'
   return headers
 }
 

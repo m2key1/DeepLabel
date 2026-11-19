@@ -4,15 +4,15 @@ import {
   createJob, greedyLines, identity, moveJobToGroup, patchJob, seedCompletedJob, shareJob, uniqueName,
   waitForJobStatus,
 } from '../helpers/api'
-import { asSession, seedSession, useSession } from '../helpers/session'
+import { asSession, seedSession, useSession, type SeededRole } from '../helpers/session'
 
-/** A member with one dataset of their own, decoding greedily so a line their re-run
+/** Someone with one dataset of their own, decoding greedily so a line their re-run
  *  wrote is tellable from the beam run that made it, signed in in a fresh browser. */
-async function memberWithOwnDataset(browser: Browser, prefix: string) {
+async function withOwnDataset(browser: Browser, role: SeededRole, prefix: string) {
   const username = `${prefix}-${Date.now()}`
-  const session = seedSession('member', username)
+  const session = seedSession(role, username)
   const ownName = uniqueName(`${prefix} own`)
-  const own = await createJob(ownName, 1, undefined, identity(username, 'member'))
+  const own = await createJob(ownName, 1, undefined, identity(username, role))
   await waitForJobStatus(own, 'done')
   await patchJob(own, { ocr_decode: 'greedy' })
   const context = await browser.newContext()
@@ -21,9 +21,12 @@ async function memberWithOwnDataset(browser: Browser, prefix: string) {
   return { username, session, own, ownName, context, page }
 }
 
-test.describe('Scenario: a member re-runs their own datasets in bulk', () => {
-  test("a selection holding somebody else's dataset is refused as a whole, naming it", async ({ browser }) => {
-    const { username, own, ownName, context, page } = await memberWithOwnDataset(browser, 'rerunner')
+test.describe('Scenario: re-running datasets in bulk', () => {
+  test("a Reviewer's selection holding a dataset they were given is refused as a whole, naming it",
+    async ({ browser }) => {
+    // Whoever made a dataset manages it, so their own re-runs even though a Reviewer may not
+    // run models on what they were only given.
+    const { username, own, ownName, context, page } = await withOwnDataset(browser, 'reviewer', 'rerunner')
     const sharedName = uniqueName('Only shared to re-run')
     const shared = await seedCompletedJob(sharedName, 1)
     await patchJob(shared, { ocr_decode: 'greedy' })
@@ -42,7 +45,7 @@ test.describe('Scenario: a member re-runs their own datasets in bulk', () => {
 
     const dialog = page.getByRole('dialog')
     const refused = dialog.getByTestId('preview-refused')
-    await expect(refused).toHaveText(`Nothing will be re-run: only the owner or an admin may re-run ${sharedName}.`)
+    await expect(refused).toHaveText(`Nothing will be re-run: only a Manager may re-run ${sharedName}.`)
     await expect(dialog.getByRole('button', { name: 'Re-run', exact: true })).toBeDisabled()
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     expect(reruns).toBe(0)
@@ -62,8 +65,8 @@ test.describe('Scenario: a member re-runs their own datasets in bulk', () => {
     await context.close()
   })
 
-  test("a member's own group is re-run from its header", async ({ browser }) => {
-    const { session, own, context, page } = await memberWithOwnDataset(browser, 'group-rerunner')
+  test("a Manager's own group is re-run from its header", async ({ browser }) => {
+    const { session, own, context, page } = await withOwnDataset(browser, 'manager', 'group-rerunner')
     const groupName = uniqueName('Member run group')
     const created = await asSession(session, '/api/groups', {
       method: 'POST', body: JSON.stringify({ name: groupName }),

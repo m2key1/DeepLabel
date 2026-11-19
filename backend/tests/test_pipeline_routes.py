@@ -14,15 +14,10 @@ from app.main import app
 
 SECRET = 'test-secret'
 ADMIN = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'root', 'X-Auth-Role': 'admin'}
-# The auth service resolves a role and its exceptions into this set; the backend only
-# ever reads it. A member who owns the dataset runs the pipeline over it by default.
-MEMBER_CAPS = 'pipeline.layout pipeline.lines pipeline.ocr train.local'
-ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'member',
-         'X-Auth-Caps': MEMBER_CAPS}
-BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'member',
-       'X-Auth-Caps': MEMBER_CAPS}
-# The same person with line detection taken away by an admin.
-ALICE_NO_LINES = {**ALICE, 'X-Auth-Caps': 'pipeline.layout pipeline.ocr train.local'}
+# Running models on a dataset is its Managers' and its creator's; no capability decides it.
+ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'manager', 'X-Auth-Caps': ''}
+BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'manager', 'X-Auth-Caps': ''}
+RITA = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'rita', 'X-Auth-Role': 'reviewer', 'X-Auth-Caps': ''}
 
 POLY = '[[0,0],[1,0],[1,1],[0,1]]'
 BBOX = '[0.0,0.0,1.0,0.5]'
@@ -176,13 +171,15 @@ class TestRedetect:
 
         assert client.post('/api/jobs/j1/redetect', headers=ALICE).status_code == 200
 
-    def test_somebody_it_was_taken_away_from_may_not(self, client, conn):
+    def test_a_reviewer_it_is_shared_with_may_not(self, client, conn):
         make_stale(conn)
+        conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'rita')")
+        conn.commit()
 
-        response = client.post('/api/jobs/j1/redetect', headers=ALICE_NO_LINES)
+        response = client.post('/api/jobs/j1/redetect', headers=RITA)
 
         assert response.status_code == 403
-        assert response.json()['detail'] == 'not permitted: pipeline.lines'
+        assert response.json()['detail'] == 'not permitted: this takes a Manager'
 
     def test_a_stranger_may_not_either_however_much_they_may_do(self, client, conn):
         make_stale(conn)
@@ -305,13 +302,14 @@ class TestWhoMayReRead:
 
         assert response.status_code == 200, response.text
 
-    def test_without_it_the_owner_is_refused_too(self, client):
-        no_ocr = {**ALICE, 'X-Auth-Caps': 'pipeline.layout pipeline.lines train.local'}
+    def test_a_reviewer_it_is_shared_with_may_not(self, client, conn):
+        conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'rita')")
+        conn.commit()
 
-        response = client.post('/api/jobs/j1/reocr', json={'scope': 'unchecked'}, headers=no_ocr)
+        response = client.post('/api/jobs/j1/reocr', json={'scope': 'unchecked'}, headers=RITA)
 
         assert response.status_code == 403
-        assert response.json()['detail'] == 'not permitted: pipeline.ocr'
+        assert response.json()['detail'] == 'only a Manager may re-run Volume'
 
     def test_a_dataset_nobody_shared_is_still_out_of_reach(self, client):
         assert client.post('/api/jobs/j1/reocr', json={'scope': 'unchecked'},
@@ -581,13 +579,6 @@ class TestRerun:
         assert conn.execute('SELECT deleted FROM elements WHERE id = 1').fetchone()[0] == 1
         assert job(conn)['run_layout'] == 1
 
-    def test_starting_over_asks_for_the_layout_permission(self, client):
-        no_layout = {**ALICE, 'X-Auth-Caps': 'pipeline.lines pipeline.ocr'}
-
-        response = client.post('/api/jobs/j1/rerun', json={'from_phase': 'start'}, headers=no_layout)
-
-        assert response.status_code == 403
-
     def test_a_reading_switched_on_reaches_pages_no_line_detection_will_advance(self, client, conn):
         conn.executescript("""
             UPDATE jobs SET run_lines = 0, run_ocr = 0 WHERE id = 'j1';
@@ -625,26 +616,25 @@ class TestRerun:
         assert client.post('/api/jobs/j1/rerun', json={'from_phase': 'ocr'},
                            headers=ALICE).status_code == 200
 
-    def test_throwing_the_checked_readings_away_is_a_permission_of_its_own(self, client, conn):
+    def test_its_owner_throws_the_checked_readings_away_without_any_granted_capability(self, client, conn):
         response = client.post('/api/jobs/j1/rerun',
                                json={'from_phase': 'ocr', 'keep_checked': False}, headers=ALICE)
 
-        assert response.status_code == 403
-        assert response.json()['detail'] == 'not permitted: pipeline.discard'
-        assert conn.execute('SELECT checked FROM lines WHERE id = 1').fetchone()['checked'] == 1
+        assert response.status_code == 200, response.text
+        assert job(conn)['status'] == 'queued'
 
     def test_somebody_else_s_dataset_is_not_theirs_to_re_run(self, client):
         assert client.post('/api/jobs/j1/rerun', json={'from_phase': 'ocr'},
                            headers=BOB).status_code == 404
 
-    def test_a_dataset_shared_with_a_member_is_still_the_owner_s_to_re_run(self, client, conn):
-        conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'bob')")
+    def test_a_dataset_shared_with_a_reviewer_is_still_its_managers_to_re_run(self, client, conn):
+        conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'rita')")
         conn.commit()
 
-        response = client.post('/api/jobs/j1/rerun', json={'from_phase': 'ocr'}, headers=BOB)
+        response = client.post('/api/jobs/j1/rerun', json={'from_phase': 'ocr'}, headers=RITA)
 
         assert response.status_code == 403
-        assert response.json()['detail'] == 'only the owner or an admin may re-run Volume'
+        assert response.json()['detail'] == 'only a Manager may re-run Volume'
         assert job(conn)['status'] == 'done'
         assert [line['text'] for line in lines(conn)] == ['Machine read', 'Second line']
 

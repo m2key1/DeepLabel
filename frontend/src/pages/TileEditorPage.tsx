@@ -9,6 +9,7 @@ import type {
   EdgeMethod, JobDetail, MapClass, PageDetail, Region, RevertResult, Ring,
 } from '../api'
 import { useAuth } from '../auth'
+import { reaches } from '../lib/roles'
 import { clamp01, midpoints, simplifyPolyline } from '../lib/geometry/core'
 import {
   clampShift, closeRun, closestEdge, contourBetween, cornersOf, countVertices, cutPolyline, deleteVertices, eraseFromGeom, extendPolyline, isClosedRun, joinPolylines, moveVertices, redrawRun, redrawStretch, regionAreaPx, simplifyRegionGeometry, subtractRegions, toPoly, translateRegion, unionRegions, vertexCount, verticesInBox, withRing,
@@ -144,6 +145,8 @@ export function TileEditorPage() {
   const { hotkeys } = useSettings()
 
   const [job, setJob] = useState<JobDetail | null>(null)
+  // Marking a tile reviewed is a Reviewer's; an Annotator's regions wait for one.
+  const canCheck = reaches(job?.my_role, 'reviewer')
   const [page, setPage] = useState<PageDetail | null>(null)
   const [classes, setClasses] = useState<MapClass[]>([])
   // What the server last sent; what is shown is this with every edit not yet in it on top,
@@ -431,7 +434,8 @@ export function TileEditorPage() {
   const pushTile = useCallback((change: TileChange, label: string) => {
     if (!page) return
     const realId = (id: number) => edits.realId(id)
-    const edit = tileEdit({ pageId: page.id, book, className: (id) => classById.get(id)?.name ?? '' }, change, label)
+    const edit = tileEdit({ pageId: page.id, book, className: (id) => classById.get(id)?.name ?? '', drawsChecked: canCheck },
+      change, label)
     const after = edit.apply(regions, { id: realId })
     const settled = edits.push(edit)
     recordEdit(settled.then((saved) => saved.span, () => undefined), regionSteps(regions, after, realId))
@@ -1621,7 +1625,7 @@ export function TileEditorPage() {
 
   // Flips at once; put back if the server refuses.
   const toggleReviewed = async () => {
-    if (!page) return
+    if (!page || !canCheck) return
     const next = !page.layout_checked
     setPage({ ...page, layout_checked: next })
     try {
@@ -1957,9 +1961,10 @@ export function TileEditorPage() {
           <Button variant="ghost" onClick={() => gotoTile(1)} disabled={tileIdx < 0 || tileIdx >= tiles.length - 1}>
             Next →
           </Button>
-          <label className="ml-2 flex items-center gap-1.5 text-sm text-ink">
+          <label className="ml-2 flex items-center gap-1.5 text-sm text-ink"
+                 title={canCheck ? undefined : 'A Reviewer marks a tile reviewed'}>
             <Check data-testid="tile-reviewed" checked={!!page?.layout_checked}
-                   onChange={toggleReviewed} disabled={readOnly} />
+                   onChange={toggleReviewed} disabled={!canCheck} />
             Reviewed
           </label>
         </>),

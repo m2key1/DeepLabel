@@ -16,7 +16,7 @@ def client(tmp_path, monkeypatch):
     from app.main import app
     conn = store.connect(config.DB_PATH)
     store.upsert_user(conn, 'sub-admin', 'root', 'admin')
-    store.upsert_user(conn, 'sub-member', 'alice', 'member')
+    store.upsert_user(conn, 'sub-member', 'alice', 'manager')
     conn.close()
     yield TestClient(app)
 
@@ -42,7 +42,7 @@ def test_a_token_authenticates_like_a_session(client):
     response = client.get('/validate', headers={'Authorization': f'Bearer {token}'})
     assert response.status_code == 200
     assert response.headers['X-Auth-User'] == 'alice'
-    assert response.headers['X-Auth-Role'] == 'member'
+    assert response.headers['X-Auth-Role'] == 'manager'
     assert 'X-Auth-Readonly' not in response.headers
 
 
@@ -52,7 +52,7 @@ def test_a_readonly_token_is_flagged_for_the_backend(client):
     assert response.status_code == 200
     assert response.headers['X-Auth-Readonly'] == '1'
     # The role is untouched, so a read-only token still reads everything its owner can.
-    assert response.headers['X-Auth-Role'] == 'member'
+    assert response.headers['X-Auth-Role'] == 'manager'
 
 
 def test_the_response_carries_no_stored_secret(client):
@@ -175,7 +175,7 @@ def test_a_token_answers_who_it_is(client):
     response = client.get('/api/me', headers=_bearer(_mint(client, 'alice')))
     assert response.status_code == 200
     assert response.json()['user'] == 'alice'
-    assert response.json()['role'] == 'member'
+    assert response.json()['role'] == 'manager'
 
 
 def test_a_token_reads_and_writes_its_owners_settings(client):
@@ -225,7 +225,7 @@ def test_an_admin_token_cannot_administer_accounts(client):
     assert [r.status_code for r in refused] == [403] * 6
     assert client.get('/api/users', cookies=_session('root')).status_code == 200
     roles = {u['username']: u['role'] for u in client.get('/api/users', cookies=_session('root')).json()['users']}
-    assert roles['alice'] == 'member'
+    assert roles['alice'] == 'manager'
 
 
 def test_a_token_reads_the_people_pickers(client):
@@ -242,7 +242,7 @@ def test_an_unknown_token_is_not_authenticated(client):
 def test_recognize_is_an_admin_right_by_default():
     assert 'recognize' in store.CAPABILITIES
     assert 'recognize' in store.role_caps('admin')
-    assert 'recognize' not in store.role_caps('member')
+    assert 'recognize' not in store.role_caps('manager')
     assert 'recognize' not in store.role_caps('viewer')
 
 
@@ -359,7 +359,7 @@ class TestARecognitionTokenLimitedToSomeModels:
         token = _mint(client, 'alice', scope='recognize')
         token_id = client.get('/api/tokens', cookies=_session('alice')).json()['tokens'][0]['id']
         conn = store.connect(config.DB_PATH)
-        store.upsert_user(conn, 'sub-bob', 'bob', 'member')
+        store.upsert_user(conn, 'sub-bob', 'bob', 'manager')
         conn.close()
 
         assert client.patch(f'/api/tokens/{token_id}', json={'models': [2]}, cookies=_session('bob')).status_code == 404

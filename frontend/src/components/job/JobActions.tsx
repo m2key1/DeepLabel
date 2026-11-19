@@ -36,7 +36,7 @@ interface JobActionsProps {
 
 export function JobActions(p: JobActionsProps) {
   const { job } = p
-  const { can, user } = useAuth()
+  const { user } = useAuth()
   const blocked = exportBlocked(job, user)
   const active = job.status === 'queued' || job.status === 'running'
   const tiles = isTileTask(job.task)
@@ -87,7 +87,7 @@ export function JobActions(p: JobActionsProps) {
           </div>
         )}
       </div>
-      <div className="relative">
+      {p.canManage && <div className="relative">
         <Button
           size="xs"
           aria-label="Download"
@@ -126,7 +126,7 @@ export function JobActions(p: JobActionsProps) {
             )}
           </div>
         )}
-      </div>
+      </div>}
       {p.canManage && (
         <div className="relative">
           <Button
@@ -150,11 +150,9 @@ export function JobActions(p: JobActionsProps) {
                 Settings…
               </button>
               {active && <button onClick={p.onCancel} className={menuItem}>Cancel run</button>}
-              {can('dataset.delete') && (
-                <button onClick={p.onDelete} className={`${menuItem} text-danger hover:text-danger`}>
-                  Delete
-                </button>
-              )}
+              <button onClick={p.onDelete} className={`${menuItem} text-danger hover:text-danger`}>
+                Delete
+              </button>
             </div>
           )}
         </div>

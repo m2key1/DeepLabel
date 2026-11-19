@@ -60,6 +60,10 @@ the version in the app's footer opens.
   and the training form warns when a long run has no early stopping (#125).
 - Line crops are cut plainly, without painting out what lies outside the outline (#129).
 - Models that fit on the card stay loaded together instead of being swapped for every page (#128).
+- Every account has one role, as in Label Studio: Admin, Manager, Reviewer, Annotator or Viewer
+  (#131). Annotators correct and add pages, Reviewers also check, Managers also run models, change
+  settings, export and delete; whoever made a dataset manages it. Members become Managers. Running
+  layout, lines and OCR, discarding checked work and deleting are no longer granted per person.
 - Line corrections are saved unchecked; checking is a step of its own.
 - The page editor: labels on every box in edit mode (#77), lines that stay in the box they lie in
   (#71), a class pressed over gathered shapes draws a tight box (#74), Ctrl draws over a selected

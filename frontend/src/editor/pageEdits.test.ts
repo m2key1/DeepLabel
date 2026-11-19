@@ -24,7 +24,7 @@ const page = (): PageDetail => ({
   ],
 } as unknown as PageDetail)
 
-const deps = { pageId: 7, book: new RevisionBook(), aspect: 1 }
+const deps = { pageId: 7, book: new RevisionBook(), aspect: 1, drawsChecked: true }
 const same: EditContext = { id: (id) => id }
 const homes = (p: PageDetail) => Object.fromEntries(p.elements.flatMap((el) => el.lines.map((l) => [l.id, el.id])))
 

@@ -14,6 +14,8 @@ export interface PageEditDeps {
   pageId: number
   book: RevisionBook
   aspect: number
+  /** Whether what this person draws counts as checked, as the server saves it: a Reviewer's does. */
+  drawsChecked: boolean
 }
 
 type PageEdit<R extends { span: EditSpan } = { span: EditSpan }> = Edit<PageDetail, R>
@@ -214,7 +216,7 @@ export function drawBox(
       if (state.elements.some((el) => el.id === id)) return state
       const drawn: PageElement = {
         id, order_idx: state.elements.length, class_name: className, raw_class_name: className, bbox, conf: null,
-        kind, checked: true, polygon, lines: [], revision: 0,
+        kind, checked: d.drawsChecked, polygon, lines: [], revision: 0,
       }
       return refile(withElements(state, (els) => [...els, drawn]), -1_000_000 - d.pageId)
     },

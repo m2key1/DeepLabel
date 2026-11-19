@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app import config, newer_models, registry, schemas, weights
-from app.deps import get_db, has_capability, require_role
+from app.deps import WRITERS, get_db, has_capability, require_role
 
 router = APIRouter(tags=['models'])
 
@@ -51,7 +51,7 @@ ADMIN_ONLY_FIELDS = {'lm_path', 'lm_dict_path', 'backend'}
 
 @router.patch('/api/models/{model_id}')
 def patch_model(model_id: int, body: ModelPatch, conn=Depends(get_db),
-                user: dict = Depends(require_role('admin', 'member'))):
+                user: dict = Depends(require_role(*WRITERS))):
     """Rename a model, archive it, or make it the default for its task. Anyone may tidy up
     the models their own trainings produced; the rest of the registry is `models.manage`."""
     row = registry.get_model(conn, model_id)

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app import dataset_sync, geometry, layout_templates, store
-from app.deps import current_user, get_db, get_user, require_job_access, require_role
+from app.deps import current_user, get_db, get_user, require_job_access, require_job_manager, require_role
 
 router = APIRouter(tags=['layout templates'])
 
@@ -178,9 +178,7 @@ def job_layout_classes(job_id: str, conn=Depends(get_db), auth: dict = Depends(c
 
 
 def _editing(conn, job_id: str, auth: dict) -> None:
-    require_job_access(conn, job_id, auth)
-    if auth['role'] not in ('admin', 'member'):
-        raise HTTPException(403, 'viewers cannot change a dataset\'s classes')
+    require_job_manager(conn, job_id, auth)
 
 
 def _apply(conn, job_id: str, change) -> list[int]:

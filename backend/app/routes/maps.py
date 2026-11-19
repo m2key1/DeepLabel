@@ -13,8 +13,8 @@ from app import (config, data_use, edge_registry, ingest, jobs, map_classes, map
                  serializers, store, weights)
 from app.backend_client import BackendClient, BackendError, Item
 from app.remote_models import scan_image
-from app.deps import (attachment, current_user, get_db, get_user, require_job_access,
-                      require_page_access, require_region_access, require_role, require_unchanged)
+from app.deps import (attachment, current_user, draws_checked, get_db, get_user, require_job_access, require_job_role,
+                      require_page_access, require_region_access, require_role, require_role_on, require_unchanged)
 
 router = APIRouter(tags=['maps'])
 
@@ -150,11 +150,12 @@ def create_region(page_id: int, body: RegionCreate, conn=Depends(get_db), user: 
     mark = store.begin_span(conn)
     order_idx = conn.execute(
         'SELECT COALESCE(MAX(order_idx), -1) + 1 n FROM regions WHERE page_id = ?', (page_id,)).fetchone()['n']
-    # A human just drew it, so it is reviewed by construction (mirrors create_element).
+    # A Reviewer who drew it has looked at it by construction (mirrors create_element).
     cur = conn.execute(
         'INSERT INTO regions (page_id, order_idx, class_id, points, holes, kind, checked) '
-        'VALUES (?,?,?,?,?,?,1)',
-        (page_id, order_idx, class_id, json.dumps(points), json.dumps(holes), body.kind))
+        'VALUES (?,?,?,?,?,?,?)',
+        (page_id, order_idx, class_id, json.dumps(points), json.dumps(holes), body.kind,
+         int(draws_checked(conn, page_id, auth))))
     store.log_region(conn, cur.lastrowid, user, 'create')
     span = store.end_span(conn, mark)
     conn.commit()
@@ -335,6 +336,8 @@ def patch_region(region_id: int, body: RegionPatch, conn=Depends(get_db), user: 
                  auth: dict = Depends(current_user)):
     """Update a region's geometry, class or reviewed flag."""
     require_region_access(conn, region_id, auth)
+    if body.checked is not None:
+        require_role_on(conn, 'region', region_id, auth, 'reviewer')
     row = conn.execute(
         'SELECT r.id, r.kind, r.class_id, p.job_id FROM regions r JOIN pages p ON r.page_id = p.id '
         'WHERE r.id = ?', (region_id,)).fetchone()
@@ -448,11 +451,12 @@ def batch_regions(page_id: int, body: RegionBatch, conn=Depends(get_db), user: s
     order_idx = conn.execute(
         'SELECT COALESCE(MAX(order_idx), -1) + 1 n FROM regions WHERE page_id = ?', (page_id,)).fetchone()['n']
     keys = {}
+    checked = int(draws_checked(conn, page_id, auth))
     for offset, (key, class_id, kind, points, holes) in enumerate(created):
         cur = conn.execute(
             'INSERT INTO regions (page_id, order_idx, class_id, points, holes, kind, checked) '
-            'VALUES (?,?,?,?,?,?,1)',
-            (page_id, order_idx + offset, class_id, json.dumps(points), json.dumps(holes), kind))
+            'VALUES (?,?,?,?,?,?,?)',
+            (page_id, order_idx + offset, class_id, json.dumps(points), json.dumps(holes), kind, checked))
         store.log_region(conn, cur.lastrowid, user, 'create')
         keys[key] = cur.lastrowid
     for r in body.patch:
@@ -530,7 +534,7 @@ class ClassCreate(BaseModel):
 def create_job_class(job_id: str, body: ClassCreate, conn=Depends(get_db), user: str = Depends(get_user),
                      auth: dict = Depends(current_user)):
     """Add a class to a map dataset's palette."""
-    _require_map_job(conn, job_id, auth)
+    _require_map_job(conn, job_id, auth, 'manager')
     name = body.name.strip()
     if not name:
         raise HTTPException(400, 'name must not be empty')
@@ -568,7 +572,7 @@ class ClassPatch(BaseModel):
 def patch_job_class(job_id: str, class_id: int, body: ClassPatch, conn=Depends(get_db),
                     user: str = Depends(get_user), auth: dict = Depends(current_user)):
     """Rename or recolour a class in the palette."""
-    _require_map_job(conn, job_id, auth)
+    _require_map_job(conn, job_id, auth, 'manager')
     if class_id == 0:
         raise HTTPException(400, 'background is fixed')
     if conn.execute('SELECT 1 FROM job_classes WHERE job_id = ? AND class_id = ?',
@@ -600,7 +604,7 @@ def reorder_job_classes(job_id: str, body: ClassOrder, conn=Depends(get_db),
                         auth: dict = Depends(current_user)):
     """Set the overlap priority of the palette. Only the ranks change: ids are what
     regions, revisions and exported masks hold. Background always ranks last."""
-    _require_map_job(conn, job_id, auth)
+    _require_map_job(conn, job_id, auth, 'manager')
     drawable = _drawable_ids(conn, job_id)
     if sorted(body.order) != drawable:
         raise HTTPException(400, f'order must list every class except background exactly once: {drawable}')
@@ -616,7 +620,7 @@ def delete_job_class(job_id: str, class_id: int, mode: str = 'delete', into: int
                      conn=Depends(get_db), user: str = Depends(get_user),
                      auth: dict = Depends(current_user)):
     """Remove a class from the palette."""
-    _require_map_job(conn, job_id, auth)
+    _require_map_job(conn, job_id, auth, 'manager')
     if class_id == 0:
         raise HTTPException(400, 'background cannot be removed')
     if conn.execute('SELECT 1 FROM job_classes WHERE job_id = ? AND class_id = ?',
@@ -650,10 +654,14 @@ def delete_job_class(job_id: str, class_id: int, mode: str = 'delete', into: int
 
 # --- Mask export --------------------------------------------------------------
 
-def _require_map_job(conn, job_id: str, auth: dict) -> dict:
-    """The job, gated. Access is checked before existence is confirmed, so an unshared
-    job is indistinguishable from a missing one (mirrors deps.require_job_access)."""
-    require_job_access(conn, job_id, auth)
+def _require_map_job(conn, job_id: str, auth: dict, least: str | None = None) -> dict:
+    """The job, gated - with `least`, on the caller's role there too. Access is checked
+    before existence is confirmed, so an unshared job is indistinguishable from a missing
+    one (mirrors deps.require_job_access)."""
+    if least:
+        require_job_role(conn, job_id, auth, least)
+    else:
+        require_job_access(conn, job_id, auth)
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)

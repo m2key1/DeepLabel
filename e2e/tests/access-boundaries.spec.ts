@@ -9,7 +9,7 @@ test.describe('Scenario: the shared queue shows how busy the GPU is, not what ot
   test("a dataset someone cannot open says nothing about itself beyond that it is there",
     async () => {
       const username = `outsider-${Date.now()}`
-      const session = seedSession('member', username)
+      const session = seedSession('manager', username)
       // A dataset with something to hide, kept on the queue by the slow reader [slow] gives it.
       const secretName = uniqueName('[slow] Private register')
       const jobId = await createJob(secretName, 1)
@@ -39,7 +39,7 @@ test.describe("Scenario: an admin reads the list as one person sees it", () => {
   test('a group that person cannot reach is not shown to them as an empty group',
     async ({ page }) => {
       const username = `lens-${Date.now()}`
-      seedSession('member', username)
+      seedSession('manager', username)
       const reachableName = uniqueName('Lens reachable')
       const unreachableName = uniqueName('Lens unreachable')
       const reachable = await createGroup(reachableName)

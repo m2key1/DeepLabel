@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import {
-  PHASE_CAPABILITY, getLlmReadPreview, getPageLlmReadings, getPageRunCosts, type LlmReadPreview,
+  getLlmReadPreview, getPageLlmReadings, getPageRunCosts, type LlmReadPreview,
   type LlmReadingsOnFile, type PagePhase, type PageRunCosts,
 } from '../../api'
-import { useAuth } from '../../auth'
 import { CaretIcon, PlayIcon } from '../icons'
 import { Button } from '../ui/Button'
 import { popoverChrome } from '../ui/Card'
@@ -72,7 +71,6 @@ interface RunMenuProps {
 export function RunMenu({
   pageId, jobId, llmModelIds, busy, onRun, onReadPage, onRemoveReadings, onError,
 }: RunMenuProps) {
-  const { can } = useAuth()
   const [open, setOpen] = useState(false)
   const [costs, setCosts] = useState<PageRunCosts | null>(null)
   const [reading, setReading] = useState<LlmReadPreview | null>(null)
@@ -137,7 +135,7 @@ export function RunMenu({
           data-testid="run-menu-items"
           className={`absolute right-0 top-full z-30 mt-1 w-60 overflow-hidden ${popoverChrome} py-1`}
         >
-          {RUNNABLE.filter((phase) => can(PHASE_CAPABILITY[phase])).map((phase) => (
+          {RUNNABLE.map((phase) => (
             <button
               key={phase}
               data-testid="run-phase"

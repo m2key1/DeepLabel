@@ -1,10 +1,10 @@
 import type { Locator, Page } from '@playwright/test'
 import { test, expect } from '../helpers/test'
 import {
-  createGroup, createJob, getJob, identity, moveJobToGroup, seedCompletedJob, shareJob, uniqueName,
+  BACKEND, createGroup, createJob, getJob, identity, moveJobToGroup, seedCompletedJob, shareJob, uniqueName,
   waitForJobStatus,
 } from '../helpers/api'
-import { asSession, seedSession, useSession } from '../helpers/session'
+import { seedSession, useSession } from '../helpers/session'
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -123,18 +123,20 @@ test.describe('Scenario: filing datasets by dragging them onto a group', () => {
 
   test('a dragged selection holding a dataset that is not yours names it and moves the rest',
        async ({ browser }) => {
+    // A Reviewer manages what they made, so only their own dataset is theirs to move.
     const username = `dragger-${Date.now()}`
-    const session = seedSession('member', username)
+    const session = seedSession('reviewer', username)
     const ownName = uniqueName('Drag mine')
-    const own = await createJob(ownName, 1, undefined, identity(username, 'member'))
+    const own = await createJob(ownName, 1, undefined, identity(username, 'reviewer'))
     const sharedName = uniqueName('Drag only shared')
     const shared = await seedCompletedJob(sharedName, 1)
     await shareJob(shared, [username])
     await waitForJobStatus(own, 'done')
 
     const targetName = uniqueName('Drag member target')
-    const created = await asSession(session, '/api/groups', {
+    const created = await fetch(`${BACKEND}/api/groups`, {
       method: 'POST', body: JSON.stringify({ name: targetName }),
+      headers: { 'X-Frontend-Secret': 'e2e-secret', 'Content-Type': 'application/json', ...identity(username, 'manager') },
     })
     expect(created.status).toBe(200)
     const target = (await created.json()) as { id: number }

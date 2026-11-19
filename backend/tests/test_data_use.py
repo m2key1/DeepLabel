@@ -12,8 +12,9 @@ from app.deps import get_db
 from app.main import app
 
 SECRET = 'test-secret'
-ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'member', 'X-Auth-Train-Local': '1'}
-BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'member', 'X-Auth-Train-Local': '1'}
+ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'manager', 'X-Auth-Train-Local': '1'}
+BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'manager', 'X-Auth-Train-Local': '1'}
+BOB_REVIEWING = {**BOB, 'X-Auth-Role': 'reviewer'}
 ROOT = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'root', 'X-Auth-Role': 'admin'}
 ALL_ON = {'training': True, 'test': True, 'external_llm': True, 'export': True}
 
@@ -93,9 +94,14 @@ class TestTheSwitches:
         assert [tuple(r) for r in conn.execute('SELECT username, action, detail FROM job_log')] == [
             ('alice', 'data_use', '{"training": false}')]
 
-    def test_someone_it_is_shared_with_cannot_change_or_read_them(self, client):
-        assert client.put('/api/jobs/j1/data-use', headers=BOB, json={'training': True}).status_code == 403
-        assert client.get('/api/jobs/j1/data-use', headers=BOB).status_code == 403
+    def test_a_reviewer_it_is_shared_with_cannot_change_or_read_them(self, client):
+        assert client.put('/api/jobs/j1/data-use', headers=BOB_REVIEWING, json={'training': True}).status_code == 403
+        assert client.get('/api/jobs/j1/data-use', headers=BOB_REVIEWING).status_code == 403
+
+    def test_a_manager_it_is_shared_with_reads_and_changes_them(self, client):
+        response = client.put('/api/jobs/j1/data-use', headers=BOB, json={'external_llm': False})
+        assert response.status_code == 200, response.text
+        assert response.json()['data_use'] == {**ALL_ON, 'external_llm': False}
 
 
 class TestTraining:

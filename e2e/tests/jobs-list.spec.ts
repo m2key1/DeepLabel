@@ -29,7 +29,7 @@ test.describe('Scenario: managing datasets from the list', () => {
     const name = uniqueName('Shareable')
     await seedCompletedJob(name, 1)
     const username = `colleague-${Date.now()}`
-    seedSession('member', username)
+    seedSession('manager', username)
 
     await page.goto('/')
     const card = page.getByTestId('job-card').filter({ hasText: name })
@@ -304,9 +304,9 @@ test.describe('Scenario: dividing and narrowing the list', () => {
     const mine = uniqueName('Divided mine')
     const theirs = uniqueName('Divided theirs')
     const other = `divider-${Date.now()}`
-    seedSession('member', other)
+    seedSession('manager', other)
     await seedCompletedJob(mine, 1)
-    await createJob(theirs, 1, undefined, identity(other, 'member'))
+    await createJob(theirs, 1, undefined, identity(other, 'manager'))
     await waitForJobStatus((await listJobs()).find((j) => j.name === theirs)!.id, 'done')
 
     // By owner: two headings, each holding only that person's datasets.
@@ -326,7 +326,7 @@ test.describe('Scenario: dividing and narrowing the list', () => {
 
   test('the lens shows what one person reaches, and says so', async ({ page }) => {
     const watcher = `lens-watcher-${Date.now()}`
-    seedSession('member', watcher)
+    seedSession('manager', watcher)
     const reachable = uniqueName('Lens shared')
     const hidden = uniqueName('Lens private')
     const sharedId = await seedCompletedJob(reachable, 1)
@@ -340,7 +340,7 @@ test.describe('Scenario: dividing and narrowing the list', () => {
     await expect(page.getByTestId('job-card').filter({ hasText: hidden })).toHaveCount(0)
 
     // Backend oracle: that is what the person's own session is actually served.
-    const theirs = await listJobs(identity(watcher, 'member'))
+    const theirs = await listJobs(identity(watcher, 'manager'))
     expect(theirs.map((j) => j.name)).toContain(reachable)
     expect(theirs.map((j) => j.name)).not.toContain(hidden)
 
@@ -358,7 +358,7 @@ test.describe('Scenario: the row fits the column it is in', () => {
     const watchers: string[] = []
     for (let i = 0; i < 5; i++) {
       const u = `fits${i}-${Date.now()}`
-      seedSession('member', u)
+      seedSession('manager', u)
       watchers.push(u)
     }
     await shareJob(jobId, watchers)

@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, Response
 from starlette.background import BackgroundTask
 
 from app import coco, config, data_use, export, schemas, store
-from app.deps import attachment, current_user, get_db, require_job_access, require_role
+from app.deps import attachment, current_user, get_db, require_job_access, require_job_manager, require_role
 
 router = APIRouter(tags=['exports'])
 
@@ -28,7 +28,7 @@ def export_job(job_id: str, format: str = 'json', checked_only: bool = False,
     """Download the dataset as json, md, txt or DeepLabel's zip, as PAGE XML, ALTO, hOCR
     or TEI with its scans, or as IIIF annotations on the canvases it was imported from;
     checked_only keeps the reviewed lines and the pages that hold one."""
-    require_job_access(conn, job_id, user)
+    require_job_manager(conn, job_id, user)
     data_use.require_export(conn, job_id, user)
     if format not in EXPORT_FORMATS:
         raise HTTPException(400, f'format must be one of {sorted(EXPORT_FORMATS)}')

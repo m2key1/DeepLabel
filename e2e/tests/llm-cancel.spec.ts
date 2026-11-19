@@ -85,7 +85,7 @@ test.describe('Scenario: cancelling a language-model run', () => {
 test.describe("Scenario: a dataset's reference charts", () => {
   test('the limit is per dataset, whoever adds the picture', async () => {
     const owner = `charts-${Date.now()}`
-    const ownerHeaders = identity(owner, 'member')
+    const ownerHeaders = identity(owner, 'manager')
     const jobId = await createJob(uniqueName('Charted'), 1, undefined, ownerHeaders)
     for (let i = 0; i < 4; i++) {
       await addLlmReference(`chart_${i}.png`, new Uint8Array(scanPng(40, 40 + i)), 'image/png',
