@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from app import data_use, transcript
+from app import transcript
 from app.deps import accessible_job, current_user, get_db
 from app.text_search import MODES, PatternTooSlow
 
@@ -11,7 +11,6 @@ router = APIRouter(tags=['transcript'])
 def transcript_index(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
     """The pages a volume is read through, without their text: that comes a page at a time."""
     job = accessible_job(conn, job_id, user)
-    data_use.note_admin_visit(conn, job_id, user)
     return {'job': {'id': job['id'], 'name': job['name']}, 'pages': transcript.index(conn, job_id)}
 
 

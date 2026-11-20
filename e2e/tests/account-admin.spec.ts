@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test'
 import { test, expect } from '../helpers/test'
 import {
-  backendFetch, createGroup, createJob, identity, jobPageIds, moveJobToGroup, seedCompletedJob,
+  backendFetch, createGroup, createJob, getJob, identity, jobPageIds, moveJobToGroup, seedCompletedJob,
   shareGroup, shareJob, uniqueName, waitForJobStatus,
 } from '../helpers/api'
 import { asSession, expireToken, seedSession, useSession, userRecord, type UserRecord } from '../helpers/session'
@@ -590,7 +590,13 @@ test.describe('Scenario: an admin reads the list as one person sees it', () => {
       expect(Object.keys(reasons).sort()).toEqual([owned, shared, viaGroup].sort())
       expect(reasons).toEqual({ [owned]: 'owner', [shared]: 'shared', [viaGroup]: 'group' })
       expect(reasons[hidden]).toBeUndefined()
-      expect(access.groups).toEqual([{ id: group.id, name: group.name, access: 'shared' }])
+      // Their own dataset sits in their Sandbox, which the record names for them (#131).
+      const sandbox = (await getJob(owned)).group_id
+      const byId = (a: { id: number }, b: { id: number }) => a.id - b.id
+      expect([...access.groups].sort(byId)).toEqual([
+        { id: group.id, name: group.name, access: 'shared' },
+        { id: sandbox, name: `${username}'s Sandbox`, access: 'owner' },
+      ].sort(byId))
 
       await page.goto(`/?as=${encodeURIComponent(username)}`)
       const strip = page.getByTestId('lens-strip')

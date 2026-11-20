@@ -399,7 +399,44 @@ export function listJobs(headers?: Record<string, string>): Promise<{ id: string
   return backendFetch('/api/jobs', headers ? { headers } : undefined)
 }
 
+/** The seeder's Sandbox as the browser's admin sees it named. */
+export const SEEDER_SANDBOX = "e2e-seeder's Sandbox"
+
+/** The id of someone's Sandbox, where every dataset they make starts (#131). */
+export async function sandboxOf(username = 'e2e-seeder'): Promise<number> {
+  const groups = await backendFetch('/api/groups') as { id: number; sandbox_of: string | null }[]
+  return groups.find((g) => g.sandbox_of === username)!.id
+}
+
+const SEEDED_WORKSPACE = 'Seeded for sharing'
+let seededWorkspace: number | undefined
+
+/** The workspace the seeder shares its datasets from. Parallel workers may race to make
+ *  it, so a name already taken is read back rather than made twice. */
+async function seededWorkspaceId(): Promise<number> {
+  if (seededWorkspace !== undefined) return seededWorkspace
+  const find = async () => ((await backendFetch('/api/groups')) as { id: number; name: string }[])
+    .find((g) => g.name === SEEDED_WORKSPACE)?.id
+  seededWorkspace = await find()
+  if (seededWorkspace === undefined) {
+    const res = await fetch(`${BACKEND}/api/groups`, {
+      method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: SEEDED_WORKSPACE }),
+    })
+    seededWorkspace = res.ok ? (await res.json()).id as number : await find()
+  }
+  return seededWorkspace!
+}
+
+/** A new dataset is made in its creator's Sandbox, and a dataset in a Sandbox is shared by
+ *  moving it into a workspace (#131) - so one still there is moved first, as anyone sharing
+ *  it would. */
 export async function shareJob(jobId: string, usernames: string[]) {
+  const job = await backendFetch(`/api/jobs/${jobId}?pages=false`)
+  const groups = await backendFetch('/api/groups') as { id: number; sandbox_of: string | null }[]
+  if (groups.find((g) => g.id === job.group_id)?.sandbox_of) {
+    await patchJob(jobId, { group_id: await seededWorkspaceId() })
+  }
   return backendFetch(`/api/jobs/${jobId}/share`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

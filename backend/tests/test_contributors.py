@@ -26,8 +26,8 @@ def _revision(conn, target_type: str, target_id: int, job_id: str, author: str, 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    """Bob owns nothing. Alice shares one dataset with him directly and one through a
-    group; a third dataset of hers stays private. Bob's edits span two datasets, one of
+    """Bob has one dataset of his own, in his Sandbox. Alice shares one dataset with him
+    directly and one through a group; a third dataset of hers stays private. Bob's edits span two datasets, one of
     which has since been deleted, and reach back further than the default window."""
     monkeypatch.setattr('app.config.FRONTEND_SECRET', SECRET)
     conn = store.connect(tmp_path / 'app.db')
@@ -37,7 +37,7 @@ def client(tmp_path, monkeypatch):
     conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('shared', 'bob')")
     _job(conn, 'grouped', 'Baptisms 1801', 'alice', group_id=group, task='map_lines')
     _job(conn, 'private', 'Private notes', 'alice')
-    _job(conn, 'own', 'Bobs own', 'bob')
+    _job(conn, 'own', 'Bobs own', 'bob', group_id=store.sandbox_id(conn, 'bob'))
 
     _revision(conn, 'line', 1, 'shared', 'bob', '2026-08-30 10:00:00')
     _revision(conn, 'line', 1, 'shared', 'bob', '2026-08-30 10:05:00')
@@ -62,7 +62,9 @@ class TestAccess:
             {'id': 'own', 'name': 'Bobs own', 'task': 'text', 'access': 'owner'},
             {'id': 'shared', 'name': 'Schematismus 1780', 'task': 'text', 'access': 'shared'},
         ]
-        assert body['groups'] == [{'id': 1, 'name': 'Parish books', 'access': 'shared'}]
+        # His Sandbox is named for whose it is, since the admin asking is not Bob.
+        assert body['groups'] == [{'id': 2, 'name': "bob's Sandbox", 'access': 'owner'},
+                                  {'id': 1, 'name': 'Parish books', 'access': 'shared'}]
 
     def test_the_owner_side_reads_as_owner(self, client):
         body = client.get('/api/contributors/alice/access', headers=ADMIN).json()

@@ -114,6 +114,8 @@ def test_a_new_dataset_takes_the_choices_the_request_named(conn, monkeypatch):
         'ocr_convention': {'long_s': True}, 'status': 'done'}
     page = conn.execute('SELECT filename, status, width, height FROM pages WHERE job_id = ?', (job_id,)).fetchone()
     assert dict(page) == {'filename': 'blank.png', 'status': 'done', 'width': 40, 'height': 30}
+    # Made, as any new dataset of hers with no workspace named, in her Sandbox (#131).
+    assert job['group_id'] == conn.execute("SELECT id FROM groups WHERE sandbox_of = 'alice'").fetchone()[0]
 
 
 def test_a_page_is_kept_under_its_own_file_name_whatever_folders_the_request_gave(conn, monkeypatch):

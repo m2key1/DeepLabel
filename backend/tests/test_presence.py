@@ -204,3 +204,33 @@ class TestOnline:
         client, _ = stack
         beat(client, 'alice', job_id='alice-job')
         assert [e['username'] for e in online(client, 'alice')] == ['alice']
+
+
+class TestAnAdminLooksWithoutATrace:
+    """An admin in a dataset they do not belong to is online like anyone, but shows no
+    place to its people; another admin still sees where they are (#131, decision 322)."""
+
+    def admin_beat(self, client, **body):
+        return client.post('/api/presence', json={'tab': 't-admin', **body}, headers=headers('root', 'admin'))
+
+    def place_of_root(self, client, viewer: str, role: str):
+        return next(u for u in online(client, viewer, role) if u['username'] == 'root')['job_id']
+
+    def test_the_datasets_people_see_the_admin_online_but_not_where(self, stack):
+        client, _ = stack
+        assert self.admin_beat(client, job_id='alice-job', page_id=1).status_code == 200
+        assert self.place_of_root(client, 'alice', 'manager') is None
+        assert self.place_of_root(client, 'bob', 'reviewer') is None
+
+    def test_another_admin_sees_where(self, stack):
+        client, _ = stack
+        self.admin_beat(client, job_id='alice-job', page_id=1)
+        assert self.place_of_root(client, 'boss', 'admin') == 'alice-job'
+
+    def test_an_admin_who_belongs_is_seen_like_anyone(self, stack):
+        client, _ = stack
+        given = client.put('/api/jobs/alice-job/share', json={'usernames': ['bob', 'root']},
+                           headers=headers('alice', 'manager'))
+        assert given.status_code == 200, given.text
+        self.admin_beat(client, job_id='alice-job', page_id=1)
+        assert self.place_of_root(client, 'alice', 'manager') == 'alice-job'

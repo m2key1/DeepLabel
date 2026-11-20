@@ -40,8 +40,14 @@ under its toolbar and the project rail, which stay in place, and ends with the f
   columns to show.
 - Mark a dataset **Complete** on its page once nothing more needs doing; the list shows it
   and filters by **In progress** or **Complete**.
-- Datasets are grouped into projects. Drag a dataset onto a project in the list or the
-  side rail to file it there, or onto Ungrouped to take it out.
+- Every dataset sits in one project or in its creator's private **Sandbox**. A new dataset
+  is made in its creator's Sandbox, which only they see, admins aside. Drag a dataset onto a
+  project you belong to, in the list or the side rail, to move it there and open it to that
+  project's people; out of a project it goes back to its creator's Sandbox.
+- A project's people are its members: a Manager among them adds and removes people, renames
+  it, and deletes it once it is empty. Someone can also be given a single dataset of a
+  project. A dataset in a Sandbox is shared by moving it into a project: its **Share** says so
+  and offers the move.
 - Tick several datasets, or use a project's menu, to act on all of them at once: re-run,
   re-read, re-detect lines, change processing settings, or move them to a project. Before
   anything is queued, the confirmation says how many datasets and lines it covers and
@@ -160,8 +166,7 @@ on the dataset; switching training off leaves them as they are, so an admin has 
 one that must go. Every model records the datasets it was made from.
 
 Others see a switched-off use as a chip beside the owner's name ("no training"). Admins can
-still open any dataset for support: while a dataset restricts any use, each visit by an admin
-who neither owns it nor has it shared is listed under **Opened by admins** in the dialog.
+open any dataset and any Sandbox for support, and leave no record of having looked.
 
 ## Layout classes and templates
 

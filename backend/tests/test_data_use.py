@@ -1,6 +1,6 @@
-"""What a dataset's owner allows its data to be used for, and the backend holding everyone
+"""What a dataset's Managers allow its data to be used for, and the backend holding everyone
 to it: training, scoring, LLM providers outside the house, and export by others - plus
-the record of which models came from a dataset and which admins opened it."""
+the record of which models came from a dataset."""
 import io
 
 import pytest
@@ -191,40 +191,11 @@ class TestExport:
         restrict(conn, export=False)
         response = client.get('/api/jobs/j1/export?format=txt', headers=who)
         assert response.status_code == 403
-        assert response.json()['detail'] == 'the owner of this dataset keeps its exports to themselves'
+        assert response.json()['detail'] == 'the creator of this dataset keeps its exports to themselves'
 
     def test_viewing_the_dataset_is_not_exporting_it(self, client, conn):
         restrict(conn, export=False)
         assert client.get('/api/jobs/j1', headers=BOB).status_code == 200
-
-
-class TestAdminVisits:
-    def visits(self, conn):
-        return [tuple(r) for r in conn.execute("SELECT job_id, username FROM job_log WHERE action = 'admin_visit'")]
-
-    def test_an_admin_opening_a_restricted_dataset_is_recorded_once_per_visit(self, client, conn):
-        restrict(conn, training=False)
-        client.get('/api/jobs/j1', headers=ROOT)
-        client.get('/api/jobs/j1', headers=ROOT)
-        assert self.visits(conn) == [('j1', 'root')]
-        conn.execute("UPDATE job_log SET created_at = datetime('now', '-31 minutes')")
-        client.get('/api/jobs/j1', headers=ROOT)
-        assert len(self.visits(conn)) == 2
-        listed = client.get('/api/jobs/j1/data-use', headers=ALICE).json()['admin_visits']
-        assert [v['username'] for v in listed] == ['root', 'root']
-
-    def test_a_dataset_that_restricts_nothing_records_nothing(self, client, conn):
-        client.get('/api/jobs/j2', headers=ROOT)
-        restrict(conn, training=False)
-        client.get('/api/jobs/j1', headers=ROOT)
-        assert self.visits(conn) == [('j1', 'root')]
-
-    def test_an_admin_it_is_shared_with_is_not_a_visitor(self, client, conn):
-        restrict(conn, training=False)
-        conn.execute("INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'root')")
-        client.get('/api/jobs/j1', headers=ROOT)
-        client.get('/api/jobs/j1', headers=BOB)
-        assert self.visits(conn) == []
 
 
 class TestModelsMadeFromADataset:

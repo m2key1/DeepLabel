@@ -51,7 +51,8 @@ test.describe('Scenario: an owner decides what a dataset may be used for', () =>
       await expect(page.getByTestId('not-trainable')).toContainText('Not offered, as')
     })
 
-  test('an admin who neither owns nor shares it cannot export it, and the visit is listed for the owner',
+  // Admins leave no record of having looked (#131); test_workspaces covers that in the backend.
+  test('an admin who neither owns nor shares it cannot export it',
     async ({ page }) => {
       const name = uniqueName('Kept register')
       const jobId = await seedCompletedJob(name, 1)
@@ -64,9 +65,6 @@ test.describe('Scenario: an owner decides what a dataset may be used for', () =>
       await expect(page.getByTestId('export-blocked')).toContainText('Ask e2e-seeder for a copy')
       await expect(page.getByTestId('export-format')).toHaveCount(0)
       expect((await page.request.get(`/api/jobs/${jobId}/export?format=txt`)).status()).toBe(403)
-
-      const visits = await backendFetch(`/api/jobs/${jobId}/data-use`)
-      expect(visits.admin_visits.map((v: { username: string }) => v.username)).toEqual(['dev'])
 
       // Once the owner allows it again, the same menu offers the formats.
       await setDataUse(jobId, { export: true })

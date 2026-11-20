@@ -36,8 +36,6 @@ interface DatasetSidebarProps {
   collapsed: boolean
   onCollapse: (collapsed: boolean) => void
   onScope: (groupId: string | null) => void
-  /** Datasets are being dragged, so Ungrouped is offered even while nothing is in it. */
-  dragging: boolean
   dropZone: (target: DropTarget) => DropZone
 }
 
@@ -46,7 +44,7 @@ const item =
 const active = 'bg-accent-wash text-ink font-medium'
 
 export function DatasetSidebar({ groups, jobs, scope, needsReview, recent, collapsed,
-                                 onCollapse, onScope, dragging, dropZone }: DatasetSidebarProps) {
+                                 onCollapse, onScope, dropZone }: DatasetSidebarProps) {
   const ungrouped = jobs.filter((j) => j.group_id === null).length
   const ungroupedZone = dropZone({ groupId: null })
 
@@ -150,7 +148,7 @@ export function DatasetSidebar({ groups, jobs, scope, needsReview, recent, colla
           </button>
         )
       })}
-      {(ungrouped > 0 || dragging) && (
+      {ungrouped > 0 && (
         <button
           {...ungroupedZone.props}
           className={`${item} flex-wrap ${

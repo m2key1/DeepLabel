@@ -88,31 +88,28 @@ def check_capability(user: dict, capability: str) -> None:
         raise HTTPException(403, f'not permitted: {capability}')
 
 
-def can_access_job(conn, job_id: str, user: dict) -> bool:
-    row = conn.execute('SELECT owner, group_id FROM jobs WHERE id = ?', (job_id,)).fetchone()
-    if row is None:
-        return False
-    if user['role'] == 'admin':
-        return True
-    if row['owner'] == user['username']:
-        return True
-    if conn.execute('SELECT 1 FROM job_assignees WHERE job_id = ? AND username = ?',
-                    (job_id, user['username'])).fetchone() is not None:
-        return True
-    # Sharing a group shares everything in it, now and later.
-    return row['group_id'] is not None and conn.execute(
-        'SELECT 1 FROM group_assignees WHERE group_id = ? AND username = ?',
-        (row['group_id'], user['username'])).fetchone() is not None
+# The datasets someone other than an admin opens: those they created, those they were
+# given, every one in a workspace they belong to - now and later - and those in their
+# Sandbox. One statement for a dataset, a list and a count alike, so they cannot disagree.
+VISIBLE_JOB_IDS = (
+    'SELECT id FROM jobs WHERE owner = :me '
+    'OR id IN (SELECT job_id FROM job_assignees WHERE username = :me) '
+    'OR group_id IN (SELECT group_id FROM group_assignees WHERE username = :me '
+    '                UNION SELECT id FROM groups WHERE sandbox_of = :me)')
 
-
-# The groups someone other than an admin reaches: their own, ones shared with them, and
-# ones holding a dataset they can see. A group name is a project name, so it is scoped
-# the way the dataset list is.
+# The workspaces someone other than an admin sees: those they belong to, their Sandbox,
+# and any holding a dataset they open - shown with that dataset alone.
 REACHABLE_GROUP_IDS = (
-    'SELECT id FROM groups WHERE owner = :me '
-    'OR id IN (SELECT group_id FROM group_assignees WHERE username = :me) '
-    'OR id IN (SELECT group_id FROM jobs WHERE group_id IS NOT NULL '
-    '          AND (owner = :me OR id IN (SELECT job_id FROM job_assignees WHERE username = :me)))')
+    'SELECT group_id AS id FROM group_assignees WHERE username = :me '
+    'UNION SELECT id FROM groups WHERE sandbox_of = :me '
+    f'UNION SELECT group_id FROM jobs WHERE group_id IS NOT NULL AND id IN ({VISIBLE_JOB_IDS})')
+
+
+def can_access_job(conn, job_id: str, user: dict) -> bool:
+    if user['role'] == 'admin':
+        return conn.execute('SELECT 1 FROM jobs WHERE id = ?', (job_id,)).fetchone() is not None
+    return conn.execute(f'SELECT 1 FROM ({VISIBLE_JOB_IDS}) WHERE id = :id',
+                        {'me': user['username'], 'id': job_id}).fetchone() is not None
 
 
 def can_reach_group(conn, group_id: int, user: dict) -> bool:
@@ -120,6 +117,25 @@ def can_reach_group(conn, group_id: int, user: dict) -> bool:
         return conn.execute('SELECT 1 FROM groups WHERE id = ?', (group_id,)).fetchone() is not None
     return conn.execute(f'SELECT 1 FROM ({REACHABLE_GROUP_IDS}) WHERE id = :id',
                         {'me': user['username'], 'id': group_id}).fetchone() is not None
+
+
+def belongs_to_workspace(conn, group_id: int, user: dict) -> bool:
+    """Whether someone may put a dataset there: a workspace they belong to - any, for an
+    admin - or their own Sandbox. Never anyone else's Sandbox."""
+    row = conn.execute('SELECT sandbox_of FROM groups WHERE id = ?', (group_id,)).fetchone()
+    if row is None:
+        return False
+    if row['sandbox_of'] is not None:
+        return row['sandbox_of'] == user['username']
+    return user['role'] == 'admin' or conn.execute(
+        'SELECT 1 FROM group_assignees WHERE group_id = ? AND username = ?',
+        (group_id, user['username'])).fetchone() is not None
+
+
+def manages_workspace(conn, group_id: int, user: dict) -> bool:
+    """A workspace's Managers are the Managers who belong to it; admins manage every one."""
+    return user['role'] == 'admin' or (role_reaches(user['role'], 'manager')
+                                       and belongs_to_workspace(conn, group_id, user))
 
 
 def require_job_access(conn, job_id: str, user: dict) -> None:
@@ -137,19 +153,31 @@ def accessible_job(conn, job_id: str, user: dict) -> dict:
     return job
 
 
-def role_given(owner: str, user: dict) -> str:
+# The two roles that may be swapped for each other on a single dataset.
+SWAPPABLE = ('annotator', 'reviewer')
+
+
+def role_given(owner: str, user: dict, swapped: str | None = None) -> str:
     """The role someone acts with on a dataset they can open: their account's, except that
-    whoever created a dataset manages it, whatever their account role."""
+    whoever created a dataset manages it, whatever their account role, and an Annotator or
+    Reviewer can be given the other role on it (`swapped`)."""
     if user['role'] in ('admin', 'viewer'):
         return user['role']
-    return 'manager' if owner == user['username'] else user['role']
+    if owner == user['username']:
+        return 'manager'
+    if swapped in SWAPPABLE and user['role'] in SWAPPABLE:
+        return swapped
+    return user['role']
 
 
 def role_on_job(conn, job_id: str, user: dict) -> str | None:
     """The role someone acts with on a dataset, or None when they cannot open it."""
     if not can_access_job(conn, job_id, user):
         return None
-    return role_given(conn.execute('SELECT owner FROM jobs WHERE id = ?', (job_id,)).fetchone()['owner'], user)
+    owner = conn.execute('SELECT owner FROM jobs WHERE id = ?', (job_id,)).fetchone()['owner']
+    swapped = conn.execute('SELECT role FROM job_assignees WHERE job_id = ? AND username = ?',
+                           (job_id, user['username'])).fetchone()
+    return role_given(owner, user, swapped['role'] if swapped else None)
 
 
 def require_job_role(conn, job_id: str, user: dict, least: str) -> None:

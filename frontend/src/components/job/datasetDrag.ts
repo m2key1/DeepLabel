@@ -90,5 +90,5 @@ export function useDatasetDrag(
     }
   }
 
-  return { dragging: dragging !== null, dragSource, dropZone }
+  return { dragSource, dropZone }
 }

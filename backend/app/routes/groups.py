@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import layout_shapes
-from app.deps import (REACHABLE_GROUP_IDS, can_access_job, can_reach_group, current_user, get_db,
-                      require_role)
+from app import layout_shapes, store
+from app.deps import (REACHABLE_GROUP_IDS, VISIBLE_JOB_IDS, can_access_job, can_reach_group, current_user,
+                      get_db, manages_workspace, require_role)
 from app.routes.bulk import each_isolated
 from app.routes.jobs import JobPatch, apply_patch
 
@@ -11,22 +11,27 @@ router = APIRouter(tags=['groups'])
 
 
 def _group_or_404(conn, group_id: int, user: dict):
-    """A group the caller cannot reach answers as one that does not exist, so its id does
-    not confirm a project name. One they reach but do not manage is _require_manager's 403."""
+    """A workspace the caller cannot reach answers as one that does not exist, so its id
+    does not confirm a project name. One they reach but do not manage is a 403."""
     if not can_reach_group(conn, group_id, user):
         raise HTTPException(404)
     return conn.execute('SELECT * FROM groups WHERE id = ?', (group_id,)).fetchone()
 
 
-def _require_manager(row, user: dict):
-    if user['role'] != 'admin' and row['owner'] != user['username']:
-        raise HTTPException(403, 'not permitted')
+def _require_manager(conn, row, user: dict, sandbox_refusal: str):
+    """Only a workspace's Managers change it; a Sandbox is never changed this way."""
+    if row['sandbox_of'] is not None:
+        raise HTTPException(409, sandbox_refusal)
+    if not manages_workspace(conn, row['id'], user):
+        raise HTTPException(403, 'not permitted: this takes a Manager of the workspace')
 
 
 def _require_unique_name(conn, name: str, exclude_id: int | None = None):
-    row = conn.execute('SELECT id FROM groups WHERE lower(name) = lower(?)', (name,)).fetchone()
+    row = conn.execute('SELECT id FROM groups WHERE lower(name) = lower(?) AND sandbox_of IS NULL',
+                       (name,)).fetchone()
     if row and row['id'] != exclude_id:
-        raise HTTPException(409, f'a group named "{name}" already exists')
+        raise HTTPException(409, f'a workspace named "{name}" already exists')
+
 
 
 class GroupBody(BaseModel):
@@ -35,27 +40,28 @@ class GroupBody(BaseModel):
 
 @router.get('/api/groups')
 def list_groups(conn=Depends(get_db), user: dict = Depends(current_user)):
-    """Dataset groups the caller can reach, with their members. Empty ones of their own
-    are included, since that is how the first dataset is moved in."""
+    """The workspaces the caller can reach, their own Sandbox among them, with their
+    members. Empty ones are included, since that is how the first dataset is moved in."""
+    me = user['username']
     if user['role'] == 'admin':
-        rows = conn.execute('SELECT id, name, owner FROM groups ORDER BY lower(name)').fetchall()
+        rows = conn.execute('SELECT id, name, owner, sandbox_of FROM groups').fetchall()
     else:
-        rows = conn.execute(
-            f'SELECT id, name, owner FROM groups WHERE id IN ({REACHABLE_GROUP_IDS}) '
-            'ORDER BY lower(name)', {'me': user['username']}).fetchall()
-    shared = {}
+        rows = conn.execute(f'SELECT id, name, owner, sandbox_of FROM groups WHERE id IN ({REACHABLE_GROUP_IDS})',
+                            {'me': me}).fetchall()
+    members = {}
     for row in conn.execute('SELECT group_id, username FROM group_assignees ORDER BY username'):
-        shared.setdefault(row['group_id'], []).append(row['username'])
-    # How many datasets the caller can see in each, so a list of groups is navigable
+        members.setdefault(row['group_id'], []).append(row['username'])
+    # How many datasets the caller can see in each, so a list of workspaces is navigable
     # without also fetching every dataset in the deployment.
     counts = {r['group_id']: r['n'] for r in conn.execute(
         'SELECT group_id, COUNT(*) n FROM jobs WHERE group_id IS NOT NULL '
-        + ('' if user['role'] == 'admin' else
-           'AND (owner = :me OR id IN (SELECT job_id FROM job_assignees WHERE username = :me) '
-           '     OR group_id IN (SELECT group_id FROM group_assignees WHERE username = :me)) ')
-        + 'GROUP BY group_id', {'me': user['username']})}
-    return [{**dict(r), 'shared_with': shared.get(r['id'], []), 'count': counts.get(r['id'], 0)}
-            for r in rows]
+        + ('' if user['role'] == 'admin' else f'AND id IN ({VISIBLE_JOB_IDS}) ')
+        + 'GROUP BY group_id', {'me': me})}
+    listed = [{'id': r['id'], 'name': store.workspace_name(r, me), 'owner': r['owner'], 'sandbox_of': r['sandbox_of'],
+               'shared_with': members.get(r['id'], []), 'count': counts.get(r['id'], 0),
+               'can_manage': r['sandbox_of'] is None and manages_workspace(conn, r['id'], user)}
+              for r in rows]
+    return sorted(listed, key=lambda g: g['name'].lower())
 
 
 class GroupShare(BaseModel):
@@ -65,11 +71,10 @@ class GroupShare(BaseModel):
 @router.put('/api/groups/{group_id}/share')
 def share_group(group_id: int, body: GroupShare, conn=Depends(get_db),
                 user: dict = Depends(current_user)):
-    """Everyone listed here reaches every dataset in the group, including ones
-    moved into it later - that is the point of sharing a group rather than
-    each dataset."""
+    """Everyone listed here belongs to the workspace and reaches every dataset in it,
+    including ones moved into it later."""
     row = _group_or_404(conn, group_id, user)
-    _require_manager(row, user)
+    _require_manager(conn, row, user, 'nobody is added to a Sandbox: move a dataset into a workspace to share it')
     names = sorted({n.strip() for n in body.usernames if n.strip()})
     conn.execute('DELETE FROM group_assignees WHERE group_id = ?', (group_id,))
     conn.executemany('INSERT INTO group_assignees (group_id, username) VALUES (?, ?)',
@@ -81,12 +86,13 @@ def share_group(group_id: int, body: GroupShare, conn=Depends(get_db),
 @router.post('/api/groups')
 def create_group(body: GroupBody, conn=Depends(get_db),
                  user: dict = Depends(require_role('admin', 'manager'))):
-    """Create a dataset group."""
+    """Create a workspace, which its creator belongs to."""
     name = body.name.strip()
     if not name:
         raise HTTPException(400, 'name must not be empty')
     _require_unique_name(conn, name)
     cur = conn.execute('INSERT INTO groups (name, owner) VALUES (?, ?)', (name, user['username']))
+    conn.execute('INSERT INTO group_assignees (group_id, username) VALUES (?, ?)', (cur.lastrowid, user['username']))
     conn.commit()
     return {'id': cur.lastrowid, 'name': name, 'owner': user['username']}
 
@@ -94,9 +100,9 @@ def create_group(body: GroupBody, conn=Depends(get_db),
 @router.patch('/api/groups/{group_id}')
 def rename_group(group_id: int, body: GroupBody, conn=Depends(get_db),
                  user: dict = Depends(current_user)):
-    """Rename a dataset group."""
+    """Rename a workspace."""
     row = _group_or_404(conn, group_id, user)
-    _require_manager(row, user)
+    _require_manager(conn, row, user, 'a Sandbox keeps its name')
     name = body.name.strip()
     if not name:
         raise HTTPException(400, 'name must not be empty')
@@ -108,11 +114,14 @@ def rename_group(group_id: int, body: GroupBody, conn=Depends(get_db),
 
 @router.delete('/api/groups/{group_id}')
 def delete_group(group_id: int, conn=Depends(get_db), user: dict = Depends(current_user)):
-    """Delete a group; the datasets in it are kept."""
+    """Delete an empty workspace. One that holds datasets is refused, so deleting it never
+    takes a dataset with it."""
     row = _group_or_404(conn, group_id, user)
-    _require_manager(row, user)
-    # Datasets survive their group; they just fall back to ungrouped.
-    conn.execute('UPDATE jobs SET group_id = NULL WHERE group_id = ?', (group_id,))
+    _require_manager(conn, row, user, 'a Sandbox is never deleted')
+    held = conn.execute('SELECT COUNT(*) FROM jobs WHERE group_id = ?', (group_id,)).fetchone()[0]
+    if held:
+        raise HTTPException(409, f"move or delete its {held} dataset{'s' if held != 1 else ''} first")
+    conn.execute('DELETE FROM group_assignees WHERE group_id = ?', (group_id,))
     conn.execute('DELETE FROM groups WHERE id = ?', (group_id,))
     conn.commit()
     return {'ok': True}

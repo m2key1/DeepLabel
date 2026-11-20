@@ -527,6 +527,8 @@ def _new_dataset(conn, account: str, name: str, fields: dict, finder, reading: R
                   finder[0]['id'] if finder and (fields.get('lines_model') or ALLOWED in fields) else None,
                   reading.model['id'] if fields.get('ocr_model') or ALLOWED in fields else None,
                   fields.get('decode') or decode.DATASET_DEFAULT, fields.get('reading_order') or reading_order.AUTO))
+    # Made where a new dataset of theirs is made by default: their Sandbox.
+    conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (store.sandbox_id(conn, account), job_id))
     if reading.convention:
         conn.execute('UPDATE jobs SET ocr_convention = ? WHERE id = ?', (json.dumps(reading.convention), job_id))
         conventions.note(conn, list(reading.convention))

@@ -397,7 +397,7 @@ export function JobsPage() {
     if (!asUser) return { jobs: all, groups }
     const lensJobs = all.filter((j) => reachOf(j, groups.find((g) => g.id === j.group_id))
       .some((r) => r.username === asUser))
-    const lensGroups = groups.filter((g) => g.owner === asUser || g.shared_with.includes(asUser)
+    const lensGroups = groups.filter((g) => g.sandbox_of === asUser || g.shared_with.includes(asUser)
       || lensJobs.some((j) => j.group_id === g.id))
     return { jobs: lensJobs, groups: lensGroups }
   }, [jobs, groups, asUser])
@@ -456,7 +456,9 @@ export function JobsPage() {
       .map((group) => ({ key: group.id as SectionKey, title: group.name,
                          rows: byGroup.get(group.id) ?? [], group }))
       .filter(({ rows, group }) =>
-        rows.length > 0 || (!filtering && (viewerIsAdmin || group!.owner === viewer)))
+        rows.length > 0 || (!filtering && (group!.sandbox_of
+          ? group!.sandbox_of === viewer
+          : viewerIsAdmin || group!.shared_with.includes(viewer))))
     const loose = byGroup.get(null) ?? []
     if (loose.length > 0) out.push({ key: 'ungrouped', title: 'Ungrouped', rows: loose })
     // A group the list could not load still holds its datasets, and they stay on screen.
@@ -543,7 +545,15 @@ export function JobsPage() {
   }
 
   const onDeleteGroup = async (group: Group) => {
-    if (!confirm(`Delete group "${group.name}"? Its datasets stay and become ungrouped.`)) return
+    setError(null)
+    const held = group.count ?? 0
+    if (held > 0) {
+      const them = held === 1 ? 'it' : 'them'
+      setError(`"${group.name}" still holds ${held} dataset${held === 1 ? '' : 's'}. `
+        + `Only an empty group can be deleted: move ${them} out or delete ${them} first.`)
+      return
+    }
+    if (!confirm(`Delete group "${group.name}"?`)) return
     try {
       await deleteGroup(group.id)
       refresh()
@@ -611,6 +621,16 @@ export function JobsPage() {
              outcome.skipped.map((s) => `${s.name} (${s.reason})`).join(', '))
   }
 
+  // Where datasets may be moved: a group the person belongs to - any, for an admin. Moving
+  // opens a dataset to the group's members; the way back is to its creator's Sandbox.
+  const moveTargets = groups.filter((g) => !g.sandbox_of && (isAdmin || g.shared_with.includes(user)))
+
+  // Adding people is the group's Managers'; a Sandbox dataset's Share explains the move instead.
+  const canShareDataset = (job: Job) => {
+    const group = groups.find((g) => g.id === job.group_id)
+    return !group || !!group.sandbox_of || group.can_manage
+  }
+
   /** The datasets in a run the caller does not manage. Any one of them refuses the whole
    *  request, so they are named before it is sent rather than skipped like a busy one. */
   const notYoursToRun = (ids: string[]): Job[] =>
@@ -648,7 +668,7 @@ export function JobsPage() {
     }
   }
   const moveSelection = (groupId: number | null) => moveDatasets([...selected], groupId)
-  const { dragging, dragSource, dropZone } = useDatasetDrag(
+  const { dragSource, dropZone } = useDatasetDrag(
     selected, canEdit, (ids, groupId) => void moveDatasets(ids, groupId))
 
   // A card's three buttons stop their click from reaching the page, which is what shuts
@@ -672,6 +692,7 @@ export function JobsPage() {
     onMasks: (fused: boolean) => void downloadMasks(job.id, fused),
     onMove: () => setMoveJob(job),
     onShare: () => setShareTarget({ kind: 'dataset', job }),
+    canShare: canShareDataset(job),
     // A map dataset has only its name and tile size left to change; a text one, everything it was made with.
     onSettings: () => (isTileTask(job.task) ? setMapSettingsJob(job) : navigate(`/jobs/${job.id}/settings`)),
     onCancel: () => void onCancel(job),
@@ -883,7 +904,9 @@ export function JobsPage() {
 
   const sectionHeader = (key: SectionKey, title: string, count: number, rows: Job[],
                          group?: Group, prefix = '') => {
-    const canManage = group && (isAdmin || group.owner === user)
+    const canManage = group?.can_manage ?? false
+    // Like Run…, settings go to each dataset in turn, and the ones not yours are named as refused.
+    const canSettle = rows.length > 0 && managesAny(rows.map((j) => j.id))
     const zone = group ? dropZone({ groupId: group.id, name: group.name })
       : key === 'ungrouped' ? dropZone({ groupId: null }) : null
     const ground = zone?.lit ? DROP_LIT : 'bg-raised'
@@ -933,10 +956,10 @@ export function JobsPage() {
         {group && (group.shared_with?.length ?? 0) > 0 && (
           <span
             data-testid="group-shared"
-            title={`Shared with: ${group.shared_with.join(', ')}`}
+            title={`Members: ${group.shared_with.join(', ')}`}
             className="text-xs text-ink-subtle"
           >
-            shared with {group.shared_with.length}
+            {group.shared_with.length} member{group.shared_with.length === 1 ? '' : 's'}
           </span>
         )}
         <span className="ml-auto flex items-center gap-1">
@@ -973,16 +996,24 @@ export function JobsPage() {
               )}
             </span>
           )}
+          {group && renamingGroup !== group.id && (
+            <>
+              {canManage && (
+                <Button variant="ghost" size="xs" data-testid="group-share"
+                        onClick={() => setShareTarget({ kind: 'group', group })}>
+                  Share…
+                </Button>
+              )}
+              {canSettle && (
+                <Button variant="ghost" size="xs" data-testid="group-settings"
+                        onClick={() => setSettingsGroup(group)}>
+                  Settings…
+                </Button>
+              )}
+            </>
+          )}
           {group && canManage && renamingGroup !== group.id && (
             <>
-              <Button variant="ghost" size="xs" data-testid="group-share"
-                      onClick={() => setShareTarget({ kind: 'group', group })}>
-                Share…
-              </Button>
-              <Button variant="ghost" size="xs" data-testid="group-settings"
-                      onClick={() => setSettingsGroup(group)}>
-                Settings…
-              </Button>
               <Button variant="ghost" size="xs" onClick={() => {
                 setGroupDraft(group.name)
                 setRenamingGroup(group.id)
@@ -1210,14 +1241,15 @@ export function JobsPage() {
         {movePicker && (
           <div className={`absolute left-0 top-full z-20 mt-1 max-h-64 w-52 overflow-auto ${popoverChrome} py-1`}
                onClick={(e) => e.stopPropagation()}>
-            {groups.map((g) => (
+            {moveTargets.map((g) => (
               <button key={g.id} className={menuItem} onClick={() => void moveSelection(g.id)}>
                 {g.name}
               </button>
             ))}
             <div className="my-1 border-t border-line" />
-            <button className={menuItem} onClick={() => void moveSelection(null)}>
-              Remove from group
+            <button className={menuItem} title="Each dataset goes back to the Sandbox of the person who made it"
+                    onClick={() => void moveSelection(null)}>
+              Back to Sandbox
             </button>
           </div>
         )}
@@ -1259,7 +1291,6 @@ export function JobsPage() {
       collapsed={collapsed}
       onCollapse={onCollapse}
       onScope={(next) => { setScope(next); setSelected(new Set()); picked?.() }}
-      dragging={dragging}
       dropZone={dropZone}
     />
   )
@@ -1366,12 +1397,12 @@ export function JobsPage() {
       )}
       {moveJob && (
         <MoveToGroupDialog
-          jobId={moveJob.id}
-          jobName={moveJob.name}
-          groupId={moveJob.group_id}
+          job={moveJob}
           groups={groups}
+          targets={moveTargets}
+          user={user}
           onClose={() => setMoveJob(null)}
-          onMoved={refresh}
+          onMoved={() => { setError(null); refresh() }}
           onError={setError}
         />
       )}
@@ -1402,6 +1433,12 @@ export function JobsPage() {
             ? { kind: 'dataset', id: shareTarget.job.id }
             : { kind: 'group', id: shareTarget.group.id }}
           title={shareTarget.kind === 'dataset' ? shareTarget.job.name : shareTarget.group.name}
+          sandboxed={shareTarget.kind === 'dataset'
+            && !!groups.find((g) => g.id === shareTarget.job.group_id)?.sandbox_of}
+          onMoveInstead={() => {
+            if (shareTarget.kind === 'dataset') setMoveJob(shareTarget.job)
+            setShareTarget(null)
+          }}
           owner={shareTarget.kind === 'dataset' ? shareTarget.job.owner : shareTarget.group.owner}
           sharedWith={shareTarget.kind === 'dataset'
             ? shareTarget.job.shared_with

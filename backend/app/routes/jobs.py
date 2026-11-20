@@ -15,9 +15,9 @@ from pydantic import BaseModel, Field
 from app import (blobs, caches, config, consensus, conventions, corpus, data_use, decode, evaluator, geometry,
                  iiif, imports, ingest, jobs, layout_shapes, layout_templates, llm, map_classes, model_registry,
                  page_rows, queue_eta, reading_order, recognize, registry, schemas, store, trainer)
-from app.deps import (ROLE_NAMES, WRITERS, can_access_job, can_reach_group, current_user, get_db, get_user,
-                      require_job_access, require_job_manager, require_job_role, require_role, role_given,
-                      role_on_job, role_reaches)
+from app.deps import (ROLE_NAMES, SWAPPABLE, VISIBLE_JOB_IDS, WRITERS, belongs_to_workspace, can_access_job, manages_workspace,
+                      current_user, get_db, get_user, require_job_access, require_job_manager, require_job_role,
+                      require_role, role_given, role_on_job, role_reaches)
 
 
 class UncappedUploadRequest(Request):
@@ -123,17 +123,19 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
                gt_from_pdf: bool = Form(False), layout_template_id: int | None = Form(None),
                hold: bool = Form(False), as_test: bool = Form(False),
                ocr_convention: str = Form('{}'), data_use: str = Form('{}'),
-               layout_shape: str = Form('box'),
+               layout_shape: str = Form('box'), group_id: int | None = Form(None),
                files: list[UploadFile] = None, conn=Depends(get_db),
                user: str = Depends(get_user), _editor=Depends(require_role(*WRITERS))):
     """Create a dataset from uploaded files - a .txt beside an image is ingested as that page's transcription.
-    With `hold`, it waits as 'uploading' while more batches are added, until it is started."""
+    With `hold`, it waits as 'uploading' while more batches are added, until it is started. It is made in
+    the workspace `group_id`, which its creator belongs to, or else in their Sandbox."""
     _valid_layout_shape(layout_shape)
     if not files:
         raise HTTPException(400, 'no files uploaded')
     ingest.valid_task(task)
     ingest.valid_line_mode(line_mode)
     name = ingest.require_unique_name(conn, name)
+    workspace = _landing_workspace(conn, _editor, group_id)
     is_map = ingest.is_tile_task(task)
     # Map jobs annotate pre-cut tiles: images only (no PDF expansion) and no text phases.
     extensions = config.IMAGE_EXTENSIONS if is_map else config.INGEST_EXTENSIONS
@@ -199,6 +201,7 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
          models['layout'], models['lines'], models['ocr'], ocr_decode, int(gt_autocheck),
          int(gt_ordered), int(gt_from_pdf), page_reading_order, int(as_test),
          UPLOADING if hold else 'queued', layout_shape))
+    conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (workspace, job_id))
     _set_convention(conn, job_id, convention)
     _set_data_use(conn, job_id, uses)
     # Tiling jobs register the uploads as full maps (job_maps); the tile phase produces
@@ -245,6 +248,15 @@ def _set_convention(conn, job_id: str, convention: dict[str, bool]) -> None:
         conventions.note(conn, [name for name, on in convention.items() if on])
 
 
+def _landing_workspace(conn, creator: dict, group_id: int | None) -> int:
+    """Where a new dataset is made: a workspace its creator belongs to, or their Sandbox."""
+    if group_id is None:
+        return store.sandbox_id(conn, creator['username'])
+    if not belongs_to_workspace(conn, group_id, creator):
+        raise HTTPException(404, 'workspace not found')
+    return group_id
+
+
 def _require_layout_template(conn, template_id: int | None) -> None:
     if template_id is not None and not conn.execute('SELECT 1 FROM layout_templates WHERE id = ?',
                                                     (template_id,)).fetchone():
@@ -253,7 +265,7 @@ def _require_layout_template(conn, template_id: int | None) -> None:
 
 @router.post('/api/jobs/import')
 def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str = Form('{}'),
-               file: UploadFile = None, conn=Depends(get_db),
+               group_id: int | None = Form(None), file: UploadFile = None, conn=Depends(get_db),
                user: str = Depends(get_user), _editor=Depends(require_role(*WRITERS))):
     """Transkribus/eScriptorium-style export: pages arrive segmented and
     transcribed, so no pipeline phase has to run - only the ingest phase, which
@@ -261,6 +273,7 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str
     if file is None:
         raise HTTPException(400, 'no file uploaded')
     name = ingest.require_unique_name(conn, name)
+    workspace = _landing_workspace(conn, _editor, group_id)
     try:
         uses = _valid_data_use(json.loads(data_use or '{}'))
     except json.JSONDecodeError:
@@ -285,6 +298,7 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str
     try:
         conn.execute('INSERT INTO jobs (id, name, owner, line_mode, run_layout, run_lines, run_ocr, ocr_decode) '
                      "VALUES (?,?,?,'per_page',0,0,0,?)", (job_id, name, user, decode.DATASET_DEFAULT))
+        conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (workspace, job_id))
         _set_data_use(conn, job_id, uses)
         layout_templates.copy_into(conn, job_id)
         # An import may bring classes this instance's template lacks; they join the
@@ -309,6 +323,8 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str
 
 class JobOptions(BaseModel):
     name: str
+    # The workspace it is made in, which its creator belongs to; none is their Sandbox.
+    group_id: int | None = None
     line_mode: str = 'per_crop'
     task: str = 'text'
     run_layout: bool = True
@@ -372,7 +388,7 @@ def _checked_options(conn, body: JobOptions) -> dict:
             'gt_from_pdf': body.gt_from_pdf and not is_map}  # map jobs have no transcriptions at all
 
 
-def _insert_job(conn, job_id: str, user: str, body: JobOptions, o: dict,
+def _insert_job(conn, job_id: str, user: str, body: JobOptions, o: dict, workspace: int,
                 source_path: str | None = None, iiif_source: dict | None = None) -> None:
     _valid_layout_shape(body.layout_shape)
     conn.execute(
@@ -387,6 +403,7 @@ def _insert_job(conn, job_id: str, user: str, body: JobOptions, o: dict,
          o['line_width'], o['models']['layout'], o['models']['lines'], o['models']['ocr'], body.ocr_decode,
          int(body.gt_autocheck), int(body.gt_ordered), int(o['gt_from_pdf']), body.page_reading_order,
          body.layout_shape))
+    conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (workspace, job_id))
     _set_convention(conn, job_id, o['convention'])
     _set_data_use(conn, job_id, o['data_use'])
 
@@ -396,6 +413,7 @@ def create_job_from_path(body: PathJob, conn=Depends(get_db), user: str = Depend
                          _admin=Depends(require_role('admin'))):
     """Create a dataset from a directory that already sits on the backend host."""
     o = _checked_options(conn, body)
+    workspace = _landing_workspace(conn, _admin, body.group_id)
     is_map = o['is_map']
     extensions = config.IMAGE_EXTENSIONS if is_map else config.INGEST_EXTENSIONS
     root, sources, skipped_symlinks = ingest.scan_path(body.server_path, extensions=extensions)
@@ -406,7 +424,7 @@ def create_job_from_path(body: PathJob, conn=Depends(get_db), user: str = Depend
     except ingest.IngestError as e:
         shutil.rmtree(config.job_dir(job_id), ignore_errors=True)
         raise HTTPException(e.status_code, e.detail)
-    _insert_job(conn, job_id, user, body, o, source_path=str(root))
+    _insert_job(conn, job_id, user, body, o, workspace, source_path=str(root))
     # Path-ingested map sources point at the user's external files; purge never touches
     # them (only pages under job_dir). Tile PNGs land in job_dir/tiles/, which purge owns.
     if o['run_tile']:
@@ -468,6 +486,7 @@ def create_job_from_iiif(body: IiifJob, conn=Depends(get_db), user: str = Depend
     if body.task != 'text':
         raise HTTPException(400, 'a IIIF manifest makes a text dataset')
     o = _checked_options(conn, body)
+    workspace = _landing_workspace(conn, _editor, body.group_id)
     manifest = _read_iiif(body.manifest)
     if manifest['kind'] != 'manifest':
         raise HTTPException(400, 'this is a collection - choose one of its manifests')
@@ -484,7 +503,7 @@ def create_job_from_iiif(body: IiifJob, conn=Depends(get_db), user: str = Depend
     position = {c['canvas']: i for i, c in enumerate(manifest['canvases'], 1)}
     entries = [(name, str(pages_dir / name)) for name in
                (_page_filename(position[c['canvas']], c['label']) for c in canvases)]
-    _insert_job(conn, job_id, user, body, o, iiif_source={
+    _insert_job(conn, job_id, user, body, o, workspace, iiif_source={
         'manifest': manifest['url'], 'label': manifest['label'],
         'attribution': manifest['attribution'], 'rights': manifest['rights']})
     page_ids = ingest.insert_pages(conn, job_id, entries)
@@ -645,22 +664,22 @@ def list_jobs(conn=Depends(get_db), user: dict = Depends(current_user)):
     if user['role'] == 'admin':
         rows = conn.execute('SELECT * FROM jobs ORDER BY created_at DESC').fetchall()
     else:
-        rows = conn.execute(
-            'SELECT * FROM jobs WHERE owner = ? '
-            'OR id IN (SELECT job_id FROM job_assignees WHERE username = ?) '
-            'OR group_id IN (SELECT group_id FROM group_assignees WHERE username = ?) '
-            'ORDER BY created_at DESC',
-            (user['username'], user['username'], user['username'])).fetchall()
+        rows = conn.execute(f'SELECT * FROM jobs WHERE id IN ({VISIBLE_JOB_IDS}) ORDER BY created_at DESC',
+                            {'me': user['username']}).fetchall()
     progress = caches.job_progress(conn)
     shared: dict[str, list[str]] = {}
-    for r in conn.execute('SELECT job_id, username FROM job_assignees ORDER BY username'):
+    # The caller's own role on a dataset given to them with one, from the same rows.
+    swapped: dict[str, str] = {}
+    for r in conn.execute('SELECT job_id, username, role FROM job_assignees ORDER BY username'):
         shared.setdefault(r['job_id'], []).append(r['username'])
+        if r['username'] == user['username'] and r['role']:
+            swapped[r['job_id']] = r['role']
     empty = {'pages_total': 0, 'layout_checked_pages': 0, 'test_pages': 0, 'lines_total': 0, 'lines_done': 0}
     payloads = []
     for row in rows:
         job = _job_payload(conn, row, shared.get(row['id'], []))
         job.update(progress.get(job['id'], empty))
-        job['my_role'] = role_given(row['owner'], user)
+        job['my_role'] = role_given(row['owner'], user, swapped.get(row['id']))
         payloads.append(job)
     return payloads
 
@@ -721,9 +740,8 @@ def get_job(job_id: str, pages: bool = True, conn=Depends(get_db),
     row = conn.execute('SELECT * FROM jobs WHERE id = ?', (job_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
-    data_use.note_admin_visit(conn, job_id, user)
     job = _job_payload(conn, row)
-    job['my_role'] = role_given(row['owner'], user)
+    job['my_role'] = role_on_job(conn, job_id, user)
     job['unreadable'] = [{**dict(r), 'iiif': bool(r['iiif'])} for r in conn.execute(
         "SELECT id, filename, error, iiif FROM pages WHERE job_id = ? AND deleted = 0 AND status = 'unreadable' "
         'ORDER BY idx', (job_id,))]
@@ -835,7 +853,7 @@ def job_info(job_id: str, conn=Depends(get_db), user: dict = Depends(current_use
         f'WHERE job_id = ? AND {store.person_author_sql()} '
         'GROUP BY author ORDER BY edits DESC, author', (job_id,)).fetchall()
     group = conn.execute(
-        'SELECT name FROM groups WHERE id = ?', (job['group_id'],)).fetchone() if job['group_id'] else None
+        'SELECT name, sandbox_of FROM groups WHERE id = ?', (job['group_id'],)).fetchone() if job['group_id'] else None
     disk = caches.job_disk_usage(job_id)
     models = {}
     for task, column in MODEL_COLUMNS.items():
@@ -846,7 +864,7 @@ def job_info(job_id: str, conn=Depends(get_db), user: dict = Depends(current_use
         'created_at': job['created_at'],
         'task': job['task'],
         'line_mode': job['line_mode'],
-        'group': group['name'] if group else None,
+        'group': store.workspace_name(group, user['username']) if group else None,
         'shared_with': job['shared_with'],
         'pages': pages['live'],
         'pages_deleted': deleted,
@@ -1075,11 +1093,18 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
         name = ingest.require_unique_name(conn, body.name, exclude_id=job_id)
         conn.execute('UPDATE jobs SET name = ? WHERE id = ?', (name, job_id))
     if 'group_id' in fields:
-        # Filing shares the dataset with the group's people and shows the group to the
-        # filer, so a group they cannot reach answers as one that does not exist.
-        if body.group_id is not None and not can_reach_group(conn, body.group_id, user):
-            raise HTTPException(404, 'group not found')
-        conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (body.group_id, job_id))
+        # Moving opens the dataset to the workspace's members, so it goes only where its
+        # mover belongs; out of a workspace it goes back to its creator's Sandbox.
+        home = store.sandbox_id(conn, job['owner'])
+        if body.group_id in (None, home):
+            target = home
+        elif not belongs_to_workspace(conn, body.group_id, user):
+            raise HTTPException(404, 'workspace not found')
+        elif store.is_sandbox(conn, body.group_id):
+            raise HTTPException(409, 'a Sandbox holds only the datasets of the person it belongs to')
+        else:
+            target = body.group_id
+        conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (target, job_id))
     for task, column in MODEL_COLUMNS.items():
         if column not in fields:
             continue
@@ -1182,16 +1207,26 @@ def patch_job(job_id: str, body: JobPatch, conn=Depends(get_db), user: dict = De
 
 class Share(BaseModel):
     usernames: list[str]
+    # An Annotator made Reviewer on this dataset, or a Reviewer made Annotator, by name.
+    roles: dict[str, str] = {}
 
 
 @router.put('/api/jobs/{job_id}/share')
 def share_job(job_id: str, body: Share, conn=Depends(get_db), user: dict = Depends(current_user)):
-    """Replace the set of users a dataset is shared with."""
+    """Replace the people given this dataset alone, each with the role they have on it."""
     require_job_manager(conn, job_id, user)
+    group_id = conn.execute('SELECT group_id FROM jobs WHERE id = ?', (job_id,)).fetchone()['group_id']
+    if group_id is not None and store.is_sandbox(conn, group_id):
+        raise HTTPException(409, 'a dataset in a Sandbox is shared by moving it into a workspace')
+    if group_id is not None and not manages_workspace(conn, group_id, user):
+        raise HTTPException(403, 'not permitted: this takes a Manager of the workspace')
+    if any(role not in SWAPPABLE for role in body.roles.values()):
+        raise HTTPException(400, 'on one dataset someone is an Annotator or a Reviewer')
     names = sorted({n.strip() for n in body.usernames if n.strip()})
+    roles = {n.strip(): role for n, role in body.roles.items()}
     conn.execute('DELETE FROM job_assignees WHERE job_id = ?', (job_id,))
-    conn.executemany('INSERT INTO job_assignees (job_id, username) VALUES (?, ?)',
-                     [(job_id, n) for n in names])
+    conn.executemany('INSERT INTO job_assignees (job_id, username, role) VALUES (?, ?, ?)',
+                     [(job_id, n, roles.get(n)) for n in names])
     conn.commit()
     return {'job_id': job_id, 'shared_with': names}
 
@@ -1199,14 +1234,12 @@ def share_job(job_id: str, body: Share, conn=Depends(get_db), user: dict = Depen
 def _data_use_payload(conn, job_id: str) -> dict:
     row = conn.execute('SELECT * FROM jobs WHERE id = ?', (job_id,)).fetchone()
     return {'data_use': store.job_row_to_dict(row)['data_use'],
-            'models': data_use.models_made_from(conn, job_id),
-            'admin_visits': data_use.admin_visits(conn, job_id)}
+            'models': data_use.models_made_from(conn, job_id)}
 
 
 @router.get('/api/jobs/{job_id}/data-use')
 def get_data_use(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
-    """What the dataset may be used for, the models already made from it, and the admins
-    who opened it while it restricted its use."""
+    """What the dataset may be used for, and the models already made from it."""
     require_job_manager(conn, job_id, user)
     return _data_use_payload(conn, job_id)
 

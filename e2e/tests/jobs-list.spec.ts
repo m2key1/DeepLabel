@@ -25,9 +25,10 @@ import { seedMapJob } from '../helpers/map'
 import { seedSession } from '../helpers/session'
 
 test.describe('Scenario: managing datasets from the list', () => {
-  test('an admin shares a dataset with a member from the card menu', async ({ page }) => {
+  test('an admin shares a dataset from the card menu, moving it out of its Sandbox first', async ({ page }) => {
     const name = uniqueName('Shareable')
-    await seedCompletedJob(name, 1)
+    const jobId = await seedCompletedJob(name, 1)
+    const group = await createGroup(uniqueName('Shared from the menu'))
     const username = `colleague-${Date.now()}`
     seedSession('manager', username)
 
@@ -35,9 +36,21 @@ test.describe('Scenario: managing datasets from the list', () => {
     const card = page.getByTestId('job-card').filter({ hasText: name })
     await card.getByTestId('job-menu').click()
     await card.getByRole('button', { name: 'Share…' }).click()
+    // A Sandbox is private, so Share says why it cannot add anyone and offers the way out (#131).
+    await expect(page.getByTestId('share-sandboxed')).toHaveText(
+      "It is in e2e-seeder's Sandbox, which only e2e-seeder can see. "
+      + 'To share it, move it into a group: everyone in that group can then open it.')
+    await page.getByRole('button', { name: 'Move to a group…' }).click()
+    await page.getByLabel('Move to').selectOption({ label: group.name })
+    await page.getByRole('button', { name: 'Move', exact: true }).click()
+    await expect.poll(async () => (await getJob(jobId)).group_id).toBe(group.id)
+
+    await card.getByTestId('job-menu').click()
+    await card.getByRole('button', { name: 'Share…' }).click()
     await page.getByRole('checkbox', { name: username }).check()
     await page.getByRole('button', { name: 'Save' }).click()
     await expect(card.getByText('shared with 1')).toBeVisible()
+    await expect.poll(async () => (await getJob(jobId)).shared_with).toEqual([username])
   })
 
   test('changing ocr settings offers a safe immediate re-run', async ({ page }) => {

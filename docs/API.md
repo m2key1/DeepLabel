@@ -48,6 +48,10 @@ dl.wait(job_id)
 Path('transcript.json').write_bytes(dl.export(job_id, reviewed_only=True))
 ```
 
+A dataset made over the API lands in your private Sandbox, which nobody else sees. Send
+`group_id` with `POST /api/jobs` (or `/api/jobs/import`) to make it in a project you belong
+to instead; `GET /api/groups` lists them, your Sandbox among them (`sandbox_of`).
+
 `POST /api/lines/texts` corrects many lines in one request (up to 5000), each as a single
 edit would; the lines it could not write come back with the reason:
 

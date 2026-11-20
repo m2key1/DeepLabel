@@ -84,8 +84,6 @@ export interface DataUseDetail {
   /** Models already trained, validated or scored on the dataset, which a switch leaves as they are. */
   models: { id: number; name: string; task: string; created_at: string; training_id: number | null
             roles: ('train' | 'valid' | 'test')[] }[]
-  /** Admins who opened it while it restricted its use, without owning it or having it shared. */
-  admin_visits: { username: string; created_at: string }[]
 }
 
 export function getDataUse(jobId: string): Promise<DataUseDetail> {
@@ -174,6 +172,10 @@ export interface Group {
   id: number
   name: string
   owner: string
+  /** Whose private Sandbox it is; null for a workspace. A Sandbox has no members. */
+  sandbox_of: string | null
+  /** Whether the caller may rename it, change who belongs to it, or delete it. */
+  can_manage: boolean
   shared_with: string[]
   /** Datasets in it the caller can see. Absent on an older backend. */
   count?: number

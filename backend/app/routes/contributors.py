@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 
+from app import store
 from app.deps import get_db, require_role
 
 router = APIRouter(tags=['contributors'])
@@ -19,11 +20,11 @@ REACHABLE_DATASETS = """
 
 REACHABLE_GROUPS = """
     WITH reach AS (
-        SELECT g.id, g.name,
+        SELECT g.id, g.name, g.sandbox_of,
                g.owner = :user AS owned,
                g.id IN (SELECT group_id FROM group_assignees WHERE username = :user) AS assigned
         FROM groups g)
-    SELECT * FROM reach WHERE owned OR assigned ORDER BY name COLLATE NOCASE
+    SELECT * FROM reach WHERE owned OR assigned
 """
 
 
@@ -36,14 +37,14 @@ def _access_label(row) -> str:
 
 
 @router.get('/api/contributors/{username}/access')
-def contributor_access(username: str, conn=Depends(get_db), _admin=Depends(require_role('admin'))):
+def contributor_access(username: str, conn=Depends(get_db), admin=Depends(require_role('admin'))):
     """Every dataset and group one person can open, and why: owned, shared directly, or
     reached through a shared group. Admins are not listed - they reach everything."""
     args = {'user': username}
     datasets = [{'id': r['id'], 'name': r['name'], 'task': r['task'], 'access': _access_label(r)}
                 for r in conn.execute(REACHABLE_DATASETS, args)]
-    groups = [{'id': r['id'], 'name': r['name'], 'access': _access_label(r)}
-              for r in conn.execute(REACHABLE_GROUPS, args)]
+    groups = sorted(({'id': r['id'], 'name': store.workspace_name(r, admin['username']), 'access': _access_label(r)}
+                     for r in conn.execute(REACHABLE_GROUPS, args)), key=lambda g: g['name'].lower())
     return {'datasets': datasets, 'groups': groups}
 
 

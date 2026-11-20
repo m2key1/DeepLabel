@@ -1,6 +1,7 @@
-"""Group names are project names, so the list is scoped the way the dataset list is:
-your own, ones shared with you, and ones holding a dataset you can reach. It used to
-return every group in the instance to anyone signed in.
+"""Workspace names are project names, so the list is scoped the way the dataset list is:
+the ones you belong to, your Sandbox, and ones holding a dataset you can reach. It used to
+return every group in the instance to anyone signed in. Changing a workspace is its
+Managers' (#131).
 """
 import pytest
 from fastapi.testclient import TestClient
@@ -11,9 +12,10 @@ from app.main import app
 
 SECRET = 'test-secret'
 ADMIN = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'root', 'X-Auth-Role': 'admin'}
-ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'member'}
-BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'member'}
+ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'manager'}
+BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'manager'}
 VIEWER = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'vera', 'X-Auth-Role': 'viewer'}
+ALICE_REVIEWING = {**ALICE, 'X-Auth-Role': 'reviewer'}
 
 
 @pytest.fixture
@@ -27,7 +29,9 @@ def client(tmp_path, monkeypatch):
             (3, 'Holds her dataset', 'bob'),
             (4, 'Holds one shared with her', 'bob'),
             (5, 'None of her business', 'bob');
-        INSERT INTO group_assignees (group_id, username) VALUES (2, 'alice');
+        -- Whoever made a workspace belongs to it, as creating one and the migration see to.
+        INSERT INTO group_assignees (group_id, username) VALUES (1, 'alice'), (2, 'bob'), (2, 'alice'),
+                                                                (3, 'bob'), (4, 'bob'), (5, 'bob');
         INSERT INTO jobs (id, name, owner, status, group_id) VALUES
             ('j-hers',   'Hers',   'alice', 'done', 3),
             ('j-shared', 'Shared', 'bob',   'done', 4),
@@ -97,12 +101,18 @@ class TestFiling:
         refused = client.patch('/api/jobs/j-hers', headers=ALICE, json={'group_id': 5})
 
         assert refused.status_code == 404
-        assert refused.json()['detail'] == 'group not found'
+        assert refused.json()['detail'] == 'workspace not found'
         assert self.filed_under(client) == 3
         assert 'None of her business' not in names(client, ALICE)
 
-    @pytest.mark.parametrize('group_id', [1, 2, 4])
-    def test_a_project_she_can_reach_takes_it(self, client, group_id):
+    def test_one_she_only_sees_through_a_dataset_she_was_given_does_not_take_it(self, client):
+        refused = client.patch('/api/jobs/j-hers', headers=ALICE, json={'group_id': 4})
+
+        assert refused.status_code == 404
+        assert self.filed_under(client) == 3
+
+    @pytest.mark.parametrize('group_id', [1, 2])
+    def test_a_project_she_belongs_to_takes_it(self, client, group_id):
         filed = client.patch('/api/jobs/j-hers', headers=ALICE, json={'group_id': group_id})
 
         assert filed.status_code == 200, filed.text
@@ -119,7 +129,7 @@ class TestFiling:
                                json={'job_ids': ['j-hers'], 'group_id': 5})
 
         assert refused.status_code == 400
-        assert refused.json()['detail'] == 'group not found'
+        assert refused.json()['detail'] == 'workspace not found'
         assert self.filed_under(client) == 3
 
 
@@ -149,7 +159,7 @@ class TestCreating:
 
 
 class TestRenaming:
-    def test_the_owner_may_rename_it(self, client):
+    def test_a_manager_in_it_may_rename_it(self, client):
         response = client.patch('/api/groups/1', json={'name': 'Renamed'}, headers=ALICE)
 
         assert response.status_code == 200
@@ -167,9 +177,9 @@ class TestRenaming:
         assert client.patch('/api/groups/1', json={'name': 'Shared with her'},
                             headers=ALICE).status_code == 409
 
-    def test_a_project_shared_with_her_is_not_hers_to_rename(self, client):
+    def test_a_reviewer_in_it_may_not_rename_it(self, client):
         assert client.patch('/api/groups/2', json={'name': 'Mine now'},
-                            headers=ALICE).status_code == 403
+                            headers=ALICE_REVIEWING).status_code == 403
         assert group(client, 2)['name'] == 'Shared with her'
 
     def test_a_project_she_cannot_reach_answers_as_if_it_did_not_exist(self, client):
@@ -189,19 +199,19 @@ class TestRenaming:
 
 class TestSharing:
     def test_sharing_a_project_names_who_reaches_it(self, client):
-        response = client.put('/api/groups/1/share', json={'usernames': ['bob', 'carol']},
+        response = client.put('/api/groups/1/share', json={'usernames': ['alice', 'bob', 'carol']},
                               headers=ALICE)
 
         assert response.status_code == 200
-        assert response.json()['shared_with'] == ['bob', 'carol']
-        assert group(client, 1, BOB)['shared_with'] == ['bob', 'carol']
+        assert response.json()['shared_with'] == ['alice', 'bob', 'carol']
+        assert group(client, 1, BOB)['shared_with'] == ['alice', 'bob', 'carol']
 
     def test_sharing_replaces_the_list_rather_than_adding_to_it(self, client):
-        client.put('/api/groups/1/share', json={'usernames': ['bob']}, headers=ALICE)
+        client.put('/api/groups/1/share', json={'usernames': ['alice', 'bob']}, headers=ALICE)
 
-        client.put('/api/groups/1/share', json={'usernames': ['carol']}, headers=ALICE)
+        client.put('/api/groups/1/share', json={'usernames': ['alice', 'carol']}, headers=ALICE)
 
-        assert group(client, 1)['shared_with'] == ['carol']
+        assert group(client, 1)['shared_with'] == ['alice', 'carol']
 
     def test_blanks_and_duplicates_are_not_people(self, client):
         response = client.put('/api/groups/1/share',
@@ -211,43 +221,44 @@ class TestSharing:
 
     def test_sharing_reaches_the_datasets_moved_in_later(self, client):
         """The point of sharing a project rather than each dataset."""
-        client.put('/api/groups/1/share', json={'usernames': ['bob']}, headers=ALICE)
+        client.put('/api/groups/1/share', json={'usernames': ['alice', 'bob']}, headers=ALICE)
         client.patch('/api/jobs/j-hers', json={'group_id': 1}, headers=ALICE)
 
         listed = client.get('/api/jobs', headers=BOB).json()
 
         assert 'j-hers' in [j['id'] for j in listed]
 
-    def test_a_project_shared_with_her_is_not_hers_to_share(self, client):
+    def test_a_reviewer_in_it_may_not_share_it(self, client):
         assert client.put('/api/groups/2/share', json={'usernames': ['carol']},
-                          headers=ALICE).status_code == 403
-        assert group(client, 2)['shared_with'] == ['alice']
+                          headers=ALICE_REVIEWING).status_code == 403
+        assert group(client, 2)['shared_with'] == ['alice', 'bob']
 
     def test_a_project_she_cannot_reach_answers_as_if_it_did_not_exist(self, client):
         refused = client.put('/api/groups/5/share', json={'usernames': ['alice']}, headers=ALICE)
 
         assert refused.status_code == 404
-        assert group(client, 5, ADMIN)['shared_with'] == []
+        assert group(client, 5, ADMIN)['shared_with'] == ['bob']
 
 
 class TestDeleting:
-    def test_the_datasets_survive_their_project(self, client):
-        assert client.delete('/api/groups/3', headers=BOB).status_code == 200
+    def test_one_holding_datasets_is_refused_and_keeps_them(self, client):
+        refused = client.delete('/api/groups/3', headers=BOB)
 
-        assert group(client, 3, ADMIN) is None
-        job = client.get('/api/jobs/j-hers', headers=ALICE).json()
-        assert job['group_id'] is None
+        assert refused.status_code == 409
+        assert refused.json()['detail'] == 'move or delete its 1 dataset first'
+        assert client.get('/api/jobs/j-hers', headers=ALICE).json()['group_id'] == 3
 
-    def test_a_project_shared_with_her_is_not_hers_to_delete(self, client):
-        assert client.delete('/api/groups/2', headers=ALICE).status_code == 403
-        assert group(client, 2) is not None
+    def test_a_reviewer_in_it_may_not_delete_it(self, client):
+        assert client.delete('/api/groups/1', headers=ALICE_REVIEWING).status_code == 403
+        assert group(client, 1) is not None
 
     def test_a_project_she_cannot_reach_answers_as_if_it_did_not_exist(self, client):
         assert client.delete('/api/groups/5', headers=ALICE).status_code == 404
         assert group(client, 5, ADMIN) is not None
 
-    def test_an_admin_may_delete_any_of_them(self, client):
-        assert client.delete('/api/groups/5', headers=ADMIN).status_code == 200
+    def test_an_admin_may_delete_any_empty_one(self, client):
+        assert client.delete('/api/groups/1', headers=ADMIN).status_code == 200
+        assert group(client, 1, ADMIN) is None
 
     def test_a_project_that_does_not_exist_is_a_404(self, client):
         assert client.delete('/api/groups/99', headers=ADMIN).status_code == 404

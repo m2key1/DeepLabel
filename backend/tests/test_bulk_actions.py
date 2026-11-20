@@ -264,7 +264,9 @@ def test_a_name_belongs_to_one_dataset_not_a_selection(client, conn):
 
 
 def test_a_selection_is_filed_under_a_group_at_once(client, conn):
+    # A group takes datasets from its members, as its creator is (#131).
     conn.execute("INSERT INTO groups (id, name, owner) VALUES (2, 'Briefe', 'alice')")
+    conn.execute("INSERT INTO group_assignees (group_id, username) VALUES (2, 'alice')")
     conn.commit()
 
     r = client.patch('/api/bulk/group', json={'job_ids': ['j1', 'j2'], 'group_id': 2},
@@ -280,7 +282,9 @@ def test_a_selection_is_filed_out_of_a_group_with_a_null(client, conn):
     r = client.patch('/api/bulk/group', json={'job_ids': ['j1'], 'group_id': None}, headers=ALICE)
 
     assert r.status_code == 200
-    assert conn.execute("SELECT group_id FROM jobs WHERE id = 'j1'").fetchone()['group_id'] is None
+    # Out of a group, a dataset goes back to its creator's Sandbox (#131).
+    assert conn.execute("SELECT group_id FROM jobs WHERE id = 'j1'").fetchone()['group_id'] \
+        == conn.execute("SELECT id FROM groups WHERE sandbox_of = 'alice'").fetchone()['id']
 
 
 def test_the_preview_sums_the_selection_and_names_what_it_cannot_run(client, conn):

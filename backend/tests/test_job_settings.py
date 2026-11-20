@@ -29,6 +29,7 @@ def conn(tmp_path, monkeypatch):
             (2, 'ocr', 'OCR v2', '/models/ocr.pt', 0),
             (3, 'ocr', 'Retired OCR', '/models/old.pt', 1);
         INSERT INTO groups (id, name, owner) VALUES (1, 'Schematismus', 'alice');
+        INSERT INTO group_assignees (group_id, username) VALUES (1, 'alice');
         INSERT INTO jobs (id, name, owner, status, task) VALUES
             ('j1', 'Volume I', 'alice', 'done', 'text'),
             ('j2', 'Volume II', 'alice', 'done', 'text');
@@ -147,14 +148,15 @@ class TestMovingItIntoAProject:
         assert patch(client, {'group_id': 1}).status_code == 200
         assert job(conn)['group_id'] == 1
 
+        # Out of a project it goes back to its creator's Sandbox (#131).
         assert patch(client, {'group_id': None}).status_code == 200
-        assert job(conn)['group_id'] is None
+        assert job(conn)['group_id'] == conn.execute("SELECT id FROM groups WHERE sandbox_of = 'alice'").fetchone()[0]
 
     def test_a_project_that_does_not_exist_is_refused(self, client):
         response = patch(client, {'group_id': 99})
 
         assert response.status_code == 404
-        assert 'group not found' in response.json()['detail']
+        assert response.json()['detail'] == 'workspace not found'
 
 
 class TestChoosingModels:

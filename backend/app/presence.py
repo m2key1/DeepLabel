@@ -18,6 +18,9 @@ class Location:
     target_kind: str | None = None
     target_id: int | None = None
     editing: bool = False
+    # An admin looking into a dataset whose people they are not among: only admins see
+    # where, everyone else sees them online and nowhere in particular.
+    unseen: bool = False
 
 
 @dataclass

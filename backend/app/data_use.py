@@ -6,8 +6,6 @@ from app.store import DATA_USE_COLUMNS
 
 PURPOSES = {'training': 'training or validating a model', 'test': 'scoring models',
             'external_llm': 'LLM providers outside the house', 'export': 'export by others'}
-# An admin who stays on a dataset page is one visit, not one per refresh.
-ADMIN_VISIT_MINUTES = 30
 
 
 def allowed(conn, job_id: str, use: str) -> bool:
@@ -54,35 +52,10 @@ def require_llm(conn, job_id: str, llm_model_ids) -> None:
 
 
 def require_export(conn, job_id: str, user: dict) -> None:
-    """The owner always may; everyone else, admins included, only while the owner allows it."""
+    """Its creator always may; everyone else, admins included, only while its use allows it."""
     row = conn.execute('SELECT owner, use_export FROM jobs WHERE id = ?', (job_id,)).fetchone()
     if row is not None and not row['use_export'] and row['owner'] != user['username']:
-        raise HTTPException(403, 'the owner of this dataset keeps its exports to themselves')
-
-
-def restricted(conn, job_id: str) -> bool:
-    row = conn.execute(f'SELECT {" + ".join(DATA_USE_COLUMNS.values())} FROM jobs WHERE id = ?',
-                       (job_id,)).fetchone()
-    return row is not None and row[0] < len(DATA_USE_COLUMNS)
-
-
-def note_admin_visit(conn, job_id: str, user: dict) -> None:
-    """An admin opening a dataset that restricts its use, without owning it or having it
-    shared with them, is recorded for the owner to see."""
-    if user['role'] != 'admin' or not restricted(conn, job_id):
-        return
-    row = conn.execute('SELECT owner, group_id FROM jobs WHERE id = ?', (job_id,)).fetchone()
-    me = user['username']
-    if row['owner'] == me or conn.execute(
-            'SELECT 1 FROM job_assignees WHERE job_id = ? AND username = ? UNION '
-            'SELECT 1 FROM group_assignees WHERE group_id = ? AND username = ?',
-            (job_id, me, row['group_id'], me)).fetchone():
-        return
-    if conn.execute("SELECT 1 FROM job_log WHERE job_id = ? AND username = ? AND action = 'admin_visit' "
-                    f"AND created_at > datetime('now', '-{ADMIN_VISIT_MINUTES} minutes')",
-                    (job_id, me)).fetchone():
-        return
-    log(conn, job_id, me, 'admin_visit')
+        raise HTTPException(403, 'the creator of this dataset keeps its exports to themselves')
 
 
 def log(conn, job_id: str, username: str, action: str, detail: dict | None = None) -> None:
@@ -102,9 +75,3 @@ def models_made_from(conn, job_id: str) -> list[dict]:
     return [{'id': r['id'], 'name': r['name'], 'task': r['task'], 'created_at': r['created_at'],
              'training_id': r['training_id'], 'roles': sorted(r['roles'].split(','), key=order.index)}
             for r in rows]
-
-
-def admin_visits(conn, job_id: str, limit: int = 50) -> list[dict]:
-    return [dict(r) for r in conn.execute(
-        "SELECT username, created_at FROM job_log WHERE job_id = ? AND action = 'admin_visit' "
-        'ORDER BY created_at DESC, id DESC LIMIT ?', (job_id, limit))]

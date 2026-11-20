@@ -1,7 +1,7 @@
 import { test, expect } from '../helpers/test'
 import {
   backendFetch, createGroup, createJob, createTraining, getJob, identity, listRegistryModels, listTrainings,
-  markLinesChecked, seedCompletedJob, uniqueName, waitForJobStatus,
+  markLinesChecked, sandboxOf, seedCompletedJob, uniqueName, waitForJobStatus,
 } from '../helpers/api'
 
 test.describe('Scenario: filing a dataset under a project', () => {
@@ -10,6 +10,7 @@ test.describe('Scenario: filing a dataset under a project', () => {
     const asMember = identity(member, 'manager')
     const own = await createJob(uniqueName('Filer own'), 1, undefined, asMember)
     await waitForJobStatus(own, 'done')
+    const sandbox = await sandboxOf(member)
     const openName = uniqueName('Their own project')
     const open = await backendFetch('/api/groups', {
       method: 'POST',
@@ -26,7 +27,7 @@ test.describe('Scenario: filing a dataset under a project', () => {
     })
     // Refused as if the project did not exist, and the dataset stays where it was.
     await expect(fileUnder(closed.id)).rejects.toThrow(/404/)
-    expect((await getJob(own)).group_id).toBeNull()
+    expect((await getJob(own)).group_id).toBe(sandbox)
     const theirGroups = async () =>
       ((await backendFetch('/api/groups', { headers: asMember })) as { name: string }[])
         .map((g) => g.name)

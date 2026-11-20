@@ -1596,3 +1596,63 @@ class TestChecksLine:
         assert [row[0] for row in conn.execute('SELECT checks_line FROM revisions ORDER BY id')] == self.EXPECTED
         assert self.by_predecessor(conn) == self.EXPECTED
         conn.close()
+
+
+class TestWorkspaces:
+    """Groups become workspaces (#131): their owner belongs to them, and every dataset in no
+    group finds a home without anyone gaining or losing a dataset (decision 326)."""
+
+    def test_a_fresh_database_has_the_columns(self, tmp_path):
+        conn = store.connect(tmp_path / 'app.db')
+        assert 'sandbox_of' in cols(conn, 'groups')
+        assert 'role' in cols(conn, 'job_assignees')
+        conn.close()
+
+    def test_an_older_database_moves_into_workspaces(self, tmp_path):
+        db = tmp_path / 'app.db'
+        conn = store.connect(db)
+        conn.executescript("""
+            INSERT INTO groups (id, name, owner) VALUES (1, 'Schematismus', 'alice');
+            INSERT INTO group_assignees (group_id, username) VALUES (1, 'bob');
+            INSERT INTO jobs (id, name, owner, group_id) VALUES
+                ('grouped', 'Band 1878', 'alice', 1),
+                ('loose', 'Trying', 'carol', NULL),
+                ('given-1', 'Letters I', 'dave', NULL),
+                ('given-2', 'Letters II', 'dave', NULL);
+            INSERT INTO job_assignees (job_id, username) VALUES ('given-1', 'erin'), ('given-2', 'erin');
+            INSERT INTO job_log (job_id, username, action) VALUES ('grouped', 'root', 'admin_visit'),
+                                                                  ('grouped', 'alice', 'data_use');
+        """)
+        conn.execute('PRAGMA user_version = 8')
+        conn.commit()
+        conn.close()
+
+        conn = store.connect(db)
+        members = lambda group_id: [r[0] for r in conn.execute(
+            'SELECT username FROM group_assignees WHERE group_id = ? ORDER BY username', (group_id,))]
+        home = lambda job_id: conn.execute(
+            'SELECT g.name, g.sandbox_of FROM jobs j JOIN groups g ON g.id = j.group_id WHERE j.id = ?',
+            (job_id,)).fetchone()
+        assert members(1) == ['alice', 'bob']
+        assert tuple(home('grouped')) == ('Schematismus', None)
+        assert tuple(home('loose')) == ('', 'carol')
+        assert tuple(home('given-1')) == tuple(home('given-2')) == ('dave', None)
+        dave = conn.execute("SELECT group_id FROM jobs WHERE id = 'given-1'").fetchone()[0]
+        assert members(dave) == ['dave']
+        assert [tuple(r) for r in conn.execute('SELECT job_id, username FROM job_assignees ORDER BY job_id')] == [
+            ('given-1', 'erin'), ('given-2', 'erin')]
+        assert [r[0] for r in conn.execute('SELECT action FROM job_log')] == ['data_use']
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == store.WORKSPACES
+        conn.close()
+
+    def test_it_runs_once(self, tmp_path):
+        """A dataset an admin later takes out of every workspace by hand is not moved again."""
+        db = tmp_path / 'app.db'
+        conn = store.connect(db)
+        conn.execute("INSERT INTO jobs (id, name, owner) VALUES ('later', 'x', 'carol')")
+        conn.commit()
+        conn.close()
+
+        conn = store.connect(db)
+        assert conn.execute("SELECT group_id FROM jobs WHERE id = 'later'").fetchone()[0] is None
+        conn.close()

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { test, expect } from '../helpers/test'
-import { OCR_READER, backendFetch, createGroup, createJob, createTraining, getTrainingProgress, identity, importStubModel, listEvaluations, listRegistryModels, listTrainings, markLinesChecked, markTestPages, moveJobToGroup, seedCompletedJob, seedDistinctPagesJob, setModelColumn, TEST_SCAN_WIDTH, uniqueName, waitForJobStatus } from '../helpers/api'
+import { OCR_READER, backendFetch, createGroup, createJob, createTraining, getTrainingProgress, identity, importStubModel, listEvaluations, listRegistryModels, listTrainings, markLinesChecked, markTestPages, moveJobToGroup, SEEDER_SANDBOX, seedCompletedJob, seedDistinctPagesJob, setModelColumn, TEST_SCAN_WIDTH, uniqueName, waitForJobStatus } from '../helpers/api'
 import { seedSession, useSession } from '../helpers/session'
 import { cancelledRun, datasetOption, pickDataset, startTraining, taskSection, testSetOption, versionRow } from '../helpers/training'
 
@@ -375,11 +375,11 @@ test.describe('Scenario: the model registry', () => {
       await expect(section).toHaveCount(1)
       await section.getByRole('button', { name: groupName }).click()
       await expect(section.getByText(grouped)).toBeVisible()
-      // The one with no project is in Ungrouped, not in this project's section.
+      // The one with no project stays in its creator's Sandbox, not in this project's section.
       await expect(section.getByText(loose)).toHaveCount(0)
-      const ungrouped = page.locator('[data-testid="dataset-group"][data-group="Ungrouped"]')
-      await ungrouped.getByRole('button', { name: 'Ungrouped' }).click()
-      await expect(ungrouped.getByText(loose)).toBeVisible()
+      const sandbox = page.locator(`[data-testid="dataset-group"][data-group="${SEEDER_SANDBOX}"]`)
+      await sandbox.getByRole('button', { name: SEEDER_SANDBOX }).click()
+      await expect(sandbox.getByText(loose)).toBeVisible()
 
       // And the project header picks its own datasets, which a flat list cannot do.
       await section.getByRole('button', { name: 'Add all' }).click()
@@ -979,10 +979,10 @@ test.describe('Scenario: picking datasets by project', () => {
     await expect(section.getByTestId('dataset-option').filter({ hasText: inGroupA })).toHaveCount(1)
     await expect(section.getByTestId('dataset-option').filter({ hasText: inGroupB })).toHaveCount(1)
     await expect(section.getByTestId('dataset-option').filter({ hasText: loose })).toHaveCount(0)
-    // And the loose one is listed under Ungrouped, so nothing is dropped.
-    const ungrouped = page.locator('[data-testid="dataset-group"][data-group="Ungrouped"]')
-    await ungrouped.getByRole('button', { name: 'Ungrouped' }).click()
-    await expect(ungrouped.getByTestId('dataset-option').filter({ hasText: loose })).toHaveCount(1)
+    // And the loose one is listed under its creator's Sandbox, so nothing is dropped.
+    const sandbox = page.locator(`[data-testid="dataset-group"][data-group="${SEEDER_SANDBOX}"]`)
+    await sandbox.getByRole('button', { name: SEEDER_SANDBOX }).click()
+    await expect(sandbox.getByTestId('dataset-option').filter({ hasText: loose })).toHaveCount(1)
 
     // Add all takes the whole project in one click, and nothing outside it.
     await expect(section.getByText('0/2', { exact: true })).toBeVisible()

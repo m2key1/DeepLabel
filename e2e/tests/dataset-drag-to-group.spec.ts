@@ -1,8 +1,8 @@
 import type { Locator, Page } from '@playwright/test'
 import { test, expect } from '../helpers/test'
 import {
-  BACKEND, createGroup, createJob, getJob, identity, moveJobToGroup, seedCompletedJob, shareJob, uniqueName,
-  waitForJobStatus,
+  BACKEND, createGroup, createJob, getJob, identity, moveJobToGroup, sandboxOf, SEEDER_SANDBOX, seedCompletedJob, shareJob,
+  uniqueName, waitForJobStatus,
 } from '../helpers/api'
 import { seedSession, useSession } from '../helpers/session'
 
@@ -51,7 +51,7 @@ test.describe('Scenario: filing datasets by dragging them onto a group', () => {
     })
 
     await expect.poll(async () => (await getJob(jobId)).group_id).toBe(group.id)
-    expect((await getJob(bystander)).group_id).toBeNull()
+    expect((await getJob(bystander)).group_id).toBe(await sandboxOf())
     await expect(page.getByTestId('drop-hint')).toHaveCount(0)
     await expect(section.locator('[data-drop-active]')).toHaveCount(0)
   })
@@ -78,7 +78,7 @@ test.describe('Scenario: filing datasets by dragging them onto a group', () => {
     for (const jobId of picked) {
       await expect.poll(async () => (await getJob(jobId)).group_id).toBe(group.id)
     }
-    expect((await getJob(left)).group_id).toBeNull()
+    expect((await getJob(left)).group_id).toBe(await sandboxOf())
     await expect(rowOf(page, leftName)).toHaveCount(1)
     await expect(page.getByTestId('bulk-bar')).toHaveCount(0)
   })
@@ -101,24 +101,25 @@ test.describe('Scenario: filing datasets by dragging them onto a group', () => {
     })
 
     await expect.poll(async () => (await getJob(dragged)).group_id).toBe(group.id)
-    expect((await getJob(ticked)).group_id).toBeNull()
+    expect((await getJob(ticked)).group_id).toBe(await sandboxOf())
     await expect(page.getByTestId('bulk-bar')).toContainText('1 selected')
   })
 
-  test('a card dropped on Ungrouped leaves its group', async ({ page }) => {
+  test('a card dropped on its creator\'s Sandbox leaves its group', async ({ page }) => {
     const groupName = uniqueName('Drag leave')
     const group = await createGroup(groupName)
     const name = uniqueName('Drag out')
     const jobId = await seedCompletedJob(name, 1)
     await moveJobToGroup(jobId, group.id)
 
+    const sandbox = SEEDER_SANDBOX
     await page.goto('/?view=cards&sort=newest')
-    const header = groupHeader(page, 'Ungrouped')
-    await dragOnto(page, rowOf(page, name).getByRole('link', { name, exact: true }), header, async () => {
-      await expect(sectionOf(page, 'Ungrouped').getByTestId('drop-hint')).toHaveText('Remove 1 dataset from its group')
+    await dragOnto(page, rowOf(page, name).getByRole('link', { name, exact: true }), groupHeader(page, sandbox),
+                   async () => {
+      await expect(sectionOf(page, sandbox).getByTestId('drop-hint')).toHaveText(`Move 1 dataset to ${sandbox}`)
     })
 
-    await expect.poll(async () => (await getJob(jobId)).group_id).toBeNull()
+    await expect.poll(async () => (await getJob(jobId)).group_id).toBe(await sandboxOf())
   })
 
   test('a dragged selection holding a dataset that is not yours names it and moves the rest',
@@ -131,6 +132,7 @@ test.describe('Scenario: filing datasets by dragging them onto a group', () => {
     const sharedName = uniqueName('Drag only shared')
     const shared = await seedCompletedJob(sharedName, 1)
     await shareJob(shared, [username])
+    const sharedGroup = (await getJob(shared)).group_id
     await waitForJobStatus(own, 'done')
 
     const targetName = uniqueName('Drag member target')
@@ -154,7 +156,7 @@ test.describe('Scenario: filing datasets by dragging them onto a group', () => {
     })
 
     await expect.poll(async () => (await getJob(own)).group_id).toBe(target.id)
-    expect((await getJob(shared)).group_id).toBeNull()
+    expect((await getJob(shared)).group_id).toBe(sharedGroup)
     await expect(page.getByText(new RegExp(`1 moved; 1 skipped: ${escape(sharedName)} \\(`)))
       .toBeVisible()
     await context.close()

@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react'
 import { getUserNames, shareGroup, shareJob } from '../../api'
+import { useAuth } from '../../auth'
 import { Modal, modalBtn, modalPrimaryBtn } from '../Modal'
 
 interface ShareDialogProps {
   target: { kind: 'dataset'; id: string } | { kind: 'group'; id: number }
   title: string
+  /** The dataset is in its creator's Sandbox: nobody is added to it there, it is moved out instead. */
+  sandboxed: boolean
+  onMoveInstead: () => void
   owner: string
   sharedWith: string[]
   onClose: () => void
@@ -13,17 +17,18 @@ interface ShareDialogProps {
 }
 
 export function ShareDialog({
-  target, title, owner, sharedWith, onClose, onShared, onError,
+  target, title, sandboxed, onMoveInstead, owner, sharedWith, onClose, onShared, onError,
 }: ShareDialogProps) {
   const [names, setNames] = useState<string[] | null>(null)
   const [chosen, setChosen] = useState<Set<string>>(new Set(sharedWith))
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
+    if (sandboxed) return
     getUserNames()
       .then((r) => setNames(r.users.map((u) => u.username)))
       .catch((e: Error) => onError(e.message))
-  }, [onError])
+  }, [sandboxed, onError])
 
   const toggle = (name: string) =>
     setChosen((prev) => {
@@ -45,6 +50,29 @@ export function ShareDialog({
     } finally {
       setBusy(false)
     }
+  }
+
+  const { user } = useAuth()
+
+  if (sandboxed) {
+    return (
+      <Modal title={`Share "${title}"`} onClose={onClose}>
+        <p data-testid="share-sandboxed" className="mb-4 text-sm text-ink-muted">
+          {owner === user
+            ? 'It is in your Sandbox, which only you can see.'
+            : `It is in ${owner}'s Sandbox, which only ${owner} can see.`}
+          {' '}To share it, move it into a group: everyone in that group can then open it.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className={modalBtn}>
+            Cancel
+          </button>
+          <button onClick={onMoveInstead} className={modalPrimaryBtn}>
+            Move to a group…
+          </button>
+        </div>
+      </Modal>
+    )
   }
 
   return (

@@ -1,29 +1,29 @@
 import { test, expect } from '../helpers/test'
 import {
-  createGroup, markLinesChecked, moveJobToGroup, seedCompletedJob, setCollapsedGroups,
+  createGroup, markLinesChecked, moveJobToGroup, sandboxOf, SEEDER_SANDBOX, seedCompletedJob, setCollapsedGroups,
   uniqueName,
 } from '../helpers/api'
 
 test.describe('Scenario: the list remembers how it was left', () => {
   test.afterEach(async ({ page }) => setCollapsedGroups(page, []))
 
-  test('folding away the Ungrouped section survives a reload, like a project does', async ({ page }) => {
+  test('folding away a Sandbox section survives a reload, like a project does', async ({ page }) => {
     await seedCompletedJob(uniqueName('Loose dataset'), 1)
     await setCollapsedGroups(page, [])
     await page.goto('/')
 
-    const ungrouped = page.locator('[data-testid="list-section"][data-title="Ungrouped"]')
-    const toggle = ungrouped.getByRole('button', { name: /Ungrouped/ }).first()
+    const sandbox = page.locator(`[data-testid="list-section"][data-title="${SEEDER_SANDBOX}"]`)
+    const toggle = sandbox.getByRole('button', { name: SEEDER_SANDBOX }).first()
     await expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await toggle.click()
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
     // Account-side oracle: the fold is stored with the rest of the person's settings.
     await expect.poll(async () => (await (await page.request.get('/api/settings')).json()).collapsed_groups)
-      .toEqual(['ungrouped'])
+      .toEqual([await sandboxOf()])
 
     await page.reload()
-    await expect(page.locator('[data-testid="list-section"][data-title="Ungrouped"]')
-      .getByRole('button', { name: /Ungrouped/ }).first()).toHaveAttribute('aria-expanded', 'false')
+    await expect(page.locator(`[data-testid="list-section"][data-title="${SEEDER_SANDBOX}"]`)
+      .getByRole('button', { name: SEEDER_SANDBOX }).first()).toHaveAttribute('aria-expanded', 'false')
   })
 
   test('clearing a search that matched nothing keeps the chosen view and order', async ({ page }) => {

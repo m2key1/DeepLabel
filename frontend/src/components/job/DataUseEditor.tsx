@@ -38,22 +38,6 @@ export function DataUseEditor({ jobId, value, onChange }: {
   return (
     <>
       <DataUseSwitches value={value} onChange={onChange} notes={{ training: trainingNote }} />
-      {detail && detail.admin_visits.length > 0 && (
-        <section className="mt-3">
-          <h3 className="text-sm font-semibold text-ink">Opened by admins</h3>
-          <p className="text-xs text-ink-muted">Admins can open a dataset for support; while anything here is off, each visit is listed.</p>
-          <table data-testid="data-use-visits" className="mt-1 w-full text-sm">
-            <thead><tr className="text-left text-xs text-ink-muted"><th className="py-1 font-medium">Admin</th>
-              <th className="py-1 font-medium">When</th></tr></thead>
-            <tbody>
-              {detail.admin_visits.map((v, i) => (
-                <tr key={i} className="border-t border-line"><td className="py-1">{v.username}</td>
-                  <td className="py-1">{formatDate(v.created_at)}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
     </>
   )
 }

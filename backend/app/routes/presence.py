@@ -51,7 +51,9 @@ def heartbeat(body: Heartbeat, conn=Depends(get_db), user: dict = Depends(curren
         job_id=body.job_id, page_id=body.page_id,
         target_kind=body.target.kind if body.target else None,
         target_id=body.target.id if body.target else None,
-        editing=body.editing)
+        editing=body.editing,
+        unseen=user['role'] == 'admin' and body.job_id is not None
+        and not can_access_job(conn, body.job_id, {**user, 'role': 'manager'}))
     registry.beat(user['username'], body.tab, location)
     return {'ok': True}
 
@@ -79,7 +81,7 @@ def online(conn=Depends(get_db), user: dict = Depends(current_user),
     users = []
     for entry in entries:
         loc = entry.location
-        if loc.job_id not in jobs:
+        if loc.job_id not in jobs or (loc.unseen and user['role'] != 'admin'):
             loc = presence.Location()
         visible = loc.job_id is not None and access[loc.job_id]
         users.append({

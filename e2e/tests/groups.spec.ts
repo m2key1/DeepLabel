@@ -1,6 +1,6 @@
 import { test, expect } from '../helpers/test'
 import {
-  createGroup, getJob, markLinesChecked, moveJobToGroup, seedCompletedJob,
+  backendFetch, createGroup, getJob, markLinesChecked, moveJobToGroup, sandboxOf, SEEDER_SANDBOX, seedCompletedJob,
   setCollapsedGroups, shareJob, uniqueName,
 } from '../helpers/api'
 import { seedSession, useSession } from '../helpers/session'
@@ -37,9 +37,9 @@ test.describe('Scenario: the list as you left it', () => {
 })
 
 test.describe('Scenario: organizing datasets in groups', () => {
-  test('creating a group, moving a dataset in, and dissolving it again', async ({ page }) => {
+  test('creating a group, moving a dataset in, and deleting it once it is empty again', async ({ page }) => {
     const jobName = uniqueName('Grouped')
-    await seedCompletedJob(jobName, 1)
+    const jobId = await seedCompletedJob(jobName, 1)
     const groupName = uniqueName('Project')
 
     await page.goto('/')
@@ -66,10 +66,23 @@ test.describe('Scenario: organizing datasets in groups', () => {
     await header.getByRole('button', { name: groupName }).click()
     await expect(header.getByTestId('job-card').filter({ hasText: jobName })).toBeVisible()
 
-    // Deleting the group keeps the dataset and returns it to Ungrouped.
+    // Only an empty group is deleted (#131): while it holds the dataset, it says so and stays.
+    const groupNames = async () => ((await backendFetch('/api/groups')) as { name: string }[]).map((g) => g.name)
+    await header.getByRole('button', { name: 'Delete' }).first().click()
+    await expect(page.getByRole('alert').filter({ hasText: groupName })).toHaveText(
+      `"${groupName}" still holds 1 dataset. Only an empty group can be deleted: move it out or delete it first.`)
+    expect(await groupNames()).toContain(groupName)
+
+    // Moved back to its creator's Sandbox, the dataset leaves the group empty, and it goes.
+    await card.getByTestId('job-menu').click()
+    await card.getByRole('button', { name: 'Move to group…' }).click()
+    await page.getByLabel('Move to').selectOption({ label: SEEDER_SANDBOX })
+    await page.getByRole('button', { name: 'Move', exact: true }).click()
+    await expect.poll(async () => (await getJob(jobId)).group_id).toBe(await sandboxOf())
     page.on('dialog', (dialog) => dialog.accept())
     await header.getByRole('button', { name: 'Delete' }).first().click()
     await expect(page.getByText(groupName)).toHaveCount(0)
+    await expect.poll(groupNames).not.toContain(groupName)
     await expect(page.getByTestId('job-card').filter({ hasText: jobName })).toBeVisible()
   })
 })

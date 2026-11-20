@@ -639,15 +639,20 @@ CREATE TABLE IF NOT EXISTS candidates (
     set_aside_at INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- A workspace (#131): the datasets in it are open to its members, in group_assignees. A
+-- row with sandbox_of is that person's private Sandbox, which takes no members.
 CREATE TABLE IF NOT EXISTS groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     owner TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    sandbox_of TEXT
 );
+-- Someone given one dataset alone. role, Annotator or Reviewer, swaps theirs on it.
 CREATE TABLE IF NOT EXISTS job_assignees (
     job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
     username TEXT NOT NULL,
+    role TEXT,
     PRIMARY KEY (job_id, username)
 );
 CREATE TABLE IF NOT EXISTS group_assignees (
@@ -792,6 +797,7 @@ CONVENTION_CATALOG = 5
 MODEL_DATASETS_BACKFILL = 6
 ABBREVIATIONS_NOT_OFFERED = 7
 CONVENTION_EXAMPLES = 8
+WORKSPACES = 9
 
 # The dataset fields behind each data use a dataset's owner can switch off.
 DATA_USE_COLUMNS = {'training': 'use_training', 'test': 'use_test',
@@ -1024,6 +1030,10 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE jobs ADD COLUMN llm_consensus_with_ocr INTEGER NOT NULL DEFAULT 0')
     if 'group_id' not in job_cols:
         conn.execute('ALTER TABLE jobs ADD COLUMN group_id INTEGER REFERENCES groups(id)')
+    if 'sandbox_of' not in {r[1] for r in conn.execute('PRAGMA table_info(groups)')}:
+        conn.execute('ALTER TABLE groups ADD COLUMN sandbox_of TEXT')
+    if 'role' not in {r[1] for r in conn.execute('PRAGMA table_info(job_assignees)')}:
+        conn.execute('ALTER TABLE job_assignees ADD COLUMN role TEXT')
     if 'ocr_decode' not in job_cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN ocr_decode TEXT NOT NULL DEFAULT 'beam'")
     if 'ocr_convention' not in job_cols:
@@ -1266,8 +1276,65 @@ def connect(db_path: Path) -> sqlite3.Connection:
                          "WHERE name = ? AND example_on = '' AND example_off = ''",
                          [(on, off, name) for name, (on, off) in conventions.DEFAULT_EXAMPLES.items()])
         conn.execute(f'PRAGMA user_version = {CONVENTION_EXAMPLES}')
+    if conn.execute('PRAGMA user_version').fetchone()[0] < WORKSPACES:
+        _move_into_workspaces(conn)
+        conn.execute(f'PRAGMA user_version = {WORKSPACES}')
     conn.commit()
     return conn
+
+
+def workspace_name(row, viewer: str) -> str:
+    """A Sandbox has no name of its own: it is yours, or somebody's."""
+    if row['sandbox_of'] is None:
+        return row['name']
+    return 'Sandbox' if row['sandbox_of'] == viewer else f"{row['sandbox_of']}'s Sandbox"
+
+
+def is_sandbox(conn, group_id: int) -> bool:
+    row = conn.execute('SELECT sandbox_of FROM groups WHERE id = ?', (group_id,)).fetchone()
+    return row is not None and row['sandbox_of'] is not None
+
+
+def sandbox_id(conn, username: str) -> int:
+    """The person's private Sandbox, made the first time it is needed."""
+    row = conn.execute('SELECT id FROM groups WHERE sandbox_of = ?', (username,)).fetchone()
+    if row:
+        return row[0]
+    return conn.execute("INSERT INTO groups (name, owner, sandbox_of) VALUES ('', ?, ?)",
+                        (username, username)).lastrowid
+
+
+def _unused_workspace_name(conn, name: str) -> str:
+    taken = {r[0].lower() for r in conn.execute('SELECT name FROM groups WHERE sandbox_of IS NULL')}
+    candidate, n = name, 2
+    while candidate.lower() in taken:
+        candidate, n = f'{name} {n}', n + 1
+    return candidate
+
+
+def _move_into_workspaces(conn) -> None:
+    """Groups become workspaces with their owner as a member, and every dataset in no
+    group finds one: its creator's Sandbox, or - where it was shared, which a Sandbox
+    cannot be - a workspace of their own, its people keeping the dataset they were given.
+    Admins' visits to datasets are no longer kept (#131, decisions 322 and 326)."""
+    conn.execute("INSERT OR IGNORE INTO group_assignees (group_id, username) "
+                 "SELECT id, owner FROM groups WHERE sandbox_of IS NULL AND owner != ''")
+    shared = {r[0] for r in conn.execute('SELECT DISTINCT job_id FROM job_assignees')}
+    workspace_of: dict[str, int] = {}
+    for job in conn.execute('SELECT id, owner FROM jobs WHERE group_id IS NULL').fetchall():
+        owner = job['owner']
+        if job['id'] in shared:
+            if owner not in workspace_of:
+                workspace_of[owner] = conn.execute(
+                    'INSERT INTO groups (name, owner) VALUES (?, ?)',
+                    (_unused_workspace_name(conn, owner or 'Shared'), owner)).lastrowid
+                conn.execute('INSERT OR IGNORE INTO group_assignees (group_id, username) VALUES (?, ?)',
+                             (workspace_of[owner], owner))
+            target = workspace_of[owner]
+        else:
+            target = sandbox_id(conn, owner)
+        conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (target, job['id']))
+    conn.execute("DELETE FROM job_log WHERE action = 'admin_visit'")
 
 
 def snapshot_element(row: sqlite3.Row) -> dict:

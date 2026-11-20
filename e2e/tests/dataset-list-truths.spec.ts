@@ -83,6 +83,7 @@ test.describe('Scenario: a group action says what it will change', () => {
     const sharedName = uniqueName('Only shared with me')
     const shared = await seedCompletedJob(sharedName, 1)
     await shareJob(shared, [username])
+    const sharedGroup = (await getJob(shared)).group_id
     await waitForJobStatus(own, 'done')
 
     const targetName = uniqueName('Member target')
@@ -106,7 +107,7 @@ test.describe('Scenario: a group action says what it will change', () => {
 
     // Backend oracle: theirs moved, somebody else's did not.
     await expect.poll(async () => (await getJob(own)).group_id).toBe(target.id)
-    expect((await getJob(shared)).group_id).toBeNull()
+    expect((await getJob(shared)).group_id).toBe(sharedGroup)
 
     // And the list says which one stayed where it was, as a re-run over a selection does.
     await expect(page.getByText(new RegExp(`1 skipped: ${escape(sharedName)}`))).toBeVisible()

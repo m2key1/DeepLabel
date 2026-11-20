@@ -1,5 +1,5 @@
 import { test, expect } from '../helpers/test'
-import { backendFetch, getJob, listRegistryModels, seedCompletedJob, uniqueName, waitForJobStatus } from '../helpers/api'
+import { backendFetch, getJob, identity, listRegistryModels, seedCompletedJob, uniqueName, waitForJobStatus } from '../helpers/api'
 import { scanPng } from '../helpers/image'
 import { createDataset, withLayoutPerCrop, wizardStep } from '../helpers/new-dataset'
 import { seedSession, useSession } from '../helpers/session'
@@ -82,6 +82,13 @@ test.describe('Scenario: creating a dataset', () => {
     const jobId = page.url().split('/').pop()!
     expect((await getJob(jobId)).owner).toBe(member)
     await waitForJobStatus(jobId, 'done')
+
+    // It starts in their Sandbox, so to share it they first move it into a group of theirs (#131).
+    const asMember = { 'Content-Type': 'application/json', ...identity(member, 'manager') }
+    const group = await backendFetch('/api/groups', {
+      method: 'POST', headers: asMember, body: JSON.stringify({ name: uniqueName('Maria group') }) })
+    await backendFetch(`/api/jobs/${jobId}`, {
+      method: 'PATCH', headers: asMember, body: JSON.stringify({ group_id: group.id }) })
 
     // As the owner, the member shares it with a colleague from the card menu.
     await page.goto('/')
