@@ -50,6 +50,8 @@ async def invalid_geometry(_request: Request, exc: geometry.InvalidGeometry) -> 
 WRITE_METHODS = ('POST', 'PATCH', 'PUT', 'DELETE')
 CLIENT_ID = re.compile(r'[A-Za-z0-9-]{1,64}')
 RECOGNITION = re.compile(r'/api/recognize(/[a-z0-9]+)?')
+# A tab saying it is open, kept in memory for a couple of minutes: no write, so a viewer's counts.
+PRESENCE = ('/api/presence', '/api/presence/leave')
 
 
 @app.middleware('http')
@@ -68,7 +70,7 @@ async def auth_gate(request: Request, call_next):
         # Recognition posts images and keeps nothing of them past the request - an async
         # one, past its reading - so it is not a write: the recognize capability decides
         # who may, read-only token or not. Its `keep`, which does store, is gated by the route.
-        if request.method in WRITE_METHODS and not recognition:
+        if request.method in WRITE_METHODS and not recognition and request.url.path not in PRESENCE:
             if role == 'viewer':
                 return JSONResponse({'detail': 'read-only account'}, status_code=403)
             # A token the user marked read-only keeps their role for reads, so it is the

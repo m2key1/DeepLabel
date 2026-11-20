@@ -105,19 +105,19 @@ function Header({ person, own, groups }: { person: Person; own: boolean; groups:
 }
 
 function PresenceState() {
-  const { user, canEdit } = useAuth()
+  const { user } = useAuth()
   const { shareActivity } = useSettings()
-  // Being seen is the default, so say so where the person looks for themselves.
-  const visible = shareActivity && canEdit
+  // Anyone with DeepLabel open is online (decision 330); what is theirs to choose is whether
+  // others see where, so say which where the person looks for themselves.
   return (
     <Link
       to={profilePath(user, 'together')}
       data-testid="visibility-state"
-      title={canEdit ? 'Change under Working together' : 'A read-only account is never broadcast'}
+      title="Change under Working together"
       className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-accent-ink"
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${visible ? 'bg-ok' : 'bg-warn'}`} />
-      {visible ? 'Online' : 'Hidden'}
+      <span className={`h-1.5 w-1.5 rounded-full ${shareActivity ? 'bg-ok' : 'bg-warn'}`} />
+      {shareActivity ? 'Online' : 'Online, place hidden'}
     </Link>
   )
 }

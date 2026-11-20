@@ -1,7 +1,6 @@
-import type { Request } from '@playwright/test'
 import { test, expect } from '../helpers/test'
 import { backendFetch, jobPageIds, seedCompletedJob, shareJob, uniqueName } from '../helpers/api'
-import { seedSession, useSession } from '../helpers/session'
+import { asSession, seedSession, useSession } from '../helpers/session'
 import { FRONTEND } from '../helpers/frontend'
 
 
@@ -38,9 +37,9 @@ test.describe('Scenario: seeing who is where', () => {
     // present there.
     await expect(row.getByTestId('live-now')).toContainText('online')
     await expect(row).not.toContainText('viewing page')
-    // Tabs closed by earlier scenarios linger until their minute is up, so the count
-    // is not this test's to assert; the person being listed is.
-    await expect(page.getByTestId('presence-pill')).toHaveText(/^\d+ online$/)
+    // Tabs closed by earlier scenarios linger for their two minutes, so the count is not
+    // this test's to assert; the person being listed is.
+    await expect(page.getByTestId('presence-pill')).toHaveText(/^\d+ others? online$/)
     await page.getByTestId('presence-pill').click()
     await expect(page.getByTestId('presence-list').getByText(username)).toBeVisible()
     await expect(page.getByTestId('presence-list')).toContainText(`viewing page 1 of ${jobName}`)
@@ -60,42 +59,83 @@ test.describe('Scenario: seeing who is where', () => {
     await colleague.close()
   })
 
-  test('switching sharing off makes a person invisible at once, and the choice sticks', async ({ browser }) => {
+  test('switching sharing off keeps a person online but hides where they are, and the choice sticks', async ({ browser }) => {
     const username = `unseen-${Date.now()}`
     const token = seedSession('manager', username)
+    const jobId = await seedCompletedJob(uniqueName('Unseen'))
+    await shareJob(jobId, [username])
+    const [pageId] = await jobPageIds(jobId)
     const colleague = await browser.newContext()
     await useSession(colleague, token)
     const theirTab = await colleague.newPage()
+    await theirTab.goto(`/jobs/${jobId}/pages/${pageId}`)
+    await expect.poll(async () => (await whereIs(username))?.page_id ?? null).toBe(pageId)
 
-    await theirTab.goto('/settings?section=together')
-    await expect.poll(async () => (await whereIs(username)) !== null).toBe(true)
-
-    await theirTab.getByTestId('share-activity').uncheck()
-    await expect.poll(async () => whereIs(username)).toBeNull()
-    await expect.poll(async () => {
-      const res = await fetch(`${FRONTEND}/api/settings`, { headers: { cookie: `sid=${token}` } })
-      return (await res.json()).share_activity
-    }).toBe(false)
-
-    // A tab that shares sends its first heartbeat as it mounts, from the effect that runs
-    // just before the one asking who else is here - so once that question is out, any
-    // beat would be too.
-    const beats: string[] = []
-    const isPresence = (r: Request) => new URL(r.url()).pathname === '/api/presence'
-    theirTab.on('request', (r) => {
-      if (r.method() === 'POST' && isPresence(r)) beats.push(r.url())
+    const share = (on: boolean) => fetch(`${FRONTEND}/api/settings`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', cookie: `sid=${token}` },
+      body: JSON.stringify({ share_activity: on }),
     })
-    const asked = theirTab.waitForRequest((r) => r.method() === 'GET' && isPresence(r))
+    expect((await share(false)).status).toBe(200)
+    // Still online, on no page anyone else can see.
+    await expect.poll(async () => {
+      const entry = await whereIs(username)
+      return entry && [entry.username, entry.job_id, entry.page_id]
+    }, { timeout: 30_000 }).toEqual([username, null, null])
+
+    // The choice sticks: a reload reports in again, still with no place.
+    const asked = theirTab.waitForRequest((r) => r.method() === 'GET' && new URL(r.url()).pathname === '/api/presence')
     await theirTab.reload()
     await asked
-    await expect(theirTab.getByTestId('share-activity')).not.toBeChecked()
-    expect(beats).toEqual([])
-    expect(await whereIs(username)).toBeNull()
+    await expect.poll(async () => (await whereIs(username))?.username ?? null).toBe(username)
+    expect((await whereIs(username))?.page_id).toBeNull()
 
-    await theirTab.getByTestId('share-activity').check()
-    await expect.poll(async () => (await whereIs(username)) !== null).toBe(true)
-    expect(beats.length).toBeGreaterThan(0)
+    expect((await share(true)).status).toBe(200)
+    await expect.poll(async () => (await whereIs(username))?.page_id ?? null, { timeout: 30_000 }).toBe(pageId)
     await colleague.close()
+  })
+
+  // README: "online" means having DeepLabel open - in view or in a background tab, a viewer's
+  // too - and the admin page and the top bar both read that one list (#139).
+  test('anyone with DeepLabel open is online in both places, and a request without a tab is not', async ({ page, browser }) => {
+    const stamp = Date.now()
+    const viewer = `viewing-${stamp}`
+    const behind = `behind-${stamp}`
+    const tabless = `tabless-${stamp}`
+
+    const viewerContext = await browser.newContext()
+    await useSession(viewerContext, seedSession('viewer', viewer))
+    await (await viewerContext.newPage()).goto('/')
+    // A tab left behind another one: the browser reports it hidden.
+    const behindContext = await browser.newContext()
+    await useSession(behindContext, seedSession('manager', behind))
+    await behindContext.addInitScript(() => {
+      Object.defineProperty(document, 'visibilityState', { get: () => 'hidden' })
+      Object.defineProperty(document, 'hidden', { get: () => true })
+    })
+    await (await behindContext.newPage()).goto('/')
+    // Someone whose account just made a request, with no DeepLabel tab open.
+    expect((await asSession(seedSession('manager', tabless), '/api/jobs')).status).toBe(200)
+
+    await expect.poll(async () => [(await whereIs(viewer))?.username ?? null, (await whereIs(behind))?.username ?? null])
+      .toEqual([viewer, behind])
+    expect(await whereIs(tabless)).toBeNull()
+
+    await page.goto('/admin')
+    const row = (name: string) => page.getByTestId('user-row').filter({ hasText: name })
+    await expect(row(viewer).getByTestId('live-now')).toContainText('online')
+    await expect(row(behind).getByTestId('live-now')).toContainText('online')
+    await expect(row(tabless)).toBeVisible()
+    await expect(row(tabless).getByTestId('live-now')).toHaveCount(0)
+
+    // The top bar counts the others; how many is not this test's to assert, as tabs from
+    // earlier scenarios linger for their two minutes, but these two are among them.
+    await expect(page.getByTestId('presence-pill')).toHaveText(/^\d+ others? online$/)
+    await page.getByTestId('presence-pill').click()
+    for (const name of [viewer, behind]) await expect(page.getByTestId('presence-list').getByText(name)).toBeVisible()
+    await expect(page.getByTestId('presence-list').getByText(tabless)).toHaveCount(0)
+
+    await viewerContext.close()
+    await behindContext.close()
   })
 })
 

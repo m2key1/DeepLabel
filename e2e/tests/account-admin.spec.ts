@@ -385,9 +385,9 @@ test.describe('Scenario: what you see of others, and what they see of you', () =
     await page.request.patch('/api/settings', { data: { show_activity: true, share_activity: true } })
   })
 
-  // README: "Two settings control it: *share what I am working on* (off makes you invisible;
-  // read-only accounts never broadcast) and *show where others are*; the Online or Hidden
-  // state on your profile opens the settings tab that changes it."
+  // README: two settings control presence: *share what I am working on* (off keeps where you
+  // are to yourself, though you still count as online) and *show where others are*; the state
+  // on your profile opens the settings tab that changes it (decision 330).
   test('"show where others are" off hides presence everywhere while the backend still lists people, and the state on your profile names the setting',
     async ({ page, browser }) => {
       const colleague = `colleague-${Date.now()}`
@@ -404,7 +404,7 @@ test.describe('Scenario: what you see of others, and what they see of you', () =
       await page.goto('/')
       const pill = page.getByTestId('presence-pill')
       // The colleague was just confirmed listed, so a count of none would be the bug.
-      await expect(pill).toHaveText(/^[1-9]\d* online$/)
+      await expect(pill).toHaveText(/^[1-9]\d* others? online$/)
       await page.getByTestId('user-menu').click()
       const state = page.getByTestId('visibility-state')
       await expect(state).toHaveText('Online')
@@ -433,21 +433,23 @@ test.describe('Scenario: what you see of others, and what they see of you', () =
       await page.goto('/settings?section=together')
       await show.check()
       await expect.poll(() => settingOf(page, 'show_activity')).toBe(true)
-      await expect(pill).toHaveText(/^[1-9]\d* online$/)
+      await expect(pill).toHaveText(/^[1-9]\d* others? online$/)
       await page.goto(`/jobs/${jobId}`)
       await expect(pageRow.getByTestId('presence-avatars').getByLabel(colleague)).toBeVisible()
       await page.goto(`/jobs/${jobId}/pages/${pageId}`)
       await expect(page.getByTestId('presence-banner')).toHaveText(`${colleague} has this page open`)
 
-      // The other switch is about being seen, and the state on the profile reports it.
+      // The other switch is about where you are being seen, and the state on the profile
+      // reports it; whoever has DeepLabel open stays online either way.
       await page.goto('/settings?section=together')
       await page.getByTestId('share-activity').uncheck()
       await expect.poll(() => settingOf(page, 'share_activity')).toBe(false)
       await page.getByTestId('user-menu').click()
-      await expect(state).toHaveText('Hidden')
+      await expect(state).toHaveText('Online, place hidden')
       await expect(state).toHaveAttribute('title', 'Change under Working together')
+      await expect.poll(async () => (await whereIs('dev'))?.username ?? null).toBe('dev')
 
-      // A read-only account has no such choice: it is never broadcast, and says so.
+      // A read-only account has the same choice, and is online like anyone else.
       const viewerName = `viewer-${Date.now()}`
       const viewerContext = await browser.newContext()
       await useSession(viewerContext, seedSession('viewer', viewerName))
@@ -455,14 +457,9 @@ test.describe('Scenario: what you see of others, and what they see of you', () =
       await viewerTab.goto('/')
       await viewerTab.getByTestId('user-menu').click()
       const viewerState = viewerTab.getByTestId('visibility-state')
-      await expect(viewerState).toHaveText('Hidden')
-      await expect(viewerState).toHaveAttribute('title', 'A read-only account is never broadcast')
-      // And not for want of trying: a heartbeat from a read-only account is refused outright.
-      await expect(backendFetch('/api/presence', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...identity(viewerName, 'viewer') },
-        body: JSON.stringify({ tab: 'e2e-viewer-tab' }),
-      })).rejects.toThrow(/403/)
+      await expect(viewerState).toHaveText('Online')
+      await expect(viewerState).toHaveAttribute('title', 'Change under Working together')
+      await expect.poll(async () => (await whereIs(viewerName))?.username ?? null).toBe(viewerName)
 
       await viewerContext.close()
       await theirs.close()
@@ -535,26 +532,31 @@ test.describe('Scenario: a colleague\'s face and your own other tabs', () => {
     })
 
   // README: "and those on another device within seconds, sharing what you work on
-  // included, so a second window stops broadcasting too".
-  test('switching sharing off in one tab switches it off in the person\'s other tab, which stops broadcasting',
+  // included, so a second window stops saying where it is too" - while it stays online
+  // (decision 330).
+  test('switching sharing off in one tab switches it off in the person\'s other tab, which keeps them online but says no place',
     async ({ browser }) => {
       const username = `twotabs-${Date.now()}`
+      const jobId = await seedCompletedJob(uniqueName('Two tabs'), 1)
+      await shareJob(jobId, [username])
+      const [pageId] = await jobPageIds(jobId)
       const contexts = await Promise.all([browser.newContext(), browser.newContext()])
-      const [tabA, tabB] = await Promise.all(contexts.map(async (context) => {
-        await useSession(context, seedSession('manager', username))
-        const tab = await context.newPage()
-        await tab.goto('/settings?section=together')
-        return tab
-      }))
-      await expect(tabB.getByTestId('share-activity')).toBeChecked()
-      await expect.poll(async () => (await whereIs(username)) !== null).toBe(true)
+      for (const context of contexts) await useSession(context, seedSession('manager', username))
+      const tabA = await contexts[0].newPage()
+      await tabA.goto('/settings?section=together')
+      const tabB = await contexts[1].newPage()
+      await tabB.goto(`/jobs/${jobId}/pages/${pageId}`)
+      const places = async () => ((await backendFetch('/api/presence')).users as PresenceUser[])
+        .filter((u) => u.username === username).map((u) => u.page_id)
+      await expect.poll(async () => (await places()).includes(pageId)).toBe(true)
 
+      await expect(tabA.getByTestId('share-activity')).toBeChecked()
       await tabA.getByTestId('share-activity').uncheck()
       await expect.poll(async () => (await (await tabA.request.get('/api/settings')).json()).share_activity)
         .toBe(false)
 
-      await expect(tabB.getByTestId('share-activity')).not.toBeChecked({ timeout: 20_000 })
-      await expect.poll(async () => whereIs(username), { timeout: 20_000 }).toBeNull()
+      // Both tabs still say the person is here; neither says where.
+      await expect.poll(places, { timeout: 20_000 }).toEqual([null, null])
       await Promise.all(contexts.map((context) => context.close()))
     })
 })

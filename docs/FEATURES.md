@@ -585,9 +585,11 @@ polygons) and *line tracing* (boundary lines, open or closed).
   the dataset's title or the page viewer's toolbar; a **Note** tag then marks it there, on the
   dataset list and in the page table (filter **Has note**), and opens it with who last edited
   it and when.
-- **Presence:** the navigation bar shows who is online, and datasets and pages show who is
-  in them. Opening a page someone else has open shows a notice. You can hide yourself or
-  hide others in Settings.
+- **Presence:** whoever has DeepLabel open - in view or in a background tab, viewers too - is
+  online. The navigation bar counts the others online, the admin page marks everyone online,
+  and datasets and pages show who is in them. Opening a page someone else has open shows a
+  notice. In Settings you can keep where you are to yourself (you still count as online) or
+  stop seeing the others.
 - **Live edits:** a colleague's changes appear in your open page without a reload.
 - **Edit conflicts:** if someone saved a line, box or region after you loaded it, your save
   is refused and both versions are shown, so you choose what to keep. This holds for every

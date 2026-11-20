@@ -80,6 +80,8 @@ the version in the app's footer opens.
 
 ### Fixed
 
+- The admin page and the top bar count the same people as online: anyone with DeepLabel open,
+  in view or in a background tab, viewers too (#139).
 - A skipped layout is no longer called found, and a page names the step it failed in (#43).
 - Checked lines stay checked through an ALTO export and import (#59).
 - The app finds the backend and the sign-in service again after their containers are recreated (#51).

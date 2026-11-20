@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
-import { getSlurmAccounts, getUsers, patchUser, type AppUser, type Role } from '../api'
+import { getPresence, getSlurmAccounts, getUsers, patchUser, type AppUser, type Role } from '../api'
 import { useAuth } from '../auth'
 import { useCrumb } from '../components/NavBar'
 import { Button } from '../components/ui/Button'
@@ -11,7 +11,6 @@ import { PendingApprovals } from '../components/users/PendingApprovals'
 import { RightsTable } from '../components/users/RightsTable'
 import { Tabs, panelId, tabId } from '../components/ui/Tabs'
 import { UserDetail } from '../components/users/UserDetail'
-import { ONLINE_WITHIN_SECONDS } from '../util'
 import { EmptyState } from '../components/ui/EmptyState'
 import { controlClass } from '../components/ui/Field'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -79,9 +78,14 @@ function AccountControls({ user, self, onPatch }: { user: AppUser; self: boolean
   )
 }
 
+// How often the list is read again, so its online dots follow people as they come and go.
+const REFRESH_MS = 30_000
+
 export function AdminPage() {
   useCrumb('Admin')
-  const { id: myId, isAdmin } = useAuth()
+  const { id: myId, isAdmin, user: me } = useAuth()
+  // Who has DeepLabel open (decision 330): whoever reads this page among them.
+  const [online, setOnline] = useState<Set<string>>(new Set())
   const [users, setUsers] = useState<AppUser[] | null>(null)
   // The capability catalogue comes with the accounts, so the matrix shows exactly what
   // this build offers rather than a copy of the list that can drift from the server's.
@@ -117,9 +121,10 @@ export function AdminPage() {
           setInvitations(r.invitations)
         })
         .catch((e: Error) => setError(e.message))
+      getPresence().then((r) => setOnline(new Set(r.users.map((u) => u.username)))).catch(() => {})
     }
     load()
-    const timer = setInterval(load, (ONLINE_WITHIN_SECONDS / 10) * 1000)
+    const timer = setInterval(load, REFRESH_MS)
     // Suggestions only: a locked or unconfigured cluster leaves the field free text.
     getSlurmAccounts()
       .then((r) => setAccounts(r.accounts))
@@ -174,6 +179,7 @@ export function AdminPage() {
           {users && users.length > 0 && (
             <RightsTable
               users={users.filter((u) => !u.pending)}
+              online={new Set([...online, me])}
               capabilities={capabilities}
               roles={roles}
               viewerGrantable={viewerGrantable}

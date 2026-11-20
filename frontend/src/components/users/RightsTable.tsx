@@ -1,7 +1,7 @@
 import { Fragment, type ReactNode } from 'react'
 import type { AppUser, Role } from '../../api'
 import { ROLES, ROLE_DESCRIPTION, ROLE_LABEL } from '../../lib/roles'
-import { formatDate, formatRelative, isOnline } from '../../util'
+import { formatDate, formatRelative } from '../../util'
 import { Avatar, AvatarLink } from '../ui/Avatar'
 import { capabilityHint, capabilityLabel } from './capabilities'
 
@@ -39,8 +39,10 @@ function cellTitle(user: AppUser, cap: string, self: boolean, allowed: boolean, 
 /** Who may do what, in one table: people under their role, and the role's own line just
  *  above them as the default, so an exception is simply the dot that breaks the line.
  *  The dots are checkboxes; clicking one makes or lifts an exception. */
-export function RightsTable({ users, capabilities, roles, viewerGrantable, myId, expanded, onToggle, onPatch, detail }: {
+export function RightsTable({ users, online, capabilities, roles, viewerGrantable, myId, expanded, onToggle, onPatch, detail }: {
   users: AppUser[]
+  /** The usernames with DeepLabel open right now. */
+  online: Set<string>
   capabilities: string[]
   roles: Record<string, string[]>
   /** What a viewer can still be given: the capabilities that write nothing. */
@@ -154,7 +156,7 @@ export function RightsTable({ users, capabilities, roles, viewerGrantable, myId,
                         )
                       })}
                       <td className="whitespace-nowrap px-2 text-right text-xs text-ink-muted">
-                        {isOnline(seen) && (
+                        {online.has(user.username) && (
                           <span data-testid="live-now" className="mr-1.5 text-ok">● online</span>
                         )}
                         <span data-testid="last-login" title={seen ? formatDate(seen) : 'Has not used the account yet'}>

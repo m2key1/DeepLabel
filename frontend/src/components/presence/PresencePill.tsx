@@ -5,9 +5,10 @@ import { AvatarLink } from '../ui/Avatar'
 import { describeLocation, distinctPeople, locationPath } from './location'
 import { popoverChrome } from '../ui/Card'
 import { menuTrigger, useDismiss } from '../ui/menu'
+import { plural } from '../../util'
 
-// "3 online" in the nav bar, opening into who is where. Absent when nobody else is
-// around, so an empty deployment does not advertise a feature with nothing to show.
+// "3 others online" in the nav bar, opening into who is where. Absent when nobody else
+// has DeepLabel open, so an empty deployment does not advertise a feature with nothing to show.
 export function PresencePill() {
   const { others } = usePresence()
   const [open, setOpen] = useState(false)
@@ -29,7 +30,7 @@ export function PresencePill() {
         className="flex items-center gap-1.5 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-muted hover:border-accent hover:text-accent-ink"
       >
         <span className="h-1.5 w-1.5 rounded-full bg-ok" />
-        {people.length} online
+        {plural(people.length, 'other')} online
       </button>
       {open && (
         <ul

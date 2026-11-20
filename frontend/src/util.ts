@@ -35,16 +35,6 @@ export function parseStamp(iso: string): Date {
   return new Date(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(iso) ? `${iso.replace(' ', 'T')}Z` : iso)
 }
 
-/** How recently an account has to have been used to count as here now. Wider than the
- *  minute the server writes at, so someone mid-read is not flickering on and off. */
-export const ONLINE_WITHIN_SECONDS = 300
-
-export function isOnline(seen: string | null, now: Date = new Date()): boolean {
-  if (!seen) return false
-  const then = parseStamp(seen)
-  if (isNaN(then.getTime())) return false
-  return (now.getTime() - then.getTime()) / 1000 <= ONLINE_WITHIN_SECONDS
-}
 
 export function formatRelative(iso: string, now: Date = new Date()): string {
   const then = parseStamp(iso)

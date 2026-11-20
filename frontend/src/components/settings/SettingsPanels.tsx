@@ -46,7 +46,7 @@ export function useSettingsPanels(): SettingsPanel[] {
             checked={shareActivity}
             onChange={(on) => save({ share_activity: on })}
             label="Share what I am working on"
-            help="Others see which dataset and page you have open. Off makes you invisible; you still see them."
+            help="Others see which dataset and page you have open. Off keeps that to yourself: you still count as online, and you still see them."
           />
           <CheckField
             data-testid="show-activity"

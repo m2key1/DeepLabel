@@ -4,9 +4,10 @@ import type { PresenceEntry, PresenceLocation, PresenceTargetKind } from './api'
 import { useAuth } from './auth'
 import { useSettings } from './settings'
 
-// Who else has which page open. Every visible tab that shares its activity sends a
-// heartbeat with its location; the backend forgets a tab a minute after the last one.
-// Reading is a plain poll: a handful of annotators do not need a socket.
+// Who has DeepLabel open, and where. Every open tab sends a heartbeat - a background one as
+// often as its browser lets it, about once a minute - with its location only when its person
+// shares their activity; the backend forgets a tab two minutes after its last one (decision
+// 330). Reading is a plain poll: a handful of annotators do not need a socket.
 const HEARTBEAT_MS = 20_000
 const POLL_MS = 10_000
 const ANNOUNCE_DEBOUNCE_MS = 300
@@ -43,18 +44,14 @@ interface PresenceCtx {
 const Ctx = createContext<PresenceCtx | null>(null)
 
 export function PresenceProvider({ children }: { children: ReactNode }) {
-  const { user, canEdit } = useAuth()
+  const { user } = useAuth()
   const { shareActivity, showActivity } = useSettings()
   const [others, setOthers] = useState<PresenceEntry[]>([])
   const location = useRef<PresenceLocation | null>(null)
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Viewers cannot write, and a heartbeat is a write; they still see everyone else.
-  const broadcasting = shareActivity && canEdit
-
   const beat = useCallback(() => {
-    if (!broadcasting || document.visibilityState !== 'visible') return
-    sendPresence({ tab: TAB, ...(location.current ?? {}) }).catch(() => undefined)
-  }, [broadcasting])
+    sendPresence({ tab: TAB, ...(shareActivity ? location.current ?? {} : {}) }).catch(() => undefined)
+  }, [shareActivity])
 
   // Pages announce where they are; arrow-keying through lines must not post per key.
   const announce = useCallback((next: PresenceLocation | null) => {
@@ -64,7 +61,7 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
   }, [beat])
 
   useEffect(() => {
-    if (!broadcasting) return
+    if (!user) return
     beat()
     const timer = setInterval(beat, HEARTBEAT_MS)
     const leave = () => {
@@ -79,7 +76,7 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('pagehide', leave)
       leave()
     }
-  }, [broadcasting, beat])
+  }, [user, beat])
 
   useEffect(() => {
     if (!showActivity) {

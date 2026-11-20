@@ -2,12 +2,13 @@ import time
 from dataclasses import dataclass
 from threading import Lock
 
-# Who has which page open right now. Each browser tab sends a heartbeat while it is
-# visible; an entry that stops being refreshed drops out after TTL_SECONDS, so a closed
-# laptop never shows up as "editing page 12" for the rest of the afternoon. Purely in
-# memory: the API runs as one process, and presence has no value across a restart.
+# Who has DeepLabel open right now, and where. Every open tab sends a heartbeat, a
+# background one only as often as its browser lets it - about once a minute - so an entry
+# that stops being refreshed drops out after TTL_SECONDS, and a closed laptop never shows up
+# as "editing page 12" for the rest of the afternoon. Purely in memory: the API runs as one
+# process, and presence has no value across a restart.
 
-TTL_SECONDS = 60
+TTL_SECONDS = 120
 
 
 @dataclass(frozen=True)

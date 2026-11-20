@@ -38,6 +38,16 @@ class TestRegistry:
         clock.now += 2
         assert registry.online() == []
 
+    def test_a_background_tab_reporting_once_a_minute_stays_online(self):
+        # A browser slows a background tab's timers to about once a minute.
+        clock = FakeClock()
+        registry = PresenceRegistry(clock=clock)
+        registry.beat('alice', 't1', Location())
+        clock.now += 75
+        assert [p.username for p in registry.online()] == ['alice']
+        clock.now += 50
+        assert registry.online() == []
+
     def test_a_fresh_heartbeat_resets_the_clock_and_moves_the_tab(self):
         clock = FakeClock()
         registry = PresenceRegistry(ttl_seconds=60, clock=clock)
@@ -125,10 +135,15 @@ class TestHeartbeat:
         assert beat(client, 'alice', job_id='alice-job', target={'kind': 'cursor', 'id': 1}).status_code == 400
         assert client.post('/api/presence', json={'tab': ' '}, headers=headers('alice')).status_code == 400
 
-    def test_viewers_cannot_announce_themselves(self, stack):
-        client, _ = stack
+    def test_a_viewer_is_online_too(self, stack):
+        # A heartbeat keeps nothing past a couple of minutes, so it is not a write a
+        # read-only account is refused.
+        client, registry = stack
         response = client.post('/api/presence', json={'tab': 't1'}, headers=headers('eve', 'viewer'))
-        assert response.status_code == 403
+        assert response.status_code == 200
+        assert [entry.username for entry in registry.online()] == ['eve']
+        assert client.post('/api/presence/leave', json={'tab': 't1'}, headers=headers('eve', 'viewer')).status_code == 200
+        assert registry.online() == []
 
 
 class TestOnline:

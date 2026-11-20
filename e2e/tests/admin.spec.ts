@@ -108,8 +108,7 @@ test.describe('Scenario: managing users', () => {
     const theirs = page.getByTestId('user-row').filter({ hasText: idle })
     await expect(theirs).toBeVisible()
 
-    // Loading this page is itself a request, so the admin reading it is here by definition -
-    // presence needed a second browser to say so, and never said it of you at all.
+    // Whoever reads this page has DeepLabel open, so is online by definition.
     await expect(mine.getByTestId('live-now')).toContainText('online')
     await expect(mine.getByTestId('last-login')).toHaveText('just now')
     // Paired against the row above: the same locator, absent for a week-old visit.
