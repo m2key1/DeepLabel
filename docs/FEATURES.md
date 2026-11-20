@@ -6,7 +6,7 @@ in the footer of every page opens the running release's notes on GitHub.
 
 ## Contents
 
-- [Datasets and projects](#datasets-and-projects)
+- [Datasets and workspaces](#datasets-and-workspaces)
 - [Creating a dataset](#creating-a-dataset)
 - [The dataset page](#the-dataset-page)
 - [Test data](#test-data)
@@ -31,28 +31,38 @@ in the footer of every page opens the running release's notes on GitHub.
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [API](#api)
 
-## Datasets and projects
+## Datasets and workspaces
 
 The start page lists every dataset you can open, as a table or as cards. The list scrolls
-under its toolbar and the project rail, which stay in place, and ends with the footer.
+under its toolbar and the workspace rail, which stay in place, and ends with the footer.
 
 - Search, sort, filter to your own datasets or to those that need review, and pick which
   columns to show.
 - Mark a dataset **Complete** on its page once nothing more needs doing; the list shows it
   and filters by **In progress** or **Complete**.
-- Every dataset sits in one project or in its creator's private **Sandbox**. A new dataset
-  is made in its creator's Sandbox, which only they see, admins aside. Drag a dataset onto a
-  project you belong to, in the list or the side rail, to move it there and open it to that
-  project's people; out of a project it goes back to its creator's Sandbox.
-- A project's people are its members: a Manager among them adds and removes people, renames
+- Every dataset sits in one workspace or in its creator's private **Sandbox**, which only
+  they see, admins aside. The list and the rail show your Sandbox first, then your
+  workspaces; nobody sees a workspace they do not belong to, not even its name.
+- The **+** beside a workspace or your Sandbox, in the rail or on its heading in the list,
+  starts a new dataset there. **New job** asks which workspace the dataset is made in, and
+  starts on the one the list is showing, else on the one your newest dataset is in, else on
+  your Sandbox.
+- Drag a dataset onto a workspace you belong to, in the list or the rail, to move it there and
+  open it to that workspace's people; **Back to Sandbox** returns a selection to its creators'
+  Sandboxes. A dataset moved into a Sandbox is taken from the people given it on its own, and
+  the move says so first.
+- A workspace's people are its members: a Manager among them adds and removes people, renames
   it, and deletes it once it is empty. Someone can also be given a single dataset of a
-  project. A dataset in a Sandbox is shared by moving it into a project: its **Share** says so
+  workspace; it then sits under **Shared with you** in their list, without the workspace's
+  name. A dataset in a Sandbox is shared by moving it into a workspace: its **Share** says so
   and offers the move.
-- Tick several datasets, or use a project's menu, to act on all of them at once: re-run,
-  re-read, re-detect lines, change processing settings, or move them to a project. Before
+- Admins see everyone else's Sandboxes after the workspaces, under their own heading, each
+  marked **Private** and named for whose it is.
+- Tick several datasets, or use a workspace's menu, to act on all of them at once: re-run,
+  re-read, re-detect lines, change processing settings, or move them to a workspace. Before
   anything is queued, the confirmation says how many datasets and lines it covers and
   names any dataset it will skip, with the reason.
-- A project's settings dialog sets the models, decoding and phases for every dataset in it.
+- A workspace's settings dialog sets the models, decoding and phases for every dataset in it.
   Each control starts on "leave as it is", so only what you change is written.
 - Each dataset's Info panel shows who uploaded it, who it is shared with, page and line
   counts, review progress, the models it uses, who has edited it and its size on disk.
@@ -462,7 +472,7 @@ backends up as described in [MODEL-BACKENDS.md](MODEL-BACKENDS.md).
 Start a run with **Train model** on the Models page. Training runs on the model's backend, either on the
 local GPU or on a Slurm cluster (marked *highly experimental*).
 
-- Pick the base model, the datasets (by project, with search), the validation split and
+- Pick the base model, the datasets (by workspace, with search), the validation split and
   optionally one or more test sets: the test pages of datasets, scored with the base and the
   new model once the run is trained. Datasets and test sets each have a search, and
   **Select all** takes everything the search shows.
@@ -584,7 +594,7 @@ polygons) and *line tracing* (boundary lines, open or closed).
 
 ## Collaboration
 
-- **Projects and sharing:** share a dataset with people directly or through its project.
+- **Workspaces and sharing:** share a dataset with people directly or through its workspace.
 - **Notes:** a dataset and each of its pages can carry one note everyone with access can read,
   such as how far a volume has been checked. Anyone who can edit adds it with **+ Note** in
   the dataset's title or the page viewer's toolbar; a **Note** tag then marks it there, on the
@@ -659,7 +669,7 @@ in Authentik, which nobody has to see or visit.
 
 ## Profile and settings
 
-- Everyone has a profile at `/people/<username>` with their picture, role, groups, a short
+- Everyone has a profile at `/people/<username>` with their picture, role, workspaces, a short
   written summary of their work, work statistics (lines corrected and checked, pages signed
   off, trainings, models, best CER), a year of activity and recent datasets.
 - Click your avatar on your profile to upload and crop a picture.
@@ -685,7 +695,7 @@ in Authentik, which nobody has to see or visit.
 - A phone is a narrow touch screen. A narrow window on a computer gets the menu and the
   fitting below, but keeps the scan beside the text. In the editors, controls that do not
   fit the header scroll along it, and the editor itself stays in place.
-- Below a tablet's width, on a phone or in a narrow window, the dataset groups slide in from
+- Below a tablet's width, on a phone or in a narrow window, the workspaces slide in from
   the left with the button at the list's edge, and slide out again once one is picked.
 - Below a tablet's width your profile's sections are picked from one menu on top, with Log
   out beside it, and the section has the whole width.

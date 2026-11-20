@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ALL_USES, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromIiif,
   createJobFromPath, iiifThumbnailUrl, ApiError, getEnabledTasks, getLayoutShapeChanges, getLayoutTemplates, getMapModels, importJob, isTileTask, listConventionFlags,
-  checkJobName, listModels, listUsableLlmModels, renameJob, reocr, reocrPreview, setDataUse as saveDataUse, setJobLlmSettings,
+  checkJobName, listGroups, listModels, listUsableLlmModels, renameJob, reocr, reocrPreview, setDataUse as saveDataUse, setJobLlmSettings,
   setJobModels, setJobProcessing, setNewPagesTest, uploadJob,
 } from '../api'
 import type {
-  ConventionFlag, DataUse, JobOptions, JobWithoutPages, LayoutShape, LayoutShapeChanges, LlmModel, ReocrPreview, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, DatasetDecode,
+  ConventionFlag, DataUse, Group, JobOptions, JobWithoutPages, LayoutShape, LayoutShapeChanges, LlmModel, ReocrPreview, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, DatasetDecode,
   Phases, RegistryModel, Task,
 } from '../api'
 import { useAuth } from '../auth'
@@ -16,6 +16,7 @@ import { ConventionFlags, flagsOn, offeredFlags, toggledFlag } from '../componen
 import { DataUseSwitches, USES, dataUseSummary, keptOut } from '../components/job/DataUseSwitches'
 import { DataUseEditor } from '../components/job/DataUseEditor'
 import { LabelMapping } from '../components/job/LabelMapping'
+import { SANDBOX, startingWorkspace, takesNewDatasets } from '../components/job/groups'
 import { AlignmentChoice, LayoutShapeChoice, LlmReaders } from '../components/job/SettingsSections'
 import { IiifSource, NO_IIIF } from '../components/job/IiifSource'
 import type { IiifChoice } from '../components/job/IiifSource'
@@ -104,10 +105,23 @@ const READING_OFF = 'OCR is off for this dataset, so nothing is matched or cut u
 /** A new dataset, step by step; or, given `edit`, the same steps for a dataset that
  *  exists: what it runs, its models and its data use, filled in as they stand. */
 export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
-  const { isAdmin, canEdit } = useAuth()
+  const { user, isAdmin, canEdit } = useAuth()
   useCrumb(edit ? `${edit.name} · Settings` : 'New job')
   const navigate = useNavigate()
   const [name, setName] = useState(edit?.name ?? '')
+  const [searchParams] = useSearchParams()
+  const [groups, setGroups] = useState<Group[] | null>(null)
+  const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(null)
+  useEffect(() => {
+    if (edit) return
+    // Unanswered, the dataset is made where it would be without a choice: the Sandbox.
+    listGroups().then(setGroups).catch(() => setGroups([]))
+  }, [edit])
+  const workspaceChoices = useMemo(
+    () => (groups ?? []).filter((g) => !g.sandbox_of && takesNewDatasets(g, user, isAdmin)), [groups, user, isAdmin])
+  const workspace = pickedWorkspace
+    ?? startingWorkspace(Number(searchParams.get('workspace')), groups ?? [], workspaceChoices)
+  const workspaceId = workspace === SANDBOX ? null : Number(workspace)
   // Two datasets of one name cannot be told apart in any list, picker or export, so the
   // name is settled on the first step rather than found out at the last. The server holds
   // the rule, and knows of datasets this person cannot see.
@@ -406,6 +420,10 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
     : models.find((m) => m.id === Number(picks[key]))?.name ?? 'default'
   const summary: SummaryRow[] = [
     { label: 'Name', value: name.trim() || '-', step: edit ? 'run' : 'source' },
+    ...(edit ? [] : [{
+      label: 'Workspace', step: 'source' as Step,
+      value: workspaceChoices.find((g) => g.id === workspaceId)?.name ?? 'your Sandbox',
+    }]),
     { label: 'Task', value: TASK_LABEL[task], step: edit ? undefined : 'source' },
     ...(edit ? [] : [{
       label: 'Source',
@@ -472,6 +490,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
     ocr_convention: ran('ocr') && !isMap ? convention : {},
     data_use: dataUse,
     layout_shape: isMap ? 'box' : shape,
+    group_id: workspaceId,
   })
 
   // The template of a dataset's layout model, where that reads top to bottom: then it, not
@@ -561,13 +580,14 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
           ran('ocr') && !isMap ? convention : {},
           dataUse,
           isMap ? 'box' : shape,
+          workspaceId,
         )
       }
       if (archive) {
         setProgress({ loaded: 0, total: archive.size })
         try {
           job_id = (await importJob(name.trim(), archive, importReviewed,
-                                    (loaded, total) => setProgress({ loaded, total }), dataUse)).job_id
+                                    (loaded, total) => setProgress({ loaded, total }), dataUse, workspaceId)).job_id
         } catch (err) {
           // A zip of scans with nothing describing them is a set of pages: it goes up as
           // an upload and is read like any other.
@@ -627,6 +647,24 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
     </div>
   )
 
+  const workspaceField = (
+    <div>
+      <label htmlFor="job-workspace" className="mb-1 block text-sm font-medium text-ink">
+        Workspace
+      </label>
+      <select id="job-workspace" value={workspace} onChange={(e) => setPickedWorkspace(e.target.value)}
+              className={inputClass}>
+        <option value={SANDBOX}>Your Sandbox</option>
+        {workspaceChoices.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+      </select>
+      <p data-testid="job-workspace-note" className="mt-1 text-xs text-ink-muted">
+        {workspaceId === null
+          ? 'Only you can see it there, until you move it into a workspace.'
+          : `Everyone in ${workspaceChoices.find((g) => g.id === workspaceId)?.name} can open it.`}
+      </p>
+    </div>
+  )
+
   if (!canEdit) return <Navigate to={edit ? `/jobs/${edit.id}` : '/'} replace />
 
   return (
@@ -651,6 +689,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
       <form onSubmit={onSubmit} className="space-y-4" data-testid="new-job-step" data-step={step}>
         {step === 'source' && (<>
             {nameField}
+            {!edit && workspaceField}
             <div>
               <label className="mb-1 block text-sm font-medium text-ink">
                 Annotation task

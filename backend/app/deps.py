@@ -97,12 +97,11 @@ VISIBLE_JOB_IDS = (
     'OR group_id IN (SELECT group_id FROM group_assignees WHERE username = :me '
     '                UNION SELECT id FROM groups WHERE sandbox_of = :me)')
 
-# The workspaces someone other than an admin sees: those they belong to, their Sandbox,
-# and any holding a dataset they open - shown with that dataset alone.
+# The workspaces someone other than an admin sees: those they belong to and their Sandbox.
+# Being given one dataset is not being let into the workspace holding it, not even its name.
 REACHABLE_GROUP_IDS = (
     'SELECT group_id AS id FROM group_assignees WHERE username = :me '
-    'UNION SELECT id FROM groups WHERE sandbox_of = :me '
-    f'UNION SELECT group_id FROM jobs WHERE group_id IS NOT NULL AND id IN ({VISIBLE_JOB_IDS})')
+    'UNION SELECT id FROM groups WHERE sandbox_of = :me')
 
 
 def can_access_job(conn, job_id: str, user: dict) -> bool:
@@ -110,6 +109,18 @@ def can_access_job(conn, job_id: str, user: dict) -> bool:
         return conn.execute('SELECT 1 FROM jobs WHERE id = ?', (job_id,)).fetchone() is not None
     return conn.execute(f'SELECT 1 FROM ({VISIBLE_JOB_IDS}) WHERE id = :id',
                         {'me': user['username'], 'id': job_id}).fetchone() is not None
+
+
+def reachable_group_ids(conn, user: dict) -> set[int] | None:
+    """The workspaces someone sees, or None for an admin, who sees them all."""
+    if user['role'] == 'admin':
+        return None
+    return {r[0] for r in conn.execute(REACHABLE_GROUP_IDS, {'me': user['username']})}
+
+
+def shown_group_id(group_id: int | None, reachable: set[int] | None) -> int | None:
+    """A dataset's workspace as its viewer may know it: none, if they do not belong to it."""
+    return group_id if reachable is None or group_id in reachable else None
 
 
 def can_reach_group(conn, group_id: int, user: dict) -> bool:

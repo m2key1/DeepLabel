@@ -102,7 +102,7 @@ test.describe('Scenario: a group action says what it will change', () => {
       await page.getByTestId('job-card').filter({ hasText: name }).getByRole('checkbox').check()
     }
     await expect(page.getByTestId('bulk-bar')).toContainText('2 selected')
-    await page.getByRole('button', { name: 'Move to group…' }).click()
+    await page.getByRole('button', { name: 'Move to workspace…' }).click()
     await page.getByRole('button', { name: targetName, exact: true }).click()
 
     // Backend oracle: theirs moved, somebody else's did not.

@@ -101,7 +101,8 @@ def _count_profile(conn, username: str) -> dict:
             'regions_drawn': _scalar(conn, _REGIONS_DRAWN, args),
             'datasets_owned': sum(1 for row in reach if row['owned']),
             'datasets_shared': sum(1 for row in reach if not row['owned']),
-            'groups': [{'id': row['id'], 'name': row['name']} for row in conn.execute(REACHABLE_GROUPS, args)],
+            'groups': [{'id': row['id'], 'name': row['name']} for row in conn.execute(REACHABLE_GROUPS, args)
+                       if row['sandbox_of'] is None],
             'trainings': {'started': trainings['started'], 'done': trainings['done'],
                           'failed': trainings['failed']},
             'models_trained': trainings['models'],

@@ -64,9 +64,11 @@ the version in the app's footer opens.
   (#131). Annotators correct and add pages, Reviewers also check, Managers also run models, change
   settings, export and delete; whoever made a dataset manages it. Members become Managers. Running
   layout, lines and OCR, discarding checked work and deleting are no longer granted per person.
-- Every dataset sits in a project, open to its members, or in its creator's private Sandbox (#131).
-  New datasets start in the Sandbox; a project's Managers manage its people; only an empty project
-  is deleted; admins' visits to a dataset are no longer recorded.
+- Every dataset sits in a workspace, open to its members, or in its creator's private Sandbox (#131).
+  A workspace's Managers manage its people; only an empty workspace is deleted; admins' visits to
+  a dataset are no longer recorded. New job asks which workspace a dataset is made in, and a + on
+  each workspace starts one there. Nobody sees a workspace they do not belong to: a dataset given
+  to them on its own is listed under Shared with you.
 - Line corrections are saved unchecked; checking is a step of its own.
 - The page editor: labels on every box in edit mode (#77), lines that stay in the box they lie in
   (#71), a class pressed over gathered shapes draws a tight box (#74), Ctrl draws over a selected

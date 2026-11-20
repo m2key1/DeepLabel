@@ -57,9 +57,14 @@ def list_groups(conn=Depends(get_db), user: dict = Depends(current_user)):
         'SELECT group_id, COUNT(*) n FROM jobs WHERE group_id IS NOT NULL '
         + ('' if user['role'] == 'admin' else f'AND id IN ({VISIBLE_JOB_IDS}) ')
         + 'GROUP BY group_id', {'me': me})}
+    # Where the caller made their newest dataset, which the New job wizard starts on.
+    newest = conn.execute('SELECT group_id FROM jobs WHERE owner = ? ORDER BY created_at DESC, rowid DESC LIMIT 1',
+                          (me,)).fetchone()
+    last_used = newest['group_id'] if newest else None
     listed = [{'id': r['id'], 'name': store.workspace_name(r, me), 'owner': r['owner'], 'sandbox_of': r['sandbox_of'],
                'shared_with': members.get(r['id'], []), 'count': counts.get(r['id'], 0),
-               'can_manage': r['sandbox_of'] is None and manages_workspace(conn, r['id'], user)}
+               'can_manage': r['sandbox_of'] is None and manages_workspace(conn, r['id'], user),
+               'last_used': r['id'] == last_used}
               for r in rows]
     return sorted(listed, key=lambda g: g['name'].lower())
 
@@ -156,7 +161,7 @@ def patch_group_jobs(group_id: int, body: JobPatch, conn=Depends(get_db),
     fields = body.model_fields_set
     beyond = [field for field in NOT_BULK if field in fields]
     if beyond:
-        raise HTTPException(400, f'{beyond[0]} belongs to one dataset, not to a group')
+        raise HTTPException(400, f'{beyond[0]} belongs to one dataset, not to a workspace')
     if not fields:
         raise HTTPException(400, 'nothing to change')
     rows = [row for row in conn.execute(

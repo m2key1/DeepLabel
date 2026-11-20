@@ -32,9 +32,9 @@ export function reachOf(job: Job, group: Group | undefined): Reach[] {
 
 function says(reach: Reach, groupName?: string): string {
   if (reach.why === 'owner') return `${reach.username} - owner`
-  if (reach.why === 'group') return `${reach.username} - through the group ${groupName}`
+  if (reach.why === 'group') return `${reach.username} - through the workspace ${groupName}`
   return reach.redundant
-    ? `${reach.username} - shared on this dataset, which the group already covers`
+    ? `${reach.username} - shared on this dataset, which the workspace already covers`
     : `${reach.username} - shared on this dataset`
 }
 

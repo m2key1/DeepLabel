@@ -1,7 +1,7 @@
 import { test, expect } from '../helpers/test'
 import {
   backendFetch, createGroup, getJob, markLinesChecked, moveJobToGroup, sandboxOf, SEEDER_SANDBOX, seedCompletedJob,
-  setCollapsedGroups, shareJob, uniqueName,
+  setCollapsedGroups, shareGroup, shareJob, uniqueName,
 } from '../helpers/api'
 import { seedSession, useSession } from '../helpers/session'
 import { taskSection } from '../helpers/training'
@@ -18,10 +18,10 @@ test.describe('Scenario: the list as you left it', () => {
     const section = page.locator('section').filter({ hasText: name })
     const header = section.getByRole('button', { name })
     await expect(header).toHaveAttribute('aria-expanded', 'true')
-    await expect(section.getByText('No datasets in this group.')).toBeVisible()
+    await expect(section.getByText('No datasets in this workspace.')).toBeVisible()
 
     await header.click()
-    await expect(section.getByText('No datasets in this group.')).toHaveCount(0)
+    await expect(section.getByText('No datasets in this workspace.')).toHaveCount(0)
 
     // The fold is kept with the account, not the browser: the server has it before the
     // reload, and the reload gets it back from there.
@@ -30,7 +30,7 @@ test.describe('Scenario: the list as you left it', () => {
       .toEqual([group.id])
     await page.reload()
     await expect(section.getByRole('button', { name })).toHaveAttribute('aria-expanded', 'false')
-    await expect(section.getByText('No datasets in this group.')).toHaveCount(0)
+    await expect(section.getByText('No datasets in this workspace.')).toHaveCount(0)
 
     await setCollapsedGroups(page, [])
   })
@@ -43,8 +43,8 @@ test.describe('Scenario: organizing datasets in groups', () => {
     const groupName = uniqueName('Project')
 
     await page.goto('/')
-    await page.getByRole('button', { name: 'New group' }).click()
-    await page.getByPlaceholder('Group name').fill(groupName)
+    await page.getByRole('button', { name: 'New workspace' }).click()
+    await page.getByPlaceholder('Workspace name').fill(groupName)
     await page.keyboard.press('Enter')
     const header = page.locator('section', { hasText: groupName }).first()
     // The name is in two places now - the sidebar lists the groups and the section
@@ -53,7 +53,7 @@ test.describe('Scenario: organizing datasets in groups', () => {
 
     const card = page.getByTestId('job-card').filter({ hasText: jobName })
     await card.getByTestId('job-menu').click()
-    await card.getByRole('button', { name: 'Move to group…' }).click()
+    await card.getByRole('button', { name: 'Move to workspace…' }).click()
     await page.locator('select').selectOption({ label: groupName })
     await page.getByRole('button', { name: 'Move', exact: true }).click()
 
@@ -70,12 +70,12 @@ test.describe('Scenario: organizing datasets in groups', () => {
     const groupNames = async () => ((await backendFetch('/api/groups')) as { name: string }[]).map((g) => g.name)
     await header.getByRole('button', { name: 'Delete' }).first().click()
     await expect(page.getByRole('alert').filter({ hasText: groupName })).toHaveText(
-      `"${groupName}" still holds 1 dataset. Only an empty group can be deleted: move it out or delete it first.`)
+      `"${groupName}" still holds 1 dataset. Only an empty workspace can be deleted: move it out or delete it first.`)
     expect(await groupNames()).toContain(groupName)
 
     // Moved back to its creator's Sandbox, the dataset leaves the group empty, and it goes.
     await card.getByTestId('job-menu').click()
-    await card.getByRole('button', { name: 'Move to group…' }).click()
+    await card.getByRole('button', { name: 'Move to workspace…' }).click()
     await page.getByLabel('Move to').selectOption({ label: SEEDER_SANDBOX })
     await page.getByRole('button', { name: 'Move', exact: true }).click()
     await expect.poll(async () => (await getJob(jobId)).group_id).toBe(await sandboxOf())
@@ -88,21 +88,25 @@ test.describe('Scenario: organizing datasets in groups', () => {
 })
 
 test.describe('Scenario: what a group name gives away', () => {
-  test('a member is not handed the names of projects they cannot reach', async ({ page, browser }) => {
+  // Being given one dataset of a workspace is not belonging to it (#131, decision 334).
+  test('a member is handed the names of their workspaces only, not of one they were given a dataset of',
+    async ({ page, browser }) => {
     const username = `grouped-${Date.now()}`
     const token = seedSession('manager', username)
 
     const theirs = uniqueName('Theirs')
     const notTheirs = uniqueName('Not theirs')
-    const sharedJob = await seedCompletedJob(uniqueName('Shared set'), 1)
-    const privateJob = await seedCompletedJob(uniqueName('Private set'), 1)
+    const givenName = uniqueName('Given set')
+    const memberJob = await seedCompletedJob(uniqueName('Member set'), 1)
+    const givenJob = await seedCompletedJob(givenName, 1)
     const openGroup = await createGroup(theirs)
     const closedGroup = await createGroup(notTheirs)
-    await moveJobToGroup(sharedJob, openGroup.id)
-    await moveJobToGroup(privateJob, closedGroup.id)
-    await shareJob(sharedJob, [username])
-    await markLinesChecked(sharedJob, 2)
-    await markLinesChecked(privateJob, 2)
+    await moveJobToGroup(memberJob, openGroup.id)
+    await moveJobToGroup(givenJob, closedGroup.id)
+    await shareGroup(openGroup.id, [username])
+    await shareJob(givenJob, [username])
+    await markLinesChecked(memberJob, 2)
+    await markLinesChecked(givenJob, 2)
 
     // The admin running the suite reaches both, so the absence below means something.
     const asAdmin = await (await page.request.get('/api/groups')).json()
@@ -125,6 +129,10 @@ test.describe('Scenario: what a group name gives away', () => {
       .toHaveCount(1)
     await expect(theirTab.locator(`[data-testid="dataset-group"][data-group="${notTheirs}"]`))
       .toHaveCount(0)
+    // The dataset they were given is offered all the same, as shared with them.
+    const given = theirTab.locator('[data-testid="dataset-group"][data-group="Shared with you"]')
+    await given.getByRole('button', { name: 'Shared with you' }).click()
+    await expect(given.getByTestId('dataset-option').filter({ hasText: givenName })).toHaveCount(1)
     await theirContext.close()
   })
 })

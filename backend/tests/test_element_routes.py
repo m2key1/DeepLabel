@@ -606,6 +606,7 @@ class TestLayoutShapeLevels:
     def test_a_group_counts_across_its_datasets(self, client, conn):
         self._setup(client, conn)
         conn.execute("INSERT INTO groups (id, name, owner) VALUES (7, 'Volumes', 'alice')")
+        conn.execute("INSERT INTO group_assignees (group_id, username) VALUES (7, 'alice')")
         conn.execute("UPDATE jobs SET group_id = 7 WHERE id = 'j1'")
         conn.commit()
 

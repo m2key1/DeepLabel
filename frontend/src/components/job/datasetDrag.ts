@@ -5,8 +5,8 @@ import type { DragEvent } from 'react'
  *  never taken for datasets. */
 const DATASETS_MIME = 'application/x-deeplabel-datasets'
 
-/** Where datasets can be dropped: a group, or Ungrouped, which takes them out. */
-export type DropTarget = { groupId: number; name: string } | { groupId: null }
+/** Where datasets can be dropped: a workspace, or a Sandbox, by name. */
+export type DropTarget = { groupId: number; name: string }
 
 export interface DropZone {
   lit: boolean
@@ -24,13 +24,11 @@ export const DROP_LIT = 'bg-accent-wash text-accent-ink outline outline-2 -outli
 
 const carrying =(e: DragEvent) => e.dataTransfer.types.includes(DATASETS_MIME)
 
-const keyOf = (target: DropTarget) => (target.groupId === null ? 'ungrouped' : String(target.groupId))
+const keyOf = (target: DropTarget) => String(target.groupId)
 
 export function dropHint(count: number, target: DropTarget): string {
   const datasets = `${count} dataset${count === 1 ? '' : 's'}`
-  return target.groupId === null
-    ? `Remove ${datasets} from ${count === 1 ? 'its group' : 'their groups'}`
-    : `Move ${datasets} to ${target.name}`
+  return `Move ${datasets} to ${target.name}`
 }
 
 /** Dragging a ticked dataset carries the selection with it, the way the bulk bar acts on

@@ -52,7 +52,7 @@ function datasetSections(jobs: Job[] | null, groups: Group[]): DatasetSection[] 
     .filter((s) => s.jobs.length > 0)
   const loose = byGroup.get(null) ?? []
   return loose.length && named.length
-    ? [...named, { key: 'ungrouped', label: 'Ungrouped', jobs: loose }]
+    ? [...named, { key: 'ungrouped', label: 'Shared with you', jobs: loose }]
     : named.length ? named : [{ key: 'all', label: '', jobs: loose }]
 }
 

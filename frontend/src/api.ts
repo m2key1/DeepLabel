@@ -176,6 +176,8 @@ export interface Group {
   sandbox_of: string | null
   /** Whether the caller may rename it, change who belongs to it, or delete it. */
   can_manage: boolean
+  /** Holds the caller's newest dataset: where the New job wizard starts. */
+  last_used: boolean
   shared_with: string[]
   /** Datasets in it the caller can see. Absent on an older backend. */
   count?: number
@@ -1330,9 +1332,11 @@ export function uploadJob(
   ocrConvention: OcrConvention = {},
   dataUse: DataUse = ALL_USES,
   layoutShape: LayoutShape = 'box',
+  groupId: number | null = null,
 ): Promise<{ job_id: string }> {
   const form = new FormData()
   form.append('layout_shape', layoutShape)
+  if (groupId !== null) form.append('group_id', String(groupId))
   if (asTest) form.append('as_test', 'true')
   form.append('ocr_convention', JSON.stringify(ocrConvention))
   form.append('data_use', JSON.stringify(dataUse))
@@ -1367,9 +1371,11 @@ export function importJob(
   reviewed: boolean,
   onProgress: (loaded: number, total: number) => void,
   dataUse: DataUse = ALL_USES,
+  groupId: number | null = null,
 ): Promise<{ job_id: string; format: string; pages: number; lines: number }> {
   const form = new FormData()
   form.append('name', name)
+  if (groupId !== null) form.append('group_id', String(groupId))
   form.append('reviewed', String(reviewed))
   form.append('data_use', JSON.stringify(dataUse))
   form.append('file', file)
@@ -1402,6 +1408,8 @@ export interface JobOptions {
   ocr_convention: OcrConvention
   data_use: DataUse
   layout_shape: LayoutShape
+  /** The workspace it is made in; none for the creator's Sandbox. */
+  group_id: number | null
 }
 
 export function createJobFromPath(

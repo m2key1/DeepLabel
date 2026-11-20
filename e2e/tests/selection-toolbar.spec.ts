@@ -73,7 +73,7 @@ test.describe('Scenario: the selection takes the toolbar row', () => {
     await expect(rowOf(page, name).getByRole('checkbox')).not.toBeChecked()
   })
 
-  test('Move to group opens downward from the top, closes on Escape, and files the selection', async ({ page }) => {
+  test('Move to workspace opens downward from the top, closes on Escape, and files the selection', async ({ page }) => {
     const target = uniqueName('Toolbar target')
     const group = await createGroup(target)
     const one = uniqueName('Toolbar one')
@@ -85,7 +85,7 @@ test.describe('Scenario: the selection takes the toolbar row', () => {
     const bar = page.getByTestId('bulk-bar')
     await expect(bar).toContainText('2 selected')
 
-    const opener = bar.getByRole('button', { name: 'Move to group…' })
+    const opener = bar.getByRole('button', { name: 'Move to workspace…' })
     const option = bar.getByRole('button', { name: target, exact: true })
     await opener.click()
     await expect(option).toBeVisible()

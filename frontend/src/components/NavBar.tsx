@@ -128,6 +128,13 @@ function ProfileLink() {
   )
 }
 
+/** New job starts in the workspace the dataset list is narrowed to, if it is one. */
+function useNewJobPath(): string {
+  const { pathname, search } = useLocation()
+  const scope = pathname === '/' ? new URLSearchParams(search).get('group') : null
+  return scope && /^\d+$/.test(scope) ? `/new?workspace=${scope}` : '/new'
+}
+
 // How often an admin's top bar asks whether anyone is waiting to be let in.
 const PENDING_EVERY_MS = 30_000
 
@@ -146,6 +153,7 @@ function usePendingCount(isAdmin: boolean): number {
 
 export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
   const { user, isAdmin, canEdit, can } = useAuth()
+  const newJobPath = useNewJobPath()
   const [queue, setQueue] = useState<QueueState | null>(null)
   const pending = usePendingCount(isAdmin)
   const navigate = useNavigate()
@@ -230,7 +238,7 @@ export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
               )}
               {isAdmin && adminLink(buttonClass({ variant: 'ghost', size: 'sm' }, 'gap-1.5 whitespace-nowrap'))}
               {canEdit && (
-                <Link to="/new" className={buttonClass({ variant: 'primary', size: 'md' }, 'whitespace-nowrap')}>
+                <Link to={newJobPath} className={buttonClass({ variant: 'primary', size: 'md' }, 'whitespace-nowrap')}>
                   New job
                 </Link>
               )}
@@ -253,6 +261,7 @@ function PhoneMenu({ queue, adminLink, canEdit, canTry }: {
   canTry: boolean
 }) {
   const { user } = useAuth()
+  const newJobPath = useNewJobPath()
   const [open, setOpen] = useState(false)
   const { pathname } = useLocation()
   useDismiss(open, () => setOpen(false))
@@ -280,7 +289,7 @@ function PhoneMenu({ queue, adminLink, canEdit, canTry }: {
           {canTry && <Link to="/try" className={item}>Try</Link>}
           {adminLink?.(`${item} gap-1.5`)}
           {canEdit && (
-            <Link to="/new" className={buttonClass({ variant: 'primary', size: 'md' }, 'w-full')}>
+            <Link to={newJobPath} className={buttonClass({ variant: 'primary', size: 'md' }, 'w-full')}>
               New job
             </Link>
           )}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   bulkMove, bulkPreview, bulkRedetect, bulkReocr, bulkRerun, cancelJob, createGroup, deleteGroup,
@@ -21,20 +21,22 @@ import { MapSettingsDialog } from '../components/job/MapSettingsDialog'
 import { NewerModelsDialog } from '../components/job/NewerModelsDialog'
 import { GroupSettingsDialog } from '../components/job/GroupSettingsDialog'
 import { MoveToGroupDialog } from '../components/job/MoveToGroupDialog'
-import { groupSize } from '../components/job/groups'
+import {
+  groupSize, inListOrder, newDatasetIn, newDatasetTitle, takesNewDatasets, workspaceKind,
+} from '../components/job/groups'
 import { sharedPrefix } from '../components/job/sharedPrefix'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
 import { AppFooter } from '../components/AppFooter'
 import { StatusBadge } from '../components/StatusBadge'
-import { Button, GroupButton } from '../components/ui/Button'
+import { Button, GroupButton, buttonClass } from '../components/ui/Button'
 import { Check } from '../components/ui/Field'
 import { NoteTag } from '../components/NoteTag'
 import { TestDataChip } from '../components/TestPage'
-import { CaretIcon, CheckIcon, FilterIcon } from '../components/icons'
+import { CaretIcon, CheckIcon, FilterIcon, LockIcon, PlusIcon } from '../components/icons'
 import { useDropPlacement } from '../components/ui/dropPlacement'
 import { menuTrigger, useDismiss } from '../components/ui/menu'
 import { Modal } from '../components/Modal'
-import { Badge } from '../components/ui/Badge'
+import { Badge, chipClass } from '../components/ui/Badge'
 import type { Tone } from '../components/ui/Badge'
 import { usePresence } from '../presence'
 import { STATUS_TONE, compactCount, overallProgress } from '../util'
@@ -151,10 +153,11 @@ const fold = (s: string) =>
 
 /** A section is a project, an owner, or the whole list. */
 type SectionKey = number | string
+type ListSection = { key: SectionKey; title: string; rows: Job[]; group?: Group }
 
 type GroupBy = 'group' | 'owner' | 'none'
 const GROUP_BYS: { key: GroupBy; label: string }[] = [
-  { key: 'group', label: 'Group by project' },
+  { key: 'group', label: 'Group by workspace' },
   { key: 'owner', label: 'Group by owner' },
   { key: 'none', label: 'No grouping' },
 ]
@@ -328,7 +331,7 @@ export function JobsPage() {
       })
       .catch((e: Error) => {
         setGroupsFailed(true)
-        setError(`Could not load the groups: ${e.message}`)
+        setError(`Could not load the workspaces: ${e.message}`)
       })
   }, [])
 
@@ -452,23 +455,26 @@ export function JobsPage() {
     }
     const filtering = query.trim() !== '' || onlyMine || needsReview || onlyTest || completeness !== null
       || scope !== null
-    const out: { key: SectionKey; title: string; rows: Job[]; group?: Group }[] = reached.groups
+    const placed: ListSection[] = inListOrder(reached.groups, viewer)
       .map((group) => ({ key: group.id as SectionKey, title: group.name,
                          rows: byGroup.get(group.id) ?? [], group }))
       .filter(({ rows, group }) =>
         rows.length > 0 || (!filtering && (group!.sandbox_of
           ? group!.sandbox_of === viewer
           : viewerIsAdmin || group!.shared_with.includes(viewer))))
+    const others = placed.filter(({ group }) => workspaceKind(group!, viewer) === 'other-sandbox')
+    const out = placed.filter((s) => !others.includes(s))
+    // Datasets given to someone on their own come without their workspace, which they do not belong to.
     const loose = byGroup.get(null) ?? []
-    if (loose.length > 0) out.push({ key: 'ungrouped', title: 'Ungrouped', rows: loose })
-    // A group the list could not load still holds its datasets, and they stay on screen.
-    // Groups that are only slower to answer than the datasets are not called not loaded.
+    if (loose.length > 0) out.push({ key: 'ungrouped', title: 'Shared with you', rows: loose })
+    // A workspace the list could not load still holds its datasets, and they stay on screen.
+    // Workspaces that are only slower to answer than the datasets are not called not loaded.
     const listed = new Set(reached.groups.map((g) => g.id))
     const unlisted = visible.filter((j) => j.group_id !== null && !listed.has(j.group_id))
     if (groupsFailed && unlisted.length > 0) {
-      out.push({ key: 'unlisted', title: 'Groups not loaded', rows: unlisted })
+      out.push({ key: 'unlisted', title: 'Workspaces not loaded', rows: unlisted })
     }
-    return out
+    return [...out, ...others]
   }, [visible, reached, groupBy, viewerIsAdmin, viewer, query, onlyMine, needsReview, onlyTest, completeness, scope,
     groupsFailed])
 
@@ -550,10 +556,10 @@ export function JobsPage() {
     if (held > 0) {
       const them = held === 1 ? 'it' : 'them'
       setError(`"${group.name}" still holds ${held} dataset${held === 1 ? '' : 's'}. `
-        + `Only an empty group can be deleted: move ${them} out or delete ${them} first.`)
+        + `Only an empty workspace can be deleted: move ${them} out or delete ${them} first.`)
       return
     }
-    if (!confirm(`Delete group "${group.name}"?`)) return
+    if (!confirm(`Delete workspace "${group.name}"?`)) return
     try {
       await deleteGroup(group.id)
       refresh()
@@ -655,10 +661,11 @@ export function JobsPage() {
     }
   }
 
-  /** The bulk bar's Move to group... and a drag onto a group are one request with one
+  /** The bulk bar's Move to workspace... and a drag onto a workspace are one request with one
    *  report, so a drop is refused exactly as the menu would be. */
   const moveDatasets = async (ids: string[], groupId: number | null) => {
     setMovePicker(false)
+    if (!confirmLeavingPeople(ids, groupId)) return
     try {
       reportSkipped(await bulkMove(ids, groupId), 'moved')
       setSelected((prev) => new Set([...prev].filter((id) => !ids.includes(id))))
@@ -668,6 +675,20 @@ export function JobsPage() {
     }
   }
   const moveSelection = (groupId: number | null) => moveDatasets([...selected], groupId)
+
+  /** A Sandbox is private: a dataset moved into one is taken from the people given it on
+   *  its own, so they are named before it happens. */
+  const confirmLeavingPeople = (ids: string[], groupId: number | null): boolean => {
+    const intoSandbox = groupId === null || !!groups.find((g) => g.id === groupId)?.sandbox_of
+    const losing = ids.map((id) => jobs?.find((j) => j.id === id))
+      .filter((j): j is Job => !!j && j.shared_with.length > 0 && reaches(j.my_role, 'manager'))
+    if (!intoSandbox || losing.length === 0) return true
+    return confirm(losing.length === 1
+      ? `"${losing[0].name}" was given to ${losing[0].shared_with.join(', ')}. In a Sandbox it is private, `
+        + 'so they lose it. Move it anyway?'
+      : `${losing.length} of these datasets were given to people on their own. In a Sandbox they are private, `
+        + 'so those people lose them. Move them anyway?')
+  }
   const { dragSource, dropZone } = useDatasetDrag(
     selected, canEdit, (ids, groupId) => void moveDatasets(ids, groupId))
 
@@ -907,8 +928,7 @@ export function JobsPage() {
     const canManage = group?.can_manage ?? false
     // Like Run…, settings go to each dataset in turn, and the ones not yours are named as refused.
     const canSettle = rows.length > 0 && managesAny(rows.map((j) => j.id))
-    const zone = group ? dropZone({ groupId: group.id, name: group.name })
-      : key === 'ungrouped' ? dropZone({ groupId: null }) : null
+    const zone = group ? dropZone({ groupId: group.id, name: group.name }) : null
     const ground = zone?.lit ? DROP_LIT : 'bg-raised'
     return (
       <div data-testid="section-header" {...zone?.props}
@@ -925,6 +945,13 @@ export function JobsPage() {
             <span className={`inline-block transition-transform ${collapsed.has(key) ? '' : 'rotate-90'}`}>▸</span>
             {renamingGroup === group?.id ? null : title}
           </button>
+          {group?.sandbox_of && (
+            <span data-testid="sandbox-private" className={chipClass()}
+                  title={group.sandbox_of === user ? 'Only you see it' : `Only ${group.sandbox_of} sees it, and admins`}>
+              <LockIcon />
+              Private
+            </span>
+          )}
           {prefix && (
             <span data-testid="shared-prefix" title={`Every name here starts with ${prefix}`}
                   className="rounded border border-dashed border-line px-1.5 font-mono text-[10px] text-ink-subtle">
@@ -963,6 +990,12 @@ export function JobsPage() {
           </span>
         )}
         <span className="ml-auto flex items-center gap-1">
+          {group && canEdit && takesNewDatasets(group, user, isAdmin) && (
+            <Link to={newDatasetIn(group)} data-testid="new-dataset-in" title={newDatasetTitle(group, user)}
+                  aria-label={newDatasetTitle(group, user)} className={buttonClass({ variant: 'ghost', size: 'xs' })}>
+              <PlusIcon />
+            </Link>
+          )}
           {rows.length > 0 && (
             <Button variant="ghost" size="xs" onClick={() => selectMany(rows.map((j) => j.id))}>
               Select all
@@ -974,7 +1007,7 @@ export function JobsPage() {
             <span className="relative">
               <Button variant="ghost" size="xs" data-testid="group-run"
                       {...menuTrigger(groupMenu === key)}
-                      title={`Run over all ${rows.length} datasets in this group`}
+                      title={`Run over all ${rows.length} datasets in this workspace`}
                       onClick={(e) => {
                         e.stopPropagation()
                         setGroupMenu(groupMenu === key ? null : key)
@@ -1204,7 +1237,7 @@ export function JobsPage() {
           <input
             autoFocus
             value={groupDraft}
-            placeholder="Group name"
+            placeholder="Workspace name"
             onChange={(e) => setGroupDraft(e.target.value)}
             onBlur={submitGroup}
             onKeyDown={(e) => {
@@ -1215,7 +1248,7 @@ export function JobsPage() {
           />
         ) : (
           <Button size="xs" onClick={() => { setGroupDraft(''); setCreatingGroup(true) }}>
-            <span aria-hidden="true">+</span> New group
+            <span aria-hidden="true">+</span> New workspace
           </Button>
         ))}
       </span>
@@ -1236,7 +1269,7 @@ export function JobsPage() {
       <span className="relative">
         <Button size="xs" {...menuTrigger(movePicker)}
                 onClick={(e) => { e.stopPropagation(); setMovePicker((v) => !v) }}>
-          Move to group…
+          Move to workspace…
         </Button>
         {movePicker && (
           <div className={`absolute left-0 top-full z-20 mt-1 max-h-64 w-52 overflow-auto ${popoverChrome} py-1`}
@@ -1274,7 +1307,7 @@ export function JobsPage() {
             ? <div className={`${CARD_GRID} px-2`}>{rows.map(jobCard)}</div>
             : sectionRows(rows, prefix)
         ) : (
-          <p className="px-2 text-xs text-ink-subtle">No datasets in this group.</p>
+          <p className="px-2 text-xs text-ink-subtle">No datasets in this workspace.</p>
         )
       )}
     </section>
@@ -1292,6 +1325,7 @@ export function JobsPage() {
       onCollapse={onCollapse}
       onScope={(next) => { setScope(next); setSelected(new Set()); picked?.() }}
       dropZone={dropZone}
+      viewer={viewer}
     />
   )
 
@@ -1315,7 +1349,7 @@ export function JobsPage() {
                className="flex flex-wrap items-baseline gap-2 border-b border-line bg-accent-wash px-4 py-2 text-xs text-accent-ink">
             <span>
               Showing what <b className="font-semibold">{asUser}</b> reaches: owned, shared
-              directly, or through a group. Admins reach everything, so this says nothing
+              directly, or through a workspace. Admins reach everything, so this says nothing
               about them.
             </span>
             <button className="ml-auto underline underline-offset-2"
@@ -1342,7 +1376,17 @@ export function JobsPage() {
               </p>
             )}
             {jobs && view === 'table' && visible.length > 0 && tableHead}
-            {sections.map(({ key, title, rows, group }) => renderSection(key, title, rows, group))}
+            {sections.map(({ key, title, rows, group }, i) => (
+              <Fragment key={key}>
+                {group && workspaceKind(group, viewer) === 'other-sandbox'
+                  && !(sections[i - 1]?.group && workspaceKind(sections[i - 1].group!, viewer) === 'other-sandbox') && (
+                  <h2 data-testid="other-sandboxes" className="mb-2 mt-6 flex items-center gap-2 px-2 text-[10px] font-semibold uppercase tracking-widest text-ink-subtle">
+                    <LockIcon /> Other people's Sandboxes
+                  </h2>
+                )}
+                {renderSection(key, title, rows, group)}
+              </Fragment>
+            ))}
           </div>
           <AppFooter />
         </div>

@@ -61,14 +61,14 @@ export function ShareDialog({
           {owner === user
             ? 'It is in your Sandbox, which only you can see.'
             : `It is in ${owner}'s Sandbox, which only ${owner} can see.`}
-          {' '}To share it, move it into a group: everyone in that group can then open it.
+          {' '}To share it, move it into a workspace: everyone in that workspace can then open it.
         </p>
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className={modalBtn}>
             Cancel
           </button>
           <button onClick={onMoveInstead} className={modalPrimaryBtn}>
-            Move to a group…
+            Move to a workspace…
           </button>
         </div>
       </Modal>
@@ -79,7 +79,7 @@ export function ShareDialog({
     <Modal title={`Share "${title}"`} onClose={onClose}>
       <p className="mb-3 text-sm text-ink-muted">
         {target.kind === 'group'
-          ? 'These people can open and work on every dataset in this group, including ones added later. The owner and admins always have access.'
+          ? 'These people can open and work on every dataset in this workspace, including ones added later. The owner and admins always have access.'
           : 'These people can open and work on this dataset. The owner and admins always have access.'}
       </p>
       {names === null && <p className="text-sm text-ink-muted">Loading…</p>}

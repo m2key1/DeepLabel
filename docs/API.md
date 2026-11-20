@@ -49,8 +49,9 @@ Path('transcript.json').write_bytes(dl.export(job_id, reviewed_only=True))
 ```
 
 A dataset made over the API lands in your private Sandbox, which nobody else sees. Send
-`group_id` with `POST /api/jobs` (or `/api/jobs/import`) to make it in a project you belong
-to instead; `GET /api/groups` lists them, your Sandbox among them (`sandbox_of`).
+`group_id` with `POST /api/jobs` (or `/api/jobs/import`) to make it in a workspace you belong
+to instead; `GET /api/groups` lists them, your Sandbox among them (`sandbox_of`). A dataset of a
+workspace you do not belong to, given to you on its own, comes with `group_id: null`.
 
 `POST /api/lines/texts` corrects many lines in one request (up to 5000), each as a single
 edit would; the lines it could not write come back with the reason:

@@ -38,7 +38,7 @@ function Details({ job, info }: { job: Job; info: DatasetInfo }) {
         {formatDate(info.created_at)} · {formatRelative(info.created_at)}
       </Row>
       <Row field="owner" label="By">{info.owner}</Row>
-      <Row field="group" label="Project">{info.group ?? 'Ungrouped'}</Row>
+      <Row field="group" label="Workspace">{info.group ?? 'Shared with you'}</Row>
       {info.shared_with.length > 0 && (
         <Row field="shared" label="Shared">{info.shared_with.join(', ')}</Row>
       )}

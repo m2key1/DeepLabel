@@ -39,8 +39,8 @@ test.describe('Scenario: managing datasets from the list', () => {
     // A Sandbox is private, so Share says why it cannot add anyone and offers the way out (#131).
     await expect(page.getByTestId('share-sandboxed')).toHaveText(
       "It is in e2e-seeder's Sandbox, which only e2e-seeder can see. "
-      + 'To share it, move it into a group: everyone in that group can then open it.')
-    await page.getByRole('button', { name: 'Move to a group…' }).click()
+      + 'To share it, move it into a workspace: everyone in that workspace can then open it.')
+    await page.getByRole('button', { name: 'Move to a workspace…' }).click()
     await page.getByLabel('Move to').selectOption({ label: group.name })
     await page.getByRole('button', { name: 'Move', exact: true }).click()
     await expect.poll(async () => (await getJob(jobId)).group_id).toBe(group.id)

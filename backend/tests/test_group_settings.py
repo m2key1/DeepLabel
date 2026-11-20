@@ -27,6 +27,8 @@ def conn(tmp_path, monkeypatch):
             (2, 'ocr', 'OCR v2', '/models/ocr.pt', 0);
         INSERT INTO groups (id, name, owner) VALUES (1, 'Schematismus', 'alice'),
                                                    (2, 'Cadastre', 'bob');
+        -- Whoever made a workspace belongs to it, as creating one and the migration see to.
+        INSERT INTO group_assignees (group_id, username) VALUES (1, 'alice'), (2, 'bob');
         INSERT INTO jobs (id, name, owner, status, task, group_id, line_mode, run_layout,
                           run_lines, run_ocr) VALUES
             ('j1', 'Volume I',   'alice', 'done',  'text', 1, 'per_crop', 1, 1, 1),
@@ -140,13 +142,13 @@ class TestWhenOneDatasetCannotTakeIt:
         assert jobs(conn, 'checked')['j1'] == 0
         assert jobs(conn, 'checked')['j2'] == 1
 
-    def test_a_member_may_still_set_what_annotators_set(self, client, conn):
-        """bob is assigned to j1 only, so that is the one dataset the group changes for him."""
+    def test_someone_given_one_dataset_of_it_does_not_reach_the_workspace(self, client, conn):
+        """bob was given j1 alone, which does not let him into the workspace (#131, decision 334)."""
+        before = jobs(conn, 'line_width')
         response = patch(client, {'line_width': 7}, headers=BOB)
 
-        assert response.json()['changed'] == [{'id': 'j1', 'name': 'Volume I'}]
-        assert jobs(conn, 'line_width')['j1'] == 7
-        assert jobs(conn, 'line_width')['j2'] != 7
+        assert response.status_code == 404
+        assert jobs(conn, 'line_width') == before
 
     def test_an_admin_reaches_every_dataset_in_the_group(self, client, conn):
         assert patch(client, {'gt_ordered': True}, headers=ADMIN).status_code == 200

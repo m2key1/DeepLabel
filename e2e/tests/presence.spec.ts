@@ -1,5 +1,7 @@
 import { test, expect } from '../helpers/test'
-import { backendFetch, jobPageIds, seedCompletedJob, shareJob, uniqueName } from '../helpers/api'
+import {
+  backendFetch, createJob, identity, jobPageIds, seedCompletedJob, shareJob, uniqueName, waitForJobStatus,
+} from '../helpers/api'
 import { asSession, seedSession, useSession } from '../helpers/session'
 import { FRONTEND } from '../helpers/frontend'
 
@@ -16,6 +18,39 @@ async function whereIs(username: string): Promise<PresenceUser | null> {
 }
 
 test.describe('Scenario: seeing who is where', () => {
+  // Admins leave no trace where they do not belong (#131, decision 322); other admins still see them.
+  test('an admin on a page of a dataset they do not belong to shows no avatar to its people', async ({ page, browser }) => {
+    const lena = `lena-${Date.now()}`
+    const lenaSession = seedSession('annotator', lena)
+    const jobId = await createJob(uniqueName('Not the admins'), 1, undefined, identity(lena, 'annotator'))
+    await waitForJobStatus(jobId, 'done')
+    const [pageId] = await jobPageIds(jobId)
+
+    // The browser's own session is the dev admin, who neither made nor was given it.
+    await page.goto(`/jobs/${jobId}/pages/${pageId}`)
+    const devTabs = async () => (await backendFetch('/api/presence')).users
+      .filter((u: PresenceUser) => u.username === 'dev')
+    await expect.poll(async () => (await devTabs()).some((u: PresenceUser) => u.page_id === pageId)).toBe(true)
+
+    const lenaContext = await browser.newContext()
+    await useSession(lenaContext, lenaSession)
+    const asLena = (await (await lenaContext.request.get('/api/presence')).json()).users
+      .filter((u: PresenceUser) => u.username === 'dev')
+    expect(asLena.length).toBeGreaterThan(0)
+    expect(asLena.map((u: PresenceUser) => u.page_id)).toEqual(asLena.map(() => null))
+
+    const lenaTab = await lenaContext.newPage()
+    await lenaTab.goto(`/jobs/${jobId}`)
+    await expect(lenaTab.getByTestId('presence-pill')).toHaveText(/^\d+ others? online$/)
+    const pageRow = lenaTab.getByRole('row').filter({ hasText: 'scan_1.png' })
+    await expect(pageRow).toHaveCount(1)
+    await expect(pageRow.getByTestId('presence-avatars').getByLabel('dev')).toHaveCount(0)
+    await lenaTab.goto(`/jobs/${jobId}/pages/${pageId}`)
+    await expect(lenaTab.getByTestId('presence-pill')).toHaveText(/^\d+ others? online$/)
+    await expect(lenaTab.getByTestId('presence-banner')).toHaveCount(0)
+    await lenaContext.close()
+  })
+
   test('a colleague on a page shows up on Admin, the dataset and the page, and moves on', async ({ page, browser }) => {
     const username = `present-${Date.now()}`
     const token = seedSession('manager', username)

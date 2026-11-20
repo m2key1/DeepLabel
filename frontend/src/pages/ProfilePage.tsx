@@ -213,7 +213,7 @@ function Overview({ profile }: { profile: PersonProfile | null }) {
         <StatRow>
           <Stat id="datasets_owned" label="Owned" value={count(stats.datasets_owned)} />
           <Stat id="datasets_shared" label="Shared with them" value={count(stats.datasets_shared)} />
-          <Stat id="groups" label="Groups" value={count(stats.groups.length)} />
+          <Stat id="groups" label="Workspaces" value={count(stats.groups.length)} />
         </StatRow>
       </Section>
       <Section

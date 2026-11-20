@@ -17,7 +17,7 @@ from app import (blobs, caches, config, consensus, conventions, corpus, data_use
                  page_rows, queue_eta, reading_order, recognize, registry, schemas, store, trainer)
 from app.deps import (ROLE_NAMES, SWAPPABLE, VISIBLE_JOB_IDS, WRITERS, belongs_to_workspace, can_access_job, manages_workspace,
                       current_user, get_db, get_user, require_job_access, require_job_manager, require_job_role,
-                      require_role, role_given, role_on_job, role_reaches)
+                      reachable_group_ids, require_role, role_given, role_on_job, role_reaches, shown_group_id)
 
 
 class UncappedUploadRequest(Request):
@@ -675,9 +675,11 @@ def list_jobs(conn=Depends(get_db), user: dict = Depends(current_user)):
         if r['username'] == user['username'] and r['role']:
             swapped[r['job_id']] = r['role']
     empty = {'pages_total': 0, 'layout_checked_pages': 0, 'test_pages': 0, 'lines_total': 0, 'lines_done': 0}
+    reachable = reachable_group_ids(conn, user)
     payloads = []
     for row in rows:
         job = _job_payload(conn, row, shared.get(row['id'], []))
+        job['group_id'] = shown_group_id(job['group_id'], reachable)
         job.update(progress.get(job['id'], empty))
         job['my_role'] = role_given(row['owner'], user, swapped.get(row['id']))
         payloads.append(job)
@@ -741,6 +743,7 @@ def get_job(job_id: str, pages: bool = True, conn=Depends(get_db),
     if row is None:
         raise HTTPException(404)
     job = _job_payload(conn, row)
+    job['group_id'] = shown_group_id(job['group_id'], reachable_group_ids(conn, user))
     job['my_role'] = role_on_job(conn, job_id, user)
     job['unreadable'] = [{**dict(r), 'iiif': bool(r['iiif'])} for r in conn.execute(
         "SELECT id, filename, error, iiif FROM pages WHERE job_id = ? AND deleted = 0 AND status = 'unreadable' "
@@ -852,8 +855,9 @@ def job_info(job_id: str, conn=Depends(get_db), user: dict = Depends(current_use
         'SELECT author, COUNT(*) AS edits, MAX(created_at) AS last_at FROM revisions '
         f'WHERE job_id = ? AND {store.person_author_sql()} '
         'GROUP BY author ORDER BY edits DESC, author', (job_id,)).fetchall()
+    group_id = shown_group_id(job['group_id'], reachable_group_ids(conn, user))
     group = conn.execute(
-        'SELECT name, sandbox_of FROM groups WHERE id = ?', (job['group_id'],)).fetchone() if job['group_id'] else None
+        'SELECT name, sandbox_of FROM groups WHERE id = ?', (group_id,)).fetchone() if group_id else None
     disk = caches.job_disk_usage(job_id)
     models = {}
     for task, column in MODEL_COLUMNS.items():
@@ -1098,6 +1102,8 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
         home = store.sandbox_id(conn, job['owner'])
         if body.group_id in (None, home):
             target = home
+            # A Sandbox is private: the people given the dataset on its own lose it there.
+            conn.execute('DELETE FROM job_assignees WHERE job_id = ?', (job_id,))
         elif not belongs_to_workspace(conn, body.group_id, user):
             raise HTTPException(404, 'workspace not found')
         elif store.is_sandbox(conn, body.group_id):
@@ -1190,7 +1196,8 @@ def patch_job(job_id: str, body: JobPatch, conn=Depends(get_db), user: dict = De
                        (job_id,)).fetchone()
     return {'id': job_id, 'name': row['name'], 'checked': bool(row['checked']),
             'gt_autocheck': bool(row['gt_autocheck']), 'gt_ordered': bool(row['gt_ordered']),
-            'auto_redetect': bool(row['auto_redetect']), 'group_id': row['group_id'],
+            'auto_redetect': bool(row['auto_redetect']),
+            'group_id': shown_group_id(row['group_id'], reachable_group_ids(conn, user)),
             'line_width': row['line_width'],
             'model_layout_id': row['model_layout_id'], 'model_lines_id': row['model_lines_id'],
             'model_ocr_id': row['model_ocr_id'], 'ocr_decode': row['ocr_decode'],

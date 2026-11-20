@@ -5,7 +5,7 @@ import { Badge } from '../ui/Badge'
 const DATASET_GROUPS: { access: DatasetAccess; label: string }[] = [
   { access: 'owner', label: 'Owns' },
   { access: 'shared', label: 'Shared directly' },
-  { access: 'group', label: 'Through a group' },
+  { access: 'group', label: 'Through a workspace' },
 ]
 
 interface AccessPanelProps {

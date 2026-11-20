@@ -1,5 +1,5 @@
-"""Workspace names are project names, so the list is scoped the way the dataset list is:
-the ones you belong to, your Sandbox, and ones holding a dataset you can reach. It used to
+"""Workspace names are project names, so the list holds only the ones you belong to and
+your Sandbox - being given one dataset of a workspace does not let you see it (#131). It used to
 return every group in the instance to anyone signed in. Changing a workspace is its
 Managers' (#131).
 """
@@ -57,10 +57,10 @@ def test_an_admin_sees_every_group(client):
         'None of her business', 'Shared with her']
 
 
-def test_a_member_sees_only_the_groups_they_can_reach(client):
-    """The one holding only Bob's dataset is not among them - that is the leak."""
-    assert names(client, ALICE) == [
-        'Hers empty', 'Holds her dataset', 'Holds one shared with her', 'Shared with her']
+def test_a_member_sees_only_the_groups_they_belong_to(client):
+    """Neither the one holding a dataset of hers nor the one holding a dataset she was
+    given: neither lets her in (decision 334)."""
+    assert names(client, ALICE) == ['Hers empty', 'Shared with her']
 
 
 def test_an_empty_group_of_your_own_still_shows(client):
@@ -68,12 +68,12 @@ def test_an_empty_group_of_your_own_still_shows(client):
     assert 'Hers empty' in names(client, ALICE)
 
 
-def test_a_group_stops_showing_when_her_dataset_leaves_it(client):
-    """Reachability is not cached anywhere: it follows wherever the datasets sit now."""
-    assert 'Holds her dataset' in names(client, ALICE)
-    moved = client.patch('/api/jobs/j-hers', headers=ALICE, json={'group_id': None})
-    assert moved.status_code == 200, moved.text
+def test_a_group_shows_once_she_belongs_to_it(client):
+    """Reachability is not cached anywhere: it follows the membership as it is now."""
     assert 'Holds her dataset' not in names(client, ALICE)
+    added = client.put('/api/groups/3/share', headers=BOB, json={'usernames': ['bob', 'alice']})
+    assert added.status_code == 200, added.text
+    assert 'Holds her dataset' in names(client, ALICE)
 
 
 def test_the_member_list_matches_the_datasets_they_are_offered(client):
@@ -95,7 +95,7 @@ class TestFiling:
     project in the filer's list, so only a project they can already reach takes it."""
 
     def filed_under(self, client):
-        return client.get('/api/jobs/j-hers', headers=ALICE).json()['group_id']
+        return client.get('/api/jobs/j-hers', headers=ADMIN).json()['group_id']
 
     def test_a_project_she_cannot_reach_answers_as_if_it_did_not_exist(self, client):
         refused = client.patch('/api/jobs/j-hers', headers=ALICE, json={'group_id': 5})
@@ -246,7 +246,7 @@ class TestDeleting:
 
         assert refused.status_code == 409
         assert refused.json()['detail'] == 'move or delete its 1 dataset first'
-        assert client.get('/api/jobs/j-hers', headers=ALICE).json()['group_id'] == 3
+        assert client.get('/api/jobs/j-hers', headers=ADMIN).json()['group_id'] == 3
 
     def test_a_reviewer_in_it_may_not_delete_it(self, client):
         assert client.delete('/api/groups/1', headers=ALICE_REVIEWING).status_code == 403
@@ -271,8 +271,8 @@ class TestSettingAWholeProject:
         assert refused.status_code == 404
         assert client.get('/api/jobs/j-bobs', headers=ADMIN).json()['checked'] is False
 
-    def test_a_project_she_reaches_through_a_shared_dataset_takes_it(self, client):
-        response = client.patch('/api/groups/4/jobs', json={'checked': True}, headers=ALICE)
+    def test_one_she_was_only_given_a_dataset_of_answers_as_if_it_did_not_exist(self, client):
+        refused = client.patch('/api/groups/4/jobs', json={'checked': True}, headers=ALICE)
 
-        assert response.status_code == 200, response.text
-        assert response.json() == {'changed': [{'id': 'j-shared', 'name': 'Shared'}], 'skipped': []}
+        assert refused.status_code == 404
+        assert client.get('/api/jobs/j-shared', headers=ADMIN).json()['checked'] is False

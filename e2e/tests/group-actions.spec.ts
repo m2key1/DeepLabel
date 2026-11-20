@@ -122,7 +122,7 @@ test.describe('Scenario: acting on a selection across groups', () => {
       await row.getByRole('checkbox').check()
     }
     await expect(page.getByTestId('bulk-bar')).toContainText('2 selected')
-    await page.getByRole('button', { name: 'Move to group…' }).click()
+    await page.getByRole('button', { name: 'Move to workspace…' }).click()
     await page.getByRole('button', { name: target, exact: true }).click()
 
     for (const jobId of [one, two]) {

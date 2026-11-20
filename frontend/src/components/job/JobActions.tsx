@@ -145,7 +145,7 @@ export function JobActions(p: JobActionsProps) {
           {p.openMenu && (
             <div ref={menu.ref}
                  className={`${menu.className} right-0 z-10 w-40 overflow-hidden ${popoverChrome} py-1`}>
-              <button onClick={p.onMove} className={menuItem}>Move to group…</button>
+              <button onClick={p.onMove} className={menuItem}>Move to workspace…</button>
               {p.canShare && <button onClick={p.onShare} className={menuItem}>Share…</button>}
               <button onClick={p.onSettings} data-testid="settings-open" className={menuItem}>
                 Settings…

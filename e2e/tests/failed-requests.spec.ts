@@ -62,9 +62,9 @@ test.describe('Scenario: a request the server refuses is said, not swallowed', (
       ? refuse(500, 'groups are unavailable')(route) : route.continue())
 
     await page.goto(`/?q=${encodeURIComponent(jobName)}`)
-    await expect(page.getByRole('alert').filter({ hasText: 'Could not load the groups' }))
-      .toHaveText('Could not load the groups: groups are unavailable')
-    const fallback = page.locator('[data-testid="list-section"][data-title="Groups not loaded"]')
+    await expect(page.getByRole('alert').filter({ hasText: 'Could not load the workspaces' }))
+      .toHaveText('Could not load the workspaces: groups are unavailable')
+    const fallback = page.locator('[data-testid="list-section"][data-title="Workspaces not loaded"]')
     await expect(fallback.getByText(jobName)).toBeVisible()
     expect((await backendFetch(`/api/jobs/${jobId}`)).group_id).toBe(group.id)
   })
@@ -85,7 +85,7 @@ test.describe('Scenario: a request the server refuses is said, not swallowed', (
 
     await page.goto(`/?q=${encodeURIComponent(jobName)}`)
     await jobsListed
-    const fallback = page.locator('[data-testid="list-section"][data-title="Groups not loaded"]')
+    const fallback = page.locator('[data-testid="list-section"][data-title="Workspaces not loaded"]')
     const ownSection = page.locator('[data-testid="list-section"]').filter({ hasText: groupName })
     await expect(page.getByTestId('jobs-skeleton')).toHaveCount(0)
     await expect(fallback).toHaveCount(0)

@@ -112,9 +112,9 @@ class TestTheWorkspaceList:
         assert (listed['Sandbox']['sandbox_of'], listed['Schematismus']['sandbox_of']) == ('anna', None)
         assert listed['Schematismus']['shared_with'] == ['anna', 'ben', 'lena']
 
-    def test_a_dataset_member_sees_the_workspace_with_their_dataset_only(self, client):
+    def test_someone_given_one_dataset_sees_no_workspace(self, client):
         api, _ = client
-        assert {name: g['count'] for name, g in workspaces(api, RITA).items()} == {'Schematismus': 1}
+        assert workspaces(api, RITA) == {}
 
     def test_an_admin_sees_whose_sandbox_each_is(self, client):
         api, _ = client
@@ -127,6 +127,53 @@ class TestTheWorkspaceList:
         assert {name: g['can_manage'] for name, g in workspaces(api, ANNA).items()} == \
             {'Sandbox': False, 'Schematismus': True}
         assert workspaces(api, BEN)['Schematismus']['can_manage'] is False
+
+
+class TestWhatSomeoneGivenOneDatasetLearns:
+    """Being given one dataset is not being let into the workspace that holds it (decision 334)."""
+
+    def test_the_dataset_names_no_workspace(self, client):
+        api, _ = client
+        assert [(j['id'], j['group_id']) for j in api.get('/api/jobs', headers=RITA).json()] == [('j1', None)]
+        assert api.get('/api/jobs/j1', params={'pages': 'false'}, headers=RITA).json()['group_id'] is None
+        assert api.get('/api/jobs/j1/info', headers=RITA).json()['group'] is None
+
+    def test_a_member_still_sees_where_it_is(self, client):
+        api, _ = client
+        assert api.get('/api/jobs/j1', params={'pages': 'false'}, headers=LENA).json()['group_id'] == 1
+        assert api.get('/api/jobs/j1/info', headers=LENA).json()['group'] == 'Schematismus'
+
+    def test_the_workspace_is_not_found_by_its_id(self, client):
+        api, _ = client
+        assert api.put('/api/groups/1/share', json={'usernames': ['rita']}, headers=RITA).status_code == 404
+
+    def test_a_profile_names_only_workspaces_its_viewer_belongs_to(self, client):
+        api, _ = client
+        assert api.get('/api/people/anna/profile', headers=ANNA).json()['stats']['groups'] == [
+            {'id': 1, 'name': 'Schematismus'}]
+        assert api.get('/api/people/anna/profile', headers=RITA).json()['stats']['groups'] == []
+
+
+class TestWhereANewDatasetStarts:
+    """The workspace of someone's newest dataset is where the wizard starts (decision 332)."""
+
+    def last_used(self, api, headers) -> dict[str, bool]:
+        return {name: g['last_used'] for name, g in workspaces(api, headers).items()}
+
+    def test_the_workspace_of_their_newest_dataset_is_marked(self, client):
+        api, conn = client
+        conn.execute("UPDATE jobs SET created_at = '2026-01-01 10:00:00' WHERE id = 'j-anna'")
+        conn.execute("UPDATE jobs SET created_at = '2026-02-01 10:00:00' WHERE id = 'j1'")
+        assert self.last_used(api, ANNA) == {'Sandbox': False, 'Schematismus': True}
+        conn.execute("UPDATE jobs SET created_at = '2026-03-01 10:00:00' WHERE id = 'j-anna'")
+        assert self.last_used(api, ANNA) == {'Sandbox': True, 'Schematismus': False}
+
+    def test_not_a_workspace_they_have_left(self, client):
+        api, conn = client
+        conn.execute("UPDATE jobs SET created_at = '2026-01-01 10:00:00' WHERE id = 'j-anna'")
+        conn.execute("UPDATE jobs SET created_at = '2026-02-01 10:00:00' WHERE id = 'j1'")
+        conn.execute("DELETE FROM group_assignees WHERE group_id = 1 AND username = 'anna'")
+        assert self.last_used(api, ANNA) == {'Sandbox': False}
 
 
 class TestManagingAWorkspace:
@@ -229,6 +276,21 @@ class TestMovingADataset:
         assert (response.status_code, response.json()['detail']) == (
             409, "a Sandbox holds only the datasets of the person it belongs to")
         assert group_of(conn, 'j2') == 1
+
+    def test_into_the_sandbox_it_leaves_the_people_it_was_given_to(self, client):
+        api, conn = client
+        response = api.patch('/api/jobs/j1', json={'group_id': None}, headers=ANNA)
+        assert response.status_code == 200, response.text
+        assert group_of(conn, 'j1') == sandbox_of(conn, 'anna')
+        assert conn.execute("SELECT COUNT(*) FROM job_assignees WHERE job_id = 'j1'").fetchone()[0] == 0
+        assert dataset_ids(api, RITA) == []
+
+    def test_between_workspaces_it_keeps_them(self, client):
+        api, conn = client
+        conn.execute("INSERT INTO groups (id, name, owner) VALUES (4, 'Briefe', 'anna')")
+        conn.execute("INSERT INTO group_assignees (group_id, username) VALUES (4, 'anna')")
+        assert api.patch('/api/jobs/j1', json={'group_id': 4}, headers=ANNA).status_code == 200
+        assert [r[0] for r in conn.execute("SELECT username FROM job_assignees WHERE job_id = 'j1'")] == ['rita']
 
     def test_a_reviewer_moves_nothing(self, client):
         api, conn = client

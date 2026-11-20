@@ -138,7 +138,7 @@ export function GroupSettingsDialog({ group, count, onClose, onDone, onError }:
   return (
     <Modal title={`Settings for every dataset in "${group.name}"`} onClose={onClose}>
       <p className="mb-3 text-xs text-ink-muted">
-        Applies to the {count} dataset{count === 1 ? '' : 's'} in this group that you can
+        Applies to the {count} dataset{count === 1 ? '' : 's'} in this workspace that you can
         change. Only what you pick here is written - everything left on "Leave as it is"
         stays whatever each dataset already has. It takes effect when pages are processed
         next; nothing already detected or read is discarded.
