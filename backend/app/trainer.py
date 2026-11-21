@@ -68,6 +68,10 @@ def extract_error(log_text: str) -> str | None:
     return None
 
 
+# Colours and cursor moves a trainer writes even into a file, as rich does with its tables forced on.
+_TERMINAL_CONTROL = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+
+
 def read_log_tail(training: dict) -> str:
     tdir = config.training_dir(training['id'])
     if training['target'] == 'slurm':
@@ -83,8 +87,8 @@ def read_log_tail(training: dict) -> str:
         source = tdir / 'training.log'
     if source is None or not source.is_file():
         return ''
-    lines = source.read_text(encoding='utf-8', errors='replace').splitlines()
-    return '\n'.join(lines[-LOG_TAIL_LINES:])
+    text = _TERMINAL_CONTROL.sub('', source.read_text(encoding='utf-8', errors='replace'))
+    return '\n'.join(text.splitlines()[-LOG_TAIL_LINES:])
 
 # Layout and lines training are wired but not yet validated end to end; the UI
 # shows them as coming soon until they graduate.

@@ -149,6 +149,19 @@ class TestTheLogTail:
 
         assert trainer.read_log_tail(slurm) == 'only the tail'
 
+    def test_a_trainers_terminal_colours_are_left_out(self, conn, tmp_path):
+        """RF-DETR draws its evaluation tables with colours forced on, even into a file (#145)."""
+        write_log(tmp_path, 'slurm.tail',
+                  '\x1b[1;36m                   Val \u2014 Per-class Metrics                   \x1b[0m\n'
+                  '\u2502\x1b[2m \x1b[0m\x1b[2mnode   \x1b[0m\x1b[2m \x1b[0m\u2502   0.7767 \u2502\n'
+                  '\x1b[?25lEpoch 3 \x1b[38;2;98;6;224m\u2501\u2501\x1b[0m 5/5\x1b[K\n')
+        slurm = {**dict(trainer.get_training(conn, 1)), 'target': 'slurm'}
+
+        assert trainer.read_log_tail(slurm) == (
+            '                   Val \u2014 Per-class Metrics                   \n'
+            '\u2502 node    \u2502   0.7767 \u2502\n'
+            'Epoch 3 \u2501\u2501 5/5')
+
     def test_only_the_last_lines_are_kept(self, conn, tmp_path):
         write_log(tmp_path, 'training.log',
                   '\n'.join(str(i) for i in range(trainer.LOG_TAIL_LINES + 50)))
