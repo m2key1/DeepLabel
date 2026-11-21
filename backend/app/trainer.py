@@ -732,7 +732,7 @@ def _check(proc: subprocess.CompletedProcess, what: str) -> subprocess.Completed
     raise RuntimeError(f'{what} failed ({proc.returncode}): {detail}')
 
 
-def _rsync(src: str, dst: str, on_pid=None) -> subprocess.CompletedProcess:
+def _rsync(src: str, dst: str, on_pid=None, excluded: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
     """The snapshot, to the cluster and back. Uncompressed on purpose - it is PNG crops,
     which spend CPU and shrink by nothing - rate limited where the deployment says so, and
     resumable: a transfer that was interrupted picks the partial files up rather than
@@ -745,6 +745,7 @@ def _rsync(src: str, dst: str, on_pid=None) -> subprocess.CompletedProcess:
     flags = ['-a', '--partial', f'--timeout={config.SLURM_RSYNC_STALL}']
     if config.SLURM_RSYNC_BWLIMIT:
         flags.append(f'--bwlimit={config.SLURM_RSYNC_BWLIMIT}')
+    flags += [f'--exclude={pattern}' for pattern in excluded]
     proc = subprocess.Popen(['rsync', *flags, '-e', ssh_cmd, src, dst],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, errors='replace')
@@ -944,6 +945,24 @@ def _fetch_live_artifacts(training: dict, remote: str):
         (tdir / 'slurm.tail').write_text(tail.stdout, encoding='utf-8')
 
 
+def _fetch_results(training: dict, remote: str) -> subprocess.CompletedProcess:
+    """What registering a finished run reads: the files at the top of its output and the
+    artifacts they list. The trainer's own folders beside them hold its checkpoints, often
+    tens of gigabytes that nothing here reads, and stay on the cluster."""
+    output = config.training_dir(training['id']) / 'output'
+    fetched = _rsync(f'{_ssh_target()}:{remote}/output/', f'{output}/', excluded=('*/',))
+    listing = output / 'artifacts.json'
+    if fetched.returncode != 0 or not listing.is_file():
+        return fetched
+    for entry in json.loads(listing.read_text(encoding='utf-8')).get('files', []):
+        if '/' in entry['path']:
+            (output / entry['path']).parent.mkdir(parents=True, exist_ok=True)
+            fetched = _rsync(f'{_ssh_target()}:{remote}/output/{entry["path"]}', str(output / entry['path']))
+            if fetched.returncode != 0:
+                return fetched
+    return fetched
+
+
 def _fetch_full_log(training: dict, remote: str) -> str:
     tdir = config.training_dir(training['id'])
     _rsync(f'{_ssh_target()}:{remote}/slurm.out', f'{tdir}/slurm.out')
@@ -993,7 +1012,7 @@ def _poll_slurm_once(conn):
             continue
         if state == 'COMPLETED':
             tdir = config.training_dir(training['id'])
-            fetch = _rsync(f'{_ssh_target()}:{remote}/output/', f'{tdir}/output/')
+            fetch = _fetch_results(training, remote)
             _fetch_full_log(training, remote)
             if fetch.returncode != 0:
                 set_state(conn, training['id'], status='error', phase=None,
@@ -1004,6 +1023,9 @@ def _poll_slurm_once(conn):
                 set_state(conn, training['id'], status='done', phase=None)
             except Exception as e:
                 set_state(conn, training['id'], status='error', phase=None, error=str(e)[:500])
+                continue
+            # Everything the model needs is here now; a run that failed keeps its folder to recover from.
+            _ssh(['rm', '-rf', remote])
         else:
             if state == 'TIMEOUT' and _resume_from_checkpoint(conn, training, remote):
                 continue

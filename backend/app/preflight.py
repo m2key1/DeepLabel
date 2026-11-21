@@ -18,6 +18,10 @@ SPLITS = ('train', 'val', 'test')
 UNITS = {'ocr': 'lines', 'layout': 'boxes', 'lines': 'lines'}
 
 RARE_BELOW = 5
+# A class with fewer boxes than these is learned from too little, and every valid box it
+# gains or loses swings its score - and the run's, which decides the epoch it keeps.
+SCARCE_TRAIN_BELOW = 20
+SCARCE_VALID_BELOW = 10
 # A flag a run teaches its base model that fewer training lines than this carry is learned
 # from too little to be relied on.
 CONVENTION_LINES_BELOW = 200
@@ -431,16 +435,22 @@ def _layout_classes(conn, request: dict, tally: Tally) -> tuple[list, list]:
     for name in sorted(counts, key=lambda n: (-sum(counts[n].values()), n)):
         row = counts[name]
         flags = (['split_only'] if row['train'] == 0
-                 else ['unvalidated'] if validated and row['val'] == 0 else [])
+                 else ['unvalidated'] if validated and row['val'] == 0
+                 else ['scarce'] if row['train'] < SCARCE_TRAIN_BELOW or (validated and row['val'] < SCARCE_VALID_BELOW)
+                 else [])
         classes.append({'name': name, **row, 'flags': flags})
     split_only = sum('split_only' in c['flags'] for c in classes)
     unvalidated = sum('unvalidated' in c['flags'] for c in classes)
+    scarce = sum('scarce' in c['flags'] for c in classes)
     findings = [
         *_flag(split_only, 'split_only', 'warn',
                f'{plural(split_only, "class appears", "classes appear")} in valid or test but never in train'),
         *_flag(unvalidated, 'unvalidated', 'info',
                f'{plural(unvalidated, "class has", "classes have")} no box in the valid split, so its '
                'score is never measured'),
+        *_flag(scarce, 'scarce', 'warn',
+               f'{plural(scarce, "class has", "classes have")} fewer than {SCARCE_TRAIN_BELOW} boxes in train or '
+               f'{SCARCE_VALID_BELOW} in valid: too few to learn from or to score steadily'),
         *_fresh_head(conn, request, [c['name'] for c in categories]),
     ]
     return classes, findings

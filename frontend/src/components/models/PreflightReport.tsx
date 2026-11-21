@@ -5,7 +5,7 @@ import { displayed } from '../../lib/text'
 import { lineShapeLabel } from '../../api'
 
 import type {
-  Preflight, PreflightChar, PreflightCharFlag, PreflightDistribution, PreflightFlagged, PreflightJoint,
+  Preflight, PreflightChar, PreflightCharFlag, PreflightClassFlag, PreflightDistribution, PreflightFlagged, PreflightJoint,
   PreflightMetric, PreflightResult, PreflightSplit,
 } from '../../api'
 import { Badge } from '../ui/Badge'
@@ -36,6 +36,12 @@ const FLAGS: Record<PreflightCharFlag, { label: string; mark: string; tone: Flag
 }
 
 const FLAG_ORDER = Object.keys(FLAGS) as PreflightCharFlag[]
+
+const CLASS_FLAGS: Record<PreflightClassFlag, { label: string; tone: FlagTone }> = {
+  split_only: { label: 'not in train', tone: 'warn' },
+  unvalidated: { label: 'not validated', tone: 'neutral' },
+  scarce: { label: 'few boxes', tone: 'warn' },
+}
 
 const TILE_RING: Record<FlagTone, string> = {
   neutral: 'border-line',
@@ -713,9 +719,7 @@ export function PreflightReport({ preflight }: { preflight: Preflight }) {
                     ))}
                     <td className={tableCell}>
                       {row.flags.map((flag) => (
-                        <Badge key={flag} tone={flag === 'split_only' ? 'warn' : 'neutral'}>
-                          {flag === 'split_only' ? 'not in train' : 'not validated'}
-                        </Badge>
+                        <Badge key={flag} tone={CLASS_FLAGS[flag].tone}>{CLASS_FLAGS[flag].label}</Badge>
                       ))}
                     </td>
                   </tr>

@@ -51,6 +51,10 @@ the version in the app's footer opens.
 
 ### Changed
 
+- Layout training repeats a small training set so each epoch holds 200 pages, stops early on
+  its smoothed score, defaults to 100 epochs instead of 1000 and keeps only its best weights; a
+  cluster run brings back only its model and leaves no folder behind, and the pre-flight warns
+  about classes with too few boxes (#146).
 - A model and the run that made it are one page, opening on what it learned from and how the
   training went (#123); a run shows the epochs it was left to train for (#115).
 - Every evaluated model is one row of one table, a column per test set and one score per cell (#124).

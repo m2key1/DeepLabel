@@ -483,6 +483,14 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
 - A run from a trained model stops early by default: after 10 validations without a better
   score it ends and keeps its best epoch. A run from scratch trains every epoch unless early
   stopping is switched on, and the form warns when a run of more than 10 epochs has none.
+- A layout run's epoch holds at least 200 pages: a smaller training set is repeated, never
+  its validation pages, so the time spent on each epoch's start, validation and checkpoint does
+  not outweigh the training. It runs at most 100 epochs, validates every epoch and stops early
+  as above on its smoothed (EMA) score; it keeps only its best weights, plus the last epoch's
+  checkpoint to resume from while it runs.
+- A finished cluster run brings back only its model and figures, not the trainer's own
+  checkpoints, and its folder on the cluster is removed once the model is registered. A run
+  that failed keeps its folder.
 - A running run whose validation has not improved for 10 epochs says so under **How it
   went**. Where its trainer can (DeepOCR), **Stop and keep epoch N** ends it at once as
   finished, with its best epoch as the model; the same button sits beside **Cancel**, which
@@ -496,7 +504,10 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
 - **Next** opens a pre-flight review of exactly the material the run will use: the split,
   crop sizes, characters per line and a character table that flags rare characters,
   lookalikes (such as a Cyrillic a in Latin text), characters only in validation, and
-  mixed Unicode forms. It warns but never blocks.
+  mixed Unicode forms. For layout it counts each class's boxes per split and marks a class
+  with fewer than 20 in train or 10 in valid as having **few boxes**: too few to learn from,
+  and each of its boxes moves the score that picks the epoch a run keeps. It warns but never
+  blocks.
 - A run still training, or one that failed or was cancelled, has the same page without
   scores: what it trains on, its settings, its progress and how it went so far, with the
   **Training** and **Data** tabs; once its model exists, the run's address leads to the

@@ -348,6 +348,32 @@ def test_layout_runs_get_classes_per_split(tmp_path, monkeypatch):
     conn.close()
 
 
+def test_a_class_with_too_few_boxes_to_learn_or_score_is_flagged(tmp_path, monkeypatch):
+    """A class with a box or two in valid moves the run's score by chance at every evaluation,
+    which is what decides the epoch a run keeps (#146)."""
+    monkeypatch.setattr('app.config.TRAININGS_DIR', tmp_path / 'trainings')
+    unprobed(monkeypatch)
+    conn = store.connect(tmp_path / 'app.db')
+    add_job(conn, 'jL')
+    add_job(conn, 'jM')
+    add_page(conn, tmp_path, 1, 'jL', 'h1')
+    add_page(conn, tmp_path, 2, 'jM', 'h2')
+    boxes = [(1, 'Paragraph')] * 19 + [(1, 'Header')] + [(2, 'Paragraph')] * 9 + [(2, 'Header')] * 2
+    for element_id, (page_id, name) in enumerate(boxes, start=100):
+        conn.execute("INSERT INTO elements (id, page_id, order_idx, class_name, bbox) "
+                     "VALUES (?, ?, ?, ?, '[0.1, 0.1, 0.2, 0.2]')", (element_id, page_id, element_id, name))
+    conn.commit()
+    result = preflight.compute(conn, {'task': 'layout', 'dataset_job_ids': ['jL'],
+                                      'split_strategy': 'holdout', 'valid_job_ids': ['jM']})
+    assert {row['name']: (row['train'], row['val'], row['flags']) for row in result['classes']} == {
+        'Paragraph': (20, 10, []), 'Header': (1, 2, ['scarce'])}
+    assert [f for f in result['findings'] if f['code'] == 'scarce'] == [
+        {'code': 'scarce', 'level': 'warn',
+         'message': '1 class has fewer than 20 boxes in train or 10 in valid: too few to learn from or '
+                    'to score steadily'}]
+    conn.close()
+
+
 def test_layout_steps_count_pages_not_boxes(tmp_path, monkeypatch):
     """The layout model batches whole pages: one train page with two boxes is one step."""
     monkeypatch.setattr('app.config.TRAININGS_DIR', tmp_path / 'trainings')

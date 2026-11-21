@@ -2408,6 +2408,7 @@ export interface PreflightSplitCount {
 export type PreflightSplit = 'train' | 'val' | 'test'
 
 export type PreflightCharFlag = 'rare' | 'split_only' | 'lookalike' | 'odd' | 'mixed_forms' | 'new_to_base'
+export type PreflightClassFlag = 'split_only' | 'unvalidated' | 'scarce'
 
 export interface PreflightChar {
   char: string
@@ -2458,7 +2459,7 @@ export interface PreflightResult {
   } | null
   /** Absent from a pre-flight stored before bars were linked. */
   joint?: PreflightJoint | null
-  classes: ({ name: string; flags: string[] } & Record<PreflightSplit, number>)[] | null
+  classes: ({ name: string; flags: PreflightClassFlag[] } & Record<PreflightSplit, number>)[] | null
   /** The convention flags an OCR run conditions on; absent before runs carried them. */
   conventions?: {
     names: string[]

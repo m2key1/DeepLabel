@@ -454,3 +454,74 @@ def test_a_run_counts_from_its_preparation_not_from_reaching_slurm(tmp_path):
     trainer.set_state(conn, 91, status='running', phase='slurm:PENDING')
 
     assert conn.execute('SELECT started_at FROM trainings WHERE id = 91').fetchone()[0] == '2026-01-01 00:00:00'
+
+
+def test_a_transfer_can_leave_out_what_matches(monkeypatch):
+    sent = {}
+    monkeypatch.setattr(trainer.subprocess, 'Popen', _fake_popen(sent))
+
+    trainer._rsync('user@cluster:dir/5/output/', '/data/trainings/5/output/', excluded=('*/',))
+
+    assert sent['cmd'][-2:] == ['user@cluster:dir/5/output/', '/data/trainings/5/output/']
+    assert '--exclude=*/' in sent['cmd']
+
+
+class TestAFinishedClusterRun:
+    """#146: a finished run brings back what registering it reads - the files at the top of its
+    output and the artifacts those list - not the trainer's working folders, whose checkpoints
+    run to tens of gigabytes, and its folder on the cluster goes once the model is registered."""
+
+    @pytest.fixture
+    def cluster(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+
+        from app import config
+        monkeypatch.setattr(config, 'TRAININGS_DIR', tmp_path / 'trainings')
+        monkeypatch.setattr(config, 'SLURM_REMOTE_DIR', 'dl-runs')
+        monkeypatch.setattr(trainer, '_ssh_target', lambda: 'user@cluster')
+        conn = store.connect(tmp_path / 'app.db')
+        conn.execute("INSERT INTO trainings (id, task, name, target, status, phase, slurm_job_id) "
+                     "VALUES (5, 'ocr', 'run', 'slurm', 'running', 'slurm:RUNNING', '1455')")
+        conn.commit()
+        sent, registered = [], []
+
+        def ssh(cmd):
+            sent.append(cmd)
+            return completed(0, stdout='COMPLETED\n' if cmd[0] == 'sacct' else '')
+
+        def rsync(source, dest, excluded=()):
+            sent.append(('rsync', source, dest, excluded))
+            if source.endswith('/output/'):
+                (tmp_path / 'trainings' / '5' / 'output').mkdir(parents=True, exist_ok=True)
+                (tmp_path / 'trainings' / '5' / 'output' / 'artifacts.json').write_text(
+                    '{"files": [{"role": "weights", "path": "model.ckpt"}, {"role": "lm", "path": "lm/domain.bin"}]}')
+            return completed(0)
+
+        monkeypatch.setattr(trainer, '_ssh', ssh)
+        monkeypatch.setattr(trainer, '_rsync', rsync)
+        monkeypatch.setattr(trainer, '_fetch_full_log', lambda *_: '')
+        monkeypatch.setattr(trainer, 'register_result', lambda _conn, training, out: registered.append(out) or 7)
+        yield SimpleNamespace(conn=conn, sent=sent, registered=registered, output=tmp_path / 'trainings' / '5' / 'output')
+        conn.close()
+
+    def test_it_fetches_the_outputs_files_and_listed_artifacts_then_removes_its_cluster_folder(self, cluster):
+        trainer._poll_slurm_once(cluster.conn)
+
+        assert cluster.conn.execute('SELECT status FROM trainings WHERE id = 5').fetchone()['status'] == 'done'
+        assert cluster.registered == [cluster.output]
+        fetched = [c for c in cluster.sent if c[0] == 'rsync']
+        assert fetched == [('rsync', 'user@cluster:dl-runs/5/output/', f'{cluster.output}/', ('*/',)),
+                           ('rsync', 'user@cluster:dl-runs/5/output/lm/domain.bin',
+                            str(cluster.output / 'lm' / 'domain.bin'), ())]
+        assert cluster.sent[-1] == ['rm', '-rf', 'dl-runs/5']
+
+    def test_a_run_that_fails_to_register_keeps_its_cluster_folder(self, cluster, monkeypatch):
+        def broken(*_):
+            raise FileNotFoundError('training produced no model.ckpt')
+
+        monkeypatch.setattr(trainer, 'register_result', broken)
+        trainer._poll_slurm_once(cluster.conn)
+
+        row = cluster.conn.execute('SELECT status, error FROM trainings WHERE id = 5').fetchone()
+        assert (row['status'], row['error']) == ('error', 'training produced no model.ckpt')
+        assert [c for c in cluster.sent if isinstance(c, list)] == [['sacct', '-j', '1455', '-n', '-X', '-o', 'State']]
