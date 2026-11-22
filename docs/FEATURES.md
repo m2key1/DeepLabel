@@ -191,7 +191,8 @@ Every dataset has its own layout classes, copied from a template when it is crea
   recolour, change the type, or remove a class and delete or reassign its boxes. Every
   change can be undone.
 - When a layout model predicts labels the dataset does not have, the Processing dialog
-  asks which class each label becomes, or whether to leave it out.
+  asks which class each label becomes, or whether to leave it out. A layout model trained in
+  DeepLabel predicts the classes it was trained on.
 
 ## Processing and re-runs
 

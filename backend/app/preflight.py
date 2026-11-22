@@ -462,7 +462,7 @@ def _fresh_head(conn, request: dict, trained: list[str]) -> list[dict]:
     if not request.get('base_model_id'):
         return []
     try:
-        known = layout_templates.model_classes(conn, request['base_model_id'])
+        known = layout_templates.model_labels(conn, request['base_model_id'])
     except Exception:
         return []
     if not known or known == trained:

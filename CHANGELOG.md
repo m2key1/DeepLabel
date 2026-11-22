@@ -89,6 +89,8 @@ the version in the app's footer opens.
 
 ### Fixed
 
+- A layout model trained on classes of its own reads with those names, not the Schematismus
+  ones (#147).
 - A training's log no longer shows the trainer's terminal colour codes (#145).
 - The admin page and the top bar count the same people as online: anyone with DeepLabel open,
   in view or in a background tab, viewers too (#139).

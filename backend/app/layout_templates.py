@@ -166,10 +166,13 @@ def vocabulary(conn: sqlite3.Connection, job_id: str, model_id: int | None = Non
 
 
 def model_labels(conn: sqlite3.Connection, model_id: int | None) -> list[str]:
-    """The labels a layout model predicts: what its backend declares, or the Schematismus
-    checkpoint's for a model read in-process."""
+    """The labels a layout model predicts: the classes its training recorded, by category id;
+    else what its backend declares, or the Schematismus checkpoint's for a model read in-process."""
     from app import backend_client
 
+    row = conn.execute('SELECT classes FROM models WHERE id = ?', (model_id,)).fetchone()
+    if row and row['classes']:
+        return [c['name'] for c in sorted(json.loads(row['classes']), key=lambda c: c['id'])]
     client = backend_client.client_for(conn, model_id)
     if client is None:
         return list(layout_classes.CLASS_NAMES)
@@ -396,12 +399,3 @@ def training_classes(conn: sqlite3.Connection, job_ids: list[str]) -> tuple[list
     categories = [{'id': class_id, 'name': name} for name, class_id in sorted(ids.items(), key=lambda kv: kv[1])]
     remap = {job_id: {c['id']: ids[c['name']] for c in classes} for job_id, classes in per_job.items()}
     return categories or [{'id': c['id'], 'name': c['name']} for c in schematismus_classes()], remap
-
-
-def model_classes(conn: sqlite3.Connection, model_id: int) -> list[str]:
-    """The classes a layout model was trained on, by category id: what its training
-    recorded, else the labels it declares (the Schematismus ones for an in-process model)."""
-    row = conn.execute('SELECT classes FROM models WHERE id = ?', (model_id,)).fetchone()
-    if row and row['classes']:
-        return [c['name'] for c in sorted(json.loads(row['classes']), key=lambda c: c['id'])]
-    return model_labels(conn, model_id)

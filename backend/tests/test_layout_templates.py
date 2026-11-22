@@ -389,6 +389,16 @@ class TestModelLabels:
         plan = self.plan(client.get(f'/api/jobs/{job_id}/layout-labels', headers=ALICE))
         assert {how for how, _ in plan.values()} == {'name'}
 
+    def test_a_trained_model_offers_the_classes_it_was_trained_on(self, client, conn, letters):
+        """Not the fixed list its backend declares for the builtin checkpoint (#147)."""
+        conn.execute("INSERT INTO models (id, task, name, checkpoint, classes) VALUES (8, 'layout', 'Letters RF-DETR', "
+                     "'/m.ckpt', ?)", (json.dumps([{'id': 1, 'name': 'Salutation'}, {'id': 2, 'name': 'Stamp'}]),))
+        conn.commit()
+
+        plan = self.plan(client.get(f'/api/jobs/{letters}/layout-labels?model_id=8', headers=ALICE))
+
+        assert plan == {'Salutation': ('name', 1), 'Stamp': ('undecided', None)}
+
     def test_a_class_the_dataset_lacks_is_refused(self, client, letters):
         response = client.put(f'/api/jobs/{letters}/layout-labels', headers=ALICE,
                               json={'model_id': 7, 'choices': [{'label': 'Paragraph', 'class_id': 99}]})
