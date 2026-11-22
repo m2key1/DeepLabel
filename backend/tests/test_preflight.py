@@ -54,7 +54,6 @@ def unprobed(monkeypatch):
     """The model repo's constants come from a probe under its own venv; these tests state
     what the model takes instead of depending on whichever checkout this machine has."""
     monkeypatch.setattr(preflight, 'input_size', lambda conn, request: (None, None))
-    monkeypatch.setattr(preflight, 'default_epochs', lambda conn, task, base_model_id: None)
 
 
 @pytest.fixture
@@ -396,6 +395,24 @@ def test_layout_steps_count_pages_not_boxes(tmp_path, monkeypatch):
     assert result['split']['totals']['train'] == {'pages': 1, 'items': 2}
     assert result['settings']['steps_per_epoch'] == 1
     assert result['settings']['total_steps'] == 4
+    conn.close()
+
+
+def test_a_trainer_that_repeats_a_small_split_is_counted_at_the_epoch_it_trains(tmp_path, monkeypatch):
+    """The layout trainer repeats a split under its declared minimum, so one page trains as
+    200 an epoch: 50 steps at batch 4, not 1 (#148)."""
+    monkeypatch.setattr('app.config.TRAININGS_DIR', tmp_path / 'trainings')
+    unprobed(monkeypatch)
+    repeating = FakeTrainer({'resources': {'min_epoch_items': 200}})
+    monkeypatch.setattr('app.remote_training.training_backend', lambda _conn, _training: repeating)
+    conn = store.connect(tmp_path / 'app.db')
+    add_job(conn, 'jL')
+    add_page(conn, tmp_path, 1, 'jL', 'h1')
+    conn.commit()
+    result = preflight.compute(conn, {'task': 'layout', 'dataset_job_ids': ['jL'],
+                                      'val_fraction': 0.1, 'batch_size': 4, 'epochs': 3})
+    assert result['split']['totals']['train'] == {'pages': 1, 'items': 1}
+    assert (result['settings']['steps_per_epoch'], result['settings']['total_steps']) == (50, 150)
     conn.close()
 
 

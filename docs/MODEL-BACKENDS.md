@@ -1024,6 +1024,7 @@ A backend declares, beside `default_batch` in `resources`:
 |---|---|
 | `batch_by_gpu` | `{card: batch}`, the batch **per GPU** measured to fit that card on the densest material of a fixed benchmark. Card ids: `rtx5090`, `rtx6000bb`, `h200`, `l40s` |
 | `effective_batch` | the batch x accumulation x GPUs the trainer's learning rates were tuned at |
+| `min_epoch_items` | optional: the items an epoch holds at least, where the trainer repeats a smaller training split up to it (the layout trainer: 200 pages). The pre-flight counts a run's steps per epoch from it |
 | `preferred_gpu` | optional: the cheapest card that holds a run, which the training dialog starts a cluster run on until one is picked (a small model peaking at 2 GB: `l40s`). A card the cluster does not offer is ignored |
 | a tunable's `role` | `accumulation` on the one tunable that sets gradient accumulation, `learning_rate` on each absolute learning rate |
 

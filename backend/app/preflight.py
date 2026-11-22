@@ -75,13 +75,18 @@ def input_size(conn, request: dict) -> tuple[int | None, int | None]:
     return None, None
 
 
-def default_epochs(conn, task: str, base_model_id: int | None) -> int | None:
-    """The epochs an untuned run trains for, as its model backend declares them."""
+def _declared(conn, task: str, base_model_id: int | None) -> dict:
+    """What the run's model backend declares about training, or nothing if none is reached."""
     try:
         client = remote_training.training_backend(conn, {'task': task, 'base_model_id': base_model_id})
-        return client.info()['train'].get('default_epochs')
+        return client.info().get('train') or {}
     except (remote_training.CannotTrain, BackendError):
-        return None
+        return {}
+
+
+def default_epochs(conn, task: str, base_model_id: int | None) -> int | None:
+    """The epochs an untuned run trains for, as its model backend declares them."""
+    return _declared(conn, task, base_model_id).get('default_epochs')
 
 
 def train_counts(conn, model_id: int | None) -> dict[str, int] | None:
@@ -502,8 +507,12 @@ def _settings(conn, request: dict, train_samples: int) -> dict:
     scaling = trainer.run_scaling(conn, task, target, request.get('gpu_type'), devices,
                                   request.get('base_model_id'), request.get('batch_size'), request.get('hyperparams'))
     batch = scaling['batch_size']
-    epochs = request.get('epochs') or default_epochs(conn, task, request.get('base_model_id'))
-    steps = math.ceil(train_samples / (batch * devices * (scaling['grad_accum_steps'] or 1))) if train_samples else 0
+    declared = _declared(conn, task, request.get('base_model_id'))
+    epochs = request.get('epochs') or declared.get('default_epochs')
+    # A trainer that repeats a smaller training split says how much an epoch holds at least.
+    minimum = (declared.get('resources') or {}).get('min_epoch_items') or 0
+    per_epoch = max(train_samples, minimum) if train_samples else 0
+    steps = math.ceil(per_epoch / (batch * devices * (scaling['grad_accum_steps'] or 1)))
     base = registry.get_model(conn, request['base_model_id']) if request.get('base_model_id') else None
     if request.get('split_strategy') == 'holdout':
         validation = f"holdout on {plural(len(request.get('valid_job_ids') or []), 'dataset')}"
