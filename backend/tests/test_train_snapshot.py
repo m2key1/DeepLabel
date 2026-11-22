@@ -138,6 +138,27 @@ def test_identical_pages_across_datasets_never_straddle_the_split(tmp_path, monk
     conn.close()
 
 
+def test_the_random_split_keeps_every_page_wholly_on_one_side(tmp_path, monkeypatch):
+    """It draws pages, not lines, so no validation page has lines in training (#127)."""
+    monkeypatch.setattr('app.config.TRAININGS_DIR', tmp_path / 'trainings')
+    conn = store.connect(tmp_path / 'app.db')
+    scan = tmp_path / 'scan.png'
+    Image.new('RGB', (400, 300), 'white').save(scan)
+    seed_ocr_pages(conn, 'jobA', scan, [f'h{i}' for i in range(6)], 5, first_page_id=1, first_line_id=1)
+
+    train_snapshot.build(conn, 9, 'ocr', ['jobA'], val_fraction=0.5)
+
+    snapshot = tmp_path / 'trainings' / '9' / 'snapshot'
+    written = {part: {int(p.stem.split('_')[1]) for p in (snapshot / part).glob('*.txt')} for part in ('train', 'valid')}
+    assert written['train'].isdisjoint(written['valid'])
+    assert written['train'] | written['valid'] == set(range(1, 31))
+    sides = snapshot_sides(snapshot)
+    by_page = [{sides[line] for line in range(first, first + 5)} for first in range(1, 31, 5)]
+    assert all(len(page) == 1 for page in by_page)
+    assert sorted(page.pop() for page in by_page) == ['train'] * 3 + ['valid'] * 3
+    conn.close()
+
+
 def test_holdout_build_puts_the_validation_dataset_entirely_in_valid(two_jobs, tmp_path):
     counts = train_snapshot.build(two_jobs, 5, 'ocr', ['jobA'],
                                   split_strategy='holdout', valid_job_ids=['jobB'])

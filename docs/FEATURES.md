@@ -475,9 +475,10 @@ backends up as described in [MODEL-BACKENDS.md](MODEL-BACKENDS.md).
 Start a run with **Train model** on the Models page. Training runs on the model's backend, either on the
 local GPU or on a Slurm cluster (marked *highly experimental*).
 
-- Pick the base model, the datasets (by workspace, with search), the validation split and
-  optionally one or more test sets: the test pages of datasets, scored with the base and the
-  new model once the run is trained. Datasets and test sets each have a search, and
+- Pick the base model, the datasets (by workspace, with search), the validation pages - a
+  share of whole pages, at random or from each dataset, so no page trains and validates at
+  once - and optionally one or more test sets: the test pages of datasets, scored with the
+  base and the new model once the run is trained. Datasets and test sets each have a search, and
   **Select all** takes everything the search shows.
 - Train only on lines a person verified, or include lines settled by language-model
   agreement.

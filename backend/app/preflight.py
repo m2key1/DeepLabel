@@ -508,8 +508,8 @@ def _settings(conn, request: dict, train_samples: int) -> dict:
     if request.get('split_strategy') == 'holdout':
         validation = f"holdout on {plural(len(request.get('valid_job_ids') or []), 'dataset')}"
     else:
-        strategy = 'per dataset' if request.get('split_strategy') == 'stratified' else 'random'
-        validation = f"{round(request.get('val_fraction', 0.1) * 100)}% {strategy}"
+        drawn = ' from each dataset' if request.get('split_strategy') == 'stratified' else ', at random'
+        validation = f"{round(request.get('val_fraction', 0.1) * 100)}% of pages{drawn}"
     return {'base_model': base['name'] if base else None, 'target': target,
             'gpu_type': request.get('gpu_type'), 'devices': devices,
             'batch_size': batch, 'batch_is_default': not request.get('batch_size'),

@@ -291,6 +291,13 @@ class TestText:
 
 
 class TestSettings:
+    def test_the_recap_says_validation_is_drawn_by_page(self, material):
+        """Whole pages go to validation, never single lines, and the recap says so (#127)."""
+        request = {'task': 'ocr', 'dataset_job_ids': ['jA', 'jV'], 'val_fraction': 0.1}
+        assert preflight.compute(material, request)['settings']['validation'] == '10% of pages, at random'
+        stratified = {**request, 'split_strategy': 'stratified'}
+        assert preflight.compute(material, stratified)['settings']['validation'] == '10% of pages from each dataset'
+
     def test_the_recap_derives_steps_from_the_train_split(self, material):
         settings = preflight.compute(material, HOLDOUT)['settings']
         assert settings['batch_size'] == 4

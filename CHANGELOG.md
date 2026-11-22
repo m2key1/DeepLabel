@@ -54,6 +54,7 @@ the version in the app's footer opens.
 - The page table shows which pages are marked lines complete, the ones line detection trains
   on, in a Lines column with its own filters; the text filters are now called Text checked and
   Text unchecked (#78).
+- The training form and pre-flight say the validation share is drawn as whole pages (#127).
 - Layout training repeats a small training set so each epoch holds 200 pages, stops early on
   its smoothed score, defaults to 100 epochs instead of 1000 and keeps only its best weights; a
   cluster run brings back only its model and leaves no folder behind, and the pre-flight warns

@@ -894,13 +894,13 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
                 value={strategy}
                 onChange={(e) => setStrategy(e.target.value as SplitStrategy)}
               >
-                <option value="uniform">Random split</option>
-                <option value="stratified">Split within each dataset</option>
+                <option value="uniform">Random pages</option>
+                <option value="stratified">Pages from each dataset</option>
               </select>
             </div>
             <div className="flex-1">
               <label className={labelClass} htmlFor="training-val">
-                Validation split
+                Validation pages
               </label>
               <select id="training-val" value={valPct} onChange={(e) => setValPct(e.target.value)} className={inputClass}>
                 {VAL_PERCENTS.map((p) => (
@@ -947,7 +947,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
           `batch ${batchSize.trim() || batchDefault}`,
           `lr ${learningRate.trim() || lrDefault}`,
           earlyStop ? `early stop after ${patienceOrDefault}` : 'no early stop',
-          `${valPct}% ${strategy === 'uniform' ? 'random' : 'per-dataset'} validation split`,
+          `validation on ${valPct}% of pages${strategy === 'uniform' ? ', at random' : ' from each dataset'}`,
           ...(testIds.length ? [`test: ${testIds.map((id) => jobs?.find((j) => j.id === id)?.name ?? '').join(', ')}`] : []),
           ...(target === 'slurm' ? [`${gpuCount}x ${GPU_LABELS[gpuType] ?? gpuType}`] : []),
           `augmentation: ${stackLabel}`,

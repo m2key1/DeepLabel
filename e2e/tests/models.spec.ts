@@ -60,7 +60,8 @@ test.describe('Scenario: the model registry', () => {
     await expect(page.getByTestId('submit-summary')).toContainText('3 epochs · batch 8 · lr 0.0001')
     await expect(page.getByTestId('trains-on-backend')).toHaveText('Trains on model backend "ocr", with the settings it offers.')
     // The split divides pages: 30% of this dataset's two pages is one valid page.
-    await page.getByLabel('Validation split').selectOption('30')
+    await page.getByLabel('Validation pages').selectOption('30')
+    await expect(page.getByTestId('submit-summary')).toContainText('validation on 30% of pages, at random')
     await page.getByLabel('Epochs', { exact: true }).fill('1')
     await page.getByLabel('Learning rate').fill('0.00005')
     // A run from a trained model stops early by default (decision 313); its patience is sent along.
