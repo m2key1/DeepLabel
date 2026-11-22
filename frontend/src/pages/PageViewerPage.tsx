@@ -116,6 +116,9 @@ import { comboLabel, eventCombo, useSettings } from '../settings'
 import { beyondPlain, orderByGroups } from '../palette'
 import { useAutoClear } from '../messages'
 
+// The most a presence heartbeat carries (routes/presence.py MAX_TARGETS).
+const PRESENCE_TARGETS_MAX = 500
+
 const HANDLES: [string, number, number][] = [
   ['nw', 0, 0], ['n', 0.5, 0], ['ne', 1, 0], ['e', 1, 0.5],
   ['se', 1, 1], ['s', 0.5, 1], ['sw', 0, 1], ['w', 0, 0.5],
@@ -727,10 +730,22 @@ export function PageViewerPage() {
   }, [setCrumbs, jobName, jobId, pageNo, inElementCrumb, selectedNo])
 
   const { onPage, onTarget } = usePresence()
+  // The line being read, the box in hand and a gathered set are all shared, so a colleague
+  // sees a clash coming before either of them saves.
+  const held: { kind: 'line' | 'element'; id: number }[] = [
+    ...(activeLine !== null ? [{ kind: 'line' as const, id: activeLine }] : []),
+    ...(selKind === 'element' && selectedId !== null ? [{ kind: 'element' as const, id: selectedId }] : []),
+    ...[...mergeSet].map((id) => ({ kind: mergeKind.current, id })),
+  ].filter((t, i, all) => all.findIndex((o) => o.kind === t.kind && o.id === t.id) === i)
+    // A sweep can gather more than a heartbeat carries; the first of them stand for it.
+    .slice(0, PRESENCE_TARGETS_MAX)
   usePresenceLocation(page
-    ? { job_id: jobId, page_id: page.id, editing: editing || editingId !== null,
-        target: activeLine !== null ? { kind: 'line', id: activeLine } : null }
+    ? { job_id: jobId, page_id: page.id, editing: editing || editingId !== null, targets: held }
     : { job_id: jobId })
+  // Each box someone else holds on this page, once per person.
+  const heldByOthers = page ? [...new Map(onPage(page.id).flatMap((entry) => entry.targets
+    .filter((t) => t.kind === 'element')
+    .map((t) => [`${entry.username}:${t.id}`, { username: entry.username, id: t.id }] as const))).values()] : []
 
   const selectElement = (el: PageElement) => {
     setSelectedId(el.id)
@@ -2632,6 +2647,24 @@ export function PageViewerPage() {
               />
             )
           })}
+          {heldByOthers.map(({ username, id }) => {
+            const el = selectable.find((e) => e.id === id)
+            return el && (
+              <rect
+                key={`held-${username}-${id}`}
+                data-testid="presence-box"
+                data-id={id}
+                data-user={username}
+                x={el.bbox[0]} y={el.bbox[1]} width={el.bbox[2] - el.bbox[0]} height={el.bbox[3] - el.bbox[1]}
+                fill="none"
+                stroke={classColor(username)}
+                strokeWidth={2.5}
+                strokeDasharray="6 3"
+                vectorEffect="non-scaling-stroke"
+                pointerEvents="none"
+              />
+            )
+          })}
           {visibleLines.map((l) => {
             if (selKind === 'line' && l.id === activeLine && !livePoly) return null
             const ghost = selKind === 'line' && l.id === activeLine
@@ -3652,6 +3685,7 @@ export function PageViewerPage() {
               ? <span className="shrink-0 text-ink-subtle" title="Holds other regions, no text">⊞</span>
               : <span className="shrink-0 tabular-nums text-ink-subtle">{el.lines.length}</span>,
             hidden: hiddenEls.has(el.id) || hidden.has(el.class_name),
+            trailing: <PresenceAvatars entries={onTarget('element', el.id)} />,
             lines: el.lines.map((line) => ({
               id: line.id,
               label: LINE_CLASS,

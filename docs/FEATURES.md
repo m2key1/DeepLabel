@@ -618,7 +618,9 @@ polygons) and *line tracing* (boundary lines, open or closed).
 - **Presence:** whoever has DeepLabel open - in view or in a background tab, viewers too - is
   online. The navigation bar counts the others online, the admin page marks everyone online,
   and datasets and pages show who is in them. Opening a page someone else has open shows a
-  notice. In Settings you can keep where you are to yourself (you still count as online) or
+  notice. In the page editor the box or gathered boxes a colleague has selected are outlined
+  in their colour on the scan, with their avatar on the box's row in the region list, so a
+  clash shows before either of you saves. In Settings you can keep where you are to yourself (you still count as online) or
   stop seeing the others.
 - **Live edits:** a colleague's changes appear in your open page without a reload.
 - **Edit conflicts:** if someone saved a line, box or region after you loaded it, your save

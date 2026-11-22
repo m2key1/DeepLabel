@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import presence
 from app.deps import can_access_job, current_user, get_db, require_job_access
@@ -7,6 +7,8 @@ from app.deps import can_access_job, current_user, get_db, require_job_access
 router = APIRouter(tags=['presence'])
 
 TARGET_KINDS = ('line', 'element', 'region')
+# A sweep can gather a page's boxes; past this many, sharing them is no longer a hint.
+MAX_TARGETS = 500
 
 
 class Target(BaseModel):
@@ -18,7 +20,7 @@ class Heartbeat(BaseModel):
     tab: str
     job_id: str | None = None
     page_id: int | None = None
-    target: Target | None = None
+    targets: list[Target] = Field(default_factory=list, max_length=MAX_TARGETS)
     editing: bool = False
 
 
@@ -45,12 +47,11 @@ def heartbeat(body: Heartbeat, conn=Depends(get_db), user: dict = Depends(curren
         page = conn.execute('SELECT job_id FROM pages WHERE id = ?', (body.page_id,)).fetchone()
         if page is None or page['job_id'] != body.job_id:
             raise HTTPException(400, 'page does not belong to that dataset')
-    if body.target is not None and body.target.kind not in TARGET_KINDS:
+    if any(target.kind not in TARGET_KINDS for target in body.targets):
         raise HTTPException(400, f'target kind must be one of {TARGET_KINDS}')
     location = presence.Location(
         job_id=body.job_id, page_id=body.page_id,
-        target_kind=body.target.kind if body.target else None,
-        target_id=body.target.id if body.target else None,
+        targets=tuple((target.kind, target.id) for target in body.targets),
         editing=body.editing,
         unseen=user['role'] == 'admin' and body.job_id is not None
         and not can_access_job(conn, body.job_id, {**user, 'role': 'manager'}))
@@ -94,8 +95,7 @@ def online(conn=Depends(get_db), user: dict = Depends(current_user),
             'job_task': jobs[loc.job_id]['task'] if visible else None,
             'page_id': loc.page_id if visible else None,
             'page_idx': page_idx.get(loc.page_id) if visible else None,
-            'target': {'kind': loc.target_kind, 'id': loc.target_id}
-                      if visible and loc.target_kind else None,
+            'targets': [{'kind': kind, 'id': target_id} for kind, target_id in loc.targets] if visible else [],
             'editing': loc.editing if visible else False,
             'accessible': visible or loc.job_id is None,
         })

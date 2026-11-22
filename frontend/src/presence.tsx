@@ -138,6 +138,6 @@ export function usePresence(): Presence {
     others,
     onJob: (jobId) => others.filter((o) => o.job_id === jobId),
     onPage: (pageId) => others.filter((o) => o.page_id === pageId),
-    onTarget: (kind, id) => others.filter((o) => o.target?.kind === kind && o.target.id === id),
+    onTarget: (kind, id) => others.filter((o) => o.targets.some((t) => t.kind === kind && t.id === id)),
   }), [others])
 }

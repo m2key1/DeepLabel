@@ -1004,7 +1004,8 @@ export type PresenceTargetKind = 'line' | 'element' | 'region'
 export interface PresenceLocation {
   job_id?: string
   page_id?: number
-  target?: { kind: PresenceTargetKind; id: number } | null
+  /** What the tab has selected: a line, a box, a gathered set. */
+  targets?: { kind: PresenceTargetKind; id: number }[]
   editing?: boolean
 }
 
@@ -1018,7 +1019,7 @@ export interface PresenceEntry {
   job_task: Task | null
   page_id: number | null
   page_idx: number | null
-  target: { kind: PresenceTargetKind; id: number } | null
+  targets: { kind: PresenceTargetKind; id: number }[]
   editing: boolean
   /** False when the person is inside a dataset you cannot open: the place is withheld. */
   accessible: boolean

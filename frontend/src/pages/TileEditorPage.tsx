@@ -190,7 +190,7 @@ export function TileEditorPage() {
   const { onPage } = usePresence()
   usePresenceLocation(page && jobId
     ? { job_id: jobId, page_id: page.id, editing: !readOnly,
-        target: selectedId !== null ? { kind: 'region', id: selectedId } : null }
+        targets: selectedId !== null ? [{ kind: 'region', id: selectedId }] : [] }
     : jobId ? { job_id: jobId } : null)
   const [busy, setBusy] = useState(false)
   // Select tool: shapes gathered with Shift-click for a merge, and the armed scissors.

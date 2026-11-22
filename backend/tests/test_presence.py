@@ -108,10 +108,25 @@ def online(client, username, role='member'):
 class TestHeartbeat:
     def test_announces_a_page_in_a_shared_dataset(self, stack):
         client, registry = stack
-        response = beat(client, 'bob', job_id='alice-job', page_id=2, target={'kind': 'line', 'id': 7}, editing=True)
+        response = beat(client, 'bob', job_id='alice-job', page_id=2, targets=[{'kind': 'line', 'id': 7}], editing=True)
         assert response.status_code == 200
         [entry] = registry.online()
-        assert entry.location == Location(job_id='alice-job', page_id=2, target_kind='line', target_id=7, editing=True)
+        assert entry.location == Location(job_id='alice-job', page_id=2, targets=(('line', 7),), editing=True)
+
+    def test_announces_every_box_of_a_gathered_set_beside_the_line(self, stack):
+        """A box or a gathered set is shared as the line is, so a clash shows before it happens (#80)."""
+        client, registry = stack
+        boxes = [{'kind': 'element', 'id': 4}, {'kind': 'element', 'id': 5}]
+        assert beat(client, 'bob', job_id='alice-job', page_id=2, targets=[{'kind': 'line', 'id': 7}, *boxes],
+                    editing=True).status_code == 200
+        [entry] = online(client, 'alice')
+        assert entry['targets'] == [{'kind': 'line', 'id': 7}, *boxes]
+
+    def test_a_selection_too_large_to_share_is_refused(self, stack):
+        client, registry = stack
+        many = [{'kind': 'element', 'id': i} for i in range(501)]
+        assert beat(client, 'bob', job_id='alice-job', page_id=2, targets=many).status_code == 422
+        assert registry.online() == []
 
     def test_refuses_a_dataset_the_caller_cannot_open(self, stack):
         client, registry = stack
@@ -132,7 +147,7 @@ class TestHeartbeat:
 
     def test_rejects_nonsense(self, stack):
         client, _ = stack
-        assert beat(client, 'alice', job_id='alice-job', target={'kind': 'cursor', 'id': 1}).status_code == 400
+        assert beat(client, 'alice', job_id='alice-job', targets=[{'kind': 'cursor', 'id': 1}]).status_code == 400
         assert client.post('/api/presence', json={'tab': ' '}, headers=headers('alice')).status_code == 400
 
     def test_a_viewer_is_online_too(self, stack):
@@ -149,12 +164,12 @@ class TestHeartbeat:
 class TestOnline:
     def test_shows_where_people_are_inside_datasets_you_can_open(self, stack):
         client, _ = stack
-        beat(client, 'bob', job_id='alice-job', page_id=2, target={'kind': 'line', 'id': 7}, editing=True)
+        beat(client, 'bob', job_id='alice-job', page_id=2, targets=[{'kind': 'line', 'id': 7}], editing=True)
         [entry] = online(client, 'alice')
         assert entry == {
             'username': 'bob', 'tab': 't1', 'seen_seconds_ago': 0,
             'job_id': 'alice-job', 'job_name': 'Schematismus', 'job_task': 'text', 'page_id': 2, 'page_idx': 1,
-            'target': {'kind': 'line', 'id': 7}, 'editing': True, 'accessible': True,
+            'targets': [{'kind': 'line', 'id': 7}], 'editing': True, 'accessible': True,
         }
 
     def test_hides_the_place_but_not_the_person_elsewhere(self, stack):
@@ -163,8 +178,9 @@ class TestOnline:
         [entry] = online(client, 'alice')
         assert entry['username'] == 'mallory'
         assert entry['accessible'] is False
-        withheld = (entry['job_id'], entry['job_name'], entry['job_task'], entry['page_id'], entry['page_idx'], entry['target'])
-        assert withheld == (None,) * 6
+        withheld = (entry['job_id'], entry['job_name'], entry['job_task'], entry['page_id'], entry['page_idx'])
+        assert withheld == (None,) * 5
+        assert entry['targets'] == []
         assert entry['editing'] is False
 
     def test_admins_see_every_place(self, stack):
@@ -184,7 +200,7 @@ class TestOnline:
         assert entry == {
             'username': 'bob', 'tab': 't1', 'seen_seconds_ago': 0,
             'job_id': None, 'job_name': None, 'job_task': None, 'page_id': None, 'page_idx': None,
-            'target': None, 'editing': False, 'accessible': True,
+            'targets': [], 'editing': False, 'accessible': True,
         }
 
     def test_someone_on_no_dataset_is_simply_online(self, stack):

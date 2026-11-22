@@ -15,8 +15,8 @@ TTL_SECONDS = 120
 class Location:
     job_id: str | None = None
     page_id: int | None = None
-    target_kind: str | None = None
-    target_id: int | None = None
+    # What the tab has selected: a line, a box, a gathered set; (kind, id) each.
+    targets: tuple[tuple[str, int], ...] = ()
     editing: bool = False
     # An admin looking into a dataset whose people they are not among: only admins see
     # where, everyone else sees them online and nowhere in particular.

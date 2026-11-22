@@ -10,6 +10,7 @@ the version in the app's footer opens.
 
 ### Added
 
+- The page editor shows which box, or gathered set of boxes, a colleague has selected (#80).
 - A recognition API: pages or line images in, lines and text out, nothing stored (#93). Big
   requests can be queued and fetched later (#96), lines can carry their confidence bands (#97),
   layout regions can be found first (#98), and a request's pages can be kept as a dataset (#99).

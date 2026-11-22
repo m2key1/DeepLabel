@@ -1,6 +1,6 @@
 import { test, expect } from '../helpers/test'
 import {
-  backendFetch, createJob, identity, jobPageIds, seedCompletedJob, shareJob, uniqueName, waitForJobStatus,
+  backendFetch, createJob, getPageDetail, identity, jobPageIds, seedCompletedJob, shareJob, uniqueName, waitForJobStatus,
 } from '../helpers/api'
 import { asSession, seedSession, useSession } from '../helpers/session'
 import { FRONTEND } from '../helpers/frontend'
@@ -10,12 +10,51 @@ interface PresenceUser {
   username: string
   job_id: string | null
   page_id: number | null
+  targets: { kind: string; id: number }[]
 }
 
 async function whereIs(username: string): Promise<PresenceUser | null> {
   const res = await backendFetch('/api/presence')
   return res.users.find((u: PresenceUser) => u.username === username) ?? null
 }
+
+test.describe('Scenario: seeing which box a colleague holds', () => {
+  test('a box a colleague selects is marked in your region list and on your scan, and let go when they do (#80)',
+    async ({ page, browser }) => {
+      const username = `holding-${Date.now()}`
+      const token = seedSession('manager', username)
+      const jobId = await seedCompletedJob(uniqueName('Held box'))
+      await shareJob(jobId, [username])
+      const [pageId] = await jobPageIds(jobId)
+      const [held, free] = (await getPageDetail(jobId, pageId)).elements.map((e: { id: number }) => e.id)
+
+      const colleague = await browser.newContext()
+      await useSession(colleague, token)
+      const theirTab = await colleague.newPage()
+      await theirTab.goto(`/jobs/${jobId}/pages/${pageId}`)
+      await theirTab.getByRole('button', { name: /^Edit/ }).click()
+      await theirTab.locator(`[data-testid="region-row"][data-region-id="${held}"] button`).first().click()
+      await expect.poll(async () => (await whereIs(username))?.targets ?? null)
+        .toEqual([{ kind: 'element', id: held }])
+
+      await page.goto(`/jobs/${jobId}/pages/${pageId}`)
+      await page.getByRole('button', { name: /^Edit/ }).click()
+      const row = (id: number) => page.locator(`[data-testid="region-row"][data-region-id="${id}"]`)
+      await expect(row(held).getByTestId('presence-avatars').getByLabel(username)).toBeVisible()
+      await expect(row(free)).toBeVisible()
+      await expect(row(free).getByTestId('presence-avatars')).toHaveCount(0)
+      const outline = page.locator('[data-testid="presence-box"]')
+      await expect(outline).toHaveCount(1)
+      await expect(outline).toHaveAttribute('data-id', String(held))
+      await expect(outline).toHaveAttribute('data-user', username)
+
+      await theirTab.keyboard.press('Escape')
+      await expect.poll(async () => (await whereIs(username))?.targets ?? null).toEqual([])
+      await expect(row(held).getByTestId('presence-avatars')).toHaveCount(0)
+      await expect(outline).toHaveCount(0)
+      await colleague.close()
+    })
+})
 
 test.describe('Scenario: seeing who is where', () => {
   // Admins leave no trace where they do not belong (#131, decision 322); other admins still see them.

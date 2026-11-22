@@ -11,7 +11,7 @@ export function distinctPeople(entries: PresenceEntry[]): PresenceEntry[] {
 }
 
 function specificity(entry: PresenceEntry): number {
-  if (entry.target) return 3
+  if (entry.targets.length > 0) return 3
   if (entry.page_id !== null) return 2
   if (entry.job_id !== null) return 1
   return 0
