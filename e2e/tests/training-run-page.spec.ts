@@ -358,6 +358,38 @@ test.describe('Scenario: reading curves like TensorBoard', () => {
   })
 })
 
+test.describe('Scenario: a run that reported once', () => {
+  test('draws its one point as a dot, which a line through it cannot show (#143)', async ({ page }) => {
+    test.setTimeout(120_000)
+    const dataset = await seedCompletedJob(uniqueName('One epoch train'), 1)
+    await markLinesChecked(dataset, 3)
+    // [once]: the stub trainer reports its first epoch and stops.
+    const name = `${uniqueName('One epoch')} [once]`
+    await createTraining({ task: 'ocr', name, dataset_job_ids: [dataset], target: 'local', epochs: 1 })
+    await expect.poll(async () => (await listTrainings()).find((t) => t.name === name)?.status,
+                      { timeout: 60_000 }).toBe('done')
+    const once = (await listTrainings()).find((t) => t.name === name)!.id
+    const reported = (await getTrainingProgress(once)).points
+    expect(reported.map((p) => [p.epoch, p.cer])).toEqual([[1, 0.5]])
+
+    await page.goto(`/models/runs/${once}?tab=training`)
+    const cer = chart(page, 'cer')
+    await expect(cer.getByTestId('metric-latest')).toHaveText('50.00%')
+    await expect(cer.getByTestId('chart-footer')).toHaveText('step 1')
+    await expect(cer.locator('[data-line="dot"]')).toHaveCount(1)
+    const dot = (await cer.locator('[data-line="dot"]').boundingBox())!
+    const plot = (await cer.getByTestId('plot-area').boundingBox())!
+    expect(dot.width).toBeGreaterThan(4)
+    expect(dot.x).toBeGreaterThan(plot.x)
+    expect(dot.x + dot.width).toBeLessThan(plot.x + plot.width)
+
+    // A run of three points is drawn as its line alone.
+    await page.goto(`/models/runs/${runId}?tab=training`)
+    await expect(chart(page, 'cer').locator('[data-line="smoothed"]')).toHaveCount(1)
+    await expect(chart(page, 'cer').locator('[data-line="dot"]')).toHaveCount(0)
+  })
+})
+
 test.describe('Scenario: the data tab explains what is under the pointer', () => {
   test('the page scrolls inside the app, and the window around it never does', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 600 })

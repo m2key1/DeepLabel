@@ -140,13 +140,15 @@ export function MetricChart({ metric, settings, cursor, active, onCursor }: {
       const band = bucketize(inView.map((r) => ({ x: r.x, y: r.y })), [x0, x1], columns)
       const trend = bucketize(inView.map((r) => ({ x: r.x, y: r.smooth })), [x0, x1], columns)
       const area = [...band.map((b) => ({ x: b.x, y: b.hi })), ...[...band].reverse().map((b) => ({ x: b.x, y: b.lo }))]
-      return { ...s, band: `${linePath(area, sx, sy)} Z`, raw: null, smoothed: linePath(trend.map((b) => ({ x: b.x, y: b.last })), sx, sy) }
+      return { ...s, band: `${linePath(area, sx, sy)} Z`, raw: null, smoothed: linePath(trend.map((b) => ({ x: b.x, y: b.last })), sx, sy), dot: null }
     }
     return {
       ...s,
       band: null,
       raw: smoothing > 0 ? linePath(s.rows, sx, sy) : null,
       smoothed: linePath(s.rows.map((r) => ({ x: r.x, y: r.smooth })), sx, sy),
+      // A line through one point draws nothing, so a series reported once is marked by a dot.
+      dot: s.rows.length === 1 ? s.rows[0] : null,
     }
   })
 
@@ -333,6 +335,7 @@ export function MetricChart({ metric, settings, cursor, active, onCursor }: {
                                 strokeLinejoin="round" style={{ stroke: s.color }} />}
                 <path d={s.smoothed} data-line="smoothed" fill="none" strokeWidth="2"
                       strokeLinejoin="round" strokeLinecap="round" style={{ stroke: s.color }} />
+                {s.dot && <circle data-line="dot" cx={sx(s.dot.x)} cy={sy(s.dot.smooth)} r="3.5" style={{ fill: s.color }} />}
               </g>
             ))}
           </g>
@@ -398,7 +401,7 @@ export function MetricChart({ metric, settings, cursor, active, onCursor }: {
       </div>
       <p data-testid="chart-footer" className="mt-0.5 h-4 truncate text-center font-mono text-[10px] tabular-nums text-ink-subtle">
         {xs.length === 0 ? '' : at === null
-          ? `${axisLabel(axis, xs[0])} - ${axisLabel(axis, xs[xs.length - 1])}${zoom ? ' · zoomed, double-click to reset' : ''}`
+          ? `${xs.length === 1 ? axisLabel(axis, xs[0]) : `${axisLabel(axis, xs[0])} - ${axisLabel(axis, xs[xs.length - 1])}`}${zoom ? ' · zoomed, double-click to reset' : ''}`
           : `${axisLabel(axis, at)} · ${atRows.map(({ s, row }) =>
               `${many ? `${s.label} ` : ''}${metric.format(row.smooth)}`).join(' · ')}`}
       </p>
