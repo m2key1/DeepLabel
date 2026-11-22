@@ -56,6 +56,9 @@ FILTERS = {
     'layout-reviewed': f'{_WORK} AND layout_checked = 1',
     'unreviewed-lines': f'{_WORK} AND lines_reviewed < lines_total',
     'layout-unchecked': f'{_WORK} AND layout_checked = 0',
+    # The flag line detection trains on: the outlines, not the text, are done.
+    'lines-complete': f'{_WORK} AND lines_checked = 1',
+    'lines-unchecked': f'{_WORK} AND lines_checked = 0',
     'no-layout': f'{_WORK} AND elements_total = 0',
     'test-pages': f'{_WORK} AND is_test = 1',
     'has-note': 'deleted = 0 AND note IS NOT NULL',
@@ -81,6 +84,7 @@ SORTS = {
     'dimensions': 'width * height',
     'status': 'status',
     'layout': 'layout_checked',
+    'lines': 'lines_checked',
     'checked': 'CAST(lines_reviewed AS REAL) / NULLIF(lines_total, 0)',
     'confidence': 'min_confidence',
     'llm': 'llm_models',

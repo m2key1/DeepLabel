@@ -104,6 +104,8 @@ def test_each_chip_says_how_many_it_would_show(client):
         'layout-unchecked': 1,
         # Page 3 has no elements at all.
         'no-layout': 1, 'test-pages': 0, 'has-note': 0,
+        # No page is marked lines complete.
+        'lines-complete': 0, 'lines-unchecked': 5,
         'deleted': 1,
     }
 
@@ -132,6 +134,21 @@ def test_lines_reviewed_and_layout_reviewed_are_independent(client, conn):
     assert ([r['id'] for r in layout['rows']], layout['counts']['layout-reviewed']) == ([2, 3, 4], 3)
 
 
+def test_lines_complete_is_the_flag_line_detection_trains_on_not_the_checked_text(client, conn):
+    """Page 1's text is all checked yet its outlines are not marked complete; page 2 is
+    marked, the deleted page 6 too, and neither is listed twice (#78)."""
+    conn.execute('UPDATE pages SET lines_checked = 1 WHERE id IN (2, 6)')
+    conn.commit()
+
+    complete = get(client, filter='lines-complete', limit=50).json()
+    unchecked = get(client, filter='lines-unchecked', limit=50).json()
+
+    assert ([r['id'] for r in complete['rows']], complete['counts']['lines-complete']) == ([2], 1)
+    assert ([r['id'] for r in unchecked['rows']], unchecked['counts']['lines-unchecked']) == ([1, 3, 4, 5], 4)
+    assert [r['lines_checked'] for r in complete['rows']] == [True]
+    assert [r['id'] for r in get(client, sort='lines', desc='true', limit=50).json()['rows']][:1] == [2]
+
+
 def test_the_combined_reviewed_filter_is_gone_from_a_text_dataset(client):
     assert get(client, filter='reviewed').status_code == 400
 
@@ -149,7 +166,8 @@ def test_a_duplicate_is_listed_but_counted_by_no_chip(client, conn):
     assert [(r['id'], r['status']) for r in body['rows']][-2:] == [(5, 'done'), (7, 'duplicate')]
     assert body['counts'] == {
         'all': 5, 'lines-reviewed': 1, 'layout-reviewed': 4, 'unreviewed-lines': 2,
-        'layout-unchecked': 1, 'no-layout': 1, 'test-pages': 0, 'has-note': 0, 'deleted': 1}
+        'layout-unchecked': 1, 'no-layout': 1, 'test-pages': 0, 'has-note': 0,
+        'lines-complete': 0, 'lines-unchecked': 5, 'deleted': 1}
     assert [r['id'] for r in get(client, filter='no-layout', limit=50).json()['rows']] == [3]
     job = client.get('/api/jobs/j1', params={'pages': 'false'}, headers=ALICE).json()
     assert job['pages_live'] == 5

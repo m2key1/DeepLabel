@@ -115,7 +115,7 @@ const PHASE_LABELS: Record<PagePhase, string> = {
   ocr: 'A re-read',
 }
 
-type SortKey = 'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'checked' | 'confidence'
+type SortKey = 'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'lines' | 'checked' | 'confidence'
   | 'llm' | 'regions' | 'test'
 
 // Why a page is left out of the work, on hover over its status.
@@ -149,9 +149,11 @@ const pageFilters = (isMap: boolean, noLayout: boolean): PageFilterDef[] => [
   ...(isMap ? [
     { key: 'reviewed' as PageFilter, label: 'Reviewed' },
   ] : [
-    { key: 'lines-reviewed' as PageFilter, label: 'Lines reviewed' },
+    { key: 'lines-reviewed' as PageFilter, label: 'Text checked' },
     ...(noLayout ? [] : [{ key: 'layout-reviewed' as PageFilter, label: 'Layout reviewed' }]),
-    { key: 'unreviewed-lines' as PageFilter, label: 'Unreviewed lines' },
+    { key: 'unreviewed-lines' as PageFilter, label: 'Text unchecked' },
+    { key: 'lines-complete' as PageFilter, label: 'Lines complete' },
+    { key: 'lines-unchecked' as PageFilter, label: 'Lines unchecked' },
   ]),
   ...(noLayout ? [] : [{ key: 'layout-unchecked' as PageFilter, label: isMap ? 'Not reviewed' : 'Layout unchecked' }]),
   // Detection found no box here, so on a per-crop dataset its lines are whatever the
@@ -170,17 +172,22 @@ const TEXT_COLUMNS: Column[] = [
   { key: 'dimensions', label: 'Dimensions' },
   { key: 'status', label: 'Status' },
   { key: 'layout', label: 'Layout', title: 'Marked layout complete - auto-exported as a COCO layout dataset' },
+  { key: 'lines', label: 'Lines', title: 'Marked lines complete - used to train line detection' },
   { key: 'checked', label: 'OCR checked', title: 'Lines whose text has been reviewed' },
   { key: 'confidence', label: 'Confidence', title: 'Worst / average line confidence' },
   { key: 'llm', label: 'LLM', title: 'Language models holding a reading of this page' },
   { key: 'test', label: 'Test', title: TEST_PAGE_MEANING },
 ]
 
+// A page's size says least about its work, so it is the column a window narrower than a
+// laptop's goes without, to keep the rest of the row in its card.
+const narrowHidden = (key: SortKey) => (key === 'dimensions' ? 'max-lg:hidden' : '')
+
 // Without a layout there is nothing to mark complete, and the review unit is the line.
 const NO_LAYOUT_COLUMNS: Column[] = TEXT_COLUMNS
   .filter((c) => c.key !== 'layout')
   .map((c) => (c.key === 'checked'
-    ? { ...c, label: 'Lines checked', title: 'Lines that have been reviewed' }
+    ? { ...c, label: 'Text checked', title: 'Lines whose text has been reviewed' }
     : c))
 
 const MAP_COLUMNS: Column[] = [
@@ -865,6 +872,8 @@ export function JobDetailPage() {
         )
       case 'layout':
         return page.layout_checked ? badge(isMap ? 'reviewed' : 'complete') : null
+      case 'lines':
+        return page.lines_checked ? badge('complete') : null
       case 'checked':
         // Lines, whatever the dataset is shaped like: this column is about text that was
         // read and reviewed, and a region is neither. How the boxes stand is on hover.
@@ -1504,7 +1513,7 @@ export function JobDetailPage() {
                     aria-sort={sort.key === col.key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}
                     className={`cursor-pointer select-none whitespace-nowrap px-3 py-2 font-medium ${
                       sort.key === col.key ? 'text-accent-ink' : ''
-                    } ${col.key === 'idx' ? PIN.number : ''}`}
+                    } ${col.key === 'idx' ? PIN.number : ''} ${narrowHidden(col.key)}`}
                   >
                     {col.label} {sort.key === col.key ? (sort.dir === 1 ? '↑' : '↓') : ''}
                   </th>
@@ -1563,7 +1572,7 @@ export function JobDetailPage() {
                       key={col.key}
                       data-col={col.key}
                       className={col.key === 'filename' ? 'max-w-0 truncate px-3 py-1 max-md:min-w-36'
-                        : `whitespace-nowrap px-3 py-1 ${col.key === 'idx' ? PIN.number : ''}`}
+                        : `whitespace-nowrap px-3 py-1 ${col.key === 'idx' ? PIN.number : ''} ${narrowHidden(col.key)}`}
                     >
                       {renderCell(col.key, page)}
                     </td>

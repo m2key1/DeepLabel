@@ -1719,10 +1719,10 @@ export interface BulkPreview {
  *  filtered set rather than the first N pages of everything. */
 export type PageFilter =
   'all' | 'reviewed' | 'lines-reviewed' | 'layout-reviewed' | 'unreviewed-lines' | 'layout-unchecked'
-  | 'no-layout' | 'test-pages' | 'has-note' | 'deleted'
+  | 'lines-complete' | 'lines-unchecked' | 'no-layout' | 'test-pages' | 'has-note' | 'deleted'
 
 export type PageSort =
-  'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'checked' | 'confidence' | 'llm' | 'test'
+  'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'lines' | 'checked' | 'confidence' | 'llm' | 'test'
 
 export interface PageRowsQuery {
   filter?: PageFilter

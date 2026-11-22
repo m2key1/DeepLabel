@@ -336,7 +336,9 @@ Press `e` to edit the page.
 - The "edited" or "settled" chip on a line is also its revert button: it puts the line back
   to its OCR text and unchecks it.
 - Mark a page's layout as complete separately from its lines; the page table filters on
-  both.
+  both. Its **Lines** column marks the pages whose outlines are marked complete, which are
+  what line detection trains on, with the filters **Lines complete** and **Lines unchecked**;
+  **Text checked** and **Text unchecked** are about the lines' text.
 - The page table's **Status** column says how far a page has come: Waiting, Uploaded, Layout
   found, Lines found or Read (Processed for map tiles), or Duplicate or Unreadable. A dataset
   that skips layout never says Layout found. When a run stops with an error, the pages it did

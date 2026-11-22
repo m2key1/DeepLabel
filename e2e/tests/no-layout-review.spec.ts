@@ -22,9 +22,11 @@ test.describe('Scenario: a dataset that skipped layout', () => {
 
     await page.goto(`/jobs/${jobId}`)
     // The column counts lines and says so; there is no layout column to leave empty.
-    await expect(page.getByRole('columnheader', { name: 'Lines checked' })).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: 'Text checked' })).toBeVisible()
     await expect(page.getByRole('columnheader', { name: 'OCR checked' })).toHaveCount(0)
     await expect(page.getByRole('columnheader', { name: 'Layout' })).toHaveCount(0)
+    // Outlines are still drawn and trained on without a layout, so their column stays (#78).
+    await expect(page.getByRole('columnheader', { name: 'Lines', exact: true })).toBeVisible()
     // ...and no chip that could only ever match every page.
     await expect(page.getByRole('button', { name: /Layout unchecked/ })).toHaveCount(0)
     await expect(page.locator('tbody').getByText('0/6')).toBeVisible()
@@ -45,7 +47,7 @@ test.describe('Scenario: a dataset that skipped layout', () => {
       await page.goto(`/jobs/${jobId}`)
       await expect(page.locator('tbody').getByText('6/6')).toBeVisible()
       // The filter was unsatisfiable before: it wanted boxes this dataset never had.
-      await page.getByRole('button', { name: /Lines reviewed/ }).click()
+      await page.getByRole('button', { name: /Text checked/ }).click()
       await expect(page.locator('tbody tr')).toHaveCount(1)
     })
 })

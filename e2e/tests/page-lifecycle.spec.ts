@@ -42,7 +42,7 @@ test.describe('Scenario: a page that was deleted', () => {
     // the filters forgot to look at the deleted flag.
     await page.goto(`/jobs/${jobId}`)
     await expect(page.getByTestId('page-filter-all')).toHaveText('All · 2')
-    await expect(page.getByTestId('page-filter-unreviewed-lines')).toHaveText('Unreviewed lines · 2')
+    await expect(page.getByTestId('page-filter-unreviewed-lines')).toHaveText('Text unchecked · 2')
     await expect(page.getByTestId('page-filter-layout-unchecked')).toHaveText('Layout unchecked · 2')
     await expect(page.locator(`[data-page-row="${ids[2]}"]`)).toHaveCount(1)
     await expect(page.locator(`[data-page-row="${ids[1]}"]`)).toHaveCount(0)

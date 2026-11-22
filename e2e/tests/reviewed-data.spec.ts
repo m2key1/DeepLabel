@@ -22,9 +22,9 @@ test.describe('Scenario: finding and consuming reviewed data', () => {
 
     await page.goto(`/jobs/${jobId}`)
     await expect(page.getByTestId('page-filter-all')).toHaveText('All · 2')
-    await expect(page.getByTestId('page-filter-lines-reviewed')).toHaveText('Lines reviewed · 1')
+    await expect(page.getByTestId('page-filter-lines-reviewed')).toHaveText('Text checked · 1')
     await expect(page.getByTestId('page-filter-layout-reviewed')).toHaveText('Layout reviewed · 1')
-    await expect(page.getByTestId('page-filter-unreviewed-lines')).toHaveText('Unreviewed lines · 1')
+    await expect(page.getByTestId('page-filter-unreviewed-lines')).toHaveText('Text unchecked · 1')
     await expect(page.getByTestId('page-filter-layout-unchecked')).toHaveText('Layout unchecked · 1')
 
     // Lines reviewed shows exactly page 1; the unfinished page is filtered out.

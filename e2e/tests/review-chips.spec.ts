@@ -9,6 +9,41 @@ type Counts = Record<string, number>
 const chipCounts = async (jobId: string): Promise<Counts> =>
   (await backendFetch(`/api/jobs/${jobId}/page-rows?limit=1`)).counts
 
+test.describe('Scenario: the outlines a line model learns from', () => {
+  test('a page marked lines complete shows it in the table and under its own filter (#78)', async ({ page }) => {
+    const jobId = await seedCompletedJob(uniqueName('Lines complete'), 3)
+    const [, outlined] = await jobPageIds(jobId)
+    await page.goto(`/jobs/${jobId}/pages/${outlined}`)
+    await page.getByRole('button', { name: /^Edit/ }).click()
+    await page.getByRole('button', { name: 'Lines complete', exact: true }).click()
+    await expect.poll(async () => (await getPageDetail(jobId, outlined)).lines_checked).toBe(true)
+    await expect.poll(() => chipCounts(jobId)).toMatchObject({ all: 3, 'lines-complete': 1, 'lines-unchecked': 2 })
+
+    await page.goto(`/jobs/${jobId}`)
+    const cell = (pageId: number) => page.locator(`[data-page-row="${pageId}"] [data-col="lines"]`)
+    const [first, , third] = await jobPageIds(jobId)
+    await expect(page.getByRole('columnheader', { name: /^Lines/ })).toHaveAttribute(
+      'title', 'Marked lines complete - used to train line detection')
+    await expect(cell(outlined)).toHaveText('complete')
+    await expect(cell(first)).toHaveText('')
+    await expect(cell(third)).toHaveText('')
+
+    const row = (filename: string) => page.getByRole('row').filter({ hasText: filename })
+    await expect(page.getByTestId('page-filter-lines-complete')).toHaveText('Lines complete · 1')
+    await expect(page.getByTestId('page-filter-lines-unchecked')).toHaveText('Lines unchecked · 2')
+    await page.getByTestId('page-filter-lines-complete').click()
+    await expect(page).toHaveURL(/filter=lines-complete$/)
+    await expect(row('scan_2.png')).toHaveCount(1)
+    await expect(row('scan_1.png')).toHaveCount(0)
+    await expect(row('scan_3.png')).toHaveCount(0)
+    await page.getByTestId('page-filter-lines-unchecked').click()
+    await expect(page).toHaveURL(/filter=lines-unchecked$/)
+    await expect(row('scan_1.png')).toHaveCount(1)
+    await expect(row('scan_3.png')).toHaveCount(1)
+    await expect(row('scan_2.png')).toHaveCount(0)
+  })
+})
+
 test.describe('Scenario: lines and layout are reviewed apart', () => {
   test('a page with every line checked and a page with its layout checked each light one chip',
     async ({ page }) => {
@@ -22,13 +57,14 @@ test.describe('Scenario: lines and layout are reviewed apart', () => {
         { all: 2, 'lines-reviewed': 1, 'layout-reviewed': 1, 'layout-unchecked': 1 })
 
       await page.goto(`/jobs/${jobId}`)
-      await expect(page.getByTestId('page-filter-lines-reviewed')).toHaveText('Lines reviewed · 1')
+      await expect(page.getByTestId('page-filter-lines-reviewed')).toHaveText('Text checked · 1')
       await expect(page.getByTestId('page-filter-layout-reviewed')).toHaveText('Layout reviewed · 1')
       await expect(page.getByTestId('page-filter-all')).toHaveText('All · 2')
       await expect(page.getByTestId('job-review-count')).toHaveText('Pages checked 1/2')
       await expect(page.getByTestId('job-review-count')).toHaveAttribute('title', '1 of 2 pages with every line checked')
       await expect(page.getByRole('button', { name: /Fully reviewed/ })).toHaveCount(0)
-      await expect(page.getByRole('button', { name: /Lines reviewed/ })).toHaveCount(1)
+      await expect(page.getByRole('button', { name: /Text checked/ })).toHaveCount(1)
+      await expect(page.getByRole('button', { name: /Lines reviewed/ })).toHaveCount(0)
 
       const row = (filename: string) => page.getByRole('row').filter({ hasText: filename })
       await page.getByTestId('page-filter-lines-reviewed').click()
