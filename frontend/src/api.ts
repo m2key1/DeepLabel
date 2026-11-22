@@ -398,6 +398,8 @@ export interface PageDetail {
   job_revision: number
   /** Which models produced what is on the page, and how much people have since done by hand. */
   provenance?: PageProvenance
+  /** The stretch of a document the corpus cut put on this page, if any. */
+  reference?: { document: string; text: string; anchors: number } | null
 }
 
 export interface ProvenanceModel {
@@ -1723,7 +1725,7 @@ export interface BulkPreview {
  *  filtered set rather than the first N pages of everything. */
 export type PageFilter =
   'all' | 'reviewed' | 'lines-reviewed' | 'layout-reviewed' | 'unreviewed-lines' | 'layout-unchecked'
-  | 'lines-complete' | 'lines-unchecked' | 'no-layout' | 'test-pages' | 'has-note' | 'deleted'
+  | 'lines-complete' | 'lines-unchecked' | 'no-layout' | 'test-pages' | 'has-note' | 'no-document-match' | 'deleted'
 
 export type PageSort =
   'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'lines' | 'checked' | 'confidence' | 'llm' | 'test'

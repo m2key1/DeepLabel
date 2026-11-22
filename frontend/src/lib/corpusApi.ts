@@ -42,29 +42,6 @@ export function deleteDocument(jobId: string, name: string): Promise<{ documents
                  { method: 'DELETE' })
 }
 
-/** What one page is answerable for, and how well the cut pinned it down. */
-export interface ReferencePage {
-  page_id: number
-  idx: number
-  filename: string
-  document: string | null
-  /** Recognized lines on this page that anchored to a corpus line. Zero means the span
-   *  is only what its neighbours left over. */
-  anchors: number
-  /** Mean similarity of those anchors, 0 where there are none. */
-  score: number
-  text: string
-  /** Where this page's ground truth came from: 'llm' for a model's diplomatic reading. */
-  gt_source: string | null
-}
-
-export function listReference(jobId: string, limit = 200, offset = 0): Promise<{
-  total: number
-  pages: ReferencePage[]
-}> {
-  return request(`${jobUrl(jobId)}/reference?limit=${limit}&offset=${offset}`)
-}
-
 export interface CutOutcome {
   documents: number
   pages: number

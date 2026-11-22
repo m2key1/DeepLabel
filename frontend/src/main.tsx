@@ -1,6 +1,6 @@
 import { StrictMode, type ComponentType } from 'react'
 import { createRoot } from 'react-dom/client'
-import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, Navigate, RouterProvider, useParams } from 'react-router-dom'
 import './index.css'
 import '@fontsource-variable/jetbrains-mono'
 // Plex Sans for the chrome, Plex Mono for every figure, Spectral for the names of things;
@@ -37,11 +37,15 @@ import { AugmentationsPage } from './pages/AugmentationsPage'
 import { ConventionsPage } from './pages/ConventionsPage'
 import { DatasetSettingsPage } from './pages/DatasetSettingsPage'
 import { TranscriptPage } from './pages/TranscriptPage'
-import { CorpusPage } from './pages/CorpusPage'
 import { NotFoundPage, RouteError } from './pages/NotFoundPage'
 import { SetPasswordPage } from './pages/SetPasswordPage'
 import { SignInPage } from './pages/SignInPage'
 import { SignUpPage } from './pages/SignUpPage'
+
+function DatasetRedirect() {
+  const { id } = useParams()
+  return <Navigate to={`/jobs/${id}`} replace />
+}
 
 initTheme()
 
@@ -76,7 +80,8 @@ const router = createBrowserRouter([
           { path: '/jobs/:id', element: <JobDetailPage /> },
           { path: '/jobs/:id/settings', element: <DatasetSettingsPage /> },
           { path: '/jobs/:id/transcript', element: <TranscriptPage /> },
-          { path: '/jobs/:id/corpus', element: <CorpusPage /> },
+          // The Corpus tab was folded into the dataset's menus; old links land on the dataset.
+          { path: '/jobs/:id/corpus', element: <DatasetRedirect /> },
           { path: '/jobs/:id/pages/:pageId', element: <PageViewerPage /> },
           { path: '/jobs/:id/tiles/:pageId', element: <TileEditorPage /> },
           { path: '*', element: <NotFoundPage /> },

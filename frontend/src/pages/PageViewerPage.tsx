@@ -38,6 +38,7 @@ import { NoteTag } from '../components/NoteTag'
 import { TestDataChip, TestPageSwitch } from '../components/TestPage'
 import { useSetCrumbs } from '../components/NavBar'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
+import { PageReference } from '../components/corpus/PageReference'
 import { PresenceBanner } from '../components/presence/PresenceBanner'
 import { LineConflict, type Conflict } from '../components/viewer/LineConflict'
 import { usePresence, usePresenceLocation } from '../presence'
@@ -4197,6 +4198,7 @@ export function PageViewerPage() {
                     and the line it belongs to can be on screen together however long the
                     page is - dragging across two hundred rows meant scrolling to the top to
                     pick one up and to the bottom to put it down. */}
+                {page?.reference && <div className="shrink-0"><PageReference reference={page.reference} /></div>}
                 {/* The row answers to this panel's width, not the window's: the splitter
                     moves one without the other, and a rail of badges as wide as the
                     reading is what a narrow panel gets otherwise. Written out rather than

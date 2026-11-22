@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test'
 import { test, expect } from '../helpers/test'
 import {
   backendFetch, correctLine, identity, jobPageIds, llmStats, pageCandidates, pageLines,
@@ -6,6 +7,7 @@ import {
 import { seedSession, useSession } from '../helpers/session'
 import { scanPng } from '../helpers/image'
 import { openViewer } from '../helpers/viewer'
+import { datasetAction, openDatasetMenu } from '../helpers/dataset'
 
 const DEV = identity('dev', 'admin')
 
@@ -125,6 +127,14 @@ async function referenceSources(jobId: string): Promise<(string | null)[]> {
   return (body.pages as { gt_source: string | null }[]).map((page) => page.gt_source)
 }
 
+/** The pages the table serves under the No document match filter - the backend oracle for
+ *  what its chip lists. */
+async function noMatchRowNames(jobId: string): Promise<string[]> {
+  const body = await backendFetch(
+    `/api/jobs/${jobId}/page-rows?filter=no-document-match&limit=50`, { headers: DEV })
+  return (body.rows as { filename: string }[]).map((row) => row.filename)
+}
+
 async function readTally(jobId: string) {
   const status = await backendFetch(`/api/jobs/${jobId}/groundtruth/status`, { headers: DEV })
   const { done, pending, running, error } = status
@@ -136,8 +146,34 @@ async function corpusSettings(jobId: string) {
   return { gt_prompt: job.gt_prompt, reference_overlap: job.reference_overlap }
 }
 
-const span = (document: string, anchors: number, score: number, lines: string[]): Span =>
+const span = (document: string | null, anchors: number, score: number, lines: string[]): Span =>
   ({ document, anchors, score, text: lines.join('\n') })
+
+/** The documents dialog, now a dataset page's More menu rather than its Corpus tab. */
+async function openDocuments(page: Page) {
+  const more = await openDatasetMenu(page, 'dataset-more')
+  await more.getByTestId('documents-open').click()
+  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Documents' })).toBeVisible()
+}
+
+/** Cuts the corpus from the Run menu, which offers it only once the page has learned
+ *  which documents the dataset holds and no run owns the pages. */
+async function cutDocuments(page: Page) {
+  await page.getByTestId('dataset-run').click()
+  const items = page.getByTestId('dataset-run-items')
+  await expect(items.getByTestId('corpus-cut')).toBeVisible()
+  await items.getByTestId('corpus-cut').click()
+}
+
+/** The diplomatic read of the Run menu, switched to reading against the documents. The
+ *  switch is offered once the page has learned which documents the dataset holds, which is
+ *  also when the No document match chip appears. */
+async function readAgainstDocuments(page: Page) {
+  await expect(page.getByTestId('page-filter-no-document-match')).toBeVisible()
+  await datasetAction(page, 'llm-read-open')
+  await page.getByRole('button', { name: 'Against the documents' }).click()
+  await expect(page.getByTestId('diplomatic-read')).toBeVisible()
+}
 
 test.describe('Scenario: cutting a corpus across the scans and reading them against it', () => {
   test('the corpus is cut onto the pages and read back as their ground truth', async ({ page }) => {
@@ -148,7 +184,7 @@ test.describe('Scenario: cutting a corpus across the scans and reading them agai
     await resetLlmStats()
 
     await page.goto(`/jobs/${jobId}`)
-    await page.getByTestId('corpus-open').click()
+    await openDocuments(page)
     await expect(page.getByTestId('documents-empty')).toBeVisible()
 
     await page.getByTestId('corpus-upload').setInputFiles([
@@ -158,7 +194,7 @@ test.describe('Scenario: cutting a corpus across the scans and reading them agai
     ])
     await expect(page.getByTestId('documents-note'))
       .toHaveText('2 documents stored. Not .txt, so left out: notes.md.')
-    await expect(page.getByTestId('documents-empty')).toHaveCount(0)
+    await expect(page.getByTestId('document-row')).toHaveCount(2)
 
     await expect.poll(() => documentRows(jobId)).toEqual([
       { name: DOCUMENT_ONE, lines: 6, pages: 0 },
@@ -168,18 +204,16 @@ test.describe('Scenario: cutting a corpus across the scans and reading them agai
     expect(await documentText(jobId, DOCUMENT_TWO)).toBe(`${LETTER_TWO.join('\n')}\n`)
 
     const documents = page.getByTestId('document-row')
-    await expect(documents).toHaveCount(2)
     await expect(documents.nth(1)).toHaveAttribute('data-name', DOCUMENT_TWO)
     await expect(documents.nth(1).getByTestId('document-lines')).toHaveText('12')
     await expect(documents.nth(1).getByTestId('document-pages')).toHaveText('-')
+    await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
 
     // Nothing has been read yet, so no page carries ground truth of any provenance.
-    await expect(page.getByTestId('gt-source')).toHaveCount(0)
+    await expect.poll(() => referenceSources(jobId)).toEqual([null, null, null])
 
-    await page.getByTestId('reference-cut').click()
-    await expect(page.getByTestId('cut-note'))
-      .toHaveText('Placed 3 of 3 pages from 2 documents. 0 anchored nothing of their own.')
-    await expect(page.getByTestId('cut-note')).toHaveAttribute('data-tone', 'ok')
+    await cutDocuments(page)
+    await expect(page.getByTestId('job-notice')).toHaveText('Cut 2 documents onto 3 of 3 pages.')
 
     // Letter one fits on one leaf; letter two is cut between leaves two and three, and
     // each of them is given two corpus lines of slack past its own end.
@@ -193,22 +227,11 @@ test.describe('Scenario: cutting a corpus across the scans and reading them agai
       { name: DOCUMENT_TWO, lines: 12, pages: 2 },
     ])
 
-    const spans = page.getByTestId('reference-row')
-    await expect(spans).toHaveCount(3)
-    await expect(page.getByTestId('reference-summary'))
-      .toHaveText('3 of 3 pages placed · every page anchored')
-    await expect(spans.nth(2)).toHaveAttribute('data-document', DOCUMENT_TWO)
-    await expect(spans.nth(2)).toHaveAttribute('data-anchors', '6')
-    await expect(spans.nth(2)).toHaveAttribute('data-trouble', 'none')
-    await expect(spans.nth(2).getByTestId('reference-text'))
-      .toHaveText(LETTER_TWO.slice(4).join(' '))
+    // Every page anchored a line of the documents, so the table counts none adrift - and
+    // the chip only exists on a dataset that has documents cut onto it.
+    await expect(page.getByTestId('page-filter-no-document-match')).toHaveText('No document match · 0')
 
-    // Nothing is in trouble, so the filter empties the list and says why.
-    await page.getByTestId('reference-trouble-only').click()
-    await expect(page.getByTestId('reference-all-well')).toBeVisible()
-    await expect(spans).toHaveCount(0)
-    await page.getByTestId('reference-trouble-only').click()
-    await expect(spans).toHaveCount(3)
+    await readAgainstDocuments(page)
 
     await expect(page.getByTestId('gt-status'))
       .toHaveText('0 done · 0 pending · 0 running · 0 failed, over 3 placed pages.')
@@ -227,9 +250,6 @@ test.describe('Scenario: cutting a corpus across the scans and reading them agai
     await expect.poll(() => referenceSources(jobId)).toEqual(['llm', 'llm', 'llm'])
     await expect(page.getByTestId('gt-status'))
       .toHaveText('3 done · 0 pending · 0 running · 0 failed, over 3 placed pages.')
-    await expect(page.getByTestId('gt-source')).toHaveCount(3)
-    await expect(page.getByTestId('gt-source').first()).toHaveAttribute('data-source', 'llm')
-    await expect(page.getByTestId('gt-source').first()).toHaveText('read by a model')
 
     // The last answer queues the dataset for alignment alone. The lines carry what a
     // person transcribed, so the alignment offers the model's reading beside that text
@@ -270,11 +290,11 @@ test.describe('Scenario: cutting a corpus across the scans and reading them agai
     await seedLlmConnection(connection, [PERFECT], DEV)
     await expect.poll(() => referenceSources(jobId)).toEqual(['sidecar'])
 
-    await page.goto(`/jobs/${jobId}/corpus`)
-    await page.getByTestId('reference-cut').click()
-    await expect(page.getByTestId('cut-note'))
-      .toHaveText('Placed 1 of 1 pages from 1 document. 0 anchored nothing of their own.')
+    await page.goto(`/jobs/${jobId}`)
+    await cutDocuments(page)
+    await expect(page.getByTestId('job-notice')).toHaveText('Cut 1 document onto 1 of 1 page.')
     const label = `${connection} ${PERFECT}`
+    await readAgainstDocuments(page)
     await page.locator(`[data-testid="gt-pick"][data-label="${label}"]`)
       .getByRole('checkbox').check()
     await resetLlmStats()
@@ -310,12 +330,15 @@ test.describe('Scenario: cutting a corpus across the scans and reading them agai
     }
     await expect.poll(offered, { timeout: 30_000 }).toEqual(
       typed.map((corrected, i) => ({ corrected, reading: [OCR_LINES[i]] })))
-    expect(await referenceSources(jobId)).toEqual(['sidecar'])
-    await expect(page.getByTestId('gt-source')).toHaveAttribute('data-source', 'sidecar')
-    await expect(page.getByTestId('gt-source')).toHaveText('transcribed by hand')
+    await expect.poll(() => referenceSources(jobId)).toEqual(['sidecar'])
     await waitForJobStatus(jobId, 'done')
 
     await openViewer(page, jobId, pageId)
+    await expect(page.getByTestId('page-reference')).toHaveAttribute('data-anchored', 'true')
+    await expect(page.getByTestId('page-reference-toggle')).toHaveText(`From ${DOCUMENT_ONE}`)
+    await page.getByTestId('page-reference-toggle').click()
+    await expect(page.getByTestId('page-reference-text')).toHaveText(typed.join('\n'))
+
     await page.getByTestId('line-row').filter({ hasText: 'Sample Header line I' }).click()
     const reading = page.locator(
       `[data-testid="line-candidate"][data-author="align:llm:${label}"]`)
@@ -324,7 +347,8 @@ test.describe('Scenario: cutting a corpus across the scans and reading them agai
       .toHaveText(`diplomatic reading - ${label}`)
   })
 
-  test('a corpus that anchors nothing is called out page by page', async ({ page }) => {
+  test('the leaves no line anchored are listed by the page table and marked in the viewer',
+       async ({ page }) => {
     const jobId = await seedCorpusJob(uniqueName('Corpus adrift'), 2, 340)
     const adrift = 'tagebuch-eintrag'
     const lines = LETTER_TWO.slice(0, 8)
@@ -332,31 +356,36 @@ test.describe('Scenario: cutting a corpus across the scans and reading them agai
     // the corpus says: every span is only what its neighbours left over.
     await putDocuments(jobId, { [adrift]: lines })
 
-    await page.goto(`/jobs/${jobId}/corpus`)
-    await page.getByTestId('reference-cut').click()
-    await expect(page.getByTestId('cut-note'))
-      .toHaveText('Placed 2 of 2 pages from 1 document. 2 anchored nothing of their own.')
+    await page.goto(`/jobs/${jobId}`)
+    await cutDocuments(page)
+    await expect(page.getByTestId('job-notice'))
+      .toHaveText('Cut 1 document onto 2 of 2 pages; 2 matched no line.')
 
     await expect.poll(() => referenceSpans(jobId)).toEqual([
       span(adrift, 0, 0, lines.slice(0, 6)),
       span(adrift, 0, 0, lines.slice(2)),
     ])
 
-    const spans = page.getByTestId('reference-row')
-    await expect(spans).toHaveCount(2)
-    await expect(page.getByTestId('reference-summary'))
-      .toHaveText('2 of 2 pages placed · 2 not anchored')
-    await expect(spans.nth(0)).toHaveAttribute('data-trouble', 'unanchored')
-    await expect(spans.nth(0)).toHaveAttribute('data-anchors', '0')
-    await expect(spans.nth(0).getByTestId('reference-trouble')).toHaveText('not anchored')
+    // The chip says how many pages need a look, and the table lists exactly those two.
+    const chip = page.getByTestId('page-filter-no-document-match')
+    await expect(chip).toHaveText('No document match · 2')
+    await chip.click()
+    const pageIds = await jobPageIds(jobId)
+    await expect(page.locator('tr[data-page-row]')).toHaveCount(2)
+    for (const pageId of pageIds) {
+      await expect(page.locator(`tr[data-page-row="${pageId}"]`)).toHaveCount(1)
+    }
+    await expect.poll(() => noMatchRowNames(jobId)).toEqual(['scan_1.png', 'scan_2.png'])
 
-    // Both pages need a look, so the filter keeps both and never claims all is well.
-    await page.getByTestId('reference-trouble-only').click()
-    await expect(spans).toHaveCount(2)
-    await expect(page.getByTestId('reference-all-well')).toHaveCount(0)
+    await openViewer(page, jobId, pageIds[0])
+    await expect(page.getByTestId('page-reference')).toHaveAttribute('data-anchored', 'false')
+    await expect(page.getByTestId('page-reference-toggle'))
+      .toHaveText(`From ${adrift} - no line of this page matched it`)
+    await page.getByTestId('page-reference-toggle').click()
+    await expect(page.getByTestId('page-reference-text')).toHaveText(lines.slice(0, 6).join('\n'))
 
-    // No model has read them, so no page shows a provenance badge.
-    await expect(page.getByTestId('gt-source')).toHaveCount(0)
+    // No model has read them yet, so no page answers for anything it was not given.
+    await expect.poll(() => referenceSources(jobId)).toEqual([null, null])
   })
 
   test('wording asking for what nothing supplies is refused, and the overlap moves the cut',
@@ -365,7 +394,8 @@ test.describe('Scenario: cutting a corpus across the scans and reading them agai
     await transcribeAs(jobId, [LETTER_ONE, PAGE_TWO_LINES, PAGE_THREE_LINES])
     await putDocuments(jobId, { [DOCUMENT_ONE]: LETTER_ONE, [DOCUMENT_TWO]: LETTER_TWO })
 
-    await page.goto(`/jobs/${jobId}/corpus`)
+    await page.goto(`/jobs/${jobId}`)
+    await readAgainstDocuments(page)
 
     // An empty editor asks with the shipped wording, so that is what a person starts from.
     const { default: shipped } = await backendFetch(
@@ -394,8 +424,9 @@ test.describe('Scenario: cutting a corpus across the scans and reading them agai
 
     // With no slack, letter two is cut exactly where the leaves part: neither page holds
     // a line of the other, where two lines of each reached over before.
-    await page.getByTestId('reference-cut').click()
-    await expect(page.getByTestId('cut-note')).toHaveAttribute('data-tone', 'ok')
+    await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
+    await cutDocuments(page)
+    await expect(page.getByTestId('job-notice')).toHaveText('Cut 2 documents onto 3 of 3 pages.')
     await expect.poll(() => referenceSpans(jobId)).toEqual([
       span(DOCUMENT_ONE, 6, 1, LETTER_ONE),
       span(DOCUMENT_TWO, 6, 1, PAGE_TWO_LINES),
@@ -403,43 +434,65 @@ test.describe('Scenario: cutting a corpus across the scans and reading them agai
     ])
   })
 
-  test('the cut says why it will not run', async ({ page }) => {
+  test('a cut that will not run is kept out of the Run menu, or comes back with why', async ({ page }) => {
     const bare = await seedCorpusJob(uniqueName('Corpus bare'), 1, 380)
 
-    await page.goto(`/jobs/${bare}/corpus`)
-    await expect(page.getByTestId('documents-empty')).toBeVisible()
-    await page.getByTestId('reference-cut').click()
-    await expect(page.getByTestId('cut-note')).toHaveAttribute('data-tone', 'bad')
-    await expect(page.getByTestId('cut-note')).toHaveText('this dataset has no corpus documents')
+    await page.goto(`/jobs/${bare}`)
+    await page.getByTestId('dataset-run').click()
+    // Nothing to cut, so there is no cut to be refused - while the same locator stands for
+    // the dataset below that does hold documents.
+    const runItems = page.getByTestId('dataset-run-items')
+    await expect(runItems).toBeVisible()
+    await expect(runItems.getByTestId('corpus-cut')).toHaveCount(0)
+    await expect(backendFetch(`/api/jobs/${bare}/reference/cut`, { method: 'POST', headers: DEV }))
+      .rejects.toThrow('this dataset has no corpus documents')
     expect(await referenceSpans(bare)).toEqual([
       { document: null, anchors: 0, score: 0, text: '' },
     ])
 
-    // A run in flight owns the pages the cut would place, so it waits for one to finish
-    // rather than moving the corpus underneath it. A slow reader keeps it running.
+    // A run in flight owns the pages the cut would place. So there is nothing to click
+    // either - and where the page has learned nothing of the run yet, the refused cut
+    // comes back with what the backend says. A slow reader keeps the run in flight long
+    // enough for that.
     const busyForm = formOf(uniqueName('Corpus busy'), 1, 390)
     busyForm.append('model_ocr_id', String(slowOcrModelId()))
     const { job_id: busy } = await backendFetch('/api/jobs', { method: 'POST', body: busyForm, headers: DEV })
     await putDocuments(busy, { [DOCUMENT_ONE]: LETTER_ONE })
-
-    await page.goto(`/jobs/${busy}/corpus`)
-    await page.getByTestId('reference-cut').click()
-    await expect(page.getByTestId('cut-note')).toHaveAttribute('data-tone', 'bad')
-    await expect(page.getByTestId('cut-note')).toHaveText('job is queued or running')
+    await page.goto(`/jobs/${busy}`)
+    await page.getByTestId('dataset-run').click()
+    await expect(runItems).toBeVisible()
+    await expect(page.getByTestId('dataset-run-items').getByTestId('corpus-cut')).toHaveCount(0)
     expect(await referenceSpans(busy)).toEqual([
       { document: null, anchors: 0, score: 0, text: '' },
     ])
+
+    // Loading the page while its status is still stale, then queueing a re-read over the
+    // API, is the one order the cut can be clicked in behind the backend's back.
+    const interrupted = await seedCorpusJob(uniqueName('Corpus interrupted'), 1, 400)
+    await putDocuments(interrupted, { [DOCUMENT_ONE]: LETTER_ONE })
+    await page.goto(`/jobs/${interrupted}`)
+    await page.getByTestId('dataset-run').click()
+    const cut = page.getByTestId('dataset-run-items').getByTestId('corpus-cut')
+    await expect(cut).toBeVisible()
+    await backendFetch(`/api/jobs/${interrupted}/reocr`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...DEV },
+      body: JSON.stringify({ scope: 'unchecked' }),
+    })
+    await cut.click()
+    await expect(page.getByTestId('job-error')).toHaveText('job is queued or running')
 
     // The dataset that was deliberately made slow is seen out before this spec ends. One
     // job worker serves the whole deployment, so a spec that walks away from a running
     // run hands the next one a queue that is already busy - which is how this file made
     // create-dataset.spec.ts time out waiting for 'done' on a run of its own.
     await waitForJobStatus(busy, 'done')
+    await waitForJobStatus(interrupted, 'done')
   })
 })
 
 test.describe('Scenario: reviewing the cut where it is most likely wrong', () => {
-  test('the leaves that anchored nothing come first in the span review', async ({ page }) => {
+  test('a leaf three down that anchored nothing is flagged in the table and in its viewer',
+       async ({ page }) => {
     const jobId = await seedCorpusJob(uniqueName('Corpus review order'), 3, 420)
     const pageIds = await jobPageIds(jobId)
     // The first two leaves read as the corpus says; the third keeps its OCR, so nothing on
@@ -447,18 +500,34 @@ test.describe('Scenario: reviewing the cut where it is most likely wrong', () =>
     await transcribeAs(jobId, [LETTER_ONE, PAGE_TWO_LINES, OCR_LINES])
     await putDocuments(jobId, { [DOCUMENT_ONE]: LETTER_ONE, [DOCUMENT_TWO]: LETTER_TWO })
 
-    await page.goto(`/jobs/${jobId}/corpus`)
-    await page.getByTestId('reference-cut').click()
+    await page.goto(`/jobs/${jobId}`)
+    await cutDocuments(page)
+    await expect(page.getByTestId('job-notice'))
+      .toHaveText('Cut 2 documents onto 3 of 3 pages; 1 matched no line.')
     await expect.poll(async () => (await referenceSpans(jobId)).map((s) => s.anchors > 0))
       .toEqual([true, true, false])
 
-    const rows = page.getByTestId('reference-row')
-    await expect(rows).toHaveCount(3)
-    await expect(rows.nth(0)).toHaveAttribute('data-page-id', String(pageIds[2]))
-    await expect(rows.nth(0)).toHaveAttribute('data-trouble', 'unanchored')
-    // The rest follow in reading order.
-    await expect(rows.nth(1)).toHaveAttribute('data-page-id', String(pageIds[0]))
-    await expect(rows.nth(2)).toHaveAttribute('data-page-id', String(pageIds[1]))
+    // Exactly the one drifting leaf is what the chip counts and the table lists.
+    const chip = page.getByTestId('page-filter-no-document-match')
+    await expect(chip).toHaveText('No document match · 1')
+    await chip.click()
+    await expect(page.locator('tr[data-page-row]')).toHaveCount(1)
+    await expect(page.locator(`tr[data-page-row="${pageIds[2]}"]`)).toHaveCount(1)
+    await expect.poll(() => noMatchRowNames(jobId)).toEqual(['scan_3.png'])
+
+    // The drifting leaf says so in its own viewer; an anchored one says where it sits.
+    await openViewer(page, jobId, pageIds[2])
+    await expect(page.getByTestId('page-reference')).toHaveAttribute('data-anchored', 'false')
+    await expect(page.getByTestId('page-reference-toggle'))
+      .toHaveText(`From ${DOCUMENT_TWO} - no line of this page matched it`)
+    await page.getByTestId('page-reference-toggle').click()
+    await expect(page.getByTestId('page-reference-text')).toHaveText(LETTER_TWO.slice(4).join('\n'))
+
+    await openViewer(page, jobId, pageIds[0])
+    await expect(page.getByTestId('page-reference')).toHaveAttribute('data-anchored', 'true')
+    await expect(page.getByTestId('page-reference-toggle')).toHaveText(`From ${DOCUMENT_ONE}`)
+    await page.getByTestId('page-reference-toggle').click()
+    await expect(page.getByTestId('page-reference-text')).toHaveText(LETTER_ONE.join('\n'))
   })
 })
 
@@ -477,6 +546,43 @@ test.describe('Scenario: taking the whole corpus away again', () => {
 
     expect((await referenceSpans(jobId)).map(({ document, text }) => ({ document, text })))
       .toEqual([{ document: null, text: '' }, { document: null, text: '' }])
+  })
+})
+
+test.describe('Scenario: removing the last document in the dataset', () => {
+  test('takes the stretches it left on the pages with it, and on a dataset never cut asks nothing more', async ({ page }) => {
+    const removeOnly = async (name: string) => {
+      page.once('dialog', (dialog) => void dialog.accept())
+      await page.getByRole('button', { name: `Remove ${name}`, exact: true }).click()
+      await expect(page.getByTestId('documents-empty')).toBeVisible()
+    }
+
+    const cuts: string[] = []
+    page.on('response', (r) => { if (r.url().includes('/reference/cut')) cuts.push(`${r.status()}`) })
+    const cut = await seedCorpusJob(uniqueName('Corpus taken back'), 2, 450)
+    await transcribeAs(cut, [LETTER_ONE, PAGE_TWO_LINES])
+    await putDocuments(cut, { [DOCUMENT_ONE]: LETTER_ONE })
+    await backendFetch(`/api/jobs/${cut}/reference/cut`, { method: 'POST', headers: DEV })
+    await expect.poll(async () => (await referenceSpans(cut)).map((s) => s.document)).toEqual([DOCUMENT_ONE, DOCUMENT_ONE])
+    await page.goto(`/jobs/${cut}`)
+    await expect(page.getByTestId('page-filter-no-document-match')).toBeVisible()
+    await openDocuments(page)
+    await removeOnly(DOCUMENT_ONE)
+    await expect.poll(async () => (await referenceSpans(cut)).map((s) => s.document)).toEqual([null, null])
+    await expect(page.getByTestId('page-filter-no-document-match')).toHaveCount(0)
+    expect(cuts).toEqual(['200'])
+
+    // Nothing was ever cut here, so there is nothing to take back and nothing to refuse.
+    const uncut = await seedCorpusJob(uniqueName('Corpus never cut'), 1, 455)
+    await putDocuments(uncut, { [DOCUMENT_ONE]: LETTER_ONE })
+    await page.goto(`/jobs/${uncut}`)
+    await openDocuments(page)
+    await removeOnly(DOCUMENT_ONE)
+    await expect.poll(() => documentRows(uncut)).toEqual([])
+    await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
+    // Whatever the removal set off has answered by now.
+    await page.waitForLoadState('networkidle')
+    expect(cuts).toEqual(['200'])
   })
 })
 
@@ -500,7 +606,8 @@ test.describe('Scenario: coming back to read the corpus again', () => {
 
     const pick = (model: string) => page
       .locator(`[data-testid="gt-pick"][data-label="${connection} ${model}"]`).getByRole('checkbox')
-    await page.goto(`/jobs/${jobId}/corpus`)
+    await page.goto(`/jobs/${jobId}`)
+    await readAgainstDocuments(page)
     await expect(pick(PERFECT)).toBeChecked()
     await expect(pick('stub-typo')).not.toBeChecked()
     await expect(page.locator(`[data-testid="gt-pick"][data-label="${connection} ${PERFECT}"]`)
@@ -517,7 +624,9 @@ test.describe('Scenario: coming back to read the corpus again', () => {
     }
     await expect.poll(models).toEqual({ gt: [typo], lines: [perfect] })
 
+    // Reopening the read is how a person comes back to it, and the pick it hid last.
     await page.reload()
+    await readAgainstDocuments(page)
     await expect(pick('stub-typo')).toBeChecked()
     await expect(pick(PERFECT)).not.toBeChecked()
     await expect.poll(() => readTally(jobId), { timeout: 30_000 })
@@ -529,11 +638,15 @@ test.describe('Scenario: coming back to read the corpus again', () => {
 test.describe('Scenario: the corpus wording is the assignee\'s working tool', () => {
   test('a member the dataset is shared with edits the corpus prompt and it is saved', async ({ page }) => {
     const jobId = await seedCorpusJob(uniqueName('Assignee wording'), 1, 380)
+    // The working tool sits where the documents are read, so a dataset without them
+    // offers no switch into it and nothing to edit.
+    await putDocuments(jobId, { [DOCUMENT_ONE]: LETTER_ONE })
     const member = `member-${Date.now()}`
     await shareJob(jobId, [member])
     await useSession(page.context(), seedSession('manager', member))
 
-    await page.goto(`/jobs/${jobId}/corpus`)
+    await page.goto(`/jobs/${jobId}`)
+    await readAgainstDocuments(page)
     const wording = 'Transcribe the leaf as it stands. The edition reads:\n{{reference}}'
     await expect(page.getByTestId('gt-prompt')).toHaveValue('')
     await page.getByTestId('gt-prompt').fill(wording)

@@ -355,6 +355,10 @@ test.describe('Scenario: polling only as much as there is news', () => {
   test('the diplomatic read looks again, ever more slowly, until it learns whether anything runs',
        async ({ page }) => {
     const jobId = await seedCompletedJob(uniqueName('Status refused'), 1)
+    // A document to read against is what offers the read at all.
+    const form = new FormData()
+    form.append('files', new Blob(['Pfarre Wien\n'], { type: 'text/plain' }), 'band.txt')
+    await backendFetch(`/api/jobs/${jobId}/documents`, { method: 'POST', body: form })
     const looks = countRequests(page, 'GET', `/api/jobs/${jobId}/groundtruth/status`)
     // A run may be in flight when the panel opens, so a failed first look cannot be taken
     // to mean there is nothing to follow.
@@ -363,7 +367,10 @@ test.describe('Scenario: polling only as much as there is news', () => {
       ? route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'down' }) })
       : route.continue())
     await page.clock.install()
-    await page.goto(`/jobs/${jobId}/corpus`)
+    await page.goto(`/jobs/${jobId}`)
+    await page.getByTestId('dataset-run').click()
+    await page.getByTestId('llm-read-open').click()
+    await page.getByRole('button', { name: 'Against the documents' }).click()
     await expect.poll(looks).toBe(1)
     await stopClock(page)
     await page.clock.runFor(2_400)

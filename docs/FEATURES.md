@@ -129,8 +129,8 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
 
 - The header has one row per kind: the actions (Review, Run, Export, **⋯**); a line of
   facts (owner, pages, the IIIF manifest it came from, its note); its state as chips
-  (pipeline steps, pages checked, test pages, data-use limits, Complete); and the three
-  views **Pages**, **Transcript** and **Corpus** as tabs, which the other two views show too.
+  (pipeline steps, pages checked, test pages, data-use limits, Complete); and the two views
+  **Pages** and **Transcript** as tabs, which the transcript shows too.
 - Filter chips narrow the table to pages that still need work, are reviewed, have no
   layout, and so on. The arrow keys move the preview through the list.
 - Long datasets load a screenful at a time; **Show more** loads the next.
@@ -409,12 +409,14 @@ several pages.
   treated as a document. The documents only need to sort in the same order as the pages.
 - After OCR, the corpus is cut onto the pages by anchoring recognised lines to corpus
   lines. Each page gets a generous span of the document.
-- The dataset's **Corpus** page lists the documents, shows each page's span (pages that
-  anchored nothing first), and lets you cut again after the OCR or the corpus improves.
-- A language model can then read each page against its span, producing a diplomatic
-  transcription of the page as it stands. This text is matched to the lines like any
-  transcription, but is never checked automatically. Struck-out words are written as
-  `<del>` and additions as `<add>`.
+- **Documents…** in the dataset's **⋯** menu lists, adds and removes the documents, and
+  **Cut the documents again** in its **Run** menu places the spans anew after the OCR or the
+  documents improve. The page table's **No document match** filter lists the pages no line
+  of which anchored a stretch, and the page viewer shows a page's stretch above its lines.
+- A language model can then read each page against its span (**Transcribe with LLMs…**,
+  **Against the documents**), producing a diplomatic transcription of the page as it
+  stands. This text is matched to the lines like any transcription, but is never checked
+  automatically. Struck-out words are written as `<del>` and additions as `<add>`.
 
 ## Language models
 

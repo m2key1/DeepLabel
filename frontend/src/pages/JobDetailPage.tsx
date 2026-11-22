@@ -85,6 +85,8 @@ import { MaskExportDialog } from '../components/job/MaskExportDialog'
 import { PurgeDialog } from '../components/job/PurgeDialog'
 import { RedetectDialog } from '../components/job/RedetectDialog'
 import { LlmReadDialog } from '../components/job/LlmReadDialog'
+import { DocumentsDialog } from '../components/corpus/DocumentsDialog'
+import { cutReference, listDocuments, type CorpusDocument } from '../lib/corpusApi'
 import { NewerModelsDialog } from '../components/job/NewerModelsDialog'
 import { LlmProgress } from '../components/job/LlmProgress'
 import { ExportBlockedNote, ExportMenu, exportBlocked } from '../components/job/ExportMenu'
@@ -144,7 +146,7 @@ type PageFilterDef = { key: PageFilter; label: string; editorsOnly?: boolean }
 // A tile has no layout and no lines: its one review is the Reviewed flag, so a map job gets
 // that chip and none of the text ones, which could only ever come back empty. A dataset
 // that skipped layout has no layout to mark complete, so the layout chips go there.
-const pageFilters = (isMap: boolean, noLayout: boolean): PageFilterDef[] => [
+const pageFilters = (isMap: boolean, noLayout: boolean, withDocuments: boolean): PageFilterDef[] => [
   { key: 'all', label: 'All' },
   ...(isMap ? [
     { key: 'reviewed' as PageFilter, label: 'Reviewed' },
@@ -163,6 +165,8 @@ const pageFilters = (isMap: boolean, noLayout: boolean): PageFilterDef[] => [
   ...(isMap || noLayout ? [] : [{ key: 'no-layout' as PageFilter, label: 'No layout' }]),
   ...(isMap ? [] : [{ key: 'test-pages' as PageFilter, label: 'Test pages' }]),
   ...(isMap ? [] : [{ key: 'has-note' as PageFilter, label: 'Has note' }]),
+  // Pages no line of which anchored a stretch of the documents cut onto the dataset.
+  ...(withDocuments ? [{ key: 'no-document-match' as PageFilter, label: 'No document match' }] : []),
   { key: 'deleted', label: 'Deleted', editorsOnly: true },
 ]
 
@@ -249,6 +253,8 @@ export function JobDetailPage() {
   const [downloadingFullMaps, setDownloadingFullMaps] = useState(false)
   const [repredictOpen, setRepredictOpen] = useState(false)
   const [llmOpen, setLlmOpen] = useState(false)
+  const [documents, setDocuments] = useState<CorpusDocument[]>([])
+  const [documentsOpen, setDocumentsOpen] = useState(false)
   const [checkOpen, setCheckOpen] = useState(false)
   const [newerModels, setNewerModels] = useState<NewerModelOffer[]>([])
   const [settleOpen, setSettleOpen] = useState(false)
@@ -531,10 +537,20 @@ export function JobDetailPage() {
   const toggleSort = (key: SortKey) =>
     setSort((prev) => ({ key, dir: prev.key === key && prev.dir === 1 ? -1 : 1 }))
 
+  // The whole-document transcriptions the pages are cut against. Removing the last one
+  // takes the stretches it left on the pages with it, where a cut had left any.
+  const loadDocuments = useCallback((wasCut = false) => {
+    if (isMap) return
+    listDocuments(jobId).then(({ documents: held }) => {
+      setDocuments(held)
+      if (wasCut && held.length === 0) cutReference(jobId).then(refetch).catch((e: Error) => setError(e.message))
+    }).catch(() => setDocuments([]))
+  }, [jobId, isMap, refetch])
+  useEffect(() => loadDocuments(), [loadDocuments])
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = useMemo(
-    () => pageFilters(isMap, noLayout).filter((f) => canEdit || !f.editorsOnly),
-    [isMap, noLayout, canEdit])
+    () => pageFilters(isMap, noLayout, documents.length > 0).filter((f) => canEdit || !f.editorsOnly),
+    [isMap, noLayout, canEdit, documents.length])
   const filter = filters.find((f) => f.key === searchParams.get('filter')) ?? filters[0]
   const setFilter = (key: PageFilter) =>
     setSearchParams(key === 'all' ? {} : { filter: key }, { replace: true })
@@ -1074,6 +1090,17 @@ export function JobDetailPage() {
                   testId: 'llm-read-open',
                   onSelect: () => { setLlmPages(undefined); setLlmOpen(true) },
                 }] : []),
+                ...(canManage && !active && !isMap && documents.length > 0 ? [{
+                  label: 'Cut the documents again',
+                  hint: 'Place each page\'s stretch of the documents anew, as after reading',
+                  testId: 'corpus-cut',
+                  onSelect: () => cutReference(jobId).then((outcome) => {
+                    setNotice(`Cut ${plural(outcome.documents, 'document')} onto ${outcome.placed} of `
+                      + `${plural(outcome.pages, 'page')}${outcome.unanchored
+                        ? `; ${outcome.unanchored} matched no line` : ''}.`)
+                    refetch()
+                  }).catch((e: Error) => setError(e.message)),
+                }] : []),
                 ...(canManage && !isMap ? [{
                   label: 'Check transcriptions…',
                   hint: 'A model reads the checked lines, and those that look nothing like their text are listed',
@@ -1206,6 +1233,12 @@ export function JobDetailPage() {
                   onSelect: () => setRemoveReadingsOpen(true),
                 }] : []),
                 ...(canManage && !isMap ? [{
+                  label: 'Documents…',
+                  hint: 'Whole-document transcriptions the pages are cut against',
+                  testId: 'documents-open',
+                  onSelect: () => setDocumentsOpen(true),
+                }] : []),
+                ...(canManage && !isMap ? [{
                   label: 'Settings…',
                   hint: 'What it runs, its models and conventions, what its data may be used for',
                   testId: 'settings-open',
@@ -1261,7 +1294,7 @@ export function JobDetailPage() {
             }
           } : undefined} />
         )}
-        {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+        {error && <p data-testid="job-error" role="alert" className="mt-2 text-sm text-danger">{error}</p>}
         {notice && (
           <p data-testid="job-notice" className="mt-2 text-sm text-ink-muted">
             {notice}
@@ -1307,6 +1340,7 @@ export function JobDetailPage() {
           consensusWithOcr={job.llm_consensus_with_ocr ?? false}
           prompt={job.llm_prompt ?? ''}
           keptInHouse={!job.data_use.external_llm}
+          withDocuments={documents.length > 0}
           onClose={() => setLlmOpen(false)}
           onStarted={(outcome) => {
             pollLlm()
@@ -1322,6 +1356,10 @@ export function JobDetailPage() {
           }}
           onError={setError}
         />
+      )}
+      {documentsOpen && (
+        <DocumentsDialog jobId={jobId} documents={documents} onClose={() => setDocumentsOpen(false)}
+                         onChanged={() => loadDocuments(documents.some((d) => d.pages > 0))} />
       )}
       {purgeOpen && (
         <PurgeDialog jobId={jobId} onClose={() => setPurgeOpen(false)} onPurged={refetch} onError={setError} />

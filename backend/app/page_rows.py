@@ -10,6 +10,8 @@ _ROWS = """
 SELECT p.id, p.idx, p.filename, p.width, p.height, p.status,
        p.layout_checked, p.lines_checked, p.deleted, p.rotation, p.is_test,
        p.note, p.note_by, p.note_at,
+       -- Whether a line of the page anchored a stretch of a document cut onto it.
+       (p.reference_document IS NOT NULL AND p.reference_anchors > 0) document_match,
        (SELECT COUNT(*) FROM elements e
          WHERE e.page_id = p.id AND e.deleted = 0 AND e.kind = 'content'
            AND e.class_name != 'Divider') elements_total,
@@ -59,6 +61,7 @@ FILTERS = {
     # The flag line detection trains on: the outlines, not the text, are done.
     'lines-complete': f'{_WORK} AND lines_checked = 1',
     'lines-unchecked': f'{_WORK} AND lines_checked = 0',
+    'no-document-match': f'{_WORK} AND document_match = 0',
     'no-layout': f'{_WORK} AND elements_total = 0',
     'test-pages': f'{_WORK} AND is_test = 1',
     'has-note': 'deleted = 0 AND note IS NOT NULL',
@@ -201,7 +204,7 @@ def _filters(task: str) -> dict[str, str]:
 
 def _as_page(row: sqlite3.Row) -> dict:
     page = dict(row)
-    for flag in ('layout_checked', 'lines_checked', 'deleted', 'is_test'):
+    for flag in ('layout_checked', 'lines_checked', 'deleted', 'is_test', 'document_match'):
         page[flag] = bool(page[flag])
     page['note'] = store.note_of(page)
     return page

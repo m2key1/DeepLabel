@@ -10,6 +10,8 @@ import { VisibilityBadge } from '../llm/VisibilityBadge'
 import { Button } from '../ui/Button'
 import { Input, Textarea } from '../ui/Field'
 import { Hint } from '../ui/Hint'
+import { DocumentRead } from '../corpus/DocumentRead'
+import { Segmented } from '../ui/Segmented'
 
 
 const SEEN_HINT =
@@ -88,12 +90,17 @@ interface LlmReadDialogProps {
   /** What the run actually took on - nothing queued is a real outcome, not a failure. */
   onStarted: (outcome: { queued: number; reused: number }) => void
   onError: (message: string) => void
+  /** The dataset has documents cut onto its pages, which the pages can be read against. */
+  withDocuments?: boolean
 }
+
+type ReadMode = 'pages' | 'documents'
 
 export function LlmReadDialog({
   jobId, pageIds, pageCount, selected, consensusMin, autocheck, consensusWithOcr, prompt,
-  keptInHouse, onClose, onStarted, onError,
+  keptInHouse, onClose, onStarted, onError, withDocuments = false,
 }: LlmReadDialogProps) {
+  const [mode, setMode] = useState<ReadMode>('pages')
   const [models, setModels] = useState<(LlmModel & { shared: boolean; self_hosted: boolean })[]>([])
   const [chosen, setChosen] = useState<number[]>(selected)
   const [preview, setPreview] = useState<LlmReadPreview | null>(null)
@@ -193,8 +200,29 @@ export function LlmReadDialog({
   const settingLabel = 'flex cursor-pointer items-center gap-2'
   const settingBox = 'cursor-pointer accent-accent'
 
+  const modes = withDocuments && (
+    <Segmented<ReadMode> value={mode} onChange={setMode} className="mb-3 w-fit" options={[
+      { value: 'pages', label: 'The pages on their own' },
+      { value: 'documents', label: 'Against the documents', title: 'Each page with the stretch of its document the cut put on it' },
+    ]} />
+  )
+  if (mode === 'documents') {
+    return (
+      // The read and its wording were laid out for a page of their own; a narrow panel
+      // wraps their headings and buttons.
+      <Modal title="Transcribe the pages with language models" width="lg" onClose={onClose}>
+        {modes}
+        <DocumentRead jobId={jobId} onError={onError} />
+        <div className="mt-4 flex justify-end border-t border-line pt-3">
+          <button onClick={onClose} className={modalBtn}>Close</button>
+        </div>
+      </Modal>
+    )
+  }
+
   return (
     <Modal title="Transcribe the pages with language models" onClose={onClose}>
+      {modes}
       {models.length === 0 ? (
         <p className="mb-3 text-sm text-ink-muted" data-testid="llm-none-configured">
           No models set up. Add an endpoint under Settings.

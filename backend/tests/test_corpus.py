@@ -421,3 +421,38 @@ class TestTheSpanReview:
         assert cut['pages'] == 1
         assert listed['total'] == 1
         assert [page['page_id'] for page in listed['pages']] == [1]
+
+
+class TestAPagesStretchInThePageViewer:
+    """The span a cut put on a page travels with the page, so the page viewer can show it
+    beside the lines it was matched against (#49)."""
+
+    def test_a_cut_page_carries_its_stretch_and_how_it_was_placed(self, client):
+        api, conn = client
+        conn.execute("UPDATE pages SET reference_text = 'Pfarre Wien', reference_document = 'brief-1941', "
+                     'reference_anchors = 2, reference_score = 0.9 WHERE id = 1')
+        conn.commit()
+        page = api.get('/api/jobs/j1/pages/1', headers=ADMIN).json()
+        assert page['reference'] == {'document': 'brief-1941', 'text': 'Pfarre Wien', 'anchors': 2}
+
+    def test_a_page_the_cut_put_nothing_on_carries_none(self, client):
+        api, _ = client
+        assert api.get('/api/jobs/j1/pages/1', headers=ADMIN).json()['reference'] is None
+
+    def test_a_cut_is_counted_at_once_by_the_no_document_match_filter(self, client):
+        api, conn = client
+        conn.execute("INSERT INTO elements (id, page_id, order_idx, class_name, bbox, kind) "
+                     "VALUES (1, 1, 0, 'Paragraph', '[0, 0, 1, 1]', 'content')")
+        for order, text in enumerate(['Pfarre Wien', 'Kaplan Huber', 'Dechant Gruber']):
+            conn.execute("INSERT INTO lines (element_id, order_idx, polygon, text) VALUES (1, ?, '[]', ?)",
+                         (order, text))
+        conn.commit()
+
+        def unmatched():
+            return api.get('/api/jobs/j1/page-rows', params={'limit': 1}, headers=ADMIN).json()['counts']['no-document-match']
+
+        assert unmatched() == 1
+        assert api.post('/api/jobs/j1/documents', headers=ADMIN, files=[
+            ('files', ('band.txt', b'Pfarre Wien\nKaplan Huber\nDechant Gruber\n', 'text/plain'))]).status_code == 200
+        assert api.post('/api/jobs/j1/reference/cut', headers=ADMIN).json()['unanchored'] == 0
+        assert unmatched() == 0

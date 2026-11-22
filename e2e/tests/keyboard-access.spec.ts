@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test'
 import { backendFetch, getJob, identity, jobPageIds, seedCompletedJob, shareJob, uniqueName } from '../helpers/api'
 import { seedSession, useSession } from '../helpers/session'
 import { openViewer } from '../helpers/viewer'
+import { openDatasetMenu } from '../helpers/dataset'
 
 // Pipelines are private to whoever saved them, and the browser is logged in as this account.
 const DEV = identity('dev', 'admin')
@@ -266,7 +267,10 @@ test.describe('Scenario: state that reads out loud', () => {
     await backendFetch(`/api/jobs/${jobId}/documents`, { method: 'POST', body: form })
     await expect.poll(() => documentNames(jobId)).toEqual(['letter-a', 'letter-b'])
 
-    await page.goto(`/jobs/${jobId}/corpus`)
+    await page.goto(`/jobs/${jobId}`)
+    const more = await openDatasetMenu(page, 'dataset-more')
+    await more.getByTestId('documents-open').click()
+    await expect(page.getByRole('dialog').getByRole('heading', { name: 'Documents' })).toBeVisible()
     const remove = page.getByRole('button', { name: 'Remove letter-a', exact: true })
     await expect(page.getByRole('button', { name: 'Remove letter-b', exact: true })).toBeVisible()
 

@@ -131,6 +131,9 @@ def page_results(job_id: str, page_id: int, conn=Depends(get_db), user: dict = D
             # Set instead by the layout model's template, where it reads top to bottom.
             'reading_order_template': layout_templates.order_set_by(conn, job_id),
             'provenance': provenance.page_provenance(conn, page),
+            # The stretch of a document the corpus cut put on this page, if any.
+            'reference': {'document': page['reference_document'], 'text': page['reference_text'],
+                          'anchors': page['reference_anchors']} if page['reference_text'] else None,
             # Where a live view of this page starts listening for other people's edits.
             'job_revision': store.job_revision(conn, job_id),
             'revision': store.latest_revision(conn, 'page', page_id)}

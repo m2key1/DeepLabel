@@ -53,6 +53,9 @@ the version in the app's footer opens.
 
 ### Changed
 
+- The Corpus tab is folded into the dataset's menus: documents under More, cutting again in
+  Run, reading against the documents in the language-model dialog, a No document match filter,
+  and each page's stretch in the page viewer; old Corpus links open the dataset (#49).
 - The page table shows which pages are marked lines complete, the ones line detection trains
   on, in a Lines column with its own filters; the text filters are now called Text checked and
   Text unchecked (#78).

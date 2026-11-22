@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from app import config, corpus, data_use, ingest, llm, llm_gt, store
+from app import config, corpus, data_use, ingest, llm, llm_gt, page_rows, store
 from app.caches import counted_page
 from app.deps import accessible_job, current_user, get_db, require_job_access, require_job_manager
 from app.routes.selection import selected_pages
@@ -139,7 +139,10 @@ def cut_reference(job_id: str, conn=Depends(get_db), user: dict = Depends(curren
         raise HTTPException(409, 'job is queued or running')
     if not corpus.needs_cut(conn, job_id):
         raise HTTPException(400, 'this dataset has no corpus documents')
-    return corpus.apply_cut(conn, job_id, job['reference_overlap'])
+    outcome = corpus.apply_cut(conn, job_id, job['reference_overlap'])
+    # The cut rewrites pages without adding a row, which the held chip counts cannot see.
+    page_rows.forget_counts(conn, job_id)
+    return outcome
 
 
 class GroundTruthRequest(BaseModel):

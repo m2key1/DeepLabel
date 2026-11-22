@@ -34,7 +34,7 @@ test.describe('Scenario: DeepLabel on a phone and a tablet', () => {
     const mapJobId = await seedMapJob(uniqueName('Small screens map'))
     const [tileId] = await tileIds(mapJobId)
     const pages = [
-      '/', `/jobs/${jobId}`, `/jobs/${jobId}/transcript`, `/jobs/${jobId}/pages/${pageId}`, `/jobs/${jobId}/corpus`,
+      '/', `/jobs/${jobId}`, `/jobs/${jobId}/transcript`, `/jobs/${jobId}/pages/${pageId}`,
       `/jobs/${jobId}/settings`, `/jobs/${mapJobId}`, '/models', '/models/evaluations', '/queue', '/new', '/admin',
       '/profile', '/conventions', '/templates', '/augmentations',
     ]
