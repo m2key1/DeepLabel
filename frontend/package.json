@@ -19,6 +19,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@types/zxcvbn": "4.4.5",
     "openseadragon": "^6.1.1",
+    "pdfjs-dist": "^6.5.438",
     "polygon-clipping": "^0.15.7",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

@@ -1334,10 +1334,13 @@ export function uploadJob(
   dataUse: DataUse = ALL_USES,
   layoutShape: LayoutShape = 'box',
   groupId: number | null = null,
+  /** The pages picked from a PDF, counted from 1, by its file name; one not named goes whole. */
+  pdfPages: Record<string, number[]> = {},
 ): Promise<{ job_id: string }> {
   const form = new FormData()
   form.append('layout_shape', layoutShape)
   if (groupId !== null) form.append('group_id', String(groupId))
+  if (Object.keys(pdfPages).length) form.append('pdf_pages', JSON.stringify(pdfPages))
   if (asTest) form.append('as_test', 'true')
   form.append('ocr_convention', JSON.stringify(ocrConvention))
   form.append('data_use', JSON.stringify(dataUse))

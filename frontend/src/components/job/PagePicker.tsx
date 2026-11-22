@@ -8,6 +8,8 @@ export interface PickItem<K> {
   name: string
   /** A thumbnail to show; without one the tile names the file type. */
   preview?: string
+  /** A thumbnail drawn in the page itself, as a PDF's page is. */
+  thumbnail?: ReactNode
 }
 
 /** Local files as pickable pages, each image with a preview that lives as long as the list. */
@@ -88,13 +90,13 @@ export function PagePicker<K>({ items, excluded, onToggle, onExclude, unit = 'fi
                    className={`relative cursor-pointer rounded-md border border-line bg-surface p-1.5 ${on ? '' : 'opacity-45'}`}>
               <input type="checkbox" checked={on} onChange={() => onToggle(item.key)} aria-label={item.name}
                      className="absolute left-3 top-3 cursor-pointer accent-accent" />
-              {item.preview ? (
+              {item.thumbnail ?? (item.preview ? (
                 <img src={item.preview} alt="" loading="lazy" className="h-32 w-full rounded-sm bg-raised object-contain" />
               ) : (
                 <div className="grid h-32 place-items-center rounded-sm bg-raised font-mono text-xs uppercase text-ink-muted">
                   {item.name.split('.').pop()}
                 </div>
-              )}
+              ))}
               <span className="mt-1 block truncate text-[11px] text-ink-muted" title={item.name}>{item.name}</span>
             </label>
           )

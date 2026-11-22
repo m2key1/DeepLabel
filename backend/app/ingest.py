@@ -167,10 +167,16 @@ def insert_maps(conn, job_id: str, files: list[tuple]):
     store.recount_pages(conn, job_id, commit=False)
 
 
-def expand_pdf(job_id: str, source: Path, display: str, prefix: str) -> list[tuple]:
-    """One entry per PDF page. The images are materialized later, in the runner;
-    here we only need the page count and the extract/render decision."""
+def expand_pdf(job_id: str, source: Path, display: str, prefix: str, keep: set[int] | None = None) -> list[tuple]:
+    """One entry per PDF page, or per page in `keep` (counted from 1) where only some were
+    picked. The images are materialized later, in the runner; here we only need the page
+    count and the extract/render decision."""
     specs = pdf.probe(source)
+    if keep is not None:
+        missing = keep - {s.page for s in specs}
+        if missing:
+            raise pdf.PdfError(f'has no page {min(missing)}')
+        specs = [s for s in specs if s.page in keep]
     for spec in specs:
         require_size_within_limit(spec.width, spec.height, f'{display} page {spec.page}')
     stem = Path(display).stem
@@ -237,7 +243,8 @@ def _expand_zip(job_id: str, archive_path: Path, prefix: str, extensions) -> lis
     return entries
 
 
-def save_uploads(job_id: str, files, offset: int, extensions=None) -> tuple[list, list]:
+def save_uploads(job_id: str, files, offset: int, extensions=None,
+                 pdf_pages: dict[str, set[int]] | None = None) -> tuple[list, list]:
     extensions = extensions or config.INGEST_EXTENSIONS
     # A zip of scans is unpacked like a PDF is: one document whose pages it holds.
     accepted = extensions | {'.zip'} if extensions == config.INGEST_EXTENSIONS else extensions
@@ -261,7 +268,8 @@ def save_uploads(job_id: str, files, offset: int, extensions=None) -> tuple[list
                 shutil.copyfileobj(file.file, out, length=1 << 20)
             if is_pdf(filename):
                 try:
-                    documents.append((filename, i, expand_pdf(job_id, dest, filename, prefix)))
+                    documents.append((filename, i, expand_pdf(job_id, dest, filename, prefix,
+                                                              (pdf_pages or {}).get(filename))))
                 except pdf.PdfError as e:
                     raise IngestError(f'{filename}: {e}')
             elif Path(filename).suffix.lower() == '.zip':

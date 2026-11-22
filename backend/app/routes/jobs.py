@@ -110,6 +110,21 @@ def _job_payload(conn, row, shared_with: list[str] | None = None) -> dict:
     return job
 
 
+def _picked_pdf_pages(raw: str, uploaded: set[str]) -> dict[str, set[int]]:
+    """The pages picked from each PDF of an upload, or 400 for a pick that names no page of a
+    file in it."""
+    try:
+        picked = json.loads(raw or '{}')
+    except json.JSONDecodeError:
+        raise HTTPException(400, 'the picked PDF pages are not JSON')
+    if not isinstance(picked, dict) or not all(
+            name in uploaded and ingest.is_pdf(name) and isinstance(pages, list) and pages
+            and all(isinstance(n, int) and not isinstance(n, bool) and n >= 1 for n in pages)
+            for name, pages in picked.items()):
+        raise HTTPException(400, 'the picked PDF pages must name an uploaded PDF and its pages, counted from 1')
+    return {name: set(pages) for name, pages in picked.items()}
+
+
 @router.post('/api/jobs')
 def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: str = Form('text'),
                page_reading_order: str = Form(reading_order.AUTO),
@@ -124,14 +139,18 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
                hold: bool = Form(False), as_test: bool = Form(False),
                ocr_convention: str = Form('{}'), data_use: str = Form('{}'),
                layout_shape: str = Form('box'), group_id: int | None = Form(None),
+               pdf_pages: str = Form('{}'),
                files: list[UploadFile] = None, conn=Depends(get_db),
                user: str = Depends(get_user), _editor=Depends(require_role(*WRITERS))):
     """Create a dataset from uploaded files - a .txt beside an image is ingested as that page's transcription.
     With `hold`, it waits as 'uploading' while more batches are added, until it is started. It is made in
-    the workspace `group_id`, which its creator belongs to, or else in their Sandbox."""
+    the workspace `group_id`, which its creator belongs to, or else in their Sandbox. `pdf_pages`
+    maps a PDF's filename to the pages picked from it, counted from 1; a PDF it does not name is
+    taken whole."""
     _valid_layout_shape(layout_shape)
     if not files:
         raise HTTPException(400, 'no files uploaded')
+    picked_pages = _picked_pdf_pages(pdf_pages, {Path(f.filename or '').name for f in files})
     ingest.valid_task(task)
     ingest.valid_line_mode(line_mode)
     name = ingest.require_unique_name(conn, name)
@@ -167,7 +186,7 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
     job_id = uuid4().hex[:12]
     try:
         images, transcriptions = ingest.split_transcriptions(files)
-        saved, skipped = ingest.save_uploads(job_id, images, 0, extensions=extensions)
+        saved, skipped = ingest.save_uploads(job_id, images, 0, extensions=extensions, pdf_pages=picked_pages)
     except ingest.IngestError as e:
         shutil.rmtree(config.job_dir(job_id), ignore_errors=True)
         raise HTTPException(e.status_code, e.detail)

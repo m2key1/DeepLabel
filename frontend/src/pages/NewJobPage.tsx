@@ -20,7 +20,8 @@ import { SANDBOX, startingWorkspace, takesNewDatasets } from '../components/job/
 import { AlignmentChoice, LayoutShapeChoice, LlmReaders } from '../components/job/SettingsSections'
 import { IiifSource, NO_IIIF } from '../components/job/IiifSource'
 import type { IiifChoice } from '../components/job/IiifSource'
-import { PagePicker, useFileItems } from '../components/job/PagePicker'
+import { PagePicker, useFileItems, type PickItem } from '../components/job/PagePicker'
+import { PdfThumb } from '../components/job/PdfThumb'
 import {
   DECODE_NAMES, LAYOUT_SHAPE_CHOICES, LINE_MODE_CHOICES, NEEDS_LAYOUT, PHASE_CHOICES, lowersShape, shapeChangesText,
 } from '../components/job/processing'
@@ -34,6 +35,7 @@ import { UploadProgress, type UploadState } from '../components/ui/UploadProgres
 import { PageHeader } from '../components/ui/PageHeader'
 import { pageShell } from '../components/ui/page'
 import { useAutoClear } from '../messages'
+import { useOpenedPdfs } from '../lib/pdfPages'
 
 type Mode = 'upload' | 'iiif' | 'path'
 type Step = 'source' | 'pages' | 'run' | 'models' | 'review'
@@ -94,6 +96,17 @@ function NewJobSummary({ rows, onEdit, canEdit, full = false }: {
 const INGEST_EXTENSIONS = /\.(jpe?g|png|tiff?|bmp|webp|pdf|txt|zip)$/i
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|tiff?|bmp|webp)$/i
 const EXPORT_ARCHIVE = /\.zip$/i
+/** A tile on the Pages step: a file, or one page of a PDF the browser has opened. */
+type PageItem = PickItem<string> & { file: File; page?: number }
+
+// Each picked file's own key, so two files of one name are left out apart.
+const fileKeys = new WeakMap<File, string>()
+let keysGiven = 0
+function fileKey(file: File): string {
+  if (!fileKeys.has(file)) fileKeys.set(file, `f${++keysGiven}`)
+  return fileKeys.get(file)!
+}
+
 function toggled<K>(held: Set<K>, key: K): Set<K> {
   const next = new Set(held)
   if (!next.delete(key)) next.add(key)
@@ -193,7 +206,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   const [gtFromPdf, setGtFromPdf] = useState(false)
   const [importReviewed, setImportReviewed] = useState(true)
   const [step, setStep] = useState<Step>(edit ? 'run' : 'source')
-  const [excluded, setExcluded] = useState<Set<File>>(new Set())
+  const [excluded, setExcluded] = useState<Set<string>>(new Set())
   const [catalog, setCatalog] = useState<ConventionFlag[] | null>(null)
   const [convention, setConvention] = useState<OcrConvention>(edit?.ocr_convention ?? {})
   const [dataUse, setDataUse] = useState<DataUse>(edit?.data_use ?? ALL_USES)
@@ -337,12 +350,49 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   // The scans themselves, which the Pages step shows; transcriptions travel with them.
   const pageFiles = useMemo(() => files.filter((f) => !/\.(txt|zip)$/i.test(f.name)), [files])
   const fileItems = useFileItems(pageFiles)
+  const pdfFiles = useMemo(() => pageFiles.filter((f) => /\.pdf$/i.test(f.name)), [pageFiles])
+  // A pick is sent by file name, so PDFs that share one could not be told apart: they go whole.
+  const splittable = useMemo(
+    () => pdfFiles.filter((f) => pdfFiles.filter((other) => other.name === f.name).length === 1), [pdfFiles])
+  const openedPdfs = useOpenedPdfs(splittable)
+  // A PDF the browser has opened is its pages, picked one by one; anything else is one file.
+  const pageItems = useMemo(() => fileItems.flatMap((item): PageItem[] => {
+    const opened = openedPdfs.get(item.key)
+    if (opened && typeof opened === 'object') {
+      return Array.from({ length: opened.pages }, (_, i) => ({
+        key: `${fileKey(item.key)}#${i + 1}`, name: `${item.name} · p. ${i + 1}`, file: item.key, page: i + 1,
+        thumbnail: <PdfThumb doc={opened.doc} page={i + 1} />,
+      }))
+    }
+    return [{ ...item, key: fileKey(item.key), file: item.key }]
+  }), [fileItems, openedPdfs])
+  // A PDF left out while it was still opening stays out, page by page, once it is open.
+  useEffect(() => {
+    setExcluded((held) => {
+      let next: Set<string> | null = null
+      for (const [file, opened] of openedPdfs) {
+        const whole = fileKey(file)
+        if (typeof opened !== 'object' || !held.has(whole)) continue
+        next ??= new Set(held)
+        next.delete(whole)
+        for (let page = 1; page <= opened.pages; page++) next.add(`${whole}#${page}`)
+      }
+      return next ?? held
+    })
+  }, [openedPdfs])
+  const keptItems = pageItems.filter((item) => !excluded.has(item.key))
+  // Only what a PDF's page list left out is named; a PDF kept whole goes as it is.
+  const pdfPages: Record<string, number[]> = Object.fromEntries(pdfFiles.flatMap((f) => {
+    const pages = pageItems.filter((item) => item.file === f && item.page !== undefined)
+    const kept = pages.filter((item) => !excluded.has(item.key))
+    return kept.length > 0 && kept.length < pages.length ? [[f.name, kept.map((item) => item.page!)]] : []
+  }))
   const manifest = mode === 'iiif' ? iiif.manifest : null
   const canvasItems = useMemo(() => (iiif.manifest?.canvases ?? []).map((c, i) => ({
     key: c.canvas, name: `${i + 1} · ${c.label || 'untitled'}`, preview: iiifThumbnailUrl(c.thumbnail),
   })), [iiif.manifest])
   const canvasesKept = (manifest?.canvases ?? []).filter((c) => !iiifExcluded.has(c.canvas))
-  const sentFiles = files.filter((f) => !excluded.has(f))
+  const sentFiles = files.filter((f) => !pageFiles.includes(f) || keptItems.some((item) => item.file === f))
   const ocrModel = models.find((m) => (picks.ocr === '' ? m.task === 'ocr' && m.is_default : m.id === Number(picks.ocr)))
   // Only a model with a token decoder reads the line with it, so the card exists only for those;
   // a new dataset that picked it and then a model without one goes back to Automatic.
@@ -394,7 +444,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
         ? canvasesKept.length === 0
           ? 'Leave at least one page in'
           : canvasesKept.length > manifest.max_pages ? `Choose at most ${manifest.max_pages} pages` : null
-        : pageFiles.every((f) => excluded.has(f)) ? 'Leave at least one page in' : null,
+        : keptItems.length === 0 ? 'Leave at least one page in' : null,
     run: edit && nameMissing ? nameMissing : applies.run && isMap && effectivePhases.tile && !tileSizeValid
       ? `Choose a tile size from ${TILE_SIZE_MIN} to ${TILE_SIZE_MAX} px`
       : null,
@@ -438,7 +488,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
       label: 'Pages', step: 'pages' as Step,
       value: manifest
         ? `${canvasesKept.length} of ${manifest.canvases.length} included`
-        : `${pageFiles.filter((f) => !excluded.has(f)).length} of ${pageFiles.length} included`,
+        : `${keptItems.length} of ${pageItems.length} included`,
     }] : []),
     ...(applies.run && !isMap ? [
       { label: 'Runs', step: 'run' as Step,
@@ -556,7 +606,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
     }
     try {
       let job_id: string
-      const upload = async (sent: File[]) => {
+      const upload = async (sent: File[], picked: Record<string, number[]> = {}) => {
         setProgress({ loaded: 0, total: sent.reduce((s, f) => s + f.size, 0) })
         return uploadJob(
           name.trim(),
@@ -581,6 +631,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
           dataUse,
           isMap ? 'box' : shape,
           workspaceId,
+          picked,
         )
       }
       if (archive) {
@@ -595,7 +646,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
           job_id = (await upload([archive])).job_id
         }
       } else if (mode === 'upload') {
-        job_id = (await upload(sentFiles)).job_id
+        job_id = (await upload(sentFiles, pdfPages)).job_id
       } else if (manifest) {
         job_id = (await createJobFromIiif(manifest.url, canvasesKept.map((c) => c.canvas), jobOptions())).job_id
       } else {
@@ -1000,10 +1051,13 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
                       onToggle={(key) => setIiifExcluded((held) => toggled(held, key))}
                       note="Thumbnails come from the archive's image server; the full images are downloaded when the dataset starts." />
         ) : (
-          <PagePicker items={fileItems} excluded={excluded} onExclude={setExcluded}
-                      onToggle={(file) => setExcluded((held) => toggled(held, file))}
-                      note={pageFiles.some((f) => /\.pdf$/i.test(f.name))
-                        ? "A PDF's pages are split once it is uploaded, so it is taken whole here." : undefined} />
+          <PagePicker items={pageItems} excluded={excluded} onExclude={setExcluded}
+                      unit={pageItems.some((item) => item.page !== undefined) ? 'page' : 'file'}
+                      onToggle={(key) => setExcluded((held) => toggled(held, key))}
+                      note={[
+                        splittable.some((f) => openedPdfs.get(f) === 'unreadable') && 'A PDF that cannot be opened here is taken whole.',
+                        splittable.length < pdfFiles.length && 'PDFs that share a name are taken whole.',
+                      ].filter(Boolean).join(' ') || undefined} />
         ))}
         {step === 'run' && (<>
             {edit && nameField}

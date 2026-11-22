@@ -89,7 +89,9 @@ another of your datasets already has stops the Source step, with a link to that 
   attribution and rights, shows them under its name, and every export carries them. Private
   and internal addresses are never fetched.
 - **Pages** shows the scans as thumbnails; untick any to leave it out, or give a range such
-  as `3-22, 35`. A PDF is split into pages once it is uploaded, so it is taken whole here.
+  as `3-22, 35`. A PDF is opened in the browser and shown as its pages, so a cover or a
+  stretch of a long volume can be left out; only the pages left in are made into the
+  dataset. A PDF the browser cannot open, or PDFs that share a name, are taken whole.
 - Choose which phases run: layout detection, line detection and OCR. Layout is off by
   default; lines are then detected on the whole page. With layout on, lines can be detected
   inside each layout box instead.
