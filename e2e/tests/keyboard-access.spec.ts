@@ -179,9 +179,13 @@ test.describe('Scenario: working the dialogs and menus from the keyboard', () =>
     await expect(run).toHaveAttribute('aria-expanded', 'true')
     const items = page.getByTestId('run-menu-items')
     await expect(items.locator('[data-testid="run-phase"][data-phase="ocr"]')).toBeVisible()
+    // The menu is drawn at the end of the page, yet Tab goes on into it, not past it (#144).
+    await page.keyboard.press('Tab')
+    await expect(items.locator('button:focus')).toHaveCount(1)
     await page.keyboard.press('Escape')
     await expect(items).toHaveCount(0)
     await expect(run).toHaveAttribute('aria-expanded', 'false')
+    await expect(run).toBeFocused()
     // Escape shut the menu and nothing else: the page is still open in the viewer.
     await expect(page).toHaveURL(new RegExp(`/jobs/${jobId}/pages/${pageId}$`))
   })

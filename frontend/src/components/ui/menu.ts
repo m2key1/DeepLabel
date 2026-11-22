@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 /** What a button that opens a menu tells assistive technology about it. */
 export function menuTrigger(open: boolean) {
@@ -49,4 +49,36 @@ export function useDismiss(open: boolean, close: () => void) {
       document.removeEventListener('keydown', onKey)
     }
   }, [open])
+}
+
+const HANG_GAP = 4
+const HANG_MARGIN = 8
+
+/** Where a menu drawn at the top of the document hangs below the element it opens from:
+ *  under it, right edges aligned, kept inside the window. Drawn there, it escapes a row that
+ *  scrolls sideways - which clips whatever sticks out of it, as the editors' header rows
+ *  do - and it follows its button when that row or the window moves. */
+export function useHangingBelow(open: boolean, anchor: RefObject<HTMLElement | null>,
+                                menu: RefObject<HTMLElement | null>) {
+  const [at, setAt] = useState({ left: 0, top: 0 })
+  useLayoutEffect(() => {
+    if (!open) return
+    const place = () => {
+      if (!anchor.current || !menu.current) return
+      const below = anchor.current.getBoundingClientRect()
+      const width = menu.current.offsetWidth
+      setAt({
+        left: Math.max(HANG_MARGIN, Math.min(below.right - width, window.innerWidth - width - HANG_MARGIN)),
+        top: below.bottom + HANG_GAP,
+      })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open, anchor, menu])
+  return at
 }

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   getLlmReadPreview, getPageLlmReadings, getPageRunCosts, type LlmReadPreview,
   type LlmReadingsOnFile, type PagePhase, type PageRunCosts,
@@ -6,7 +7,7 @@ import {
 import { CaretIcon, PlayIcon } from '../icons'
 import { Button } from '../ui/Button'
 import { popoverChrome } from '../ui/Card'
-import { menuTrigger, useDismiss } from '../ui/menu'
+import { menuTrigger, useDismiss, useHangingBelow } from '../ui/menu'
 import { plural } from '../../util'
 
 const menuItem =
@@ -110,12 +111,20 @@ export function RunMenu({
   }, [open, pageId])
 
   useDismiss(open, () => setOpen(false))
+  const anchor = useRef<HTMLDivElement>(null)
+  const menu = useRef<HTMLDivElement>(null)
+  const at = useHangingBelow(open, anchor, menu)
+  // Drawn at the end of the document, the menu would come last on Tab; focus goes into it,
+  // after the dismiss above has noted the button to hand it back to.
+  useEffect(() => {
+    if (open) menu.current?.focus({ preventScroll: true })
+  }, [open])
   const readings = onFile.reduce((sum, m) => sum + m.readings, 0)
 
   const corrections = costs?.lines.corrections ?? 0
 
   return (
-    <div className="relative">
+    <div ref={anchor}>
       <Button
         size="xs"
         disabled={busy}
@@ -129,11 +138,14 @@ export function RunMenu({
       >
         {busy ? 'Running…' : <><PlayIcon /> Run <CaretIcon /></>}
       </Button>
-      {open && (
+      {open && createPortal(
         <div
+          ref={menu}
+          tabIndex={-1}
           onClick={(e) => e.stopPropagation()}
           data-testid="run-menu-items"
-          className={`absolute right-0 top-full z-30 mt-1 w-60 overflow-hidden ${popoverChrome} py-1`}
+          style={at}
+          className={`fixed z-30 w-60 overflow-hidden ${popoverChrome} py-1 focus:outline-none`}
         >
           {RUNNABLE.map((phase) => (
             <button
@@ -186,7 +198,8 @@ export function RunMenu({
               {plural(corrections, 'correction')} kept and re-attached afterwards.
             </p>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

@@ -89,6 +89,7 @@ the version in the app's footer opens.
 
 ### Fixed
 
+- The page editor's Run menu opens in full again, no longer cut off by the editor bar (#144).
 - A layout model trained on classes of its own reads with those names, not the Schematismus
   ones (#147).
 - A training's log no longer shows the trainer's terminal colour codes (#145).

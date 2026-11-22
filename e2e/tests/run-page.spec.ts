@@ -111,6 +111,27 @@ test.describe('Scenario: running a phase on one page', () => {
 test.describe('Scenario: what the Run menu is, and is not, drawn over', () => {
   // The menu and the pane splitter were both z-20 and the splitter comes later in the
   // document, so its line was drawn straight through the open panel.
+  test('the open menu is seen whole, not cut off by the bar it hangs from', async ({ page }) => {
+    const jobId = await seedCompletedJob(uniqueName('Whole menu'), 1)
+    const [pageId] = await jobPageIds(jobId)
+    await openViewer(page, jobId, pageId)
+
+    await openRunMenu(page)
+    const items = page.getByTestId('run-menu-items')
+    await expect(items).toBeInViewport({ ratio: 1 })
+    const entries = items.getByRole('button')
+    await expect(entries).toHaveCount(4)
+    // What a person can press: the point at the centre of each entry is that entry. A menu
+    // clipped by the row it opens from fails this, though Playwright would scroll its items
+    // into view and click them (#144).
+    for (const entry of await entries.all()) {
+      expect(await entry.evaluate((element) => {
+        const box = element.getBoundingClientRect()
+        return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.closest('button') === element
+      })).toBe(true)
+    }
+  })
+
   test('the splitter runs behind the open panel, not through it', async ({ page }) => {
     const jobId = await seedCompletedJob(uniqueName('Over the splitter'), 1)
     const [pageId] = await jobPageIds(jobId)
