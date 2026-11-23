@@ -4,7 +4,7 @@ import unicodedata
 from contextvars import ContextVar
 from pathlib import Path
 
-from app import caches, conventions, folding, page_types
+from app import caches, conventions, folding, page_types, rights
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -66,6 +66,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     note_at TEXT,
     -- Free fields - a date, a shelfmark - as a JSON list of {key, value}, in order (app/metadata.py).
     metadata TEXT NOT NULL DEFAULT '[]',
+    -- The scans' rights (app/rights.py): a statement from the closed list, credit line, holder,
+    -- source and note, as JSON, with the fields an import filled named. Every change is in rights_log.
+    rights TEXT NOT NULL DEFAULT '{}',
+    -- The licence of the transcriptions and annotations made here, from the same list.
+    transcription_licence TEXT,
     -- Wording for the diplomatic reading that turns a corpus span into ground truth. It
     -- is a different question from llm_prompt - it carries the page's reference text -
     -- so it is asked separately. Empty uses the shipped one.
@@ -259,6 +264,16 @@ CREATE TABLE IF NOT EXISTS job_layout_classes (
     color TEXT,
     position INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (job_id, class_id)
+);
+-- Every change to a dataset's rights fields: who changed which, from what to what, and when.
+CREATE TABLE IF NOT EXISTS rights_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    field TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    author TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 -- A text dataset's own page types (app/page_types.py), copied from the defaults as it is
 -- made. Each can switch steps off for its pages; pages.page_type names one, NULL is text.
@@ -1138,6 +1153,17 @@ def connect(db_path: Path) -> sqlite3.Connection:
                 conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} TEXT')
         if 'metadata' not in {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN metadata TEXT NOT NULL DEFAULT '[]'")
+    if 'rights' not in {row[1] for row in conn.execute('PRAGMA table_info(jobs)')}:
+        conn.execute("ALTER TABLE jobs ADD COLUMN rights TEXT NOT NULL DEFAULT '{}'")
+        conn.execute('ALTER TABLE jobs ADD COLUMN transcription_licence TEXT')
+        # What a IIIF dataset's manifest said moves into the fields, marked as imported.
+        for job in conn.execute('SELECT id, iiif_source FROM jobs WHERE iiif_source IS NOT NULL').fetchall():
+            try:
+                source = json.loads(job['iiif_source'])
+            except ValueError:
+                continue
+            rights.write(conn, job['id'], rights.from_iiif({**source, 'url': source.get('manifest')}), 'import',
+                         imported=True)
     if 'grad_accum_steps' not in training_cols:
         conn.execute('ALTER TABLE trainings ADD COLUMN grad_accum_steps INTEGER')
         conn.execute('ALTER TABLE trainings ADD COLUMN lr_scale REAL')
@@ -1752,6 +1778,8 @@ def job_row_to_dict(row: sqlite3.Row) -> dict:
     job['gt_model_ids'] = json.loads(job.get('gt_model_ids') or '[]')
     job['ocr_convention'] = json.loads(job.get('ocr_convention') or '{}')
     job['iiif_source'] = json.loads(job['iiif_source']) if job.get('iiif_source') else None
+    job['metadata'] = json.loads(job.get('metadata') or '[]')
+    job['rights_status'] = json.loads(job.pop('rights', None) or '{}').get('status')
     job['data_use'] = {use: bool(job.pop(col, 1)) for use, col in DATA_USE_COLUMNS.items()}
     read = job.get('ocr_convention_read')
     job['ocr_convention_read'] = json.loads(read) if read is not None else None

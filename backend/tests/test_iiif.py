@@ -353,7 +353,12 @@ class TestExport:
 
         assert answer.status_code == 200
         archive = zipfile.ZipFile(io.BytesIO(answer.content))
-        assert sorted(archive.namelist()) == ['SOURCE.txt', 'annotations/0001_fol-1r.json']
+        assert sorted(archive.namelist()) == ['RIGHTS.txt', 'SOURCE.txt', 'annotations/0001_fol-1r.json']
+        # The manifest's licence and attribution filled the dataset's rights (#42).
+        assert archive.read('RIGHTS.txt').decode() == (
+            'Facsimiles (the scans)\nRights: CC BY 4.0 <http://creativecommons.org/licenses/by/4.0/>\n'
+            f'Credit line: Provided by the town archive\nSource: Ratsprotokolle 1781 - {V2["@id"]}\n\n'
+            'Transcriptions and annotations made in DeepLabel\nLicence: not given\n')
         annotations = json.loads(archive.read('annotations/0001_fol-1r.json'))
         assert [a['body']['value'] for a in annotations['items']] == ['Rath']
         assert archive.read('SOURCE.txt').decode() == (
@@ -372,8 +377,8 @@ class TestExport:
 
         assert ('<sourceDesc><bibl><title>Ratsprotokolle 1781</title>'
                 f'<idno type="IIIF-manifest">{V2["@id"]}</idno><availability>'
-                '<licence target="https://creativecommons.org/licenses/by/4.0/">Provided by the town archive'
-                '</licence></availability></bibl></sourceDesc>') in tei
+                '<licence target="http://creativecommons.org/licenses/by/4.0/">CC BY 4.0</licence>'
+                '<p>Provided by the town archive</p></availability></bibl></sourceDesc>') in tei
         assert (f'<Comments>IIIF manifest {V2["@id"]}; Provided by the town archive; '
                 'https://creativecommons.org/licenses/by/4.0/</Comments>') in page_xml
 

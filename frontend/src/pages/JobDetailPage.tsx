@@ -98,6 +98,7 @@ import { ExportBlockedNote, ExportMenu, exportBlocked } from '../components/job/
 import { DataUseChips } from '../components/job/DataUseSwitches'
 import { LayoutClassesDialog } from '../components/job/LayoutClassesDialog'
 import { PageTypesDialog } from '../components/job/PageTypesDialog'
+import { RightsChip } from '../components/job/RightsDialog'
 import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
 import { SettleAgainDialog } from '../components/job/SettleAgainDialog'
 import { RepredictDialog } from '../components/job/RepredictDialog'
@@ -1312,6 +1313,8 @@ export function JobDetailPage() {
           <PhaseStrip job={job} />
           <ReviewProgress done={job.pages_checked ?? 0} total={(isMap ? job.tiles_total : job.pages_live) ?? 0}
                           unit={isMap ? 'tiles reviewed' : 'pages with every line checked'} />
+          <RightsChip jobId={jobId} status={job.rights_status ?? null} canEdit={canEdit}
+                      onChanged={(status) => setJob((p) => (p ? { ...p, rights_status: status } : p))} />
           {!isMap && (
             <TestDataControls
               testPages={chipCounts['test-pages'] ?? 0}

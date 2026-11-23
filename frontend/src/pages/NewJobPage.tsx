@@ -2,15 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ALL_USES, READING_ORDERS, READING_ORDER_LABEL, TILE_SIZE_MAX, TILE_SIZE_MIN, createJobFromIiif,
-  createJobFromPath, iiifThumbnailUrl, ApiError, getEnabledTasks, getLayoutShapeChanges, getLayoutTemplates, getMapModels, importJob, isTileTask, listConventionFlags,
+  createJobFromPath, iiifThumbnailUrl, ApiError, getEnabledTasks, getRightsStatements, getLayoutShapeChanges, getLayoutTemplates, getMapModels, importJob, isTileTask, listConventionFlags,
   checkJobName, listGroups, listModels, listUsableLlmModels, renameJob, reocr, reocrPreview, setDataUse as saveDataUse, setJobLlmSettings,
   setJobModels, setJobProcessing, setNewPagesTest, uploadJob,
 } from '../api'
 import type {
   ConventionFlag, DataUse, Group, JobOptions, JobWithoutPages, LayoutShape, LayoutShapeChanges, LlmModel, ReocrPreview, LayoutTemplate, LineMode, MapModel, MapRunner, ModelPicks, ModelTask, OcrConvention, DatasetDecode,
-  Phases, RegistryModel, Task,
+  Phases, RegistryModel, RightsStatement, Task,
 } from '../api'
 import { useAuth } from '../auth'
+import { Select } from '../components/ui/Field'
 import { conventionLabel } from '../components/conventionLabel'
 import { ConventionFlags, flagsOn, offeredFlags, toggledFlag } from '../components/job/ConventionFlags'
 import { DataUseSwitches, USES, dataUseSummary, keptOut } from '../components/job/DataUseSwitches'
@@ -122,6 +123,14 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   useCrumb(edit ? `${edit.name} · Settings` : 'New job')
   const navigate = useNavigate()
   const [name, setName] = useState(edit?.name ?? '')
+  // Asked of every new dataset, with nothing chosen for anyone (#42); an existing one sets it in its rights.
+  const [licence, setLicence] = useState<string | null>(null)
+  const [statements, setStatements] = useState<RightsStatement[]>([])
+  const [statementsFailed, setStatementsFailed] = useState<string | null>(null)
+  useEffect(() => {
+    if (!edit) getRightsStatements().then((found) => setStatements(found.statements))
+      .catch((e: Error) => setStatementsFailed(e.message))
+  }, [edit])
   const [searchParams] = useSearchParams()
   const [groups, setGroups] = useState<Group[] | null>(null)
   const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(null)
@@ -449,7 +458,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
       ? `Choose a tile size from ${TILE_SIZE_MIN} to ${TILE_SIZE_MAX} px`
       : null,
     models: null,
-    review: null,
+    review: !edit && !licence ? 'Choose a licence for the transcriptions' : null,
   }
   const missing = route.map((s) => stepMissing[s]).find((m) => m !== null) ?? null
   // A step can be clicked once it has been reached and everything before it holds, so going
@@ -546,6 +555,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
     data_use: dataUse,
     layout_shape: isMap ? 'box' : shape,
     group_id: workspaceId,
+    transcription_licence: licence,
   })
 
   // The template of a dataset's layout model, where that reads top to bottom: then it, not
@@ -637,13 +647,15 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
           isMap ? 'box' : shape,
           workspaceId,
           picked,
+          licence,
         )
       }
       if (archive) {
         setProgress({ loaded: 0, total: archive.size })
         try {
           job_id = (await importJob(name.trim(), archive, importReviewed,
-                                    (loaded, total) => setProgress({ loaded, total }), dataUse, workspaceId)).job_id
+                                    (loaded, total) => setProgress({ loaded, total }), dataUse, workspaceId,
+                                    licence)).job_id
         } catch (err) {
           // A zip of scans with nothing describing them is a set of pages: it goes up as
           // an upload and is read like any other.
@@ -1472,6 +1484,26 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
           )}
         </>)}
         {step === 'review' && (<>
+          {!edit && (
+            <section data-testid="new-job-licence" className="rounded-md border border-line bg-surface px-4 py-3">
+              <h2 className="text-sm font-semibold text-ink">Licence of the transcriptions</h2>
+              <p className="mb-2 text-xs text-ink-muted">
+                Under which terms the text and annotations made here may be reused. The scans keep their own
+                rights, set in the dataset's Rights.
+              </p>
+              <Select size="sm" className="w-full max-w-md" aria-label="Licence of the transcriptions"
+                      data-testid="new-job-licence-select"
+                      value={licence ?? ''} onChange={(e) => setLicence(e.target.value || null)}>
+                <option value="" disabled>Choose a licence…</option>
+                {statements.map((s) => <option key={s.uri} value={s.uri}>{s.label}</option>)}
+              </Select>
+              {statementsFailed && (
+                <p role="alert" className="mt-1.5 text-xs text-danger">
+                  The licences could not be loaded ({statementsFailed}) - reload the page to try again.
+                </p>
+              )}
+            </section>
+          )}
           <section ref={dataUseSection} data-testid="new-job-data-use" className="rounded-md border border-line bg-surface px-4 py-3">
             <h2 className="text-sm font-semibold text-ink">Data use</h2>
             <p className="text-xs text-ink-muted">

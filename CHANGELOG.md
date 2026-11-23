@@ -10,6 +10,9 @@ the version in the app's footer opens.
 
 ### Added
 
+- Rights for a dataset's scans and a licence for its transcriptions, from a closed list, with
+  every change logged. A new dataset asks for the licence, a IIIF import fills the rights, and
+  every export carries them (#42, first part).
 - Page types: a dataset's pages can be cover, blank, table or image, each type with the steps
   a run takes on it; covers and blanks are not read, and a page line detection found nothing on
   is offered as blank. Datasets and pages carry free metadata, written in Info, exported into

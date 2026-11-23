@@ -2,7 +2,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from app import formats, iiif, layout_shapes, metadata
+from app import formats, iiif, layout_shapes, metadata, rights
 from app.caches import counted_page
 
 
@@ -21,8 +21,8 @@ def _rounded(polygon: list) -> list:
 
 
 def collect_job(conn, job_id: str, checked_only: bool = False) -> dict:
-    job = conn.execute('SELECT id, name, owner, created_at, layout_shape, iiif_source, metadata FROM jobs WHERE id = ?',
-                       (job_id,)).fetchone()
+    job = conn.execute('SELECT id, name, owner, created_at, layout_shape, iiif_source, metadata, rights, '
+                       'transcription_licence FROM jobs WHERE id = ?', (job_id,)).fetchone()
     outlines = job is not None and layout_shapes.outlines(job['layout_shape'])
     pages = []
     for page in conn.execute(
@@ -32,8 +32,11 @@ def collect_job(conn, job_id: str, checked_only: bool = False) -> dict:
         if checked_only and not any(element['lines'] for element in entry['elements']):
             continue
         pages.append(entry)
+    held = rights.of_job(job) if job else {}
     described = {**{k: job[k] for k in ('id', 'name', 'owner', 'created_at')},
-                 'metadata': metadata.of(job['metadata'])} if job else {}
+                 'metadata': metadata.of(job['metadata']),
+                 'rights': {field: held[field] for field in ('status', *(f for f, _ in rights.TEXT_FIELDS))},
+                 'transcription_licence': held['transcription_licence']} if job else {}
     if job and job['iiif_source']:
         described['iiif_source'] = json.loads(job['iiif_source'])
     return {'job': described, 'pages': pages}
@@ -102,6 +105,7 @@ def write_archive(conn, data: dict, files: dict[str, str], out, scans: bool = Tr
     path or a file object) so a volume's worth of scans never has to fit in memory. The
     scans are stored as they are - they are compressed already."""
     source = data['job'].get('iiif_source')
+    files = {**files, 'RIGHTS.txt': rights.notice(data['job'])}
     if source:
         files = {**files, 'SOURCE.txt': source_note(source)}
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zf:

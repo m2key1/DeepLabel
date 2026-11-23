@@ -179,6 +179,22 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
 - A dataset made from a IIIF manifest takes the manifest's metadata, and each page its
   canvas's. A label the manifest gives twice becomes one field with both values.
 
+## Rights
+
+- Every dataset carries the rights of its scans: a statement from a closed list (Creative
+  Commons and RightsStatements.org, Copyright Not Evaluated first), a credit line, the rights
+  holder, the source and a note. Beside them is the licence of the transcriptions and
+  annotations made in DeepLabel, from the same list.
+- The chip on the dataset's title shows the statement, amber "Rights not evaluated" until
+  somebody chooses one. It opens the fields and every change made to them, with who and when;
+  anyone who can edit the dataset changes them.
+- A new dataset asks for the licence of its transcriptions, with nothing chosen.
+- A dataset made from a IIIF manifest takes its rights into the fields (v3 `rights` and
+  `requiredStatement`, v2 `license` and `attribution`), marked "from the import" until somebody
+  changes them. A rights address that is not on the list is kept in the note.
+- Every export archive carries a `RIGHTS.txt`. The TEI header licenses the transcriptions in
+  `publicationStmt` and gives the scans' rights and credit line in `sourceDesc`.
+
 ## Test data
 
 - A page is test data or not. No training uses a test page, nor any page with the same scan;

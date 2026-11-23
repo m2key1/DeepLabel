@@ -15,6 +15,7 @@ from app.routes import jobs as job_routes
 from app.routes import layout_templates as layout_template_routes
 from app.routes import metadata as metadata_routes
 from app.routes import page_types as page_type_routes
+from app.routes import rights as rights_routes
 
 Image.MAX_IMAGE_PIXELS = None
 
@@ -122,6 +123,7 @@ app.include_router(job_routes.router)
 app.include_router(layout_template_routes.router)
 app.include_router(page_type_routes.router)
 app.include_router(metadata_routes.router)
+app.include_router(rights_routes.router)
 app.include_router(conventions.router)
 app.include_router(pages.router)
 app.include_router(elements.router)

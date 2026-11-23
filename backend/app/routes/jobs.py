@@ -14,10 +14,11 @@ from pydantic import BaseModel, Field
 
 from app import (blobs, caches, config, consensus, conventions, corpus, data_use, decode, evaluator, geometry,
                  iiif, iiif_transcripts, imports, ingest, ingest_queue, jobs, layout_shapes, layout_templates, llm, map_classes, metadata, model_registry,
-                 page_rows, queue_eta, reading_order, recognize, registry, schemas, store, trainer)
+                 page_rows, queue_eta, reading_order, recognize, registry, rights, schemas, store, trainer)
 from app.deps import (ROLE_NAMES, SWAPPABLE, VISIBLE_JOB_IDS, WRITERS, belongs_to_workspace, can_access_job, manages_workspace,
                       current_user, get_db, get_user, require_job_access, require_job_manager, require_job_role,
                       reachable_group_ids, require_role, role_given, role_on_job, role_reaches, shown_group_id)
+from app.routes import rights as rights_routes
 
 
 class UncappedUploadRequest(Request):
@@ -139,7 +140,7 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
                hold: bool = Form(False), as_test: bool = Form(False),
                ocr_convention: str = Form('{}'), data_use: str = Form('{}'),
                layout_shape: str = Form('box'), group_id: int | None = Form(None),
-               pdf_pages: str = Form('{}'),
+               pdf_pages: str = Form('{}'), transcription_licence: str = Form(''),
                files: list[UploadFile] = None, conn=Depends(get_db),
                user: str = Depends(get_user), _editor=Depends(require_role(*WRITERS))):
     """Create a dataset from uploaded files - a .txt beside an image is ingested as that page's transcription.
@@ -151,6 +152,7 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
     if not files:
         raise HTTPException(400, 'no files uploaded')
     picked_pages = _picked_pdf_pages(pdf_pages, {Path(f.filename or '').name for f in files})
+    licence = rights_routes.statement(transcription_licence) if transcription_licence else None
     ingest.valid_task(task)
     ingest.valid_line_mode(line_mode)
     name = ingest.require_unique_name(conn, name)
@@ -221,6 +223,8 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
          int(gt_ordered), int(gt_from_pdf), page_reading_order, int(as_test),
          UPLOADING if hold else 'queued', layout_shape))
     conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (workspace, job_id))
+    if licence:
+        rights.write(conn, job_id, {'transcription_licence': licence}, user)
     _set_convention(conn, job_id, convention)
     _set_data_use(conn, job_id, uses)
     # Tiling jobs register the uploads as full maps (job_maps); the tile phase produces
@@ -285,7 +289,8 @@ def _require_layout_template(conn, template_id: int | None) -> None:
 
 @router.post('/api/jobs/import')
 def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str = Form('{}'),
-               group_id: int | None = Form(None), file: UploadFile = None, conn=Depends(get_db),
+               group_id: int | None = Form(None), transcription_licence: str = Form(''),
+               file: UploadFile = None, conn=Depends(get_db),
                user: str = Depends(get_user), _editor=Depends(require_role(*WRITERS))):
     """Transkribus/eScriptorium-style export: pages arrive segmented and
     transcribed, so no pipeline phase has to run - only the ingest phase, which
@@ -294,6 +299,7 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str
         raise HTTPException(400, 'no file uploaded')
     name = ingest.require_unique_name(conn, name)
     workspace = _landing_workspace(conn, _editor, group_id)
+    licence = rights_routes.statement(transcription_licence) if transcription_licence else None
     try:
         uses = _valid_data_use(json.loads(data_use or '{}'))
     except json.JSONDecodeError:
@@ -319,6 +325,8 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str
         conn.execute('INSERT INTO jobs (id, name, owner, line_mode, run_layout, run_lines, run_ocr, ocr_decode) '
                      "VALUES (?,?,?,'per_page',0,0,0,?)", (job_id, name, user, decode.DATASET_DEFAULT))
         conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (workspace, job_id))
+        if licence:
+            rights.write(conn, job_id, {'transcription_licence': licence}, user)
         _set_data_use(conn, job_id, uses)
         layout_templates.copy_into(conn, job_id)
         # An import may bring classes this instance's template lacks; they join the
@@ -343,6 +351,8 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str
 
 class JobOptions(BaseModel):
     name: str
+    # The licence of what is transcribed in it, from the rights statements on offer.
+    transcription_licence: str | None = None
     # The workspace it is made in, which its creator belongs to; none is their Sandbox.
     group_id: int | None = None
     line_mode: str = 'per_crop'
@@ -408,7 +418,8 @@ def _checked_options(conn, body: JobOptions) -> dict:
             'run_predict': run_predict, 'run_tile': run_tile, 'tile_size': tile_size, 'line_width': line_width,
             'model_id': model_id, 'seed_classes': seed_classes,
             'convention': _valid_convention(body.ocr_convention), 'data_use': _valid_data_use(body.data_use),
-            'gt_from_pdf': body.gt_from_pdf and not is_map}  # map jobs have no transcriptions at all
+            'gt_from_pdf': body.gt_from_pdf and not is_map,  # map jobs have no transcriptions at all
+            'licence': rights_routes.statement(body.transcription_licence) if body.transcription_licence else None}
 
 
 def _insert_job(conn, job_id: str, user: str, body: JobOptions, o: dict, workspace: int,
@@ -427,6 +438,8 @@ def _insert_job(conn, job_id: str, user: str, body: JobOptions, o: dict, workspa
          int(body.gt_autocheck), int(body.gt_ordered), int(o['gt_from_pdf']), body.page_reading_order,
          body.layout_shape))
     conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (workspace, job_id))
+    if o['licence']:
+        rights.write(conn, job_id, {'transcription_licence': o['licence']}, user)
     _set_convention(conn, job_id, o['convention'])
     _set_data_use(conn, job_id, o['data_use'])
 
@@ -533,6 +546,7 @@ def create_job_from_iiif(body: IiifJob, conn=Depends(get_db), user: str = Depend
         'manifest': manifest['url'], 'label': manifest['label'],
         'attribution': manifest['attribution'], 'rights': manifest['rights']})
     conn.execute('UPDATE jobs SET metadata = ? WHERE id = ?', (json.dumps(manifest['metadata']), job_id))
+    rights.write(conn, job_id, rights.from_iiif(manifest), 'import', imported=True)
     page_ids = ingest.insert_pages(conn, job_id, entries)
     for (_, source), canvas in zip(entries, canvases):
         transcript = ({'transcript': canvas['transcript'], 'reviewed': body.transcriptions_reviewed}

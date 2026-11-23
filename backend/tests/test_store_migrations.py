@@ -170,6 +170,7 @@ class TestMigrations:
         'convention_flags': ['added_from', 'created_at', 'description', 'label', 'name'],
         'candidates': ['author', 'checked', 'created_at', 'dismissed', 'id', 'line_id', 'llm_model_id', 'order_idx', 'page_id', 'polygon', 'similarity', 'source', 'text'],
         'declined_models': ['job_id', 'model_id', 'task'],
+        'rights_log': ['author', 'created_at', 'field', 'id', 'job_id', 'new_value', 'old_value'],
         'elements': ['bbox', 'checked', 'class_name', 'conf', 'deleted', 'id', 'kind', 'lines_bbox', 'order_idx', 'page_id', 'raw_class_name'],
         'eval_lines': ['confidence', 'cer', 'decode', 'distance', 'evaluation_id', 'ground_truth', 'job_id', 'length', 'line_id', 'ops', 'page_id', 'prediction'],
         'evaluations': ['cer', 'created_at', 'decode', 'error', 'id', 'line_count', 'model_id', 'owner', 'pid', 'source', 'status', 'training_id', 'wer'],
@@ -1758,4 +1759,42 @@ def test_a_database_from_before_page_types_gives_each_text_dataset_its_copy(tmp_
     conn.commit()
     store.connect(db).close()
     assert conn.execute("SELECT name FROM job_page_types WHERE job_id = 't' AND type_id = 2").fetchone()[0] == 'Einband'
+    conn.close()
+
+
+def test_a_database_from_before_rights_moves_a_iiif_datasets_rights_into_the_fields(tmp_path):
+    """What its manifest said becomes its rights, marked imported and logged (#42); a dataset
+    from an upload starts with none."""
+    db = tmp_path / 'app.db'
+    conn = store.connect(db)
+    source = {'manifest': 'https://archive.example/m', 'label': 'Minutes', 'attribution': 'Town archive',
+              'rights': 'https://creativecommons.org/licenses/by/4.0/'}
+    conn.execute("INSERT INTO jobs (id, name, task, iiif_source) VALUES ('i', 'IIIF', 'text', ?), "
+                 "('u', 'Upload', 'text', NULL)", (json.dumps(source),))
+    conn.execute('DELETE FROM rights_log')
+    conn.commit()
+    keep = sorted(cols(conn, 'jobs') - {'rights', 'transcription_licence'})
+    conn.close()
+    strip_column(db, 'jobs', keep)
+
+    conn = store.connect(db)
+    held = {r['id']: json.loads(r['rights']) for r in conn.execute('SELECT id, rights FROM jobs')}
+    assert held == {'i': {'status': 'http://creativecommons.org/licenses/by/4.0/', 'credit': 'Town archive',
+                          'holder': '', 'source': 'Minutes - https://archive.example/m', 'note': '',
+                          'imported': ['credit', 'source', 'status']}, 'u': {}}
+    assert conn.execute("SELECT COUNT(*) FROM rights_log WHERE job_id = 'i' AND author = 'import'").fetchone()[0] == 3
+    conn.close()
+
+
+def test_a_iiif_source_that_is_not_json_does_not_stop_the_database_opening(tmp_path):
+    db = tmp_path / 'app.db'
+    conn = store.connect(db)
+    conn.execute("INSERT INTO jobs (id, name, task, iiif_source) VALUES ('i', 'IIIF', 'text', 'not json')")
+    conn.commit()
+    keep = sorted(cols(conn, 'jobs') - {'rights', 'transcription_licence'})
+    conn.close()
+    strip_column(db, 'jobs', keep)
+
+    conn = store.connect(db)
+    assert conn.execute("SELECT rights FROM jobs WHERE id = 'i'").fetchone()[0] == '{}'
     conn.close()

@@ -191,7 +191,7 @@ class TestReviewedOnly:
         response = download(client, 'zip', checked_only=True)
 
         names = zipfile.ZipFile(io.BytesIO(response.content)).namelist()
-        assert sorted(names) == ['images/p1.png', 'job.json', 'pages/page_0001.json', 'pages/page_0001.md']
+        assert sorted(names) == ['RIGHTS.txt', 'images/p1.png', 'job.json', 'pages/page_0001.json', 'pages/page_0001.md']
 
     def test_the_whole_export_still_keeps_every_page(self, client, unreviewed_page):
         pages = download(client, 'json').json()['pages']

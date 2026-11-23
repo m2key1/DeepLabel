@@ -1,7 +1,7 @@
 import { test, expect } from '../helpers/test'
 import { backendFetch, getJob, identity, listRegistryModels, seedCompletedJob, uniqueName, waitForJobStatus } from '../helpers/api'
 import { scanPng } from '../helpers/image'
-import { createDataset, withLayoutPerCrop, wizardStep } from '../helpers/new-dataset'
+import { chooseLicence, createDataset, withLayoutPerCrop, wizardStep } from '../helpers/new-dataset'
 import { seedSession, useSession } from '../helpers/session'
 
 const uploadFiles = (names: string[]) =>
@@ -243,6 +243,7 @@ test.describe('Scenario: a new dataset step by step', () => {
     await page.getByTestId('wizard-next').click()
     const review = page.getByTestId('new-job-review')
     await expect(review.locator('[data-label="Convention"]')).toContainText('keep the double hyphen')
+    await chooseLicence(page)
     await page.getByRole('button', { name: 'Create job' }).click()
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
     const created = await getJob(page.url().split('/').pop()!)

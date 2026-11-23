@@ -249,7 +249,7 @@ test.describe('Scenario: downloading only what was reviewed', () => {
     // One sidecar pair for the reviewed page, numbered by its place in the dataset, and
     // its scan, so the archive imports elsewhere.
     expect(zipEntries(Buffer.from(await res.arrayBuffer())))
-      .toEqual(['job.json', 'pages/page_0002.json', 'pages/page_0002.md', 'images/scan_2.png'])
+      .toEqual(['job.json', 'pages/page_0002.json', 'pages/page_0002.md', 'RIGHTS.txt', 'images/scan_2.png'])
   })
 })
 
@@ -264,7 +264,7 @@ test.describe('Scenario: out in a standard format and back in', () => {
       expect(res.status).toBe(200)
       const archive = Buffer.from(await res.arrayBuffer())
       expect(zipEntries(archive)).toEqual(
-        ['page/scan_1.xml', 'page/scan_2.xml', 'images/scan_1.png', 'images/scan_2.png'])
+        ['page/scan_1.xml', 'page/scan_2.xml', 'RIGHTS.txt', 'images/scan_1.png', 'images/scan_2.png'])
 
       const { jobId: back, reply } = await importThroughForm(page, uniqueName('Back again'), archive)
 

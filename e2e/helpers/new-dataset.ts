@@ -22,6 +22,17 @@ export async function wizardStep(page: Page, step: WizardStep) {
     await page.getByTestId('wizard-next').click()
   }
   await expect(form).toHaveAttribute('data-step', step)
+  if (step === 'review') await chooseLicence(page)
+}
+
+/** Every new dataset is asked the licence of its transcriptions, with nothing chosen (#42); a
+ *  scenario that is not about it takes CC BY. */
+export async function chooseLicence(page: Page, label = 'CC BY 4.0') {
+  // Settings of an existing dataset share the wizard and ask nothing: its rights are elsewhere.
+  if (new URL(page.url()).pathname !== '/new') return
+  const licence = page.getByTestId('new-job-licence-select')
+  await expect(licence).toBeVisible()
+  if (!(await licence.inputValue())) await licence.selectOption({ label })
 }
 
 /** Creating happens on the last step, after a look at everything chosen. */

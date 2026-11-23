@@ -114,6 +114,9 @@ export interface Job {
   ocr_convention_read?: string[] | null
   /** The IIIF manifest it was imported from; null for any other dataset. */
   iiif_source?: IiifSource | null
+  /** The scans' rights statement, null until somebody says; see getJobRights for the rest. */
+  rights_status?: string | null
+  transcription_licence?: string | null
   /** What its owner allows its data to be used for. */
   data_use: DataUse
   /** Whether layout elements are boxes or outlines. */
@@ -1358,8 +1361,10 @@ export function uploadJob(
   groupId: number | null = null,
   /** The pages picked from a PDF, counted from 1, by its file name; one not named goes whole. */
   pdfPages: Record<string, number[]> = {},
+  transcriptionLicence: string | null = null,
 ): Promise<{ job_id: string }> {
   const form = new FormData()
+  if (transcriptionLicence) form.append('transcription_licence', transcriptionLicence)
   form.append('layout_shape', layoutShape)
   if (groupId !== null) form.append('group_id', String(groupId))
   if (Object.keys(pdfPages).length) form.append('pdf_pages', JSON.stringify(pdfPages))
@@ -1398,9 +1403,11 @@ export function importJob(
   onProgress: (loaded: number, total: number) => void,
   dataUse: DataUse = ALL_USES,
   groupId: number | null = null,
+  transcriptionLicence: string | null = null,
 ): Promise<{ job_id: string; format: string; pages: number; lines: number }> {
   const form = new FormData()
   form.append('name', name)
+  if (transcriptionLicence) form.append('transcription_licence', transcriptionLicence)
   if (groupId !== null) form.append('group_id', String(groupId))
   form.append('reviewed', String(reviewed))
   form.append('data_use', JSON.stringify(dataUse))
@@ -1436,6 +1443,8 @@ export interface JobOptions {
   layout_shape: LayoutShape
   /** The workspace it is made in; none for the creator's Sandbox. */
   group_id: number | null
+  /** The licence of what is transcribed in it, a rights statement's URI. */
+  transcription_licence?: string | null
 }
 
 export function createJobFromPath(
@@ -2263,6 +2272,43 @@ export function patchPageType(
 /** Give pages a type; null makes them text again. */
 export function setPagesType(jobId: string, pageIds: number[], typeId: number | null): Promise<{ pages: number }> {
   return request(`/api/jobs/${jobId}/pages/type`, json('POST', { page_ids: pageIds, type_id: typeId }))
+}
+
+/** A rights statement a scan or a transcription may carry, by its canonical URI. */
+export interface RightsStatement {
+  uri: string
+  label: string
+}
+
+export type RightsField = 'status' | 'credit' | 'holder' | 'source' | 'note' | 'transcription_licence'
+
+export interface JobRights {
+  status: string | null
+  credit: string
+  holder: string
+  source: string
+  note: string
+  transcription_licence: string | null
+  /** The fields an import filled that nobody has changed by hand since. */
+  imported: RightsField[]
+  /** Every change, newest first. */
+  history: { field: RightsField; old: string | null; new: string | null; author: string; at: string }[]
+}
+
+export const NOT_EVALUATED = 'http://rightsstatements.org/vocab/CNE/1.0/'
+
+export function getRightsStatements(): Promise<{ statements: RightsStatement[] }> {
+  return request('/api/rights/statements')
+}
+
+export function getJobRights(jobId: string): Promise<JobRights> {
+  return request(`/api/jobs/${jobId}/rights`)
+}
+
+export function putJobRights(
+  jobId: string, changes: Partial<Record<RightsField, string>>,
+): Promise<JobRights> {
+  return request(`/api/jobs/${jobId}/rights`, json('PUT', changes))
 }
 
 export interface ClusterSession {

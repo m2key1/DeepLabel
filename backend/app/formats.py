@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape, quoteattr
 
+from app import rights
+
 PAGE_NS = 'http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15'
 ALTO_NS = 'http://www.loc.gov/standards/alto/ns-v4#'
 TEI_NS = 'http://www.tei-c.org/ns/1.0'
@@ -208,14 +210,22 @@ def _source_line(source: dict) -> str:
     return '; '.join(p for p in parts if p)
 
 
-def _tei_source(source: dict) -> str:
-    """The manifest a IIIF dataset came from, with its attribution and rights."""
-    rights = source.get('rights')
-    licence = (f'<licence{f" target={quoteattr(rights)}" if rights else ""}>'
-               f'{escape(source.get("attribution") or rights or "")}</licence>')
-    return (f'<bibl><title>{escape(source.get("label") or "")}</title>'
-            f'<idno type="IIIF-manifest">{escape(source["manifest"])}</idno>'
-            f'<availability>{licence}</availability></bibl>')
+def _licence(uri: str) -> str:
+    return f'<licence target={quoteattr(uri)}>{escape(rights.LABELS.get(uri, uri))}</licence>'
+
+
+def _tei_source(job: dict) -> str:
+    """Where the scans come from, the IIIF manifest where there is one, and the rights they
+    carry with the credit line that has to go with them."""
+    held = job.get('rights') or {}
+    iiif = job.get('iiif_source')
+    status, credit = held.get('status'), held.get('credit')
+    if not (status or credit or iiif):
+        return f'<p>{escape(job.get("name", ""))}</p>'
+    idno = f'<idno type="IIIF-manifest">{escape(iiif["manifest"])}</idno>' if iiif else ''
+    terms = (_licence(status) if status else '') + (f'<p>{escape(credit)}</p>' if credit else '')
+    return (f'<bibl><title>{escape((iiif or {}).get("label") or job.get("name", ""))}</title>{idno}'
+            f'{f"<availability>{terms}</availability>" if terms else ""}</bibl>')
 
 
 def _tei_fields(fields: list[dict]) -> str:
@@ -260,13 +270,15 @@ def tei(data: dict) -> str:
             f'<graphic url={quoteattr("images/" + page["filename"])} width="{page["width"]}px" '
             f'height="{page["height"]}px"/>{"".join(zones)}</surface>')
     title = escape(data['job'].get('name', ''))
-    source = data['job'].get('iiif_source')
+    licence = data['job'].get('transcription_licence')
+    published = (f'<distributor>DeepLabel</distributor><availability>{_licence(licence)}</availability>' if licence
+                 else '<p>Exported from DeepLabel</p>')
     fields = data['job'].get('metadata')
     notes = f'<notesStmt><note type="metadata">{_tei_fields(fields)}</note></notesStmt>' if fields else ''
     return (
         f'<?xml version="1.0" encoding="UTF-8"?>\n<TEI xmlns="{TEI_NS}"><teiHeader><fileDesc>'
         f'<titleStmt><title>{title}</title></titleStmt>'
-        f'<publicationStmt><p>Exported from DeepLabel</p></publicationStmt>{notes}'
-        f'<sourceDesc>{_tei_source(source) if source else f"<p>{title}</p>"}</sourceDesc></fileDesc></teiHeader>'
+        f'<publicationStmt>{published}</publicationStmt>{notes}'
+        f'<sourceDesc>{_tei_source(data["job"])}</sourceDesc></fileDesc></teiHeader>'
         f'<facsimile>{"".join(surfaces)}</facsimile>'
         f'<text><body>{"".join(body)}</body></text></TEI>\n')
