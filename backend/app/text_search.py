@@ -1,21 +1,16 @@
 import re
 import time
-import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import regex
 
+from app.folding import search_form
+
 MODES = ('fuzzy', 'exact', 'case', 'regex')
 # How long one search may spend in a user's pattern, across the whole volume. A pattern
 # that backtracks without end would otherwise hold a worker for as long as it likes.
 PATTERN_SECONDS = 2.0
-
-UMLAUT = {'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss'}
-QUOTE = re.compile('[\u2018\u2019\u201a]')
-DOUBLE_QUOTE = re.compile('[\u201c\u201d\u201e]')
-DASH = re.compile('[\u2010\u2011\u2012\u2013\u2014\u2212]')
-SPACE = re.compile(r'\s+')
 
 
 class PatternTooSlow(Exception):
@@ -29,19 +24,6 @@ class Hit:
     score: float
     # The words that answered, so they can be marked in the line they were found in.
     words: list[str]
-
-
-def fold(text: str) -> str:
-    text = unicodedata.normalize('NFC', text)
-    text = DASH.sub('-', DOUBLE_QUOTE.sub('"', QUOTE.sub("'", text)))
-    return SPACE.sub(' ', text).strip()
-
-
-def search_form(text: str) -> str:
-    """Folded, lowercased, and with the German umlauts written out: a volume spells the same
-    name Müller on one page and Mueller on the next, and somebody searching for either
-    means both."""
-    return re.sub('[äöüß]', lambda m: UMLAUT[m.group()], fold(text).lower())
 
 
 def distance(a: str, b: str, cap: int) -> int:

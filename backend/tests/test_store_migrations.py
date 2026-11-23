@@ -236,6 +236,11 @@ class TestMigrations:
 
         fresh_tables = {row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")}
+        # A virtual table is whatever its CREATE says, and its shadow tables are SQLite's
+        # own: neither gains a column by ALTER, so the check above has nothing to do there.
+        virtual = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'")}
+        fresh_tables = {t for t in fresh_tables if not any(t == v or t.startswith(f'{v}_') for v in virtual)}
 
         unnamed = fresh_tables - set(self.ORIGINAL_COLUMNS)
         assert not unnamed, (
@@ -1277,7 +1282,8 @@ class TestQueueAndAccessIndexes:
         raw.execute('DROP INDEX IF EXISTS idx_lines_needs_ocr')
         raw.commit()
         raw.close()
-        strip_column(db, 'lines', ['id', 'element_id', 'order_idx', 'polygon', 'text'])
+        # corrected_text came with the table, so no database ever lacked it.
+        strip_column(db, 'lines', ['id', 'element_id', 'order_idx', 'polygon', 'text', 'corrected_text'])
 
         conn = store.connect(db)
         assert 'needs_ocr' in cols(conn, 'lines')
@@ -1677,4 +1683,31 @@ def test_a_database_from_before_skipped_layout_marks_the_pages_layout_passed_by(
     assert dict(conn.execute('SELECT id, layout_skipped FROM pages ORDER BY id').fetchall()) == {1: 1, 2: 0, 3: 0, 4: 0}
     store.connect(db).close()
     assert dict(conn.execute('SELECT id, layout_skipped FROM pages ORDER BY id').fetchall()) == {1: 1, 2: 0, 3: 0, 4: 0}
+    conn.close()
+
+
+def test_a_database_from_before_the_search_index_indexes_its_lines(tmp_path):
+    """The lines a database already holds are indexed once, on the first open that has the
+    index (#41), under their corrected text where there is one."""
+    db = tmp_path / 'app.db'
+    conn = store.connect(db)
+    conn.execute("INSERT INTO jobs (id, name) VALUES ('j1', 'Volume')")
+    conn.execute("INSERT INTO pages (id, job_id, idx, filename, source_file) VALUES (1, 'j1', 0, 'p.png', '/p.png')")
+    conn.execute("INSERT INTO elements (id, page_id, order_idx, class_name, bbox) VALUES (1, 1, 0, 'Paragraph', '[0,0,1,1]')")
+    conn.execute("INSERT INTO lines (id, element_id, order_idx, polygon, text, corrected_text) VALUES "
+                 "(1, 1, 0, '[]', 'Müller', NULL), (2, 1, 1, '[]', 'Huber', 'Hueber')")
+    conn.commit()
+    conn.close()
+    raw = sqlite3.connect(db)
+    for name in ('line_search_added', 'line_search_changed', 'line_search_removed'):
+        raw.execute(f'DROP TRIGGER {name}')
+    raw.execute('DROP TABLE line_search')
+    raw.commit()
+    raw.close()
+
+    conn = store.connect(db)
+    assert [tuple(r) for r in conn.execute('SELECT rowid, folded FROM line_search ORDER BY rowid')] == [
+        (1, 'mueller'), (2, 'hueber')]
+    store.connect(db).close()
+    assert conn.execute('SELECT COUNT(*) FROM line_search').fetchone()[0] == 2
     conn.close()

@@ -10,7 +10,7 @@ from app import (augmentations, caches, config, dataset_sync, geometry, ingest_q
 from app.deps import LEGACY_ROLES
 from app.routes import (augmentations as augmentation_routes, backend_api, bulk, contributors, conventions, elements,
                         evaluations, exports, groups, lines, llm, maps, models, pages, people, pipeline, presence,
-                        recognize, reference as reference_routes, trainings, transcript)
+                        recognize, reference as reference_routes, search, trainings, transcript)
 from app.routes import jobs as job_routes
 from app.routes import layout_templates as layout_template_routes
 
@@ -124,6 +124,7 @@ app.include_router(elements.router)
 app.include_router(lines.router)
 app.include_router(exports.router)
 app.include_router(transcript.router)
+app.include_router(search.router)
 app.include_router(pipeline.router)
 app.include_router(maps.router)
 app.include_router(groups.router)

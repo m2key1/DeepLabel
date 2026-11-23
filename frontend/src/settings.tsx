@@ -38,6 +38,7 @@ export interface HotkeyAction {
 export const HOTKEY_ACTIONS: HotkeyAction[] = [
   { id: 'goJobs', label: 'Go to datasets', short: 'Datasets', scope: 'global' },
   { id: 'goQueue', label: 'Go to the queue', short: 'Queue', scope: 'global' },
+  { id: 'goSearch', label: 'Search every dataset', short: 'Search', scope: 'global' },
   { id: 'goModels', label: 'Go to models', short: 'Models', scope: 'global' },
   { id: 'goSettings', label: 'Go to your profile and settings', short: 'Profile', scope: 'global' },
   { id: 'goAdmin', label: 'Go to admin', short: 'Admin', scope: 'global' },

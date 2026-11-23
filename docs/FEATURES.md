@@ -377,6 +377,15 @@ Press `e` to edit the page.
   on the server over the whole volume; a pattern that takes longer than two seconds is
   stopped and asked to be more specific.
 - `f` opens a distraction-free reading view.
+- **Search** in the top bar looks through every line of every dataset you can open at once,
+  whatever its data-use limits, with the same fuzzy, exact, case-sensitive and pattern modes.
+  Narrow it to a workspace, to one of the datasets it found, or to checked lines. Answers are
+  grouped by dataset, the dataset whose lines answer best and most first, each line with its
+  crop, page and the words that matched; a click opens the line in the page viewer. The
+  address holds the search, so it can be sent to someone. Fuzzy and exact search look a query
+  up in a trigram index first, so they need three letters, and a near spelling is found when
+  it shares three letters in a row with the query; a pattern is read against every line and
+  is stopped after two seconds.
 - Export a dataset as PAGE XML, ALTO, hOCR or TEI with its scans, as JSON, Markdown, plain
   text or DeepLabel's own zip, either complete or only what was reviewed. Each standard
   format writes the whole layout as far as it can: tables, columns and other containers

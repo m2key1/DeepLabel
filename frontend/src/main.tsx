@@ -20,6 +20,7 @@ import { initTheme } from './components/ThemeToggle'
 import { Shell } from './components/NavBar'
 import { JobsPage } from './pages/JobsPage'
 import { QueuePage } from './pages/QueuePage'
+import { SearchPage } from './pages/SearchPage'
 import { NewJobPage } from './pages/NewJobPage'
 import { JobDetailPage } from './pages/JobDetailPage'
 import { LayoutTemplatesPage } from './pages/LayoutTemplatesPage'
@@ -59,6 +60,7 @@ const router = createBrowserRouter([
         children: [
           { path: '/', element: <JobsPage /> },
           { path: '/queue', element: <QueuePage /> },
+          { path: '/search', element: <SearchPage /> },
           { path: '/new', element: <NewJobPage /> },
           { path: '/admin', element: <AdminPage /> },
           // The page was called Users before it grew the instance-wide settings.

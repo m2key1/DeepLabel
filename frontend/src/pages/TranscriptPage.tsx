@@ -10,7 +10,7 @@ import { DatasetViews } from '../components/job/DatasetViews'
 import { ChevronIcon, ExpandIcon, PagesIcon } from '../components/icons'
 import { Check, Input } from '../components/ui/Field'
 import { Segmented } from '../components/ui/Segmented'
-import { searchForm } from '../lib/fuzzy'
+import { SEARCH_MODES, marked } from '../components/search/searchControls'
 import { displayed } from '../lib/text'
 import { useSettings } from '../settings'
 import type { SearchMode } from '../lib/fuzzy'
@@ -23,19 +23,6 @@ function lineText(line: TranscriptLine): string {
   return displayed(line.corrected_text ?? line.text ?? '')
 }
 
-const MARK = 'rounded-sm bg-warn/25'
-
-/** The line's text with the words that answered the search marked. Matching is done on the
- *  folded form, so what is marked is found by folding each word the same way rather than by
- *  looking for the query in the text - which would miss the very spellings it matched. */
-function marked(text: string, words: string[]) {
-  if (words.length === 0) return text
-  const wanted = new Set(words)
-  return text.split(/(\s+)/).map((part, i) =>
-    wanted.has(part) || wanted.has(searchForm(part))
-      ? <span key={i} data-testid="transcript-match" className={MARK}>{part}</span>
-      : part)
-}
 
 /** How far the wheel has to keep pushing at the foot of a page before it turns. A page that
  *  ends mid-sentence should not turn itself under a reader who has only just arrived at the
@@ -488,12 +475,7 @@ function Transcript({ jobId }: { jobId: string }) {
           className="shrink-0"
           value={mode}
           onChange={setMode}
-          options={[
-            { value: 'fuzzy', label: 'Fuzzy', title: 'Near spellings count - Schmidt finds Schmitt' },
-            { value: 'exact', label: 'Exact', title: 'This text exactly, in any case' },
-            { value: 'case', label: 'Aa', title: 'This text exactly, matching case' },
-            { value: 'regex', label: '.*', title: 'A regular expression' },
-          ]}
+          options={SEARCH_MODES}
         />
         {needle && (
           <>
@@ -726,7 +708,7 @@ function Transcript({ jobId }: { jobId: string }) {
                           currentHit?.line === line.id ? 'bg-accent-wash' : ''
                         } hover:bg-accent-wash`}
                       >
-                        {marked(lineText(line), words ?? [])}
+                        {marked(lineText(line), words ?? [], 'transcript-match')}
                       </p>
                     ))}
                   </div>

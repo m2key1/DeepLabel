@@ -164,6 +164,7 @@ export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
   // offered only where its link is: a key must not reach a page its owner may not open.
   useCommand('goJobs', () => navigate('/'))
   useCommand('goQueue', () => navigate('/queue'))
+  useCommand('goSearch', () => navigate('/search'))
   useCommand('goModels', () => navigate('/models'))
   useCommand('goSettings', () => navigate(profilePath(user)))
   useCommand('toggleTheme', cycleTheme)
@@ -225,6 +226,9 @@ export function NavBar({ crumbs }: { crumbs: Crumb[] }) {
           <>
             <PresencePill />
             <div className="ml-auto flex shrink-0 items-center gap-2">
+              <Link to="/search" data-testid="nav-search" className={buttonClass({ variant: 'ghost', size: 'sm' }, 'whitespace-nowrap')}>
+                Search
+              </Link>
               <Link to="/queue" className={buttonClass({ variant: 'ghost', size: 'sm' }, 'whitespace-nowrap')}>
                 Queue
               </Link>
@@ -281,6 +285,7 @@ function PhoneMenu({ queue, adminLink, canEdit, canTry }: {
         <nav aria-label="Menu" data-testid="nav-menu"
              onClick={(e) => e.stopPropagation()}
              className={`absolute inset-x-2 top-12 z-40 flex flex-col gap-1 p-2 ${popoverChrome}`}>
+          <Link to="/search" className={item}>Search</Link>
           <Link to="/queue" className={item}>
             Queue
             {queue && <span className="ml-auto text-xs font-normal text-ink-subtle">{queueSummary(queue)}</span>}

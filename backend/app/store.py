@@ -4,7 +4,7 @@ import unicodedata
 from contextvars import ContextVar
 from pathlib import Path
 
-from app import caches, conventions
+from app import caches, conventions, folding
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -1289,7 +1289,45 @@ def connect(db_path: Path) -> sqlite3.Connection:
         _move_into_workspaces(conn)
         conn.execute(f'PRAGMA user_version = {WORKSPACES}')
     conn.commit()
+    _index_line_text(conn)
     return conn
+
+
+# Every line's text, folded for search, under a trigram index: what searching across every
+# dataset looks a query up in before the matching proper reads the lines it found.
+_FOLDED = {row: folding.sql_search_form(f"COALESCE({row}corrected_text, {row}text, '')") for row in ('', 'new.')}
+LINE_SEARCH = (
+    "CREATE VIRTUAL TABLE IF NOT EXISTS line_search USING fts5(folded, tokenize='trigram')",
+    'CREATE TRIGGER IF NOT EXISTS line_search_added AFTER INSERT ON lines BEGIN '
+    f"INSERT INTO line_search (rowid, folded) VALUES (new.id, {_FOLDED['new.']}); "
+    'END',
+    'CREATE TRIGGER IF NOT EXISTS line_search_changed AFTER UPDATE OF text, corrected_text ON lines BEGIN '
+    'DELETE FROM line_search WHERE rowid = old.id; '
+    f"INSERT INTO line_search (rowid, folded) VALUES (new.id, {_FOLDED['new.']}); "
+    'END',
+    'CREATE TRIGGER IF NOT EXISTS line_search_removed AFTER DELETE ON lines BEGIN '
+    'DELETE FROM line_search WHERE rowid = old.id; '
+    'END',
+)
+LINE_SEARCH_PARTS = ('line_search', 'line_search_added', 'line_search_changed', 'line_search_removed')
+
+
+def _index_line_text(conn) -> None:
+    """Builds the search index and its triggers where any part is missing, and indexes every
+    line the database already holds - once, under the write lock, so two processes opening a
+    database from before the index do not both fill it."""
+    present = lambda: conn.execute(
+        f"SELECT COUNT(*) FROM sqlite_master WHERE name IN ({', '.join('?' * len(LINE_SEARCH_PARTS))})",
+        LINE_SEARCH_PARTS).fetchone()[0]
+    if present() == len(LINE_SEARCH_PARTS):
+        return
+    conn.execute('BEGIN IMMEDIATE')
+    if present() < len(LINE_SEARCH_PARTS):
+        for statement in LINE_SEARCH:
+            conn.execute(statement)
+        conn.execute('DELETE FROM line_search')
+        conn.execute(f"INSERT INTO line_search (rowid, folded) SELECT id, {_FOLDED['']} FROM lines")
+    conn.commit()
 
 
 def workspace_name(row, viewer: str) -> str:

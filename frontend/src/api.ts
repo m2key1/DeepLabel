@@ -3278,6 +3278,43 @@ export function searchTranscript(jobId: string, q: string, mode: string, reviewe
   return request(`/api/jobs/${jobId}/transcript/search?${params}`, { signal })
 }
 
+export interface CorpusHit {
+  job_id: string
+  job_name: string
+  page_id: number
+  page_idx: number
+  line_id: number
+  text: string
+  /** The words that answered, to be marked in the line. */
+  words: string[]
+  score: number
+  /** The line's crop, versioned like lineCropUrl. */
+  crop: string
+}
+
+export interface CorpusSearch {
+  /** False for a pattern not finished yet. */
+  usable: boolean
+  /** Fewer than three letters to look up: the index cannot. */
+  too_short: boolean
+  total: number
+  /** Every dataset with an answer, best first, with how many lines answered. */
+  datasets: { id: string; name: string; hits: number }[]
+  /** A screenful of the answers, grouped by dataset in the order above. */
+  hits: CorpusHit[]
+}
+
+/** Every dataset the caller can open, narrowed to a workspace, a dataset or checked lines. */
+export function searchCorpus(
+  ask: { q: string; mode: string; group: string | null; job: string | null; checked: boolean },
+  offset: number, signal?: AbortSignal,
+): Promise<CorpusSearch> {
+  const params = new URLSearchParams({ q: ask.q, mode: ask.mode, checked: String(ask.checked), offset: String(offset) })
+  if (ask.group) params.set('group_id', ask.group)
+  if (ask.job) params.set('job_id', ask.job)
+  return request(`/api/search?${params}`, { signal })
+}
+
 export function jobEventsUrl(jobId: string): string {
   return `/api/jobs/${jobId}/events`
 }

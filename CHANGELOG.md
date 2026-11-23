@@ -10,6 +10,7 @@ the version in the app's footer opens.
 
 ### Added
 
+- Search every dataset you can open at once, from Search in the top bar (#41).
 - The New job wizard shows a PDF as its pages, so single pages or ranges of it can be left out before upload (#46).
 - The page editor shows which box, or gathered set of boxes, a colleague has selected (#80).
 - A recognition API: pages or line images in, lines and text out, nothing stored (#93). Big
