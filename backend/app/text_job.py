@@ -151,7 +151,7 @@ def phase_layout(conn, job_id: str, stage, batch_size: int):
         (job_id,)).fetchall()
     done = conn.execute(
         "SELECT COUNT(*) c FROM pages WHERE job_id = ? AND deleted = 0 "
-        "AND status IN ('layout_done','lines_done','done')",
+        "AND status IN ('layout_done','lines_done','done') AND layout_skipped = 0",
         (job_id,)).fetchone()['c']
     total_elements = conn.execute(
         "SELECT COUNT(*) c FROM elements e JOIN pages p ON e.page_id = p.id "
@@ -194,7 +194,7 @@ def phase_layout(conn, job_id: str, stage, batch_size: int):
             # The detector's own order holds only for its own classes.
             if not layout.ordered or any(remapped):
                 geometry.resequence_page(conn, page['id'])
-            conn.execute("UPDATE pages SET status = 'layout_done' WHERE id = ?", (page['id'],))
+            conn.execute("UPDATE pages SET status = 'layout_done', layout_skipped = 0 WHERE id = ?", (page['id'],))
             store.note_page_model(conn, page['id'], 'layout', registry.running_model_id('layout'))
             conn.commit()
             done += 1
@@ -581,8 +581,9 @@ def run(conn, job_id: str, job_path: Path, layout_batch_size: int, ocr_chunk_lin
 
     def skip_layout():
         # Layout disabled: advance ingested pages so the line/OCR phases (which key on
-        # 'layout_done') still run. With no elements, line detection falls back to whole-page.
-        conn.execute("UPDATE pages SET status = 'layout_done' "
+        # 'layout_done') still run, marked as passed by. With no elements, line detection
+        # falls back to whole-page.
+        conn.execute("UPDATE pages SET status = 'layout_done', layout_skipped = 1 "
                      "WHERE job_id = ? AND status = 'ingested' AND deleted = 0", (job_id,))
         conn.commit()
 

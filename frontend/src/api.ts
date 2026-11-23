@@ -192,6 +192,8 @@ export interface PageSummary {
   status: string
   layout_checked: boolean
   lines_checked: boolean
+  /** Moved past layout while it was off: no layout has run on it. */
+  layout_skipped?: boolean
   deleted: boolean
   /** Test data: never trained on, and what a run's test set is scored on. */
   is_test?: boolean
@@ -1479,8 +1481,18 @@ export function addPagesFromPath(
   return request(`/api/jobs/${jobId}/pages/path`, json('POST', { server_path: serverPath }))
 }
 
-export function rerunPreview(jobId: string): Promise<RerunPreview> {
-  return request(`/api/jobs/${jobId}/rerun`)
+/** With `onlyMissing`, the counts are over the pages `fromPhase` has not run on. */
+export function rerunPreview(jobId: string, fromPhase?: MissedStep, onlyMissing = false): Promise<RerunPreview> {
+  return request(`/api/jobs/${jobId}/rerun${onlyMissing ? `?from_phase=${fromPhase}&only_missing=true` : ''}`)
+}
+
+/** The steps a dataset can run on just the pages they have not run on. */
+export type MissedStep = 'layout' | 'lines' | 'ocr'
+export type StepsNotRun = Record<MissedStep, number>
+
+/** How many pages each switched-on step has not run on - all zero while the dataset is busy. */
+export function stepsNotRun(jobId: string): Promise<StepsNotRun> {
+  return request(`/api/jobs/${jobId}/steps-not-run`)
 }
 
 /** `keepChecked` spares the lines somebody has read from an OCR re-run; `keepText`
@@ -1488,12 +1500,13 @@ export function rerunPreview(jobId: string): Promise<RerunPreview> {
  *  whatever it finds. Both default to the careful answer, as they do on the server. */
 export function rerunJob(
   jobId: string, fromPhase: RerunPhase, force = false,
-  opts: { keepChecked?: boolean; keepText?: boolean } = {},
+  opts: { keepChecked?: boolean; keepText?: boolean; onlyMissing?: boolean } = {},
 ): Promise<{ ok: boolean }> {
   return request(`/api/jobs/${jobId}/rerun`, json('POST', {
     from_phase: fromPhase, force,
     keep_checked: opts.keepChecked ?? true,
     keep_text: opts.keepText ?? true,
+    only_missing: opts.onlyMissing ?? false,
   }))
 }
 

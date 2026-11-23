@@ -53,6 +53,8 @@ the version in the app's footer opens.
 
 ### Changed
 
+- A step switched on after some pages went through without it is offered on just those pages,
+  and a page layout passed by no longer counts as layout done (#138).
 - A dataset's pages are ingested beside the GPU queue, two datasets at a time, and the dataset
   shows as Ingesting until it joins the queue (#140).
 - The Corpus tab is folded into the dataset's menus: documents under More, cutting again in

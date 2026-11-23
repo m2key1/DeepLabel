@@ -289,3 +289,22 @@ def test_a_dataset_of_its_own_classes_stores_the_models_labels_as_it_decided(con
     assert elements(conn) == [('Panel', 'Panel', 'container', 0), ('Body', 'Body', 'content', 0)]
     assert [t for _, t in lines_of(conn, 'Body')] == ['Body 0', 'Body 1']
     assert 'left out boxes whose label this dataset has no class for: PageNumber (1)' in capsys.readouterr().out
+
+
+def test_a_page_layout_passed_by_is_marked_and_a_later_layout_run_clears_the_mark(conn, backend, tmp_path):
+    """Layout off moves the page on untouched, which it remembers (#138); layout that does
+    run on it later takes the mark away again."""
+    conn.execute("UPDATE jobs SET run_layout = 0, run_lines = 0, run_ocr = 0 WHERE id = 'j1'")
+    conn.commit()
+    run(conn, tmp_path)
+    page = conn.execute('SELECT status, layout_skipped FROM pages WHERE id = 1').fetchone()
+    assert tuple(page) == ('layout_done', 1)
+    assert store.get_job(conn, 'j1')['counters']['pages_layout_done'] == 0
+
+    conn.execute("UPDATE jobs SET run_layout = 1, status = 'running' WHERE id = 'j1'")
+    conn.execute("UPDATE pages SET status = 'ingested' WHERE id = 1")
+    conn.commit()
+    run(conn, tmp_path)
+    page = conn.execute('SELECT status, layout_skipped FROM pages WHERE id = 1').fetchone()
+    assert tuple(page) == ('layout_done', 0)
+    assert store.get_job(conn, 'j1')['counters']['pages_layout_done'] == 1

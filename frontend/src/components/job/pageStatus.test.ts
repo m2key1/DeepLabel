@@ -18,6 +18,11 @@ describe('pageStatus', () => {
       .toEqual({ label: 'Uploaded', failed: false })
   })
 
+  it('does not claim a layout was found on a page passed by before layout was switched on', () => {
+    expect(pageStatus('layout_done', job(), true)).toEqual({ label: 'Uploaded', failed: false })
+    expect(pageStatus('layout_done', job(), false)).toEqual({ label: 'Layout found', failed: false })
+  })
+
   it('marks pages that did not get past the step a run failed in', () => {
     const lines = job({ run_layout: false, status: 'error', phase: 'lines' })
     expect(pageStatus('layout_done', lines)).toEqual({ label: 'Lines failed', failed: true })

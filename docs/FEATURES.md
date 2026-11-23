@@ -215,6 +215,12 @@ source and pages. Changes apply to the next run; nothing already recognised is t
 - A map dataset keeps a smaller **Settings**: its name, and its tile size if it cut its own tiles.
 - **Re-run** a phase over the dataset (from the **Run** menu on its page), a selection of
   pages, or a single page. The dialog says what will be replaced before it runs.
+- A step that was off when some pages went through - layout skipped, or lines or OCR switched
+  off at the time - is remembered per page. Once it is switched on, the dataset's Managers
+  see a banner naming the step and how many pages it has not run on; **Run on those pages…**
+  opens the Re-run dialog with only those pages ticked, so the pages it did run on keep what
+  they have. A page layout passed by reads **Uploaded**, not Layout found, and is not counted
+  in the Layout step.
 - When a step of a dataset was run with a model that has since been replaced (by a new
   default, a new version, or a model changed under Settings), its owner is asked on
   opening it. Each step is listed with the old and new model and what running it again

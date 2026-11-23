@@ -1656,3 +1656,25 @@ class TestWorkspaces:
         conn = store.connect(db)
         assert conn.execute("SELECT group_id FROM jobs WHERE id = 'later'").fetchone()[0] is None
         conn.close()
+
+
+def test_a_database_from_before_skipped_layout_marks_the_pages_layout_passed_by(tmp_path):
+    """A text dataset with layout off moved its pages past layout untouched (#138); only those
+    that got that far are marked, and nothing of a dataset that runs layout or of a map."""
+    db = tmp_path / 'app.db'
+    conn = store.connect(db)
+    conn.execute("INSERT INTO jobs (id, name, task, run_layout) VALUES ('off', 'No layout', 'text', 0), "
+                 "('on', 'Layout', 'text', 1), ('map', 'Map', 'map_segmentation', 0)")
+    conn.execute("INSERT INTO pages (id, job_id, idx, filename, source_file, status) VALUES "
+                 "(1, 'off', 0, 'a.png', '/a.png', 'done'), (2, 'off', 1, 'b.png', '/b.png', 'pending'), "
+                 "(3, 'on', 0, 'c.png', '/c.png', 'done'), (4, 'map', 0, 'd.png', '/d.png', 'done')")
+    conn.commit()
+    keep = sorted(cols(conn, 'pages') - {'layout_skipped'})
+    conn.close()
+    strip_column(db, 'pages', keep)
+
+    conn = store.connect(db)
+    assert dict(conn.execute('SELECT id, layout_skipped FROM pages ORDER BY id').fetchall()) == {1: 1, 2: 0, 3: 0, 4: 0}
+    store.connect(db).close()
+    assert dict(conn.execute('SELECT id, layout_skipped FROM pages ORDER BY id').fetchall()) == {1: 1, 2: 0, 3: 0, 4: 0}
+    conn.close()

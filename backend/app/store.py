@@ -100,6 +100,8 @@ CREATE TABLE IF NOT EXISTS pages (
     status TEXT NOT NULL DEFAULT 'pending',
     layout_checked INTEGER NOT NULL DEFAULT 0,
     lines_checked INTEGER NOT NULL DEFAULT 0,
+    -- Moved past layout untouched while layout was off: it has not run on this page.
+    layout_skipped INTEGER NOT NULL DEFAULT 0,
     deleted INTEGER NOT NULL DEFAULT 0,
     source_pdf TEXT,
     source_page INTEGER,
@@ -1157,6 +1159,13 @@ def connect(db_path: Path) -> sqlite3.Connection:
         # sidecar .txt - the PDF text layer was not a source yet.
         conn.execute('ALTER TABLE pages ADD COLUMN gt_source TEXT')
         conn.execute("UPDATE pages SET gt_source = 'sidecar' WHERE gt_text IS NOT NULL")
+    if 'layout_skipped' not in page_cols:
+        # A text dataset with layout off moved every page past layout untouched; those
+        # pages are the ones it has not run on.
+        conn.execute('ALTER TABLE pages ADD COLUMN layout_skipped INTEGER NOT NULL DEFAULT 0')
+        if 'status' in page_cols:
+            conn.execute("UPDATE pages SET layout_skipped = 1 WHERE status IN ('layout_done', 'lines_done', 'done') "
+                         "AND job_id IN (SELECT id FROM jobs WHERE run_layout = 0 AND task = 'text')")
     if 'reference_text' not in page_cols:
         # The corpus span this page is answerable for, with how well the cut is pinned
         # down: which document it came from, how many lines anchored, and how closely.
@@ -1700,7 +1709,8 @@ def recount_pages(conn: sqlite3.Connection, job_id: str, commit: bool = True) ->
         conn, job_id, commit,
         pages_total=total,
         pages_ingested=one(f"SELECT COUNT(*) c {pages} AND status != 'pending'"),
-        pages_layout_done=one(f"SELECT COUNT(*) c {pages} AND status IN ('layout_done','lines_done','done')"),
+        pages_layout_done=one(f"SELECT COUNT(*) c {pages} AND status IN ('layout_done','lines_done','done') "
+                              'AND layout_skipped = 0'),
         elements_total=one(f'SELECT COUNT(*) c {els}'),
         elements_lines_done=one(f"SELECT COUNT(*) c {els} AND p.status IN ('lines_done','done')"),
         lines_total=one(f'SELECT COUNT(*) c {lines}'),

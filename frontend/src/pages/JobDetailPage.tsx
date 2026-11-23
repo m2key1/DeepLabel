@@ -30,12 +30,13 @@ import {
   uploadPages,
   listPageRows,
   retryIiifDownloads,
+  stepsNotRun,
   ApiError,
 } from '../api'
 import type {
   JobEvent, NewerModelOffer, JobWithoutPages, LlmReadStatus, MapClass, PageDetail,
   PageFilter as PageFilterKey, PagePhase, PageRows, PageSort, PageSummary, PurgeManifest, Region,
-  ReviewQueue, StaleLines, UnreadablePage, IiifSource,
+  ReviewQueue, StaleLines, StepsNotRun, UnreadablePage, IiifSource,
 } from '../api'
 import { useAuth } from '../auth'
 import { useCommand } from '../commands'
@@ -95,7 +96,7 @@ import { LayoutClassesDialog } from '../components/job/LayoutClassesDialog'
 import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
 import { SettleAgainDialog } from '../components/job/SettleAgainDialog'
 import { RepredictDialog } from '../components/job/RepredictDialog'
-import { RerunDialog } from '../components/job/RerunDialog'
+import { MISSED_STEPS, RerunDialog, STEP_NAME } from '../components/job/RerunDialog'
 import { CheckDialog } from '../components/job/CheckDialog'
 import { CopyImageButton } from '../components/CopyImageButton'
 import {
@@ -234,6 +235,8 @@ export function JobDetailPage() {
   useAutoClear(notice, setNotice)
   const [sseRetry, setSseRetry] = useState(0)
   const [rerunOpen, setRerunOpen] = useState(false)
+  const [rerunOnMissing, setRerunOnMissing] = useState(false)
+  const [notRun, setNotRun] = useState<StepsNotRun | null>(null)
   const [stale, setStale] = useState<StaleLines | null>(null)
   const [redetectOpen, setRedetectOpen] = useState(false)
   const [reocrCount, setReocrCount] = useState(0)
@@ -398,6 +401,14 @@ export function JobDetailPage() {
     askedNewer.current = true
     getNewerModels(jobId).then((r) => setNewerModels(r.offers)).catch(() => undefined)
   }, [jobId, canManage, isMap, active, uploading])
+  // A step switched on that has not run on some pages - layout passed them by, or the step
+  // was off when they came in - is offered to the Managers who can run it there.
+  const switchedOn = job ? [job.run_layout, job.run_lines, job.run_ocr].join() : ''
+  const pagesTotal = job?.counters.pages_total
+  useEffect(() => {
+    if (!canManage || isMap || active || uploading || !switchedOn) return setNotRun(null)
+    stepsNotRun(jobId).then(setNotRun).catch(() => setNotRun(null))
+  }, [jobId, canManage, isMap, active, uploading, switchedOn, pagesTotal])
   const lineJob = job?.task === 'map_lines'
   // Nothing detected the boxes, so the lines are what gets reviewed and counted.
   const noLayout = !!job && !isMap && !job.run_layout
@@ -845,9 +856,9 @@ export function JobDetailPage() {
 
   const pageHref = (page: PageSummary) => `/jobs/${jobId}/${isMap ? 'tiles' : 'pages'}/${page.id}`
 
-  const statusCell = (status: string) => {
+  const statusCell = (status: string, layoutSkipped?: boolean) => {
     if (!job) return null
-    const { label, failed } = pageStatus(status, job)
+    const { label, failed } = pageStatus(status, job, layoutSkipped)
     return failed ? <FailedPageStatus label={label} error={job.error} />
       : <span data-status={status} title={LEFT_OUT[status]} className="text-ink-muted">{label}</span>
   }
@@ -884,7 +895,7 @@ export function JobDetailPage() {
             deleted
           </span>
         ) : (
-          statusCell(page.status)
+          statusCell(page.status, page.layout_skipped)
         )
       case 'layout':
         return page.layout_checked ? badge(isMap ? 'reviewed' : 'complete') : null
@@ -1082,7 +1093,7 @@ export function JobDetailPage() {
                   label: 'Re-run phases…',
                   hint: 'Run layout, lines, OCR or alignment again on every page',
                   testId: 'rerun-open',
-                  onSelect: () => setRerunOpen(true),
+                  onSelect: () => { setRerunOnMissing(false); setRerunOpen(true) },
                 }] : []),
                 ...(canManage && !isMap ? [{
                   label: 'Transcribe with LLMs…',
@@ -1294,6 +1305,9 @@ export function JobDetailPage() {
             }
           } : undefined} />
         )}
+        {notRun && !active && !uploading && (
+          <StepsNotRunBanner notRun={notRun} onRun={() => { setRerunOnMissing(true); setRerunOpen(true) }} />
+        )}
         {error && <p data-testid="job-error" role="alert" className="mt-2 text-sm text-danger">{error}</p>}
         {notice && (
           <p data-testid="job-notice" className="mt-2 text-sm text-ink-muted">
@@ -1303,7 +1317,8 @@ export function JobDetailPage() {
         {!isMap && <DatasetViews jobId={jobId} active="pages" className="mt-2" />}
       </header>
       {rerunOpen && (
-        <RerunDialog jobId={jobId} jobName={job.name} layoutOn={job.run_layout} onClose={() => setRerunOpen(false)}
+        <RerunDialog jobId={jobId} jobName={job.name} layoutOn={job.run_layout} notRun={notRun ?? undefined}
+                     startOnMissing={rerunOnMissing} onClose={() => setRerunOpen(false)}
                      onDone={refetch} onError={setError} />
       )}
       {repredictOpen && (
@@ -1738,6 +1753,25 @@ export function JobDetailPage() {
   )
 }
 
+
+/** The steps switched on that have not run on some pages, by name and count. */
+function StepsNotRunBanner({ notRun, onRun }: { notRun: StepsNotRun; onRun: () => void }) {
+  const missed = MISSED_STEPS.filter((step) => notRun[step] > 0)
+  if (missed.length === 0) return null
+  const [first, ...rest] = missed
+  const name = STEP_NAME[first]
+  return (
+    <div data-testid="steps-not-run" role="status"
+         className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-accent/30 bg-accent-wash px-3 py-2 text-sm">
+      <span className="min-w-0 flex-1">
+        <span className="font-medium">{name[0].toUpperCase() + name.slice(1)} has not run on {plural(notRun[first], 'page')}</span>
+        {rest.map((step) => `, ${STEP_NAME[step]} on ${notRun[step]}`).join('')}
+        <span className="text-ink-muted"> - {missed.length === 1 ? 'it was' : 'they were'} off when those pages went through.</span>
+      </span>
+      <Button size="xs" data-testid="steps-not-run-open" onClick={onRun}>Run on those pages…</Button>
+    </div>
+  )
+}
 
 function UnreadablePages({ pages, onRetry }: { pages: UnreadablePage[]; onRetry?: () => void }) {
   const files = pages.filter((page) => !page.iiif)

@@ -8,7 +8,7 @@ from app import caches, ingest, store
 # GROUP BY over the lot, which is what makes this expensive on a large volume.
 _ROWS = """
 SELECT p.id, p.idx, p.filename, p.width, p.height, p.status,
-       p.layout_checked, p.lines_checked, p.deleted, p.rotation, p.is_test,
+       p.layout_checked, p.lines_checked, p.layout_skipped, p.deleted, p.rotation, p.is_test,
        p.note, p.note_by, p.note_at,
        -- Whether a line of the page anchored a stretch of a document cut onto it.
        (p.reference_document IS NOT NULL AND p.reference_anchors > 0) document_match,
@@ -204,7 +204,7 @@ def _filters(task: str) -> dict[str, str]:
 
 def _as_page(row: sqlite3.Row) -> dict:
     page = dict(row)
-    for flag in ('layout_checked', 'lines_checked', 'deleted', 'is_test', 'document_match'):
+    for flag in ('layout_checked', 'lines_checked', 'layout_skipped', 'deleted', 'is_test', 'document_match'):
         page[flag] = bool(page[flag])
     page['note'] = store.note_of(page)
     return page

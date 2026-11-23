@@ -72,7 +72,7 @@ def test_a_row_carries_what_the_table_shows(client):
 
     assert body['rows'] == [{
         'id': 1, 'idx': 0, 'filename': 'a.png', 'width': 600, 'height': 800,
-        'status': 'done', 'layout_checked': True, 'lines_checked': False, 'deleted': False,
+        'status': 'done', 'layout_checked': True, 'lines_checked': False, 'layout_skipped': False, 'deleted': False,
         'document_match': False,
         'rotation': 0, 'is_test': False, 'note': None,
         'elements_total': 1, 'elements_checked': 1,

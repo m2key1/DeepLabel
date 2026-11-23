@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app import candidates, characters, config, ingest, layout_classes, newer_models, registry, store
+from app.caches import counted_page
 from app.deps import (current_user, get_db, get_user, require_job_access, require_job_manager, require_page_access,
                       role_on_job, role_reaches)
 
@@ -230,22 +231,34 @@ RERUN_FROM = {
 }
 
 
-def _layout_checked_pages(conn, job_id: str) -> int:
+# The pages a step has not run on while it is switched on: layout passed them by, or they
+# wait for their lines or their reading. A re-run of only these leaves the rest as they are.
+NOT_RUN = {
+    'layout': "layout_skipped = 1 AND status IN ('layout_done','lines_done','done')",
+    'lines': "status = 'layout_done'",
+    'ocr': "status = 'lines_done'",
+}
+STEP_SWITCH = {'layout': 'run_layout', 'lines': 'run_lines', 'ocr': 'run_ocr'}
+
+
+def _layout_checked_pages(conn, job_id: str, among: str = '1') -> int:
     return conn.execute(
-        'SELECT COUNT(*) c FROM pages WHERE job_id = ? AND layout_checked = 1 AND deleted = 0',
+        f'SELECT COUNT(*) c FROM pages WHERE job_id = ? AND layout_checked = 1 AND deleted = 0 AND {among}',
         (job_id,)).fetchone()['c']
 
 
-def _rerun_counts(conn, job_id: str) -> dict:
+def _rerun_counts(conn, job_id: str, among: str = '1') -> dict:
+    """What a re-run would touch, over the pages `among` names - all of them by default."""
     q = ('SELECT COUNT(*) c FROM lines l JOIN elements e ON l.element_id = e.id '
-         'JOIN pages p ON e.page_id = p.id WHERE p.job_id = ? AND p.deleted = 0 AND e.deleted = 0 AND l.deleted = 0')
+         'JOIN pages p ON e.page_id = p.id WHERE p.job_id = ? AND p.deleted = 0 AND e.deleted = 0 AND l.deleted = 0 '
+         f'AND p.id IN (SELECT id FROM pages WHERE {among})')
     one = lambda extra='': conn.execute(q + extra, (job_id,)).fetchone()['c']
-    layout_checked = _layout_checked_pages(conn, job_id)
+    layout_checked = _layout_checked_pages(conn, job_id, among)
     edited = conn.execute(
         'SELECT COUNT(DISTINCT r.target_id) c FROM revisions r JOIN elements e ON e.id = r.target_id '
         'JOIN pages p ON e.page_id = p.id '
         "WHERE p.job_id = ? AND p.deleted = 0 AND r.target_type = 'element' "
-        f"AND {store.person_author_sql('r.author')}",
+        f"AND {store.person_author_sql('r.author')} AND p.id IN (SELECT id FROM pages WHERE {among})",
         (job_id,)).fetchone()['c']
     return {'lines': one(), 'corrected': one(' AND l.corrected_text IS NOT NULL'),
             'checked': one(' AND l.checked = 1'),
@@ -266,24 +279,46 @@ def rerun_discards(conn, job_id: str, from_phase: str) -> dict:
     return counts
 
 
-def require_rerun(conn, job: dict, from_phase: str, force: bool) -> None:
+def require_rerun(conn, job: dict, from_phase: str, force: bool, among: str = '1') -> None:
     """Refuse a re-run of a busy dataset, or one that would retire a layout sign-off
     without force - asked by the re-run itself and by the preview of one."""
     require_idle(job)
     if from_phase in BOX_PHASES and not force:
-        signed_off = _layout_checked_pages(conn, job['id'])
+        signed_off = _layout_checked_pages(conn, job['id'], among)
         if signed_off:
             raise HTTPException(409, f'{signed_off} page(s) are marked layout complete; '
                                      'pass force to re-run anyway')
 
 
 @router.get('/api/jobs/{job_id}/rerun')
-def rerun_preview(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
-    """What a re-run would discard, so the UI can confirm with real numbers."""
+def rerun_preview(job_id: str, from_phase: str | None = None, only_missing: bool = False,
+                  conn=Depends(get_db), user: dict = Depends(current_user)):
+    """What a re-run would discard, so the UI can confirm with real numbers - over the pages
+    a step has not run on, where the re-run is of those alone."""
     require_job_access(conn, job_id, user)
     if store.get_job(conn, job_id) is None:
         raise HTTPException(404)
-    return _rerun_counts(conn, job_id)
+    return _rerun_counts(conn, job_id, _missing(from_phase) if only_missing else '1')
+
+
+def _missing(from_phase: str | None) -> str:
+    if from_phase not in NOT_RUN:
+        raise HTTPException(400, f"only {', '.join(NOT_RUN)} can be run on just the pages they missed")
+    return NOT_RUN[from_phase]
+
+
+@router.get('/api/jobs/{job_id}/steps-not-run')
+def steps_not_run(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)) -> dict:
+    """How many pages each switched-on step has not run on, so the dataset can offer to run
+    it there - nothing while the dataset is busy, which will get to them itself."""
+    require_job_access(conn, job_id, user)
+    job = store.get_job(conn, job_id)
+    if job is None:
+        raise HTTPException(404)
+    idle = job['status'] not in (*store.JOB_BUSY, 'uploading') and not ingest.is_tile_task(job['task'])
+    return {step: conn.execute(f'SELECT COUNT(*) c FROM pages WHERE job_id = ? AND {counted_page()} AND {where}',
+                               (job_id,)).fetchone()['c'] if idle and job[STEP_SWITCH[step]] else 0
+            for step, where in NOT_RUN.items()}
 
 
 class Rerun(BaseModel):
@@ -296,6 +331,8 @@ class Rerun(BaseModel):
     # Detection replaces the lines; their text goes to the pool first and is re-offered
     # on whatever is found this time. Off starts the page clean instead.
     keep_text: bool = True
+    # Only the pages the step has not run on, leaving those it went through as they are.
+    only_missing: bool = False
 
 
 @router.post('/api/jobs/{job_id}/rerun')
@@ -308,7 +345,7 @@ def rerun_job(job_id: str, body: Rerun, conn=Depends(get_db), me: dict = Depends
         require_rerun_manager(conn, job, me)
     user = me['username']
     result = rerun_one(conn, job_id, body.from_phase, body.force, user,
-                       keep_checked=body.keep_checked, keep_text=body.keep_text)
+                       keep_checked=body.keep_checked, keep_text=body.keep_text, only_missing=body.only_missing)
     conn.commit()
     return result
 
@@ -337,7 +374,7 @@ def switch_on_phase(conn, job: dict, phase: str) -> None:
 
 
 def rerun_one(conn, job_id: str, from_phase: str, force: bool, user: str,
-              keep_checked: bool = True, keep_text: bool = True) -> dict:
+              keep_checked: bool = True, keep_text: bool = True, only_missing: bool = False) -> dict:
     """One dataset's re-run, short of the commit. Shared with the bulk route, so a group
     discards exactly what the same request over each dataset would have discarded."""
     body = Rerun(from_phase=from_phase, force=force, keep_checked=keep_checked, keep_text=keep_text)
@@ -346,13 +383,16 @@ def rerun_one(conn, job_id: str, from_phase: str, force: bool, user: str,
         raise HTTPException(404)
     if body.from_phase not in RERUN_FROM:
         raise HTTPException(400, f"from_phase must be one of {sorted(RERUN_FROM)}")
-    require_rerun(conn, job, body.from_phase, body.force)
-
     reset_to, match = RERUN_FROM[body.from_phase]
+    if only_missing:
+        match = _missing(body.from_phase)
+    require_rerun(conn, job, body.from_phase, body.force, match)
+
     discarded = rerun_discards(conn, job_id, body.from_phase)
     # Deleted pages must never be handed back to the runner.
     pages = f"SELECT id FROM pages WHERE job_id = ? AND deleted = 0 AND {match}"
     realign = body.from_phase in ('align', 'reference')
+    dropped_lines = False
     if not realign and body.keep_text:
         # Everything the re-run is about to overwrite goes to the pool first, so a person's
         # corrections are re-offered on whatever the pipeline detects this time.
@@ -381,6 +421,7 @@ def rerun_one(conn, job_id: str, from_phase: str, force: bool, user: str,
         conn.execute(f'UPDATE lines SET deleted = 1 WHERE {scope}', (job_id,))
         for line_id in stale:
             store.log_line(conn, line_id, f'system:rerun@{user}', 'delete')
+        dropped_lines = bool(stale)
         reset_pages = [page['id'] for page in conn.execute(pages, (job_id,)).fetchall()]
         if not body.keep_text:
             # Starting clean is a promise about the pool too: left there, what it holds for
@@ -407,7 +448,10 @@ def rerun_one(conn, job_id: str, from_phase: str, force: bool, user: str,
         shutil.rmtree(config.job_dir(job_id) / 'crops', ignore_errors=True)
     conn.execute(f'UPDATE pages SET status = ? WHERE job_id = ? AND deleted = 0 AND {match}',
                  (reset_to, job_id))
-    switch_on_phase(conn, job, body.from_phase)
+    # Only the pages a switched-on step missed: nothing else is switched on with it, unless
+    # detecting the boxes again took lines that only line detection gives back.
+    if not only_missing or dropped_lines:
+        switch_on_phase(conn, job, body.from_phase)
     _queue(conn, job_id)
     # The counters still describe the discarded work, so the bars would read against
     # stale totals (e.g. 76/75) until the re-run happens to overwrite each one.

@@ -46,13 +46,13 @@ const PROGRESS = ['pending', 'ingested', 'layout_done', 'lines_done', 'done']
 
 type StatusOf = Pick<Job, 'task' | 'run_layout' | 'status' | 'phase'>
 
-export function pageStatus(status: string, job: StatusOf): { label: string; failed: boolean } {
+export function pageStatus(status: string, job: StatusOf, layoutSkipped = false): { label: string; failed: boolean } {
   if (isTileTask(job.task)) return { label: status === 'done' ? 'Processed' : PAGE_STATUS[status] ?? status, failed: false }
   const step = job.status === 'error' && job.phase ? STEP_PASSED[job.phase] : undefined
   const reached = PROGRESS.indexOf(status)
   if (step && reached >= 0 && reached < PROGRESS.indexOf(step.through)) return { label: step.failed, failed: true }
-  // A dataset without layout moves its pages past the step untouched, so none was found.
-  if (status === 'layout_done' && !job.run_layout) return { label: PAGE_STATUS.ingested, failed: false }
+  // Layout off moves a page past the step untouched, so none was found on it.
+  if (status === 'layout_done' && (layoutSkipped || !job.run_layout)) return { label: PAGE_STATUS.ingested, failed: false }
   return { label: PAGE_STATUS[status] ?? status, failed: false }
 }
 

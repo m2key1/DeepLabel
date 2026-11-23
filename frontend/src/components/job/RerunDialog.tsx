@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react'
 import { rerunJob, rerunPreview } from '../../api'
-import type { RerunPhase, RerunPreview } from '../../api'
+import type { MissedStep, RerunPhase, RerunPreview, StepsNotRun } from '../../api'
+import { plural } from '../../util'
 import { Modal, modalBtn, modalDangerBtn, modalPrimaryBtn } from '../Modal'
+import { CheckField } from '../ui/Field'
 
 interface RerunDialogProps {
   jobId: string
   jobName: string
   layoutOn: boolean
+  /** Pages each step has not run on; opened from the banner that names them, the dialog
+   *  starts on the first such step with only those pages ticked. */
+  notRun?: StepsNotRun
+  startOnMissing?: boolean
   onClose: () => void
   onDone: () => void
   onError: (message: string) => void
@@ -40,16 +46,26 @@ const FIRST_PHASE: Record<'on' | 'off', [RerunPhase, string, string]> = {
   off: ['start', 'From the start, without layout', 'drop the boxes, redo lines on the whole page and OCR'],
 }
 
-export function RerunDialog({ jobId, jobName, layoutOn, onClose, onDone, onError }: RerunDialogProps) {
+export const MISSED_STEPS: MissedStep[] = ['layout', 'lines', 'ocr']
+export const STEP_NAME: Record<MissedStep, string> = { layout: 'layout', lines: 'line detection', ocr: 'OCR' }
+
+export function RerunDialog({
+  jobId, jobName, layoutOn, notRun, startOnMissing = false, onClose, onDone, onError,
+}: RerunDialogProps) {
   const first = FIRST_PHASE[layoutOn ? 'on' : 'off']
-  const [from, setFrom] = useState<RerunPhase>('lines')
+  const firstMissed = MISSED_STEPS.find((step) => (notRun?.[step] ?? 0) > 0)
+  const [from, setFrom] = useState<RerunPhase>(startOnMissing && firstMissed ? firstMissed : 'lines')
   const [loss, setLoss] = useState<RerunPreview | null>(null)
   const [keepChecked, setKeepChecked] = useState(true)
   const [keepText, setKeepText] = useState(true)
+  const [onlyMissing, setOnlyMissing] = useState(startOnMissing && firstMissed !== undefined)
+  const missed = (MISSED_STEPS as RerunPhase[]).includes(from) ? notRun?.[from as MissedStep] ?? 0 : 0
+  const scoped = onlyMissing && missed > 0
 
   useEffect(() => {
-    rerunPreview(jobId).then(setLoss).catch((e: Error) => onError(e.message))
-  }, [jobId, onError])
+    setLoss(null)
+    rerunPreview(jobId, from as MissedStep, scoped).then(setLoss).catch((e: Error) => onError(e.message))
+  }, [jobId, from, scoped, onError])
 
   // Which second choice the phase asks for, if any. Alignment reads what is there and
   // replaces nothing, so it asks nothing.
@@ -64,7 +80,7 @@ export function RerunDialog({ jobId, jobName, layoutOn, onClose, onDone, onError
 
   const run = () => {
     onClose()
-    rerunJob(jobId, from, pastSignOff, { keepChecked, keepText })
+    rerunJob(jobId, from, pastSignOff, { keepChecked, keepText, onlyMissing: scoped })
       .then(onDone)
       .catch((e: Error) => onError(e.message))
   }
@@ -92,6 +108,14 @@ export function RerunDialog({ jobId, jobName, layoutOn, onClose, onDone, onError
           </label>
         ))}
       </div>
+      {missed > 0 && (
+        <div className="mb-3">
+          <CheckField data-testid="rerun-only-missing"
+                      label={`Only the ${plural(missed, 'page')} ${STEP_NAME[from as MissedStep]} has not run on`}
+                      help="The pages it has run on keep what they have"
+                      checked={onlyMissing} onChange={setOnlyMissing} />
+        </div>
+      )}
       {loss === null ? (
         <p className="mb-3 text-sm text-ink-muted">Checking what this discards…</p>
       ) : choices === null ? (
