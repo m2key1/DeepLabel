@@ -54,8 +54,13 @@ export function formatRelative(iso: string, now: Date = new Date()): string {
 /** What each run state means, as a tone rather than a colour: waiting, working,
  *  finished, stopped by hand, broken. The badge and the dashboard's row accent both
  *  read this, so they cannot say different things about the same job. */
+/** Its pages are being worked on - waiting for the GPU, on it, or being ingested beside
+ *  it - so nothing else may start on the dataset meanwhile. */
+export const isBusy = (status: JobStatus) => status === 'queued' || status === 'running' || status === 'ingesting'
+
 export const STATUS_TONE: Record<JobStatus, Tone> = {
   uploading: 'neutral',
+  ingesting: 'accent',
   queued: 'neutral',
   running: 'accent',
   done: 'ok',

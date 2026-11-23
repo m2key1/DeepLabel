@@ -378,11 +378,11 @@ def _reocr_batch_loop():
             "JOIN elements e ON l.element_id = e.id JOIN pages p ON e.page_id = p.id "
             "JOIN jobs j ON j.id = p.job_id "
             "WHERE l.needs_ocr = 1 AND l.deleted = 0 AND j.run_ocr = 1 "
-            "AND j.status NOT IN ('queued', 'running', 'uploading')").fetchall()
+            f"AND j.status NOT IN ({store.JOB_BUSY_SQL}, 'uploading')").fetchall()
         for row in rows:
             conn.execute(
                 "UPDATE jobs SET status = 'queued', phase = NULL, error = NULL "
-                "WHERE id = ? AND status NOT IN ('queued', 'running', 'uploading')", (row['job_id'],))
+                f"WHERE id = ? AND status NOT IN ({store.JOB_BUSY_SQL}, 'uploading')", (row['job_id'],))
         conn.commit()
 
 
@@ -390,7 +390,7 @@ def start_reocr_batcher():
     threading.Thread(target=_reocr_batch_loop, daemon=True).start()
 
 
-CANCELLABLE_STATUSES = ('queued', 'running')
+CANCELLABLE_STATUSES = store.JOB_BUSY
 
 
 def cancel_job(conn, job_id: str) -> bool:
@@ -398,7 +398,7 @@ def cancel_job(conn, job_id: str) -> bool:
     run is left as it ended - a Cancel from a stale tab must not unfinish it."""
     row = conn.execute('SELECT pid FROM jobs WHERE id = ?', (job_id,)).fetchone()
     cancelled = conn.execute(
-        "UPDATE jobs SET status = 'cancelled' WHERE id = ? AND status IN (?, ?)",
+        "UPDATE jobs SET status = 'cancelled' WHERE id = ? AND status IN (?, ?, ?)",
         (job_id, *CANCELLABLE_STATUSES)).rowcount
     conn.commit()
     if not cancelled:

@@ -263,7 +263,8 @@ class TestImport:
 
         routes[f'{ARCHIVE}/img/2/full/4000,/0/default.jpg'] = httpx.Response(200, content=jpeg(400, 500, 30))
         assert client.post(f'/api/jobs/{job_id}/iiif/retry', headers=MEMBER).json() == {'retried': 1}
-        assert conn.execute('SELECT status FROM jobs WHERE id = ?', (job_id,)).fetchone()[0] == 'queued'
+        # Its image is fetched by the ingester before the GPU queue sees the dataset (#140).
+        assert conn.execute('SELECT status FROM jobs WHERE id = ?', (job_id,)).fetchone()[0] == 'ingesting'
         text_job.phase_ingest(conn, job_id, config.job_dir(job_id))
 
         assert [r[0] for r in conn.execute('SELECT status FROM pages WHERE job_id = ? ORDER BY idx', (job_id,))] == [

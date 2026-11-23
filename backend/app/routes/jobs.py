@@ -13,7 +13,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from app import (blobs, caches, config, consensus, conventions, corpus, data_use, decode, evaluator, geometry,
-                 iiif, imports, ingest, jobs, layout_shapes, layout_templates, llm, map_classes, model_registry,
+                 iiif, imports, ingest, ingest_queue, jobs, layout_shapes, layout_templates, llm, map_classes, model_registry,
                  page_rows, queue_eta, reading_order, recognize, registry, schemas, store, trainer)
 from app.deps import (ROLE_NAMES, SWAPPABLE, VISIBLE_JOB_IDS, WRITERS, belongs_to_workspace, can_access_job, manages_workspace,
                       current_user, get_db, get_user, require_job_access, require_job_manager, require_job_role,
@@ -235,6 +235,7 @@ def create_job(name: str = Form(...), line_mode: str = Form('per_crop'), task: s
         layout_templates.copy_into(conn, job_id, layout_template_id)
         ingest.attach_ground_truth(conn, page_ids, gt_texts)
         corpus.store_documents(conn, job_id, corpus_texts)
+    _queue_unless_held(conn, job_id)
     conn.commit()
     return {'job_id': job_id, 'documents': len(corpus_texts)}
 
@@ -457,6 +458,7 @@ def create_job_from_path(body: PathJob, conn=Depends(get_db), user: str = Depend
         layout_templates.copy_into(conn, job_id, body.layout_template_id)
         ingest.attach_ground_truth(conn, page_ids, gt_texts)
         corpus.store_documents(conn, job_id, corpus_texts)
+    _queue_unless_held(conn, job_id)
     conn.commit()
     return {'job_id': job_id, 'documents': len(corpus_texts),
             'skipped_symlinks': skipped_symlinks}
@@ -530,6 +532,7 @@ def create_job_from_iiif(body: IiifJob, conn=Depends(get_db), user: str = Depend
         conn.execute('UPDATE pages SET iiif = ? WHERE id = ?', (json.dumps(
             {k: canvas[k] for k in ('canvas', 'label', 'width', 'height', 'image')}), page_ids[source]))
     layout_templates.copy_into(conn, job_id, body.layout_template_id)
+    _queue_unless_held(conn, job_id)
     conn.commit()
     return {'job_id': job_id, 'pages': len(canvases)}
 
@@ -554,10 +557,11 @@ UPLOADING = 'uploading'
 
 
 def _queue_unless_held(conn, job_id: str) -> None:
-    """Added pages are processed next - unless the dataset is still waiting for the rest
-    of its upload, which its start queues all at once."""
-    conn.execute("UPDATE jobs SET status = 'queued', phase = NULL, error = NULL "
-                 "WHERE id = ? AND status != ?", (job_id, UPLOADING))
+    """Added pages are processed next, rendered first by the ingester where any are pending -
+    unless the dataset is still waiting for the rest of its upload, which its start sends on
+    all at once."""
+    conn.execute('UPDATE jobs SET status = ?, phase = NULL, error = NULL WHERE id = ? AND status != ?',
+                 (ingest_queue.waiting_status(conn, job_id), job_id, UPLOADING))
 
 
 @router.post('/api/jobs/{job_id}/start')
@@ -569,7 +573,7 @@ def start_held(job_id: str, conn=Depends(get_db), user: dict = Depends(current_u
         raise HTTPException(404)
     if job['status'] != UPLOADING:
         raise HTTPException(409, f'this dataset is {job["status"]}, not waiting for its upload')
-    conn.execute("UPDATE jobs SET status = 'queued' WHERE id = ?", (job_id,))
+    conn.execute('UPDATE jobs SET status = ? WHERE id = ?', (ingest_queue.waiting_status(conn, job_id), job_id))
     conn.commit()
     return {'ok': True}
 
@@ -578,7 +582,7 @@ def _require_appendable(conn, job_id: str) -> dict:
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
-    if job['status'] in ('queued', 'running'):
+    if job['status'] in store.JOB_BUSY:
         raise HTTPException(409, 'job is queued or running')
     return job
 
@@ -1029,7 +1033,7 @@ def _patch_processing(conn, job_id: str, job, body: JobPatch, fields: set, user:
     disagree with the pages they are producing. Hence the refusal while one is in flight."""
     if ingest.is_tile_task(job['task'] or 'text'):
         raise HTTPException(400, 'a tile dataset runs no text phases')
-    if job['status'] in ('queued', 'running'):
+    if job['status'] in store.JOB_BUSY:
         raise HTTPException(409, 'the dataset is already queued or running')
 
     def wanted(name: str, current):
@@ -1105,7 +1109,7 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
     if 'tile_size' in fields and body.tile_size is not None:
         if not job['run_tile']:
             raise HTTPException(400, 'only a dataset that cuts its maps into tiles has a tile size')
-        if job['status'] in ('queued', 'running'):
+        if job['status'] in store.JOB_BUSY:
             raise HTTPException(409, 'the dataset is already queued or running')
         conn.execute('UPDATE jobs SET tile_size = ? WHERE id = ?',
                      (_valid_tile_size(body.tile_size), job_id))
@@ -1452,7 +1456,7 @@ def queue(conn=Depends(get_db), user: dict = Depends(current_user)):
         'JOIN elements e ON l.element_id = e.id JOIN pages p ON e.page_id = p.id '
         'JOIN jobs j ON j.id = p.job_id '
         'WHERE l.needs_ocr = 1 AND l.deleted = 0 AND j.run_ocr = 1 '
-        "AND j.status NOT IN ('queued', 'running') GROUP BY j.id ORDER BY j.name").fetchall()
+        f"AND j.status NOT IN ({store.JOB_BUSY_SQL}) GROUP BY j.id ORDER BY j.name").fetchall()
     pending_reocr = None
     if flagged:
         datasets = []

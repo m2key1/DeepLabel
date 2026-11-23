@@ -53,6 +53,8 @@ the version in the app's footer opens.
 
 ### Changed
 
+- A dataset's pages are ingested beside the GPU queue, two datasets at a time, and the dataset
+  shows as Ingesting until it joins the queue (#140).
 - The Corpus tab is folded into the dataset's menus: documents under More, cutting again in
   Run, reading against the documents in the language-model dialog, a No document match filter,
   and each page's stretch in the page viewer; old Corpus links open the dataset (#49).

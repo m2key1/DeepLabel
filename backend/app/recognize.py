@@ -504,7 +504,7 @@ def keeping(conn, account: str, name: str, names: list[str]) -> Keeping:
         raise Refused(409, f'a dataset named "{name}" belongs to another account; keep needs a name of your own')
     if ingest.is_tile_task(job['task']):
         raise Refused(400, f'"{job["name"]}" is a map dataset; pages are kept in a text dataset')
-    if job['status'] in ('queued', 'running'):
+    if job['status'] in store.JOB_BUSY:
         raise Refused(409, f'"{job["name"]}" is queued or running; keep into it once it has finished')
     return Keeping(job['name'], holder)
 

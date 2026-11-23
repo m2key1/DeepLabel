@@ -4,6 +4,7 @@ import { Badge } from './ui/Badge'
 
 const STATUS_LABEL: Record<JobStatus, string> = {
   uploading: 'Uploading',
+  ingesting: 'Ingesting',
   queued: 'Queued',
   running: 'Running',
   done: 'Done',

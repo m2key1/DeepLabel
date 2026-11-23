@@ -94,7 +94,7 @@ import {
   REVIEW_THRESHOLDS, classColor, classInk, confBadgeClass, getElementPenShapes, getHiddenClasses, setClassColors, getLinePenShape,
   getOcrFrac, setElementPenShapes,
   getPenClass, clampKeyboardSize, clampLoupeHeight, getKeyboardPlace, getKeyboardSize, getLoupeHeight,
-  getReadingsFrac, getReadingsOpen, setReadingsOpen, setHiddenClasses, setLoupeHeight,
+  getReadingsFrac, getReadingsOpen, isBusy, setReadingsOpen, setHiddenClasses, setLoupeHeight,
   setKeyboardPlace, setKeyboardSize, setLinePenShape, setOcrFrac, setPenClass, setReadingsFrac, setReviewConf,
 } from '../util'
 import type { LinePenShape } from '../util'
@@ -1006,7 +1006,7 @@ export function PageViewerPage() {
         await new Promise((r) => setTimeout(r, 2000))
         if (!mounted.current) return
         const j = await getJob(jobId)
-        if (j.status === 'queued' || j.status === 'running') continue
+        if (isBusy(j.status)) continue
         // A phase that died in the runner leaves the page as it found it - emptied, for
         // layout - so saying nothing reads as the run never having happened.
         if (j.status === 'error') setError(j.error ?? 'the run failed')

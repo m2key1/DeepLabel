@@ -792,7 +792,7 @@ def repredict(job_id: str, body: RepredictBody, conn=Depends(get_db), user: str 
               auth: dict = Depends(current_user), _admin=Depends(require_role('admin'))):
     """Re-run map pre-annotation, keeping human-edited regions."""
     job = _require_map_job(conn, job_id, auth)
-    if job['status'] in ('queued', 'running'):
+    if job['status'] in store.JOB_BUSY:
         raise HTTPException(409, 'job is queued or running')
     problem = jobs.map_runner_problem()
     if problem:

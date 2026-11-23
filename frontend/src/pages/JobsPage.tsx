@@ -39,7 +39,7 @@ import { Modal } from '../components/Modal'
 import { Badge, chipClass } from '../components/ui/Badge'
 import type { Tone } from '../components/ui/Badge'
 import { usePresence } from '../presence'
-import { STATUS_TONE, compactCount, overallProgress } from '../util'
+import { STATUS_TONE, compactCount, isBusy, overallProgress } from '../util'
 import { useAutoClear } from '../messages'
 import { usePolling } from '../hooks/usePolling'
 import { reaches } from '../lib/roles'
@@ -767,7 +767,7 @@ export function JobsPage() {
   )
 
   const cellFor = (job: Job, key: string) => {
-    const active = job.status === 'queued' || job.status === 'running'
+    const active = isBusy(job.status)
     switch (key) {
       case 'phases':
         return (
@@ -849,7 +849,7 @@ export function JobsPage() {
   )
 
   const jobCard = (job: Job) => {
-    const active = job.status === 'queued' || job.status === 'running'
+    const active = isBusy(job.status)
     return (
       <div key={job.id} data-testid="job-card" data-status={job.status} {...dragSource(job.id)}
            className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-line border-l-4 ${

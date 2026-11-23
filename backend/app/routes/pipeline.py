@@ -46,7 +46,7 @@ class Redetect(BaseModel):
 
 
 def require_idle(job: dict) -> None:
-    if job['status'] in ('queued', 'running'):
+    if job['status'] in store.JOB_BUSY:
         raise HTTPException(409, 'job is already queued or running')
 
 
@@ -88,7 +88,7 @@ def redetect_lines(job_id: str, body: Redetect | None = None, conn=Depends(get_d
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
-    if job['status'] in ('queued', 'running'):
+    if job['status'] in store.JOB_BUSY:
         raise HTTPException(409, 'job is already queued or running')
     if body is not None and body.page_id is not None:
         # Explicit page-level redo: forget what the lines were detected against, so
@@ -555,7 +555,7 @@ def _runnable_job(conn, job_id: str, user: dict) -> dict:
     if job is None:
         raise HTTPException(404)
     require_rerun_manager(conn, job, user)
-    if job['status'] in ('queued', 'running'):
+    if job['status'] in store.JOB_BUSY:
         raise HTTPException(409, 'the dataset is already queued or running')
     return job
 

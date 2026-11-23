@@ -30,7 +30,7 @@ import { SkippedSymlinks } from '../components/job/SkippedSymlinks'
 import { useCrumb } from '../components/NavBar'
 import { readsWithOwnDecoder } from '../components/models/families'
 import { readerName } from '../components/viewer/readers'
-import { humanBytes } from '../util'
+import { humanBytes, isBusy } from '../util'
 import { UploadProgress, type UploadState } from '../components/ui/UploadProgress'
 import { PageHeader } from '../components/ui/PageHeader'
 import { pageShell } from '../components/ui/page'
@@ -549,7 +549,7 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
   const ocrSettingsChanged = !!edit && (ocrDecode !== edit.ocr_decode || modelPicks.ocr !== edit.model_ocr_id
     || flagsOn(convention).join() !== flagsOn(edit.ocr_convention ?? {}).join())
   const canReread = ocrSettingsChanged && (reocrState?.unchecked ?? 0) > 0
-    && edit.status !== 'queued' && edit.status !== 'running'
+    && !isBusy(edit.status)
 
   /** Each changed setting through the endpoint that owns it, and nothing unchanged: what a
    *  run uses cannot be changed while one is going, but data use can. */

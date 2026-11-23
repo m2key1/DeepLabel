@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from PIL import Image
 
-from app import (augmentations, caches, config, dataset_sync, geometry, jobs, llm_gt, llm_ocr,
+from app import (augmentations, caches, config, dataset_sync, geometry, ingest_queue, jobs, llm_gt, llm_ocr,
                  llm_queue, store, trainer, training, weights)
 from app.deps import LEGACY_ROLES
 from app.routes import (augmentations as augmentation_routes, backend_api, bulk, contributors, conventions, elements,
@@ -26,6 +26,7 @@ async def lifespan(_app: FastAPI):
     caches.warm_progress(conn)
     conn.close()
     jobs.start_worker()
+    ingest_queue.start_ingester()
     trainer.start_slurm_poller()
     jobs.start_reocr_batcher()
     # Page readings are network work, so they run beside the GPU queue, not in it. Both

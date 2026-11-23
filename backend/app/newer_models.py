@@ -1,6 +1,6 @@
 from collections import Counter
 
-from app import registry
+from app import registry, store
 
 # What each step's output records about the model that made it.
 READ_BY = {
@@ -78,7 +78,7 @@ def offers(conn, job: dict) -> list[dict]:
     a new default the dataset follows, a model changed under Processing, or a newer
     version marked for its own - with what running it again would cost. A step the owner
     declined for that very model is left out."""
-    if job['task'] != 'text' or job['status'] in ('queued', 'running', 'uploading'):
+    if job['task'] != 'text' or job['status'] in (*store.JOB_BUSY, 'uploading'):
         return []
     declined = {r['task']: r['model_id'] for r in conn.execute(
         'SELECT task, model_id FROM declined_models WHERE job_id = ?', (job['id'],))}

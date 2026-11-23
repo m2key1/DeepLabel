@@ -15,7 +15,7 @@ different question and is not reusable.
 """
 import json
 
-from app import align, candidates, data_use, llm, llm_client, llm_ocr, llm_queue
+from app import align, candidates, data_use, llm, llm_client, llm_ocr, llm_queue, store
 from app.caches import counted_page
 
 GT_SOURCE = 'llm'
@@ -239,7 +239,7 @@ def _realign(conn, job_id: str) -> None:
     """With the last answer in, the dataset is queued for alignment alone. Pages keep their
     status, so the earlier phases find no work and only the new ground truth is matched."""
     job = conn.execute('SELECT status FROM jobs WHERE id = ?', (job_id,)).fetchone()
-    if job is None or job['status'] in ('queued', 'running', 'uploading'):
+    if job is None or job['status'] in (*store.JOB_BUSY, 'uploading'):
         return
     conn.execute("UPDATE jobs SET status = 'queued', phase = NULL, error = NULL WHERE id = ?",
                  (job_id,))

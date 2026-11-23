@@ -1,6 +1,6 @@
 import type { PasswordRules } from './components/account/strength'
 
-export type JobStatus = 'uploading' | 'queued' | 'running' | 'done' | 'error' | 'cancelled'
+export type JobStatus = 'uploading' | 'ingesting' | 'queued' | 'running' | 'done' | 'error' | 'cancelled'
 export type Phase = 'ingest' | 'layout' | 'lines' | 'ocr' | 'predict' | 'tile'
 export type ExportFormat = 'json' | 'md' | 'txt' | 'zip' | 'page' | 'alto' | 'hocr' | 'tei' | 'iiif'
 export type Task = 'text' | 'map_segmentation' | 'map_lines'

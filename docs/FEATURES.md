@@ -228,6 +228,10 @@ source and pages. Changes apply to the next run; nothing already recognised is t
 - Vertical lines are read in both directions and the more confident reading is kept.
 - Turn a scan that arrived the wrong way up from the page viewer's **Run** menu. Boxes and
   lines turn with it, and turning back restores the original file.
+- A new dataset's pages, and pages added to one, are ingested beside the GPU queue rather
+  than in it: the dataset shows as **Ingesting**, its Ingest step counts the pages as they
+  come in, and it joins the queue once every page is in. Two datasets ingest at a time, so a
+  large PDF holds up neither the GPU nor more than one other upload.
 - The **Queue** page shows everything running or waiting - datasets, trainings,
   evaluations, async recognition requests - on a timeline per GPU and on the cluster, each item as long as it is
   expected to take, with the time it should start. Estimates come from the item's own

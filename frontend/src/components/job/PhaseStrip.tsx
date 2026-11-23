@@ -83,11 +83,11 @@ export function PhaseStrip({ job }: { job: Phased }) {
   const [errorOpen, setErrorOpen] = useState(false)
   useDismiss(errorOpen, () => setErrorOpen(false))
   const stateOf = (p: Phase): StepState => p.skipped ? 'skipped'
-    : job.phase === p.key && job.status === 'running' ? 'running'
+    : job.phase === p.key && (job.status === 'running' || job.status === 'ingesting') ? 'running'
     : job.phase === p.key && job.status === 'error' ? 'failed'
     : p.total > 0 && p.done >= p.total ? 'done' : 'waiting'
   const failed = phases.find((p) => stateOf(p) === 'failed')
-  const showStatus = job.status !== 'done' && job.status !== 'running' && !failed
+  const showStatus = job.status !== 'done' && job.status !== 'running' && job.status !== 'ingesting' && !failed
   const errorButton = (label: string) => job.error ? {
     type: 'button' as const,
     'aria-expanded': errorOpen,

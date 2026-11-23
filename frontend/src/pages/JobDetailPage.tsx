@@ -99,7 +99,7 @@ import { RerunDialog } from '../components/job/RerunDialog'
 import { CheckDialog } from '../components/job/CheckDialog'
 import { CopyImageButton } from '../components/CopyImageButton'
 import {
-  REVIEW_THRESHOLDS, classColor, confBadgeClass, confOutlineClass, getReviewConf,
+  REVIEW_THRESHOLDS, classColor, confBadgeClass, confOutlineClass, getReviewConf, isBusy,
   plural, setReviewConf,
 } from '../util'
 import { widePageShell } from '../components/ui/page'
@@ -381,7 +381,7 @@ export function JobDetailPage() {
     refetch()
   }, [refetch])
 
-  const active = job !== null && (job.status === 'queued' || job.status === 'running')
+  const active = job !== null && isBusy(job.status)
   // Sent in parts by the client: it waits until the last part is in, then is started.
   const uploading = job?.status === 'uploading'
   // The settings that decide how the dataset is processed, and running models on it, are
@@ -510,7 +510,7 @@ export function JobDetailPage() {
       ingested.current = ev.counters.pages_ingested
       setJob((prev) => (prev ? { ...prev, status: ev.status, phase: ev.phase, counters: ev.counters } : prev))
       // The run is over and the stream with it: what it wrote is in the rows now.
-      if (ev.status !== 'queued' && ev.status !== 'running') {
+      if (!isBusy(ev.status)) {
         closed = true
         es.close()
         window.clearTimeout(trailing)

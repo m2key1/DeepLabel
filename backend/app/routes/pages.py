@@ -389,7 +389,7 @@ def patch_pages(job_id: str, body: PagesPatch, conn=Depends(get_db), user: str =
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
-    if job['status'] in ('queued', 'running'):
+    if job['status'] in store.JOB_BUSY:
         raise HTTPException(409, 'job is queued or running')
     if not body.page_ids:
         return {'updated': 0, 'pages_total': store.recount_pages(conn, job_id)}
@@ -469,7 +469,7 @@ def purge_pages(job_id: str, conn=Depends(get_db), _admin=Depends(require_role('
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
-    if job['status'] in ('queued', 'running'):
+    if job['status'] in store.JOB_BUSY:
         raise HTTPException(409, 'job is queued or running')
     targets = _purge_targets(conn, job_id)
     manifest = _purge_manifest(targets)

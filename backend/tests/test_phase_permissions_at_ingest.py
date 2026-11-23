@@ -83,4 +83,4 @@ class TestAppend:
         response = append(api, job_id, ANNOTATOR)
         assert response.status_code == 200, response.text
         assert page_count(conn, job_id) == 1
-        assert store.get_job(conn, job_id)['status'] == 'queued'
+        assert store.get_job(conn, job_id)['status'] == 'ingesting'

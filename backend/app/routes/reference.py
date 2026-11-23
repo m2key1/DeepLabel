@@ -135,7 +135,7 @@ def cut_reference(job_id: str, conn=Depends(get_db), user: dict = Depends(curren
     job = store.get_job(conn, job_id)
     if job is None:
         raise HTTPException(404)
-    if job['status'] in ('queued', 'running'):
+    if job['status'] in store.JOB_BUSY:
         raise HTTPException(409, 'job is queued or running')
     if not corpus.needs_cut(conn, job_id):
         raise HTTPException(400, 'this dataset has no corpus documents')

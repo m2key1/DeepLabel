@@ -1735,6 +1735,12 @@ def state_update(fields: dict) -> tuple[str, list]:
     return ', '.join(sets), params
 
 
+# A dataset its pages are being worked on in: waiting for the GPU, on it, or being ingested
+# beside it. Nothing else may start on it meanwhile.
+JOB_BUSY = ('queued', 'running', 'ingesting')
+JOB_BUSY_SQL = ', '.join(f"'{status}'" for status in JOB_BUSY)
+
+
 def set_job_state(conn: sqlite3.Connection, job_id: str, status=None, phase=None, error=None, pid=None):
     fields = {col: val for col, val in (('status', status), ('phase', phase), ('error', error), ('pid', pid))
               if val is not None}

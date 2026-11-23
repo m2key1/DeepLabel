@@ -8,6 +8,7 @@ import { menuTrigger } from '../ui/menu'
 import { JobInfo } from './JobInfo'
 import { ExportBlockedNote, ExportMenu, exportBlocked } from './ExportMenu'
 import { popoverChrome } from '../ui/Card'
+import { isBusy } from '../../util'
 
 export const menuItem =
   'block w-full px-2.5 py-1.5 text-left text-xs text-ink-muted hover:bg-accent-wash hover:text-accent-ink'
@@ -39,7 +40,7 @@ export function JobActions(p: JobActionsProps) {
   const { job } = p
   const { user } = useAuth()
   const blocked = exportBlocked(job, user)
-  const active = job.status === 'queued' || job.status === 'running'
+  const active = isBusy(job.status)
   const tiles = isTileTask(job.task)
   // A row near the foot of the list has no room beneath it, and most rows are.
   const info = useDropPlacement(p.openInfo)

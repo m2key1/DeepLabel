@@ -176,15 +176,15 @@ class TestHeldUpload:
         assert self.status(conn, job_id) == 'uploading'
         assert conn.execute('SELECT COUNT(*) c FROM pages WHERE job_id = ?', (job_id,)).fetchone()['c'] == 2
 
-    def test_starting_it_queues_it_once(self, client):
+    def test_starting_it_sends_it_on_once(self, client):
         api, conn = client
         job_id = self.create_held(api)
 
         assert api.post(f'/api/jobs/{job_id}/start', headers=EDITOR).status_code == 200
-        assert self.status(conn, job_id) == 'queued'
+        assert self.status(conn, job_id) == 'ingesting'
         again = api.post(f'/api/jobs/{job_id}/start', headers=EDITOR)
         assert again.status_code == 409
-        assert self.status(conn, job_id) == 'queued'
+        assert self.status(conn, job_id) == 'ingesting'
 
     def test_only_its_owner_starts_it(self, client):
         api, conn = client
@@ -201,11 +201,11 @@ class TestHeldUpload:
         job_id = res.json()['job_id']
         assert conn.execute('SELECT ocr_decode FROM jobs WHERE id = ?', (job_id,)).fetchone()[0] == 'auto'
 
-    def test_a_dataset_created_without_hold_is_queued_at_once(self, client):
+    def test_a_dataset_created_without_hold_goes_to_the_ingester_at_once(self, client):
         api, conn = client
         res = api.post('/api/jobs', data={'name': 'small'}, headers=EDITOR,
                        files=[('files', ('p.png', png_bytes(), 'image/png'))])
-        assert self.status(conn, res.json()['job_id']) == 'queued'
+        assert self.status(conn, res.json()['job_id']) == 'ingesting'
 
     def test_answers_from_language_models_do_not_start_it(self, client):
         from app import llm_gt
