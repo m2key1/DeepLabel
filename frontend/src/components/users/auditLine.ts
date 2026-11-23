@@ -34,6 +34,11 @@ export function auditLine(entry: UserAuditEntry, username: string): string {
     return `signed out of ${entry.old_value} session${entry.old_value === '1' ? '' : 's'}`
   }
   if (entry.field === 'password_link') return 'password link created'
+  if (entry.field === 'second_factor') {
+    return entry.new_value === 'reset in part'
+      ? `second factor reset stopped part way: ${entry.old_value} removed before Authentik refused the rest`
+      : `second factor reset: ${entry.old_value} removed, a new one is set up at the next sign-in`
+  }
   if (entry.field === 'exceptions') {
     return `the role change cleared the exceptions for ${username}: ${clearedExceptions(entry.old_value)}`
   }

@@ -87,6 +87,18 @@ CREATE TABLE IF NOT EXISTS sign_in_failures (
     last_at TEXT NOT NULL,
     locked_until TEXT
 );
+-- A sign-in waiting on its second factor: where Authentik's flow stands (its cookies and
+-- flow, as JSON) under the hash of the token the sign-in page holds, for ten minutes.
+CREATE TABLE IF NOT EXISTS pending_sign_ins (
+    token_hash TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    next TEXT NOT NULL,
+    weak INTEGER NOT NULL DEFAULT 0,
+    -- The throttle's key for the account, so wrong codes count as wrong passwords do.
+    account TEXT NOT NULL DEFAULT '',
+    -- When the sign-in began: its ten minutes run from here, however many steps it takes.
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- Long-lived credentials for scripts, which have no cookie to send. Only the hash is
 -- stored, so a leaked database yields no usable token; `prefix` exists to let a user
 -- recognise which token a row is. A read-only token is refused every write by the
@@ -252,6 +264,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('PRAGMA foreign_keys=ON')
     conn.executescript(SCHEMA)
+    if 'account' not in {r[1] for r in conn.execute('PRAGMA table_info(pending_sign_ins)')}:
+        conn.execute("ALTER TABLE pending_sign_ins ADD COLUMN account TEXT NOT NULL DEFAULT ''")
     columns = {r[1] for r in conn.execute('PRAGMA table_info(users)')}
     if 'settings' not in columns:
         conn.execute("ALTER TABLE users ADD COLUMN settings TEXT NOT NULL DEFAULT '{}'")
@@ -605,6 +619,24 @@ def sign_in_wait(conn: sqlite3.Connection, keys: list[str], now: datetime | None
     waits = [(datetime.strptime(r[0], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc) - now).total_seconds()
              for r in rows]
     return max([0, *(math.ceil(w) for w in waits if w > 0)])
+
+
+PENDING_MINUTES = 10
+
+
+def hold_sign_in(conn: sqlite3.Connection, token_hash: str, state: dict, next_page: str, weak: bool,
+                 account: str, began: str | None = None) -> None:
+    conn.execute('INSERT OR REPLACE INTO pending_sign_ins (token_hash, state, next, weak, account, created_at) '
+                 "VALUES (?, ?, ?, ?, ?, COALESCE(?, datetime('now')))",
+                 (token_hash, json.dumps(state), next_page, int(weak), account, began))
+
+
+def held_sign_in(conn: sqlite3.Connection, token_hash: str):
+    """A sign-in still waiting on its second factor, taken off the list: each step holds it anew."""
+    conn.execute(f"DELETE FROM pending_sign_ins WHERE created_at < datetime('now', '-{PENDING_MINUTES} minutes')")
+    row = conn.execute('SELECT * FROM pending_sign_ins WHERE token_hash = ?', (token_hash,)).fetchone()
+    conn.execute('DELETE FROM pending_sign_ins WHERE token_hash = ?', (token_hash,))
+    return None if row is None else {**dict(row), 'state': json.loads(row['state'])}
 
 
 def note_sign_in_failure(conn: sqlite3.Connection, keys: list[str], now: datetime | None = None):

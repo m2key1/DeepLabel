@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { getPasswordLink, setPasswordWithLink } from '../api'
+import type { SecondFactorStep } from '../api'
 import { AccountCard, AccountError } from '../components/account/AccountCard'
+import { SecondFactor } from '../components/account/SecondFactor'
 import { NewPassword } from '../components/account/NewPassword'
 import { useNewPassword } from '../components/account/useNewPassword'
 import { Button } from '../components/ui/Button'
@@ -15,6 +17,8 @@ export function SetPasswordPage() {
   const password = useNewPassword(link ? [link.email] : [])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // A new account sets up its second factor before DeepLabel opens.
+  const [asked, setAsked] = useState<{ step: SecondFactorStep; pending: string } | null>(null)
 
   useEffect(() => {
     getPasswordLink(token()).then(setLink).catch((err: Error) => setDead(err.message))
@@ -25,14 +29,19 @@ export function SetPasswordPage() {
     setBusy(true)
     setError(null)
     try {
-      const { next } = await setPasswordWithLink(token(), password.value.password)
-      window.location.replace(next)
+      const answer = await setPasswordWithLink(token(), password.value.password)
+      if ('next' in answer) {
+        window.location.replace(answer.next)
+        return
+      }
+      setAsked(answer)
     } catch (err) {
       setError((err as Error).message)
       setBusy(false)
     }
   }
 
+  if (asked) return <SecondFactor first={asked} />
   if (dead) {
     return (
       <AccountCard title="This link cannot be used" testid="set-password-dead" footer={

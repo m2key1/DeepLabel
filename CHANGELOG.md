@@ -10,6 +10,9 @@ the version in the app's footer opens.
 
 ### Added
 
+- A second factor at sign-in: an authenticator app and recovery codes, set up on DeepLabel's
+  own sign-in page, asked at every sign-in where a deployment requires it, and reset by an
+  admin for a lost phone (#135). `python -m app.second_factor_setup` requires it on Authentik.
 - Rights for a dataset's scans and a licence for its transcriptions, from a closed list, with
   every change logged. A new dataset asks for the licence, a IIIF import fills the rights, and
   every export carries them (#42, first part).

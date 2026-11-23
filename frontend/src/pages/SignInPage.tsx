@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { getSignInOptions, signIn } from '../api'
+import type { SecondFactorStep } from '../api'
 import { AccountCard, AccountError, AccountField } from '../components/account/AccountCard'
+import { SecondFactor } from '../components/account/SecondFactor'
 import { Button } from '../components/ui/Button'
 
 /** Where the page asked to go back to, as the auth service handed it over. The service
@@ -19,6 +21,7 @@ export function SignInPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [signUp, setSignUp] = useState(false)
+  const [asked, setAsked] = useState<{ step: SecondFactorStep; pending: string } | null>(null)
 
   useEffect(() => {
     getSignInOptions().then((o) => setSignUp(o.sign_up)).catch(() => undefined)
@@ -28,8 +31,13 @@ export function SignInPage() {
     setBusy(true)
     setError(null)
     try {
-      const { next } = await signIn(email, password, nextPage())
-      window.location.replace(next)
+      const answer = await signIn(email, password, nextPage())
+      if ('next' in answer) {
+        window.location.replace(answer.next)
+        return
+      }
+      setPassword('')
+      setAsked(answer)
     } catch (err) {
       setError((err as Error).message)
       setPassword('')
@@ -37,6 +45,7 @@ export function SignInPage() {
     }
   }
 
+  if (asked) return <SecondFactor first={asked} />
   return (
     <AccountCard title="Sign in" testid="sign-in-form" onSubmit={() => void submit()} footer={
       <>

@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import auth, authentik, avatars, config, sign_in, store
 
@@ -238,23 +238,84 @@ async def sign_in_with_password(body: SignIn, request: Request):
     try:
         wait = store.sign_in_wait(conn, keys)
         if wait:
-            minutes = -(-wait // 60)
-            raise HTTPException(429, {'message': f'Too many attempts - try again in {minutes} '
-                                                 f'{"minute" if minutes == 1 else "minutes"}.',
-                                      'retry_after': wait})
+            raise _too_many(wait)
         try:
-            claims = await sign_in.sign_in(email, body.password)
+            outcome = await sign_in.start(email, body.password)
         except sign_in.WrongCredentials:
             store.note_sign_in_failure(conn, keys)
             raise HTTPException(400, {'message': 'Wrong email or password.'}) from None
         except sign_in.Unavailable as why:
-            print(f'AUTH: sign-in failed on the provider side: {why}', flush=True)
-            raise HTTPException(502, {'message': 'Signing in is not possible right now. '
-                                                 'Try again in a minute, or tell an admin.'}) from None
+            raise _provider_problem(why) from None
         store.clear_sign_in_failures(conn, account)
+        if isinstance(outcome, sign_in.Asked):
+            # The account's name is all there is to judge the password against before the
+            # second factor names who signed in.
+            weak = _below_the_rules(body.password, {'preferred_username': email, 'email': email})
+            return _asked(conn, outcome, _safe_next(body.next), weak, account)
     finally:
         conn.close()
-    return _signed_in(claims, _safe_next(body.next), weak=_below_the_rules(body.password, claims))
+    return _signed_in(outcome, _safe_next(body.next), weak=_below_the_rules(body.password, outcome))
+
+
+def _too_many(wait: int) -> HTTPException:
+    minutes = -(-wait // 60)
+    return HTTPException(429, {'message': f'Too many attempts - try again in {minutes} '
+                                          f'{"minute" if minutes == 1 else "minutes"}.', 'retry_after': wait})
+
+
+def _provider_problem(why: Exception) -> HTTPException:
+    print(f'AUTH: sign-in failed on the provider side: {why}', flush=True)
+    return HTTPException(502, {'message': 'Signing in is not possible right now. '
+                                          'Try again in a minute, or tell an admin.'})
+
+
+def _asked(conn, asked: 'sign_in.Asked', next_page: str, weak: bool, account: str, began: str | None = None) -> Response:
+    """What the sign-in page shows for a second factor, and a fresh token to answer it with:
+    each step is taken once, and the sign-in keeps the time it began."""
+    token = auth.new_token()
+    store.hold_sign_in(conn, auth.hash_api_token(token), asked.state, next_page, weak, account, began)
+    conn.commit()
+    return JSONResponse({'step': asked.step, 'pending': token})
+
+
+class SignInStep(BaseModel):
+    pending: str
+    # A code from the authenticator app, or a recovery code.
+    code: str | None = Field(default=None, max_length=64)
+    # The recovery codes were stored somewhere safe.
+    stored: bool = False
+
+
+@app.post('/api/sign-in/step')
+async def sign_in_step(body: SignInStep):
+    """Answer the second factor a sign-in asked for: a code, or that the recovery codes are
+    stored. Answers with the next step, or with a session and the page to go to."""
+    if not auth.oidc_enabled():
+        raise HTTPException(404, 'signing in with a password is not used here')
+    conn = store.connect(config.DB_PATH)
+    try:
+        held = store.held_sign_in(conn, auth.hash_api_token(body.pending))
+        conn.commit()
+        if held is None:
+            raise HTTPException(400, {'message': 'Signing in took too long or was finished elsewhere - start again.'})
+        wait = store.sign_in_wait(conn, [held['account']])
+        if wait:
+            raise _too_many(wait)
+        try:
+            outcome = await sign_in.resume(held['state'], {'code': ''.join((body.code or '').split()),
+                                                           'stored': body.stored})
+        except sign_in.WrongCredentials:
+            raise HTTPException(400, {'message': 'Signing in took too long or was finished elsewhere - start again.'})
+        except sign_in.Unavailable as why:
+            raise _provider_problem(why) from None
+        if isinstance(outcome, sign_in.Asked):
+            if outcome.step.get('error'):
+                store.note_sign_in_failure(conn, [held['account']])
+            return _asked(conn, outcome, held['next'], bool(held['weak']), held['account'], held['created_at'])
+        store.clear_sign_in_failures(conn, held['account'])
+    finally:
+        conn.close()
+    return _signed_in(outcome, held['next'], weak=bool(held['weak']))
 
 
 def _below_the_rules(password: str, claims: dict) -> bool:
@@ -283,12 +344,19 @@ async def _sign_in_after_setting(username: str, password: str) -> Response:
     """Sign someone in with the password they have just set, through the same flow as
     the sign-in page, so the session is exactly the one a sign-in would give."""
     try:
-        claims = await sign_in.sign_in(username, password)
+        outcome = await sign_in.start(username, password)
     except (sign_in.WrongCredentials, sign_in.Unavailable) as why:
         print(f'AUTH: signing in after setting a password failed: {why!r}', flush=True)
         raise HTTPException(502, {'message': 'Your password is set, but signing you in failed. '
                                              'Sign in on the sign-in page.'}) from None
-    return _signed_in(claims, '/')
+    if isinstance(outcome, sign_in.Asked):
+        # A new account sets up its second factor before DeepLabel opens.
+        conn = store.connect(config.DB_PATH)
+        try:
+            return _asked(conn, outcome, '/', False, _account_key(username))
+        finally:
+            conn.close()
+    return _signed_in(outcome, '/')
 
 
 def _account_problem(why: Exception) -> HTTPException:
@@ -856,6 +924,33 @@ def revoke_user_sessions(user_id: int, me: dict = Depends(require_admin_session)
     finally:
         conn.close()
     return {'revoked': revoked}
+
+
+@app.delete('/api/users/{user_id}/second-factor')
+def reset_second_factor(user_id: int, me: dict = Depends(require_admin_session)):
+    """Take away a person's authenticator app and recovery codes - a lost phone - so their
+    next sign-in sets up new ones. Their password and sessions stay as they are."""
+    _require_accounts()
+    if user_id == me['id']:
+        raise HTTPException(400, 'cannot reset your own second factor here')
+    conn = store.connect(config.DB_PATH)
+    try:
+        user = store.get_user(conn, user_id)
+        if user is None:
+            raise HTTPException(404)
+        try:
+            removed = authentik.remove_second_factor(authentik.account(username=user['subject'])['pk'])
+        except authentik.PartlyRemoved as why:
+            store.log_user_change(conn, user_id, _actor(me), 'second_factor', f'{why.removed} devices', 'reset in part')
+            conn.commit()
+            raise _account_problem(why) from None
+        except (authentik.Refused, authentik.Unavailable) as why:
+            raise _account_problem(why) from None
+        store.log_user_change(conn, user_id, _actor(me), 'second_factor', f'{removed} devices', 'reset')
+        conn.commit()
+    finally:
+        conn.close()
+    return {'removed': removed}
 
 
 @app.get('/api/users/{user_id}/audit')

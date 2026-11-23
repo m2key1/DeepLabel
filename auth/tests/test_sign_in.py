@@ -54,7 +54,7 @@ class TestSigningIn:
             assert attempt(client, 'right-password', next=elsewhere).json() == {'next': '/'}
 
     def test_a_login_flow_with_a_step_deeplabel_cannot_answer_is_reported_not_guessed(self, provider, client):
-        provider.extra_stage = 'ak-stage-authenticator-validate'
+        provider.extra_stage = 'ak-stage-captcha'
 
         response = attempt(client, 'right-password')
 

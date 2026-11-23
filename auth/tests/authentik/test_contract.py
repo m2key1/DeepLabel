@@ -8,7 +8,7 @@ import time
 import httpx
 import pytest
 
-from app import authentik, config, sign_in
+from app import authentik, config, second_factor_setup, sign_in
 
 URL = os.environ.get('AUTHENTIK_CONTRACT_URL', '').rstrip('/')
 TOKEN = os.environ.get('AUTHENTIK_CONTRACT_TOKEN', 'contract-bootstrap-token')
@@ -77,7 +77,9 @@ def configured(provider, monkeypatch):
 
 
 def signed_in(email: str, password: str) -> dict:
-    return asyncio.run(sign_in.sign_in(email, password))
+    claims = asyncio.run(sign_in.start(email, password))
+    assert isinstance(claims, dict), claims
+    return claims
 
 
 def test_the_right_password_names_the_person(configured):
@@ -133,3 +135,63 @@ def test_a_new_account_takes_a_password_and_signs_in_and_can_be_switched_off(man
     with pytest.raises(sign_in.WrongCredentials):
         signed_in(email, 'Mias-Passw0rd!')
     authentik.set_active(made['pk'], True)
+
+
+def _totp(secret: str, at: float) -> str:
+    """The code an authenticator app shows for `secret` at `at`, as RFC 6238 computes it."""
+    import base64
+    import hashlib
+    import hmac
+    import struct
+    key = base64.b32decode(secret + '=' * (-len(secret) % 8))
+    digest = hmac.new(key, struct.pack('>Q', int(at // 30)), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    return str((struct.unpack('>I', digest[offset:offset + 4])[0] & 0x7FFFFFFF) % 1_000_000).zfill(6)
+
+
+SECOND_EMAIL = 'contract-bert@example.org'
+
+
+@pytest.fixture
+def required(configured, monkeypatch):
+    """The login flow with a second factor required, as second_factor_setup leaves it, and an
+    account that has none yet; relaxed again afterwards for the tests above."""
+    users = _api('GET', '/api/v3/core/users/', params={'username': SECOND_EMAIL})['results']
+    user = users[0] if users else _api('POST', '/api/v3/core/users/', json={
+        'username': SECOND_EMAIL, 'email': SECOND_EMAIL, 'name': 'Bert Contract', 'type': 'external', 'path': 'users'})
+    _api('POST', f"/api/v3/core/users/{user['pk']}/set_password/", json={'password': PASSWORD})
+    monkeypatch.setattr(config, 'AUTHENTIK_API_TOKEN', SERVICE_TOKEN)
+    authentik.remove_second_factor(user['pk'])
+    with httpx.Client(base_url=URL, headers={'Authorization': f'Bearer {TOKEN}'}, timeout=30) as admin:
+        second_factor_setup.require(admin)
+        second_factor_setup.require(admin)
+        try:
+            yield user
+        finally:
+            second_factor_setup.relax(admin)
+
+
+def test_a_first_sign_in_sets_up_an_app_and_recovery_codes_then_lets_in(required):
+    asked = asyncio.run(sign_in.start(SECOND_EMAIL, PASSWORD))
+    assert asked.step['kind'] == 'enrol'
+    assert asked.step['otpauth'].startswith('otpauth://totp/DeepLabel%3Acontract-bert%40example.org?secret=')
+    assert asked.step['otpauth'].endswith('&issuer=DeepLabel')
+
+    codes = asyncio.run(sign_in.resume(asked.state, {'code': _totp(asked.step['secret'], time.time())}))
+    assert codes.step['kind'] == 'recovery' and len(codes.step['codes']) == 6
+
+    claims = asyncio.run(sign_in.resume(codes.state, {'stored': True}))
+    assert claims['sub'] == SECOND_EMAIL
+
+    # Every sign-in after asks for a code; a recovery code serves once, and a wrong one says why.
+    later = asyncio.run(sign_in.start(SECOND_EMAIL, PASSWORD))
+    assert later.step == {'kind': 'code', 'recovery': True}
+    wrong = asyncio.run(sign_in.resume(later.state, {'code': 'not-a-code'}))
+    assert (wrong.step['kind'], wrong.step['error']) == ('code', sign_in.WRONG_CODE)
+    # A wrong code holds every factor back for a moment, as a person retyping takes anyway.
+    time.sleep(2)
+    assert asyncio.run(sign_in.resume(wrong.state, {'code': codes.step['codes'][0]}))['sub'] == SECOND_EMAIL
+
+    # An admin takes the factor away, and the next sign-in sets one up again.
+    assert authentik.remove_second_factor(required['pk']) == 2
+    assert asyncio.run(sign_in.start(SECOND_EMAIL, PASSWORD)).step['kind'] == 'enrol'

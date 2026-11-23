@@ -3190,8 +3190,27 @@ export function getMe(): Promise<Me> {
 
 /** Signs in with a password on DeepLabel's own page. `next` is the page to go back to; the
  *  answer says where that is once the auth service has checked it is on this site. */
-export function signIn(email: string, password: string, next: string): Promise<{ next: string }> {
+/** What a sign-in asks of the person besides their password (#135): setting up an authenticator
+ *  app, storing recovery codes once, or a code from either. */
+export type SecondFactorStep =
+  | { kind: 'enrol'; otpauth: string; secret: string; qr: string; error?: string }
+  | { kind: 'recovery'; codes: string[] }
+  | { kind: 'code'; recovery: boolean; error?: string }
+
+/** Signed in and where to go, or a second-factor step to answer with its one-time token. */
+export type SignInAnswer = { next: string } | { step: SecondFactorStep; pending: string }
+
+export function signIn(email: string, password: string, next: string): Promise<SignInAnswer> {
   return request('/api/sign-in', json('POST', { email, password, next }))
+}
+
+export function signInStep(pending: string, reply: { code?: string; stored?: boolean }): Promise<SignInAnswer> {
+  return request('/api/sign-in/step', json('POST', { pending, ...reply }))
+}
+
+/** Take a person's authenticator app and recovery codes away; their next sign-in sets up new ones. */
+export function resetSecondFactor(userId: number): Promise<{ removed: number }> {
+  return request(`/api/users/${userId}/second-factor`, { method: 'DELETE' })
 }
 
 export function getSignInOptions(): Promise<{ sign_up: boolean }> {
@@ -3214,7 +3233,7 @@ export function getPasswordLink(token: string): Promise<{ email: string; purpose
 }
 
 /** Sets the password a link is for and signs its owner in. */
-export function setPasswordWithLink(token: string, password: string): Promise<{ next: string }> {
+export function setPasswordWithLink(token: string, password: string): Promise<SignInAnswer> {
   return request('/api/set-password', json('POST', { token, password }))
 }
 

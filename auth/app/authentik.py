@@ -107,3 +107,37 @@ def set_password(user_pk: int, password: str) -> None:
 def set_active(user_pk: int, active: bool) -> None:
     with _client() as client:
         _call(client, 'PATCH', f'/api/v3/core/users/{user_pk}/', json={'is_active': active})
+
+
+SECOND_FACTORS = ('totp', 'static')
+
+
+class PartlyRemoved(Unavailable):
+    """Authentik refused a device after others of the account had gone already."""
+
+    def __init__(self, removed: int, why: str):
+        super().__init__(why)
+        self.removed = removed
+
+
+def remove_second_factor(user_pk: int) -> int:
+    """Take away every authenticator app and set of recovery codes of one account, so its next
+    sign-in sets them up again. Returns how many went. The admin lists answer every account's
+    devices whatever ?user= says, so each is checked for its owner before it goes."""
+    removed = 0
+    with _client() as client:
+        for kind in SECOND_FACTORS:
+            devices, page = [], 1
+            while page:
+                listed = _call(client, 'GET', f'/api/v3/authenticators/admin/{kind}/',
+                               params={'user': user_pk, 'page': page, 'page_size': 100})
+                devices += listed['results']
+                page = (listed.get('pagination') or {}).get('next') or 0
+            for device in devices:
+                if device['user']['pk'] == user_pk:
+                    try:
+                        _call(client, 'DELETE', f"/api/v3/authenticators/admin/{kind}/{device['pk']}/")
+                    except Unavailable as why:
+                        raise (PartlyRemoved(removed, str(why)) if removed else why) from None
+                    removed += 1
+    return removed

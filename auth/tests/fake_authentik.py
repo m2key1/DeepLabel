@@ -21,6 +21,13 @@ POLICY = {'name': 'default-password-change-password-policy', 'password_field': '
           'error_message': f'Password needs to be {SHORTEST} characters or longer.',
           'check_have_i_been_pwned': False, 'check_zxcvbn': False, 'zxcvbn_score_threshold': 2}
 INVALID = {'password': [{'string': 'Invalid password', 'code': 'invalid'}]}
+# The second factor, when the flow asks for one: the code the authenticator app shows now, the
+# secret it was set up with, and the recovery codes the static stage hands out.
+RIGHT_CODE = '123456'
+SECRET = 'JBSWY3DPEHPK3PXP'
+RECOVERY = [f'rec-{i}' for i in range(6)]
+BAD_CODE = {'code': [{'string': 'Invalid Token. Please ensure the time on your device is accurate and try again.',
+                      'code': 'invalid'}]}
 
 
 class FakeAuthentik:
@@ -29,6 +36,11 @@ class FakeAuthentik:
         self.requests: list[tuple[str, str]] = []
         self.sessions: dict[str, dict] = {}
         self.extra_stage: str | None = None
+        # As the flow AUTHENTIK.md sets up for a required second factor: an app, then recovery codes.
+        self.second_factor = False
+        self.devices: list[dict] = []
+        # A service account made before the static-device permissions were documented.
+        self.refuse_static_delete = False
         self.policy = POLICY
         self.down = False
         self.add('service@example.org', type='internal_service_account', pk=1)
@@ -56,8 +68,54 @@ class FakeAuthentik:
             return self._admin(request, path)
         return self._login(request, path)
 
+    def _devices_of(self, user: dict, kind: str) -> list[dict]:
+        return [d for d in self.devices if d['user']['pk'] == user['pk'] and d['kind'] == kind]
+
+    def _after_password(self, session: dict) -> None:
+        """Where the flow goes once the password is right: enrolment, the code, or in."""
+        user = session['user']
+        if not self.second_factor:
+            session['done'] = 'redirecting'
+        elif not self._devices_of(user, 'totp'):
+            session['stage'] = 'ak-stage-authenticator-totp'
+        elif not self._devices_of(user, 'static'):
+            session['stage'] = 'ak-stage-authenticator-static'
+        elif session.get('validated'):
+            session['done'] = 'redirecting'
+        else:
+            session['stage'] = 'ak-stage-authenticator-validate'
+
+    def _challenge(self, session: dict) -> dict:
+        stage, user = session['stage'], session['user']
+        if stage == 'ak-stage-authenticator-totp':
+            return {'component': stage, 'pending_user': user['username'],
+                    'config_url': f"otpauth://totp/authentik%3A{user['username']}?secret={SECRET}"
+                                  '&algorithm=SHA1&digits=6&period=30&issuer=authentik'}
+        if stage == 'ak-stage-authenticator-static':
+            return {'component': stage, 'pending_user': user['username'], 'codes': RECOVERY}
+        if stage == 'ak-stage-authenticator-validate':
+            return {'component': stage, 'pending_user': user['username'], 'configuration_stages': [],
+                    'device_challenges': [{'device_class': d['kind'], 'device_uid': str(d['pk']), 'challenge': {},
+                                           'last_used': None} for d in self.devices if d['user']['pk'] == user['pk']]}
+        return {'component': stage}
+
+    def _add_device(self, user: dict, kind: str) -> None:
+        self.devices.append({'pk': len(self.devices) + 1, 'kind': kind, 'used': [],
+                             'user': {'pk': user['pk'], 'username': user['username']}})
+
     def _admin(self, request: httpx.Request, path: str) -> httpx.Response:
         body = json.loads(request.content) if request.content else None
+        if path.startswith('/api/v3/authenticators/admin/'):
+            kind = path.split('/')[5]
+            if request.method == 'GET':
+                # Like the real one, the list does not honour ?user=: every device comes back.
+                return httpx.Response(200, json={'results': [
+                    {'pk': d['pk'], 'name': kind, 'user': d['user']} for d in self.devices if d['kind'] == kind]})
+            pk = int(path.split('/')[6])
+            if kind == 'static' and self.refuse_static_delete:
+                return httpx.Response(403, json={'detail': 'You do not have permission to perform this action.'})
+            self.devices = [d for d in self.devices if not (d['kind'] == kind and d['pk'] == pk)]
+            return httpx.Response(204)
         if path == '/api/v3/core/users/' and request.method == 'GET':
             params = dict(request.url.params)
             return httpx.Response(200, json={'results': [self._public(u) for u in self.users.values()
@@ -94,7 +152,7 @@ class FakeAuthentik:
                 return httpx.Response(302, headers={'location': f'{FLOW}?query=', **cookie})
             if session['done']:
                 return httpx.Response(200, json={'component': 'xak-flow-redirect', 'to': '/'}, headers=cookie)
-            return httpx.Response(200, json={'component': session['stage']}, headers=cookie)
+            return httpx.Response(200, json=self._challenge(session), headers=cookie)
         if path == FLOW:
             answer = json.loads(request.content)
             if answer['component'] == 'ak-stage-identification':
@@ -106,7 +164,28 @@ class FakeAuthentik:
                 if not user or not user['is_active'] or not user['password'] or user['password'] != answer['password']:
                     return httpx.Response(200, headers=cookie, json={'component': 'ak-stage-password',
                                                                     'response_errors': INVALID})
-                session['done'] = 'redirecting'
+                self._after_password(session)
+            elif answer['component'] == 'ak-stage-authenticator-totp':
+                if answer.get('code') != RIGHT_CODE:
+                    return httpx.Response(200, headers=cookie, json={
+                        **self._challenge(session), 'response_errors': {'code': [{'string': 'Code does not match'}]}})
+                self._add_device(session['user'], 'totp')
+                session['validated'] = True
+                self._after_password(session)
+            elif answer['component'] == 'ak-stage-authenticator-static':
+                self._add_device(session['user'], 'static')
+                self._after_password(session)
+            elif answer['component'] == 'ak-stage-authenticator-validate':
+                code = answer.get('code')
+                recovery = next((d for d in self._devices_of(session['user'], 'static')
+                                 if code in RECOVERY and code not in d['used']), None)
+                if code != RIGHT_CODE and recovery is None:
+                    return httpx.Response(200, headers=cookie, json={**self._challenge(session),
+                                                                    'response_errors': BAD_CODE})
+                if recovery:
+                    recovery['used'].append(code)
+                session['validated'] = True
+                self._after_password(session)
             return httpx.Response(302, headers={'location': f'{FLOW}?query=', **cookie})
         if path == '/application/o/authorize/':
             if session['done'] is not True:

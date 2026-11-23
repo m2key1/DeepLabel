@@ -48,3 +48,15 @@ describe('the other account changes', () => {
     expect(auditLine(entry('sessions', '2', '0'), 'alice')).toBe('signed out of 2 sessions')
   })
 })
+
+describe('a second factor taken away', () => {
+  it('says how much went, so a reset of nothing reads as one', () => {
+    expect(auditLine(entry('second_factor', '2 devices', 'reset'), 'alice'))
+      .toBe('second factor reset: 2 devices removed, a new one is set up at the next sign-in')
+  })
+
+  it('says when Authentik stopped it part way', () => {
+    expect(auditLine(entry('second_factor', '1 devices', 'reset in part'), 'alice'))
+      .toBe('second factor reset stopped part way: 1 devices removed before Authentik refused the rest')
+  })
+})

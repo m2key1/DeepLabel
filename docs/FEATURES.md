@@ -756,6 +756,15 @@ in Authentik, which nobody has to see or visit.
 - Someone who signs in with a password that no longer meets those rules is asked to choose
   a new one before anything else opens; their other browsers are signed out once they have.
   API tokens keep working.
+- Where the deployment requires a second factor (AUTHENTIK.md section 7), the first sign-in
+  after the password shows a QR code to scan with an authenticator app and asks for the code
+  it shows, then shows six recovery codes once, to copy or download. Every sign-in after asks
+  for the app's code, or a recovery code, each of which works once. A wrong code counts like a
+  wrong password towards the wait, and a sign-in has ten minutes from its password to its
+  last code. A new account sets this up before DeepLabel opens; an existing one at its next
+  sign-in. API tokens are not asked.
+- An admin takes a person's second factor away from their details on the Admin page - a lost
+  phone - and their next sign-in sets up a new one. It is in their account's history.
 - Where sign-up is switched on, the sign-in page offers **Create an account**. A new
   account can sign in at once but only sees a page saying it waits for an admin; it opens
   DeepLabel by itself once approved. So does anyone signing in for the first time who was

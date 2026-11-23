@@ -98,6 +98,9 @@ With `AUTHENTIK_API_TOKEN` set, DeepLabel manages accounts in Authentik itself:
   forgot theirs. Their current password works until the link is used.
 - **Change password** on everyone's own profile, without asking the old one; every other
   browser of theirs is signed out.
+- **Reset second factor** on a person's details takes their authenticator app and recovery
+  codes away - a lost phone - so their next sign-in sets up new ones (section 7). It is
+  logged in their account's history.
 - **Sign-up** on the sign-in page, with `SELF_SIGN_UP=true`. A new account waits until an
   admin approves it; **Reject** switches it off here and in Authentik. One address may
   make three accounts an hour.
@@ -114,8 +117,8 @@ Only `external` accounts are touched: one that is `internal` or a superuser is m
 Authentik, so a link can never hand over an operator's access.
 
 The token belongs to a service account that may only see, add and change users, set
-their passwords and read password policies - a leaked token cannot touch flows,
-providers or admins. This creates it and writes the token into `.env` without printing it:
+their passwords, read password policies and see and remove second-factor devices - a
+leaked token cannot touch flows, providers or admins. This creates it and writes the token into `.env` without printing it:
 
 ```
 docker exec -i deeplabel-authentik ak shell <<'PY' 2>/dev/null | grep '^AUTHENTIK_API_TOKEN=' >> .env
@@ -124,7 +127,11 @@ from authentik.rbac.models import Role
 role, _ = Role.objects.get_or_create(name="deeplabel-accounts")
 role.assign_perms(["authentik_core.view_user", "authentik_core.add_user", "authentik_core.change_user",
                    "authentik_core.reset_user_password",
-                   "authentik_policies_password.view_passwordpolicy", "authentik_policies.view_policy"])
+                   "authentik_policies_password.view_passwordpolicy", "authentik_policies.view_policy",
+                   "authentik_stages_authenticator_totp.view_totpdevice",
+                   "authentik_stages_authenticator_totp.delete_totpdevice",
+                   "authentik_stages_authenticator_static.view_staticdevice",
+                   "authentik_stages_authenticator_static.delete_staticdevice"])
 account, _ = User.objects.get_or_create(username="deeplabel-accounts", defaults=dict(
     name="DeepLabel accounts", type=UserTypes.SERVICE_ACCOUNT, path="service-accounts"))
 account.set_unusable_password()
@@ -154,7 +161,41 @@ for stage in IdentificationStage.objects.exclude(enrollment_flow=None):
 PY
 ```
 
-## 7. Moving an existing deployment
+## 7. A second factor at sign-in
+
+DeepLabel's sign-in page answers Authentik's stages for an authenticator app (TOTP) and
+recovery codes: a person scans a QR code and types the app's code, stores the recovery
+codes shown once, and from then on gives a code at every sign-in - the app's, or a recovery
+code, each usable once. A new account sets them up as it opens (after its invitation link,
+or once its sign-up is approved), an existing one at its next sign-in. API tokens are not
+affected: a script signs in with its token alone.
+
+To require it, run once with an admin's token (the service account may not edit flows):
+
+```
+docker exec -e AUTHENTIK_URL=http://deeplabel-authentik:9000 -e AUTHENTIK_ADMIN_TOKEN=... \
+  deeplabel-auth python -m app.second_factor_setup
+```
+
+It sets the login flow's validation stage to set up an app where there is none, and binds
+the recovery-code stage after it for anyone who has none yet. Run again, it changes nothing;
+`--relax` makes the second factor optional again. A deployment whose service account was
+made before this needs the four `*device` permissions above added to its role:
+
+```
+docker exec -i deeplabel-authentik ak shell <<'PY'
+from authentik.rbac.models import Role
+Role.objects.get(name="deeplabel-accounts").assign_perms([
+    "authentik_stages_authenticator_totp.view_totpdevice", "authentik_stages_authenticator_totp.delete_totpdevice",
+    "authentik_stages_authenticator_static.view_staticdevice", "authentik_stages_authenticator_static.delete_staticdevice"])
+PY
+```
+
+After a wrong code Authentik holds every factor of that account back for a moment, longer
+after each further mistake; the page says to wait for the next code. DeepLabel counts wrong
+codes like wrong passwords as well, so five in a row make the account wait.
+
+## 8. Moving an existing deployment
 
 For a deployment that signed people in on Authentik's pages before:
 

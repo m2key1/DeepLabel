@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  getContributorAccess, getContributorActivity, getUserAudit, makePasswordLink, revokeUserSessions,
+  getContributorAccess, getContributorActivity, getUserAudit, makePasswordLink, resetSecondFactor, revokeUserSessions,
   type AppUser, type ContributorAccess, type ContributorActivity, type PasswordLink, type UserAuditEntry,
 } from '../../api'
 import { formatDate, formatRelative } from '../../util'
@@ -86,6 +86,20 @@ export function UserDetail({ user, self, canReset, onChanged, onError }: UserDet
     }
   }
 
+  const takeSecondFactor = async () => {
+    const who = user.email || user.username
+    if (!window.confirm(`Take ${who}'s authenticator app and recovery codes away? They set up new ones at their next sign-in.`)) return
+    setBusy(true)
+    try {
+      await resetSecondFactor(user.id)
+      await loadAudit()
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const loading = <p className="text-sm text-ink-subtle">Loading…</p>
 
   return (
@@ -154,6 +168,17 @@ export function UserDetail({ user, self, canReset, onChanged, onError }: UserDet
                 <Button size="xs" data-testid="reset-password" disabled={busy}
                         title="A one-time link with which they choose a new password" onClick={resetPassword}>
                   Reset password
+                </Button>
+              </dd>
+            </div>
+          )}
+          {canReset && !self && (
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-ink-muted">Second factor</dt>
+              <dd>
+                <Button size="xs" data-testid="reset-second-factor" disabled={busy}
+                        title="For a lost phone: their next sign-in sets up a new app and recovery codes" onClick={takeSecondFactor}>
+                  Reset second factor
                 </Button>
               </dd>
             </div>
