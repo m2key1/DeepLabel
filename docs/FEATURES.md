@@ -165,8 +165,9 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
 - A page line detection found nothing on is offered as blank: **Found nothing** in the page
   table lists those pages, and **Blank?** on the row gives one the type. Nothing is marked
   blank without that click, and a page somebody gave any type, Text included, is no longer offered.
-- The page table has a **Type** column, sortable, and a chip per type lists its pages. The
-  page viewer's **Info** (beside the file name) shows the page's type and changes it.
+- Once a page has a type other than Text or is offered as blank, the page table shows a sortable
+  **Type** column, and a chip per type lists its pages. In the page viewer, the page's name opens
+  its **Info**, which shows the page's type and changes it.
 
 ## Metadata
 

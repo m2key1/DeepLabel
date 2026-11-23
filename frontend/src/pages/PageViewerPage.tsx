@@ -3787,9 +3787,8 @@ export function PageViewerPage() {
       style={{ ['--vkbd-h' as string]: `${kbVisible ? kbHeight : 0}px` }}
       header={{
         left: (<>
-          {page && <span className="min-w-0 truncate text-xs text-ink-subtle">{page.filename}</span>}
           {page && (
-            <PageInfo jobId={jobId} pageId={page.id} pageType={page.page_type} metadata={page.metadata}
+            <PageInfo jobId={jobId} pageId={page.id} filename={page.filename} pageType={page.page_type} metadata={page.metadata}
                       canEdit={canEdit} canManage={canManage}
                       onChange={(next) => setPage((p) => (p ? { ...p, ...next } : p))} />
           )}

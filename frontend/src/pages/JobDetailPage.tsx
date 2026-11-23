@@ -434,7 +434,10 @@ export function JobDetailPage() {
   const available = lineJob ? LINE_COLUMNS
     : isMap ? MAP_COLUMNS
     : noLayout ? NO_LAYOUT_COLUMNS : TEXT_COLUMNS
-  const columns = available.filter((c) => !hiddenColumns.includes(c.key))
+  // A Type column is noise where every page is text and none is offered as blank.
+  const typesInUse = Object.entries(chipCounts).some(([key, n]) =>
+    n > 0 && (key === 'found-nothing' || (key.startsWith('type:') && key !== `type:${TEXT_PAGE_TYPE}`)))
+  const columns = available.filter((c) => !hiddenColumns.includes(c.key) && (c.key !== 'type' || typesInUse))
 
   const startReview = () =>
     review?.total && navigate(`/jobs/${jobId}/pages/${review.lines[0].page_id}?review=${maxConf}`)

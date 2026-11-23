@@ -4,7 +4,6 @@ import { listPageTypes, putPageMetadata, setPagesType, TEXT_PAGE_TYPE } from '..
 import type { MetadataEntry, PageType } from '../../api'
 import { InfoIcon } from '../icons'
 import { MetadataEditor } from '../MetadataEditor'
-import { Button } from '../ui/Button'
 import { popoverChrome } from '../ui/Card'
 import { Select } from '../ui/Field'
 import { useDismiss, useHangingBelow } from '../ui/menu'
@@ -18,9 +17,11 @@ function stepsOf(type: PageType): string {
 
 /** A page's own facts beside its scan: its type, which decides the steps a run takes on it,
  *  and its metadata. */
-export function PageInfo({ jobId, pageId, pageType, metadata, canEdit, canManage, onChange }: {
+export function PageInfo({ jobId, pageId, filename, pageType, metadata, canEdit, canManage, onChange }: {
   jobId: string
   pageId: number
+  /** Shown as the way in: the page's name opens what is known about it. */
+  filename: string
   pageType: number | null
   metadata: MetadataEntry[]
   canEdit: boolean
@@ -46,13 +47,16 @@ export function PageInfo({ jobId, pageId, pageType, metadata, canEdit, canManage
     setPagesType(jobId, [pageId], next).then(() => onChange({ page_type: next })).catch((e: Error) => setError(e.message))
   }
 
+  // The icon leads, so a narrowing header takes the name first; the type is set from the page table too.
   return (
-    <div ref={anchor}>
-      <Button size="xs" data-testid="page-info" aria-label="Page info" title="This page's type and metadata"
-              aria-haspopup="dialog" aria-expanded={open}
-              onClick={(e) => { e.stopPropagation(); setOpen(!open) }}>
-        <InfoIcon />
-      </Button>
+    <div ref={anchor} className="min-w-0">
+      <button type="button" data-testid="page-info" title={`${filename}: its type and metadata`}
+              aria-label={`Page info: ${filename}`} aria-haspopup="dialog" aria-expanded={open}
+              onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
+              className="flex min-w-0 max-w-full items-center gap-1 rounded text-xs text-ink-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent pointer-coarse:min-h-11">
+        <span className="shrink-0"><InfoIcon /></span>
+        <span className="truncate">{filename}</span>
+      </button>
       {open && createPortal(
         <div ref={panel} onClick={(e) => e.stopPropagation()} data-testid="page-info-panel" style={at}
              className={`fixed z-30 w-80 ${popoverChrome} space-y-3 p-3 text-xs`}>
