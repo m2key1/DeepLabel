@@ -4,7 +4,7 @@ import unicodedata
 from contextvars import ContextVar
 from pathlib import Path
 
-from app import caches, conventions, folding
+from app import caches, conventions, folding, page_types
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     note TEXT,
     note_by TEXT,
     note_at TEXT,
+    -- Free fields - a date, a shelfmark - as a JSON list of {key, value}, in order (app/metadata.py).
+    metadata TEXT NOT NULL DEFAULT '[]',
     -- Wording for the diplomatic reading that turns a corpus span into ground truth. It
     -- is a different question from llm_prompt - it carries the page's reference text -
     -- so it is asked separately. Empty uses the shipped one.
@@ -130,6 +132,8 @@ CREATE TABLE IF NOT EXISTS pages (
     note TEXT,
     note_by TEXT,
     note_at TEXT,
+    -- Free fields of the page - a folio, a date - as the dataset's are kept.
+    metadata TEXT NOT NULL DEFAULT '[]',
     -- A page imported from IIIF (JSON): its canvas, label and size, and the image URL it
     -- is downloaded from at ingest. NULL for every other page.
     iiif TEXT
@@ -255,6 +259,17 @@ CREATE TABLE IF NOT EXISTS job_layout_classes (
     color TEXT,
     position INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (job_id, class_id)
+);
+-- A text dataset's own page types (app/page_types.py), copied from the defaults as it is
+-- made. Each can switch steps off for its pages; pages.page_type names one, NULL is text.
+CREATE TABLE IF NOT EXISTS job_page_types (
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    type_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    run_layout INTEGER NOT NULL DEFAULT 1,
+    run_lines INTEGER NOT NULL DEFAULT 1,
+    run_ocr INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (job_id, type_id)
 );
 -- What a dataset does with a layout model's label its classes lack: the class
 -- it is read as, or NULL to leave such boxes out. A label matching a class by name needs no row.
@@ -985,6 +1000,14 @@ def connect(db_path: Path) -> sqlite3.Connection:
         # 'text' (layout/lines/ocr pipeline), 'map_segmentation' (polygon tiles) or
         # 'map_lines' (boundary-line tracing on tiles).
         conn.execute("ALTER TABLE jobs ADD COLUMN task TEXT NOT NULL DEFAULT 'text'")
+    if 'page_type' not in page_cols:
+        conn.execute('ALTER TABLE pages ADD COLUMN page_type INTEGER')
+        conn.execute(f'INSERT OR IGNORE INTO job_page_types ({page_types.COLUMNS}) '
+                     f"SELECT jobs.id, d.* FROM jobs, (VALUES {page_types.DEFAULT_ROWS}) d WHERE jobs.task = 'text'")
+    # Every way a text dataset comes to be - upload, import, IIIF - gives it its copy.
+    conn.execute("CREATE TRIGGER IF NOT EXISTS jobs_page_types AFTER INSERT ON jobs WHEN NEW.task = 'text' "
+                 f'BEGIN INSERT OR IGNORE INTO job_page_types ({page_types.COLUMNS}) '
+                 f'SELECT NEW.id, d.* FROM (VALUES {page_types.DEFAULT_ROWS}) d; END')
     if 'run_predict' not in job_cols:
         # Map-segmentation model pre-annotation phase. Off by default: unlike the
         # run_layout/lines/ocr text flags (default 1), most jobs don't predict.
@@ -1113,6 +1136,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
         if 'note' not in {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}:
             for column in ('note', 'note_by', 'note_at'):
                 conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} TEXT')
+        if 'metadata' not in {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN metadata TEXT NOT NULL DEFAULT '[]'")
     if 'grad_accum_steps' not in training_cols:
         conn.execute('ALTER TABLE trainings ADD COLUMN grad_accum_steps INTEGER')
         conn.execute('ALTER TABLE trainings ADD COLUMN lr_scale REAL')

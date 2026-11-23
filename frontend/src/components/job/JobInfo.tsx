@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { datasetInfo, isTileTask } from '../../api'
+import { datasetInfo, isTileTask, putJobMetadata } from '../../api'
 import type { DatasetInfo, Job } from '../../api'
+import { useAuth } from '../../auth'
+import { MetadataEditor } from '../MetadataEditor'
 import { formatDate, formatRelative, humanBytes, plural } from '../../util'
 import { popoverChrome } from '../ui/Card'
 
@@ -99,6 +101,7 @@ function Details({ job, info }: { job: Job; info: DatasetInfo }) {
 /** What a dataset is made of, fetched when the panel opens rather than carried in the
  *  list payload - the disk breakdown walks the job directory. */
 export function JobInfo({ job }: { job: Job }) {
+  const { canEdit } = useAuth()
   const [info, setInfo] = useState<DatasetInfo | null>(null)
   // Not self-clearing: the panel has nothing else to show, and an empty popover
   // says less than the failure does.
@@ -119,6 +122,16 @@ export function JobInfo({ job }: { job: Job }) {
       {error && <p className="text-danger">{error}</p>}
       {!info && !error && <p className="text-ink-muted">Loading…</p>}
       {info && <Details job={job} info={info} />}
+      {info && (
+        <section className="mt-3 border-t border-line pt-2">
+          <h3 className="mb-1 font-medium text-ink">Metadata</h3>
+          <MetadataEditor entries={info.metadata} canEdit={canEdit} testId="job-metadata"
+                          onSave={(entries) => putJobMetadata(job.id, entries).then(({ metadata }) => {
+                            setInfo({ ...info, metadata })
+                            return metadata
+                          })} />
+        </section>
+      )}
     </div>
   )
 }

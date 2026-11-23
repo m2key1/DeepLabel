@@ -10,8 +10,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
 from pydantic import BaseModel
 
-from app import (blobs, caches, candidates, config, dataset_sync, geometry, layout_templates, llm_ocr, page_rows,
-                 provenance, reading_order, renditions, revert, rotation, serializers, store, training)
+from app import (blobs, caches, candidates, config, dataset_sync, geometry, layout_templates, llm_ocr, metadata,
+                 page_rows, provenance, reading_order, renditions, revert, rotation, serializers, store, training)
 from app.deps import (IMMUTABLE_CACHE, WRITERS, current_user, get_db, get_user, require_job_access,
                       require_job_manager, require_page_access, require_role, require_role_on, require_unchanged)
 from app.routes.jobs import Note
@@ -122,6 +122,7 @@ def page_results(job_id: str, page_id: int, conn=Depends(get_db), user: dict = D
             'layout_checked': bool(page['layout_checked']),
             'lines_checked': bool(page['lines_checked']), 'is_test': bool(page['is_test']),
             'note': store.note_of(dict(page)),
+            'metadata': metadata.of(page['metadata']), 'page_type': page['page_type'],
             'elements': elements, 'regions': regions,
             # What the lines of a page with no layout are ordered by: this page's own
             # answer if it has one, and the dataset's, which is what it falls back to.

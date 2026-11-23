@@ -74,7 +74,7 @@ def test_a_row_carries_what_the_table_shows(client):
         'id': 1, 'idx': 0, 'filename': 'a.png', 'width': 600, 'height': 800,
         'status': 'done', 'layout_checked': True, 'lines_checked': False, 'layout_skipped': False, 'deleted': False,
         'document_match': False,
-        'rotation': 0, 'is_test': False, 'note': None,
+        'rotation': 0, 'is_test': False, 'note': None, 'page_type': None, 'blank_offer': False,
         'elements_total': 1, 'elements_checked': 1,
         'lines_total': 2, 'lines_reviewed': 2,
         'min_confidence': 0.8, 'avg_confidence': pytest.approx(0.85),
@@ -109,6 +109,10 @@ def test_each_chip_says_how_many_it_would_show(client):
         'lines-complete': 0, 'lines-unchecked': 5,
         # No document was cut onto any page.
         'no-document-match': 5,
+        # Pages 3 and 4 went through line detection and have no line.
+        'found-nothing': 2,
+        # Nobody gave a page a type, so every one is text.
+        'type:1': 5, 'type:2': 0, 'type:3': 0, 'type:4': 0, 'type:5': 0,
         'deleted': 1,
     }
 
@@ -185,7 +189,8 @@ def test_a_duplicate_is_listed_but_counted_by_no_chip(client, conn):
     assert body['counts'] == {
         'all': 5, 'lines-reviewed': 1, 'layout-reviewed': 4, 'unreviewed-lines': 2,
         'layout-unchecked': 1, 'no-layout': 1, 'test-pages': 0, 'has-note': 0,
-        'lines-complete': 0, 'lines-unchecked': 5, 'no-document-match': 5, 'deleted': 1}
+        'lines-complete': 0, 'lines-unchecked': 5, 'no-document-match': 5, 'found-nothing': 2,
+        'type:1': 5, 'type:2': 0, 'type:3': 0, 'type:4': 0, 'type:5': 0, 'deleted': 1}
     assert [r['id'] for r in get(client, filter='no-layout', limit=50).json()['rows']] == [3]
     job = client.get('/api/jobs/j1', params={'pages': 'false'}, headers=ALICE).json()
     assert job['pages_live'] == 5

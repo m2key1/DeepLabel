@@ -103,15 +103,18 @@ def _page_region(page: dict, b: Box) -> str:
             f'<Coords points="{_points_attr(_region_points(page, element))}"/>{inner}{"".join(lines)}</{tag}>')
 
 
-def page_xml(page: dict, source: dict | None = None) -> str:
+def page_xml(page: dict, source: dict | None = None, dataset_metadata: list[dict] = ()) -> str:
+    """One page as PAGE XML, its dataset's metadata and then its own as MetadataItems."""
     now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+    items = ''.join(f'<MetadataItem type="other" name={quoteattr(f["key"])} value={quoteattr(f["value"])}/>'
+                    for f in [*dataset_metadata, *page.get('metadata', [])])
     tree = layout_tree(page)
     order = [f'<RegionRefIndexed index="{r}" regionRef="r{r + 1}"/>' for r in range(len(page['elements']))]
     regions = [_page_region(page, b) for b in tree]
     return (
         f'<?xml version="1.0" encoding="UTF-8"?>\n<PcGts xmlns="{PAGE_NS}">'
         f'<Metadata><Creator>DeepLabel</Creator><Created>{now}</Created><LastChange>{now}</LastChange>'
-        f'{f"<Comments>{escape(_source_line(source))}</Comments>" if source else ""}</Metadata>'
+        f'{f"<Comments>{escape(_source_line(source))}</Comments>" if source else ""}{items}</Metadata>'
         f'<Page imageFilename={quoteattr(page["filename"])} imageWidth="{page["width"]}" imageHeight="{page["height"]}">'
         f'<ReadingOrder><OrderedGroup id="ro">{"".join(order)}</OrderedGroup></ReadingOrder>'
         f'{"".join(regions)}</Page></PcGts>\n')
@@ -215,6 +218,12 @@ def _tei_source(source: dict) -> str:
             f'<availability>{licence}</availability></bibl>')
 
 
+def _tei_fields(fields: list[dict]) -> str:
+    """Metadata as a TEI glossary list, each field's name labelling its value."""
+    return ('<list type="gloss">' + ''.join(f'<label>{escape(f["key"])}</label><item>{escape(f["value"])}</item>'
+                                            for f in fields) + '</list>')
+
+
 def _tei_zone(page: dict, f: str, b: Box) -> str:
     """A region's zone around the zones it holds and its lines' zones."""
     element, rz = b.element, f'{f}_r{b.r + 1}'
@@ -245,16 +254,19 @@ def tei(data: dict) -> str:
                 marks = ''.join(f'<lb facs="#{rz}_l{l + 1}" n="{l + 1}"/>{escape(line_text(line))}'
                                 for l, line in enumerate(element['lines']))
                 body.append(f'<ab facs="#{rz}" type={quoteattr(element["class_name"])}>{marks}</ab>')
+        described = f'<desc>{_tei_fields(page["metadata"])}</desc>' if page.get('metadata') else ''
         surfaces.append(
-            f'<surface xml:id="{f}" ulx="0" uly="0" lrx="{page["width"]}" lry="{page["height"]}">'
+            f'<surface xml:id="{f}" ulx="0" uly="0" lrx="{page["width"]}" lry="{page["height"]}">{described}'
             f'<graphic url={quoteattr("images/" + page["filename"])} width="{page["width"]}px" '
             f'height="{page["height"]}px"/>{"".join(zones)}</surface>')
     title = escape(data['job'].get('name', ''))
     source = data['job'].get('iiif_source')
+    fields = data['job'].get('metadata')
+    notes = f'<notesStmt><note type="metadata">{_tei_fields(fields)}</note></notesStmt>' if fields else ''
     return (
         f'<?xml version="1.0" encoding="UTF-8"?>\n<TEI xmlns="{TEI_NS}"><teiHeader><fileDesc>'
         f'<titleStmt><title>{title}</title></titleStmt>'
-        '<publicationStmt><p>Exported from DeepLabel</p></publicationStmt>'
+        f'<publicationStmt><p>Exported from DeepLabel</p></publicationStmt>{notes}'
         f'<sourceDesc>{_tei_source(source) if source else f"<p>{title}</p>"}</sourceDesc></fileDesc></teiHeader>'
         f'<facsimile>{"".join(surfaces)}</facsimile>'
         f'<text><body>{"".join(body)}</body></text></TEI>\n')

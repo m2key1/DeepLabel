@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import candidates, characters, config, ingest, layout_classes, newer_models, registry, store
+from app import candidates, characters, config, ingest, layout_classes, newer_models, page_types, registry, store
 from app.caches import counted_page
 from app.deps import (current_user, get_db, get_user, require_job_access, require_job_manager, require_page_access,
                       role_on_job, role_reaches)
@@ -233,12 +233,13 @@ RERUN_FROM = {
 }
 
 
-# The pages a step has not run on while it is switched on: layout passed them by, or they
-# wait for their lines or their reading. A re-run of only these leaves the rest as they are.
+# The pages a step has not run on while it is switched on, for them as for the dataset: layout
+# passed them by, or they wait for their lines or their reading. A re-run of only these leaves
+# the rest as they are.
 NOT_RUN = {
-    'layout': "layout_skipped = 1 AND status IN ('layout_done','lines_done','done')",
-    'lines': "status = 'layout_done'",
-    'ocr': "status = 'lines_done'",
+    'layout': f"layout_skipped = 1 AND status IN ('layout_done','lines_done','done') AND {page_types.runs('layout')}",
+    'lines': f"status = 'layout_done' AND {page_types.runs('lines')}",
+    'ocr': f"status = 'lines_done' AND {page_types.runs('ocr')}",
 }
 STEP_SWITCH = {'layout': 'run_layout', 'lines': 'run_lines', 'ocr': 'run_ocr'}
 
@@ -273,9 +274,15 @@ REMATCH_PHASES = ('align', 'reference')
 BOX_PHASES = ('layout', 'start')
 
 
+def kept_by_type(from_phase: str | None) -> str:
+    """The pages a re-run of a step may take: not those whose type switches the step off,
+    whose results nothing would make again once cleared."""
+    return page_types.runs(from_phase) if from_phase in page_types.STEPS else '1'
+
+
 def rerun_discards(conn, job_id: str, from_phase: str) -> dict:
     """What re-running from this phase throws away, in the re-run preview's terms."""
-    counts = _rerun_counts(conn, job_id)
+    counts = _rerun_counts(conn, job_id, kept_by_type(from_phase))
     if from_phase in REMATCH_PHASES:
         return {**counts, 'corrected': 0, 'layout_checked': 0, 'elements_edited': 0}
     return counts
@@ -300,7 +307,7 @@ def rerun_preview(job_id: str, from_phase: str | None = None, only_missing: bool
     require_job_access(conn, job_id, user)
     if store.get_job(conn, job_id) is None:
         raise HTTPException(404)
-    return _rerun_counts(conn, job_id, _missing(from_phase) if only_missing else '1')
+    return _rerun_counts(conn, job_id, _missing(from_phase) if only_missing else kept_by_type(from_phase))
 
 
 def _missing(from_phase: str | None) -> str:
@@ -386,8 +393,7 @@ def rerun_one(conn, job_id: str, from_phase: str, force: bool, user: str,
     if body.from_phase not in RERUN_FROM:
         raise HTTPException(400, f"from_phase must be one of {sorted(RERUN_FROM)}")
     reset_to, match = RERUN_FROM[body.from_phase]
-    if only_missing:
-        match = _missing(body.from_phase)
+    match = _missing(body.from_phase) if only_missing else f'{match} AND {kept_by_type(body.from_phase)}'
     require_rerun(conn, job, body.from_phase, body.force, match)
     since = store.begin_span(conn)
 
@@ -580,6 +586,10 @@ class RunPages(BaseModel):
 PHASES = ('layout', 'lines', 'ocr')
 
 
+# What a page of a type that switches a step off goes without, for the reason a page run is refused.
+SWITCHED_OFF = {'layout': 'has no layout found', 'lines': 'has no lines found', 'ocr': 'is not read'}
+
+
 class NotRunnable(Exception):
     """This page cannot take this phase. `status` is what a request for that one page
     answers with; in a batch the reason is reported beside the page instead."""
@@ -635,6 +645,9 @@ def _stage_page_run(conn, page, phase: str, username: str) -> None:
     # empty it, load a model, and fail in the runner.
     if not Path(page['source_file']).exists():
         raise NotRunnable(409, 'the image for this page is missing on disk')
+    passed_by = page_types.switched_off(conn, page_id, phase)
+    if passed_by:
+        raise NotRunnable(400, f'a {passed_by} page {SWITCHED_OFF[phase]} - give it another type first')
     if phase == 'ocr':
         readable = _page_costs(conn, page_id)['ocr']
         if not readable['unchecked']:

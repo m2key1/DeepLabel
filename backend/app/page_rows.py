@@ -2,7 +2,7 @@ import re
 import sqlite3
 import time
 
-from app import caches, ingest, store
+from app import caches, ingest, page_types, store
 
 # One row per live page with everything the table shows. The counts are correlated
 # subqueries rather than joins: a join would multiply the page row by its lines and need a
@@ -10,7 +10,7 @@ from app import caches, ingest, store
 _ROWS = """
 SELECT p.id, p.idx, p.filename, p.width, p.height, p.status,
        p.layout_checked, p.lines_checked, p.layout_skipped, p.deleted, p.rotation, p.is_test,
-       p.note, p.note_by, p.note_at,
+       p.note, p.note_by, p.note_at, p.page_type,
        -- Whether a line of the page anchored a stretch of a document cut onto it.
        (p.reference_document IS NOT NULL AND p.reference_anchors > 0) document_match,
        (SELECT COUNT(*) FROM elements e
@@ -53,6 +53,9 @@ FROM pages p WHERE p.job_id = :job_id
 # deleted pages. Written against the names the subquery projects, not against `p.` -
 # outside it the alias is gone and only the column names survive.
 _WORK = caches.counted_page()
+# Line detection went over the page and found no line, and nobody has said what it is: offered
+# as blank, never made one.
+_FOUND_NOTHING = "page_type IS NULL AND status IN ('lines_done', 'done') AND lines_total = 0"
 FILTERS = {
     'all': 'deleted = 0',
     'lines-reviewed': f'{_WORK} AND lines_total > 0 AND lines_reviewed = lines_total',
@@ -66,6 +69,7 @@ FILTERS = {
     'no-layout': f'{_WORK} AND elements_total = 0',
     'test-pages': f'{_WORK} AND is_test = 1',
     'has-note': 'deleted = 0 AND note IS NOT NULL',
+    'found-nothing': f'{_WORK} AND {_FOUND_NOTHING}',
     'deleted': 'deleted = 1',
 }
 
@@ -87,6 +91,7 @@ SORTS = {
     'filename': 'filename',
     'dimensions': 'width * height',
     'status': 'status',
+    'type': f'COALESCE(page_type, {page_types.TEXT})',
     'layout': 'layout_checked',
     'lines': 'lines_checked',
     'checked': 'CAST(lines_reviewed AS REAL) / NULLIF(lines_total, 0)',
@@ -131,7 +136,7 @@ def fetch(conn: sqlite3.Connection, job_id: str, *, task: str, page_filter: str 
     after it, asking for the first fifty unreviewed pages of a volume whose first fifty are
     reviewed would answer with nothing. `task` is the dataset's, which decides what
     reviewed means on it."""
-    filters = _filters(task)
+    filters = _filters(conn, job_id, task)
     by_run = RUN_FILTER.fullmatch(page_filter)
     if page_filter not in filters and by_run is None:
         raise BadQuery(f'filter must be one of {sorted(filters)}, or run:<id>')
@@ -158,8 +163,9 @@ def fetch(conn: sqlite3.Connection, job_id: str, *, task: str, page_filter: str 
             f'SELECT COUNT(*) c FROM ({_ROWS}) WHERE {where}', args).fetchone()['c']
     else:
         matched = counts(conn, job_id, task=task)[page_filter]
+    offered = '0' if ingest.is_tile_task(task) else f'{_WORK} AND {_FOUND_NOTHING}'
     rows = conn.execute(
-        f'SELECT * FROM ({_ROWS}) WHERE {where} ORDER BY {order} LIMIT :limit OFFSET :offset',
+        f'SELECT *, ({offered}) blank_offer FROM ({_ROWS}) WHERE {where} ORDER BY {order} LIMIT :limit OFFSET :offset',
         args).fetchall()
     return {
         'rows': [_as_page(r) for r in rows],
@@ -197,7 +203,7 @@ def counts(conn: sqlite3.Connection, job_id: str, *, task: str) -> dict[str, int
                 _counts[key] = held = (held[0], stamp, held[2])
         if held is not None:
             return held[2]
-    filters = _filters(task)
+    filters = _filters(conn, job_id, task)
     selects = ', '.join(
         f'SUM(CASE WHEN {COUNTED.get(name, clause)} THEN 1 ELSE 0 END) "{name}"'
         for name, clause in filters.items())
@@ -215,15 +221,20 @@ def forget_counts(conn: sqlite3.Connection | None = None, job_id: str | None = N
         _counts.pop((caches.db_key(conn), job_id), None)
 
 
-def _filters(task: str) -> dict[str, str]:
+def _filters(conn: sqlite3.Connection, job_id: str, task: str) -> dict[str, str]:
     """What the chips mean on a dataset of this task: a tile is reviewed by its flag, a
-    page by what was checked on it."""
-    return TILE_FILTERS if ingest.is_tile_task(task) else FILTERS
+    page by what was checked on it, and 'type:<id>' lists a page type's pages."""
+    if ingest.is_tile_task(task):
+        return TILE_FILTERS
+    types = conn.execute('SELECT type_id FROM job_page_types WHERE job_id = ? ORDER BY type_id', (job_id,))
+    return {**FILTERS, **{f'type:{row["type_id"]}': f'{_WORK} AND COALESCE(page_type, {page_types.TEXT}) = {row["type_id"]}'
+                          for row in types}}
 
 
 def _as_page(row: sqlite3.Row) -> dict:
     page = dict(row)
-    for flag in ('layout_checked', 'lines_checked', 'layout_skipped', 'deleted', 'is_test', 'document_match'):
+    for flag in ('layout_checked', 'lines_checked', 'layout_skipped', 'deleted', 'is_test', 'document_match',
+                 'blank_offer'):
         page[flag] = bool(page[flag])
     page['note'] = store.note_of(page)
     return page

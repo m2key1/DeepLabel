@@ -10,7 +10,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 from PIL import Image
 
-from app import config
+from app import config, metadata
 
 TIMEOUT = 30
 # The whole of one fetch: TIMEOUT is per read, so a server sending a byte at a time would
@@ -275,7 +275,14 @@ def _canvas(canvas: dict, v3: bool) -> dict:
     return {'canvas': _id(canvas), 'label': text(canvas.get('label')),
             'width': _dimension(canvas.get('width')) or _dimension(resource.get('width')),
             'height': _dimension(canvas.get('height')) or _dimension(resource.get('height')),
-            'image': image, 'thumbnail': thumbnail, **({'transcript': transcript} if transcript else {})}
+            'image': image, 'thumbnail': thumbnail, 'metadata': _metadata(canvas),
+            **({'transcript': transcript} if transcript else {})}
+
+
+def _metadata(node: dict) -> list[dict]:
+    """The label and value pairs a manifest or canvas describes itself with, as fields."""
+    return metadata.merged([(text(item.get('label')), text(item.get('value')))
+                            for item in node.get('metadata') or [] if isinstance(item, dict)])
 
 
 def parse(document: dict, url: str) -> dict:
@@ -305,7 +312,7 @@ def parse(document: dict, url: str) -> dict:
         attribution = text(document.get('attribution'))
         rights = text(document.get('license'))
     return {'kind': 'manifest', 'url': url, 'label': text(document.get('label')), 'version': 3 if v3 else 2,
-            'attribution': attribution, 'rights': rights, 'canvases': pages}
+            'attribution': attribution, 'rights': rights, 'metadata': _metadata(document), 'canvases': pages}
 
 
 def read(url: str) -> dict:

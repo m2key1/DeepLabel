@@ -3,7 +3,7 @@ from collections.abc import Callable
 
 from PIL import Image
 
-from app import config, linecrop, store
+from app import config, linecrop, page_types, store
 
 # Reads line crops: the images, and what DeepLabel knows about each beside its pixels, in;
 # texts, confidences and per-character profiles out, in the same order.
@@ -71,7 +71,7 @@ def run(conn, job_id: str, read: Read, author: str, model_id: int | None, chunk_
         "JOIN lines l ON l.element_id = e.id "
         "WHERE p.job_id = ? AND p.deleted = 0 AND l.deleted = 0 AND p.status IN ('lines_done', 'done') "
         "AND (l.text IS NULL OR l.needs_ocr = 1) "
-        "ORDER BY p.idx", (job_id,)).fetchall()
+        f"AND {page_types.runs('ocr', 'p')} ORDER BY p.idx", (job_id,)).fetchall()
 
     pending = []
     for page in pages:

@@ -187,6 +187,8 @@ class TestMigrations:
         'job_layout_classes': ['class_id', 'color', 'job_id', 'name', 'position', 'reads', 'role'],
         'job_maps': ['content_hash', 'deleted', 'filename', 'height', 'id', 'idx', 'job_id', 'n_tiles', 'source_file', 'status', 'width'],
         'jobs': ['checked', 'counters', 'created_at', 'error', 'id', 'line_mode', 'name', 'owner', 'phase', 'pid', 'source_path', 'status'],
+        # Rebuilt after jobs, whose rebuild drops the trigger that writes into it.
+        'job_page_types': ['job_id', 'name', 'run_layout', 'run_lines', 'run_ocr', 'type_id'],
         'layout_label_maps': ['class_id', 'job_id', 'label', 'model_id'],
         'layout_template_classes': ['class_id', 'color', 'name', 'position', 'reads', 'role', 'template_id'],
         'layout_templates': ['created_at', 'id', 'is_default', 'name', 'owner', 'rules'],
@@ -1732,4 +1734,28 @@ def test_a_database_from_before_runs_records_them_from_the_next_queue(tmp_path):
     conn.execute("UPDATE jobs SET status = 'queued' WHERE id = 'j1'")
     assert [tuple(r) for r in conn.execute("SELECT j.run_id, r.job_id FROM jobs j JOIN runs r ON r.id = j.run_id")] == [
         (1, 'j1')]
+    conn.close()
+
+
+def test_a_database_from_before_page_types_gives_each_text_dataset_its_copy(tmp_path):
+    """Every text dataset gets the five defaults once (#40); a map gets none, and a type a
+    dataset renamed since is kept when the database is opened again."""
+    db = tmp_path / 'app.db'
+    conn = store.connect(db)
+    conn.execute("INSERT INTO jobs (id, name, task) VALUES ('t', 'Text', 'text'), ('map', 'Map', 'map_segmentation')")
+    conn.execute("INSERT INTO pages (id, job_id, idx, filename, source_file) VALUES (1, 't', 0, 'a.png', '/a.png')")
+    conn.execute('DELETE FROM job_page_types')
+    conn.commit()
+    keep = sorted(cols(conn, 'pages') - {'page_type'})
+    conn.close()
+    strip_column(db, 'pages', keep)
+
+    conn = store.connect(db)
+    assert [tuple(r) for r in conn.execute("SELECT job_id, COUNT(*), SUM(run_ocr) FROM job_page_types GROUP BY job_id")] == \
+        [('t', 5, 3)]
+    assert conn.execute('SELECT page_type FROM pages WHERE id = 1').fetchone()[0] is None
+    conn.execute("UPDATE job_page_types SET name = 'Einband' WHERE job_id = 't' AND type_id = 2")
+    conn.commit()
+    store.connect(db).close()
+    assert conn.execute("SELECT name FROM job_page_types WHERE job_id = 't' AND type_id = 2").fetchone()[0] == 'Einband'
     conn.close()

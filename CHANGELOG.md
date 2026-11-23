@@ -10,6 +10,10 @@ the version in the app's footer opens.
 
 ### Added
 
+- Page types: a dataset's pages can be cover, blank, table or image, each type with the steps
+  a run takes on it; covers and blanks are not read, and a page line detection found nothing on
+  is offered as blank. Datasets and pages carry free metadata, written in Info, exported into
+  TEI and PAGE XML, and taken from a IIIF manifest (#40).
 - An archived model can be deleted from its page, with its run and checkpoint, by whoever
   trained it or an admin (#152).
 - A finished layout run is scored beside its base model on its held-out pages, per class

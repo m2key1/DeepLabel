@@ -151,6 +151,34 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
 - Anyone who can edit the dataset can delete pages and restore them from the Deleted
   filter.
 
+## Page types
+
+- Every text dataset has its own page types, from a set of five: Text, Cover, Blank, Table and
+  Image. A page nobody gave a type is text. **Page types…** in the dataset's More menu renames
+  them and says which steps a run takes on each type's pages (find layout, find lines, read
+  text); Cover and Blank start with reading off.
+- A dataset's Managers and its creator give a selection of pages a type with **Set type** in
+  the page table. A type that switches a step off passes its pages by from the next run on, as
+  the dataset's own switch would, and the dataset does not count them as pages that step missed.
+  A re-run of that step leaves them as they are, and running it on one such page alone is
+  refused with the reason.
+- A page line detection found nothing on is offered as blank: **Found nothing** in the page
+  table lists those pages, and **Blank?** on the row gives one the type. Nothing is marked
+  blank without that click, and a page somebody gave any type, Text included, is no longer offered.
+- The page table has a **Type** column, sortable, and a chip per type lists its pages. The
+  page viewer's **Info** (beside the file name) shows the page's type and changes it.
+
+## Metadata
+
+- Datasets and pages carry free fields - a date, a folio, a shelfmark - kept in the order they
+  were written. A dataset's are under **Info** in the dataset list, a page's under **Info** in
+  the page viewer; anyone who can edit the dataset writes them.
+- They are exported: a dataset's into the TEI header as a list in `notesStmt`, a page's into
+  its `surface` as a `desc`; in PAGE XML every page carries its dataset's and then its own as
+  `MetadataItem`s.
+- A dataset made from a IIIF manifest takes the manifest's metadata, and each page its
+  canvas's. A label the manifest gives twice becomes one field with both values.
+
 ## Test data
 
 - A page is test data or not. No training uses a test page, nor any page with the same scan;

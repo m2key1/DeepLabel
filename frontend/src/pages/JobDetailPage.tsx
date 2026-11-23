@@ -24,6 +24,10 @@ import {
   setNewPagesTest,
   setPageNote,
   markTestPages,
+  listPageTypes,
+  setPagesType,
+  BLANK_PAGE_TYPE,
+  TEXT_PAGE_TYPE,
   setPageLayoutChecked,
   setPagesDeleted,
   runPagesPhase,
@@ -35,7 +39,7 @@ import {
 } from '../api'
 import type {
   JobEvent, NewerModelOffer, JobWithoutPages, LlmReadStatus, MapClass, PageDetail,
-  PageFilter as PageFilterKey, PagePhase, PageRows, PageSort, PageSummary, PurgeManifest, Region,
+  PageFilter as PageFilterKey, PagePhase, PageRows, PageSort, PageSummary, PageType, PurgeManifest, Region,
   ReviewQueue, StaleLines, StepsNotRun, UnreadablePage, IiifSource,
 } from '../api'
 import { useAuth } from '../auth'
@@ -93,6 +97,7 @@ import { LlmProgress } from '../components/job/LlmProgress'
 import { ExportBlockedNote, ExportMenu, exportBlocked } from '../components/job/ExportMenu'
 import { DataUseChips } from '../components/job/DataUseSwitches'
 import { LayoutClassesDialog } from '../components/job/LayoutClassesDialog'
+import { PageTypesDialog } from '../components/job/PageTypesDialog'
 import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
 import { SettleAgainDialog } from '../components/job/SettleAgainDialog'
 import { RepredictDialog } from '../components/job/RepredictDialog'
@@ -106,7 +111,7 @@ import {
 import { widePageShell } from '../components/ui/page'
 import { menuTrigger, useDismiss } from '../components/ui/menu'
 import { useAutoClear } from '../messages'
-import { Check } from '../components/ui/Field'
+import { Check, Select } from '../components/ui/Field'
 import { usePolling } from '../hooks/usePolling'
 import { reaches } from '../lib/roles'
 import { cardChrome, popoverChrome } from '../components/ui/Card'
@@ -118,7 +123,7 @@ const PHASE_LABELS: Record<PagePhase, string> = {
   ocr: 'A re-read',
 }
 
-type SortKey = 'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'lines' | 'checked' | 'confidence'
+type SortKey = 'idx' | 'filename' | 'dimensions' | 'status' | 'type' | 'layout' | 'lines' | 'checked' | 'confidence'
   | 'llm' | 'regions' | 'test'
 
 // Why a page is left out of the work, on hover over its status.
@@ -137,6 +142,10 @@ type PageFilter = PageFilterKey
 
 type PageFilterDef = { key: PageFilter; label: string; editorsOnly?: boolean }
 
+// Chips that are noise on the datasets that have none of their pages, so they show only once
+// there are some - or while one is the selected filter, which has to stay put.
+const HIDDEN_WHEN_EMPTY = new Set<string>(['deleted', 'no-layout', 'test-pages', 'found-nothing'])
+
 // What each chip matches, and how many, is the backend's (page_rows.FILTERS): one rule in
 // one place, so a chip's count and its rows cannot disagree. This only says which chips a
 // dataset of this shape offers.
@@ -147,7 +156,7 @@ type PageFilterDef = { key: PageFilter; label: string; editorsOnly?: boolean }
 // A tile has no layout and no lines: its one review is the Reviewed flag, so a map job gets
 // that chip and none of the text ones, which could only ever come back empty. A dataset
 // that skipped layout has no layout to mark complete, so the layout chips go there.
-const pageFilters = (isMap: boolean, noLayout: boolean, withDocuments: boolean): PageFilterDef[] => [
+const pageFilters = (isMap: boolean, noLayout: boolean, withDocuments: boolean, types: PageType[]): PageFilterDef[] => [
   { key: 'all', label: 'All' },
   ...(isMap ? [
     { key: 'reviewed' as PageFilter, label: 'Reviewed' },
@@ -166,6 +175,10 @@ const pageFilters = (isMap: boolean, noLayout: boolean, withDocuments: boolean):
   ...(isMap || noLayout ? [] : [{ key: 'no-layout' as PageFilter, label: 'No layout' }]),
   ...(isMap ? [] : [{ key: 'test-pages' as PageFilter, label: 'Test pages' }]),
   ...(isMap ? [] : [{ key: 'has-note' as PageFilter, label: 'Has note' }]),
+  // A type's pages, but not Text's: every page nobody gave a type is text, which is nearly all.
+  ...types.filter((type) => type.id !== TEXT_PAGE_TYPE).map((type) => ({ key: `type:${type.id}` as PageFilter, label: type.name })),
+  // Line detection went over these and found nothing; offered as blank, one by one or as a selection.
+  ...(isMap ? [] : [{ key: 'found-nothing' as PageFilter, label: 'Found nothing' }]),
   // Pages no line of which anchored a stretch of the documents cut onto the dataset.
   ...(withDocuments ? [{ key: 'no-document-match' as PageFilter, label: 'No document match' }] : []),
   { key: 'deleted', label: 'Deleted', editorsOnly: true },
@@ -176,6 +189,7 @@ const TEXT_COLUMNS: Column[] = [
   { key: 'filename', label: 'Filename' },
   { key: 'dimensions', label: 'Dimensions' },
   { key: 'status', label: 'Status' },
+  { key: 'type', label: 'Type', title: 'Cover, blank and the rest: which steps a run takes on the page' },
   { key: 'layout', label: 'Layout', title: 'Marked layout complete - auto-exported as a COCO layout dataset' },
   { key: 'lines', label: 'Lines', title: 'Marked lines complete - used to train line detection' },
   { key: 'checked', label: 'OCR checked', title: 'Lines whose text has been reviewed' },
@@ -263,6 +277,8 @@ export function JobDetailPage() {
   const [settleOpen, setSettleOpen] = useState(false)
   const [removeReadingsOpen, setRemoveReadingsOpen] = useState(false)
   const [classesOpen, setClassesOpen] = useState(false)
+  const [pageTypesOpen, setPageTypesOpen] = useState(false)
+  const [pageTypes, setPageTypes] = useState<PageType[]>([])
   // The pages a read is scoped to, or undefined for the whole dataset. Held apart from the
   // table's selection, which the dialog must not follow while it is open.
   const [llmPages, setLlmPages] = useState<number[] | undefined>(undefined)
@@ -560,8 +576,8 @@ export function JobDetailPage() {
   useEffect(() => loadDocuments(), [loadDocuments])
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = useMemo(
-    () => pageFilters(isMap, noLayout, documents.length > 0).filter((f) => canEdit || !f.editorsOnly),
-    [isMap, noLayout, canEdit, documents.length])
+    () => pageFilters(isMap, noLayout, documents.length > 0, pageTypes).filter((f) => canEdit || !f.editorsOnly),
+    [isMap, noLayout, canEdit, documents.length, pageTypes])
   // A run's pages come from its history rather than from a chip of their own.
   const runFilter = /^run:\d+$/.test(searchParams.get('filter') ?? '')
     ? { key: searchParams.get('filter') as PageFilter, label: 'Last changed by a run' } : null
@@ -680,6 +696,13 @@ export function JobDetailPage() {
   // Nothing left to mark means the button's job is to unmark instead - see bulkLayoutChecked.
   const allChecked = selectedLive > 0 && selectedPages.every((p) => p.layout_checked)
   const allTest = selectedLive > 0 && selectedPages.every((p) => p.is_test)
+  const loadPageTypes = useCallback(() => {
+    if (!isMap) listPageTypes(jobId).then((found) => setPageTypes(found.types)).catch(() => setPageTypes([]))
+  }, [jobId, isMap])
+  useEffect(() => loadPageTypes(), [loadPageTypes])
+  const typeName = (typeId: number) => pageTypes.find((type) => type.id === typeId)?.name
+  const setTypeOf = (pageIds: number[], typeId: number) =>
+    setPagesType(jobId, pageIds, typeId).then(() => { refetch(); loadPageTypes() }).catch((e: Error) => setError(e.message))
 
   const toggleRow = (page: PageSummary, shift: boolean) => {
     setSelected((prev) => {
@@ -886,6 +909,17 @@ export function JobDetailPage() {
             <PresenceAvatars entries={onPage(page.id)} />
           </span>
         )
+      case 'type':
+        if (page.page_type != null && page.page_type !== TEXT_PAGE_TYPE) {
+          return <Badge data-testid="page-type-tag">{typeName(page.page_type)}</Badge>
+        }
+        return page.blank_offer && canManage ? (
+          <ChipButton data-testid="blank-offer"
+                      title="Line detection found nothing here. Mark it as this type, which a run reads no text on."
+                      onClick={(e) => { e.stopPropagation(); setTypeOf([page.id], BLANK_PAGE_TYPE) }}>
+            {typeName(BLANK_PAGE_TYPE) ?? 'Blank'}?
+          </ChipButton>
+        ) : null
       case 'dimensions':
         return (
           <span className="text-ink-muted">
@@ -1232,6 +1266,11 @@ export function JobDetailPage() {
                   hint: 'Their names, colours, and which are containers',
                   testId: 'layout-classes',
                   onSelect: () => setClassesOpen(true),
+                }, {
+                  label: 'Page types…',
+                  hint: 'Cover, blank and the rest, and which steps a run takes on each',
+                  testId: 'page-types',
+                  onSelect: () => setPageTypesOpen(true),
                 }] : []),
                 // A Manager's, like the agreement settings they apply; offered once readings
                 // are on file, since there is nothing to settle or remove before.
@@ -1385,6 +1424,10 @@ export function JobDetailPage() {
       {classesOpen && (
         <LayoutClassesDialog jobId={jobId} canEdit={canManage} onClose={() => setClassesOpen(false)} onChanged={refetch} />
       )}
+      {pageTypesOpen && (
+        <PageTypesDialog jobId={jobId} canEdit={canManage} onClose={() => setPageTypesOpen(false)}
+                         onChanged={() => { refetch(); loadPageTypes() }} />
+      )}
       {removeReadingsOpen && (
         <RemoveReadingsDialog jobId={jobId} onClose={() => setRemoveReadingsOpen(false)}
                               onRemoved={() => { refetch(); pollLlm() }} onError={setError} />
@@ -1439,6 +1482,13 @@ export function JobDetailPage() {
               </button>
             </>
           )}
+          {canManage && !isMap && selectedLive > 0 && pageTypes.length > 0 && (
+            <Select size="xs" data-testid="bulk-page-type" aria-label="Set the type of the selected pages" value=""
+                    onChange={(e) => setTypeOf(selectedPages.map((p) => p.id), Number(e.target.value))}>
+              <option value="" disabled>Set type…</option>
+              {pageTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+            </Select>
+          )}
           {canManage && !isMap && selectedLive > 0 && (
             <button data-testid="bulk-test-pages" className={actionClass}
                     onClick={() => markTest(selectedPages.map((p) => p.id), !allTest)}>
@@ -1474,9 +1524,7 @@ export function JobDetailPage() {
           {[...filters, ...(runFilter ? [runFilter] : [])].map((f) => {
             const count = f === runFilter ? matched : chipCounts[f.key] ?? 0
             const active = filter.key === f.key
-            // An empty Deleted or No-layout chip is noise on the datasets that have
-            // neither, but both have to stay put while one is the selected filter.
-            if (count === 0 && !active && (f.key === 'deleted' || f.key === 'no-layout' || f.key === 'test-pages')) return null
+            if (count === 0 && !active && (HIDDEN_WHEN_EMPTY.has(f.key) || f.key.startsWith('type:'))) return null
             return (
               <button
                 key={f.key}

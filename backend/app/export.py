@@ -2,7 +2,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from app import formats, iiif, layout_shapes
+from app import formats, iiif, layout_shapes, metadata
 from app.caches import counted_page
 
 
@@ -21,7 +21,7 @@ def _rounded(polygon: list) -> list:
 
 
 def collect_job(conn, job_id: str, checked_only: bool = False) -> dict:
-    job = conn.execute('SELECT id, name, owner, created_at, layout_shape, iiif_source FROM jobs WHERE id = ?',
+    job = conn.execute('SELECT id, name, owner, created_at, layout_shape, iiif_source, metadata FROM jobs WHERE id = ?',
                        (job_id,)).fetchone()
     outlines = job is not None and layout_shapes.outlines(job['layout_shape'])
     pages = []
@@ -32,7 +32,8 @@ def collect_job(conn, job_id: str, checked_only: bool = False) -> dict:
         if checked_only and not any(element['lines'] for element in entry['elements']):
             continue
         pages.append(entry)
-    described = {k: job[k] for k in ('id', 'name', 'owner', 'created_at')} if job else {}
+    described = {**{k: job[k] for k in ('id', 'name', 'owner', 'created_at')},
+                 'metadata': metadata.of(job['metadata'])} if job else {}
     if job and job['iiif_source']:
         described['iiif_source'] = json.loads(job['iiif_source'])
     return {'job': described, 'pages': pages}
@@ -66,6 +67,7 @@ def page_entry(conn, page, outlines: bool, checked_only: bool = False) -> dict:
             'rotation': page['rotation'],
             # Which pages were reviewed whole, so an import elsewhere keeps them ground truth.
             'layout_checked': bool(page['layout_checked']), 'lines_checked': bool(page['lines_checked']),
+            'metadata': metadata.of(page['metadata']),
             'elements': elements,
             **({'iiif': {k: v for k, v in json.loads(page['iiif']).items() if k != 'image'}}
                if page['iiif'] else {})}
@@ -160,6 +162,7 @@ def standard_files(data: dict, fmt: str) -> dict[str, str]:
     stems = _file_stems(data)
     title = data['job'].get('name', '')
     source = data['job'].get('iiif_source')
-    render = {'page': (lambda page: formats.page_xml(page, source), 'xml'), 'alto': (formats.alto, 'xml'),
+    described = data['job'].get('metadata', [])
+    render = {'page': (lambda page: formats.page_xml(page, source, described), 'xml'), 'alto': (formats.alto, 'xml'),
               'hocr': (lambda page: formats.hocr(page, title), 'hocr')}[fmt]
     return {f'{fmt}/{stems[page["id"]]}.{render[1]}': render[0](page) for page in data['pages']}

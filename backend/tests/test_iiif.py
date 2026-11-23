@@ -100,10 +100,10 @@ class TestReadingManifests:
         assert manifest['canvases'] == [
             {'canvas': f'{ARCHIVE}/canvas/1', 'label': 'fol. 1r', 'width': 8000, 'height': 10000,
              'image': f'{ARCHIVE}/img/1/full/6000,/0/default.jpg',
-             'thumbnail': f'{ARCHIVE}/img/1/full/240,/0/default.jpg'},
+             'thumbnail': f'{ARCHIVE}/img/1/full/240,/0/default.jpg', 'metadata': []},
             {'canvas': f'{ARCHIVE}/canvas/2', 'label': 'fol. 1v', 'width': 4000, 'height': 5000,
              'image': f'{ARCHIVE}/img/2/full/4000,/0/default.jpg',
-             'thumbnail': f'{ARCHIVE}/img/2/full/240,/0/default.jpg'},
+             'thumbnail': f'{ARCHIVE}/img/2/full/240,/0/default.jpg', 'metadata': []},
         ]
 
     def test_a_v3_manifest_reads_language_maps_choices_and_plain_images(self):
@@ -115,6 +115,13 @@ class TestReadingManifests:
             ('1', f'{ARCHIVE}/plain/1.jpg', f'{ARCHIVE}/plain/1-thumb.jpg'),
             ('2', f'{ARCHIVE}/img3/2/full/2000,/0/default.jpg', f'{ARCHIVE}/img3/2/full/240,/0/default.jpg'),
         ]
+
+    def test_a_v3_manifests_metadata_reads_its_language_maps(self):
+        manifest = iiif.parse({**V3, 'metadata': [{'label': {'en': ['Date'], 'de': ['Datum']},
+                                                   'value': {'none': ['1781']}}]}, V3['id'])
+
+        assert manifest['metadata'] == [{'key': 'Date', 'value': '1781'}]
+        assert [c['metadata'] for c in manifest['canvases']] == [[], []]
 
     def test_collections_of_either_version_list_their_members(self):
         v2 = {'@context': 'http://iiif.io/api/presentation/2/context.json', '@type': 'sc:Collection', 'label': 'All',
@@ -270,6 +277,24 @@ class TestImport:
         assert [r[0] for r in conn.execute('SELECT status FROM pages WHERE job_id = ? ORDER BY idx', (job_id,))] == [
             'ingested', 'ingested']
         assert client.post(f'/api/jobs/{job_id}/iiif/retry', headers=MEMBER).status_code == 409
+
+    def test_the_manifests_metadata_becomes_the_datasets_and_each_canvases_its_pages(self, api):
+        """A label a manifest gives twice is one field, its values joined, as the dataset's
+        own metadata could not hold it twice (#40)."""
+        client, conn, routes, _ = api
+        first, second = V2['sequences'][0]['canvases']
+        routes[V2['@id']] = httpx.Response(200, json={
+            **V2, 'metadata': [{'label': 'Shelfmark', 'value': 'Rep. 17'},
+                               {'label': [{'@value': 'Subject', '@language': 'en'}], 'value': 'Law'},
+                               {'label': 'Subject', 'value': '<b>Taxes</b>'}, {'label': '', 'value': 'nameless'}],
+            'sequences': [{'canvases': [{**first, 'metadata': [{'label': 'Folio', 'value': '1r'}]}, second]}]})
+
+        job_id = create(client, [f'{ARCHIVE}/canvas/1', f'{ARCHIVE}/canvas/2']).json()['job_id']
+
+        assert json.loads(conn.execute('SELECT metadata FROM jobs WHERE id = ?', (job_id,)).fetchone()[0]) == [
+            {'key': 'Shelfmark', 'value': 'Rep. 17'}, {'key': 'Subject', 'value': 'Law; Taxes'}]
+        assert [json.loads(r[0]) for r in conn.execute('SELECT metadata FROM pages WHERE job_id = ? ORDER BY idx',
+                                                       (job_id,))] == [[{'key': 'Folio', 'value': '1r'}], []]
 
     def test_the_manifest_is_read_again_so_a_canvas_it_lacks_is_no_page(self, api):
         client, *_ = api

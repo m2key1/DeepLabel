@@ -198,6 +198,10 @@ export interface PageSummary {
   /** Test data: never trained on, and what a run's test set is scored on. */
   is_test?: boolean
   note?: Note | null
+  /** The dataset's page type it was given; null is text. Absent from the detail's own list. */
+  page_type?: number | null
+  /** Line detection found nothing on it and nobody has said what it is: offered as blank. */
+  blank_offer?: boolean
   /** Degrees the scan has been turned since it arrived. Renditions are served immutable,
    *  so a turned page's pictures are asked for under this. Absent from the dataset
    *  detail's own page list, which the table falls back to on an older backend only. */
@@ -376,6 +380,9 @@ export interface PageDetail {
   id: number
   idx: number
   filename: string
+  metadata: MetadataEntry[]
+  /** The dataset's page type it was given; null is text. */
+  page_type: number | null
   width: number
   height: number
   layout_checked: boolean
@@ -1263,8 +1270,15 @@ export function getJob(jobId: string, opts?: { pages: false }) {
   return request(`/api/jobs/${jobId}${opts?.pages === false ? '?pages=false' : ''}`)
 }
 
+/** One free field of a dataset's or a page's metadata: a date, a folio, a shelfmark. */
+export interface MetadataEntry {
+  key: string
+  value: string
+}
+
 export interface DatasetInfo {
   owner: string
+  metadata: MetadataEntry[]
   created_at: string
   task: Task
   line_mode: string
@@ -1674,6 +1688,14 @@ export function setPageNote(pageId: number, text: string): Promise<Note | null> 
   return request(`/api/pages/${pageId}/note`, json('PUT', { text }))
 }
 
+export function putJobMetadata(jobId: string, entries: MetadataEntry[]): Promise<{ metadata: MetadataEntry[] }> {
+  return request(`/api/jobs/${jobId}/metadata`, json('PUT', { metadata: entries }))
+}
+
+export function putPageMetadata(pageId: number, entries: MetadataEntry[]): Promise<{ metadata: MetadataEntry[] }> {
+  return request(`/api/pages/${pageId}/metadata`, json('PUT', { metadata: entries }))
+}
+
 export function setNewPagesTest(jobId: string, newPagesTest: boolean): Promise<{ new_pages_test: boolean }> {
   return request(`/api/jobs/${jobId}`, json('PATCH', { new_pages_test: newPagesTest }))
 }
@@ -1760,11 +1782,14 @@ export interface BulkPreview {
 export type PageFilter =
   'all' | 'reviewed' | 'lines-reviewed' | 'layout-reviewed' | 'unreviewed-lines' | 'layout-unchecked'
   | 'lines-complete' | 'lines-unchecked' | 'no-layout' | 'test-pages' | 'has-note' | 'no-document-match' | 'deleted'
+  | 'found-nothing'
   /** The pages a run changed that nobody has touched since, opened from its history. */
   | `run:${number}`
+  /** A page type's pages, unset pages counting as text. */
+  | `type:${number}`
 
 export type PageSort =
-  'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'lines' | 'checked' | 'confidence' | 'llm' | 'test'
+  'idx' | 'filename' | 'dimensions' | 'status' | 'type' | 'layout' | 'lines' | 'checked' | 'confidence' | 'llm' | 'test'
 
 export interface PageRowsQuery {
   filter?: PageFilter
@@ -2209,6 +2234,35 @@ export function markTestPages(
 ): Promise<{ test_pages: number; pages: number; new_pages_test: boolean }> {
   return request(`/api/jobs/${jobId}/test-pages`,
     json('POST', { ...(pageIds ? { page_ids: pageIds } : {}), test }))
+}
+
+/** The page types every dataset has from the start; a page without one counts as text. */
+export const TEXT_PAGE_TYPE = 1
+export const BLANK_PAGE_TYPE = 3
+
+/** One of a dataset's own page types, and the steps it leaves on for its pages. */
+export interface PageType {
+  id: number
+  name: string
+  run_layout: boolean
+  run_lines: boolean
+  run_ocr: boolean
+  pages: number
+}
+
+export function listPageTypes(jobId: string): Promise<{ types: PageType[] }> {
+  return request(`/api/jobs/${jobId}/page-types`)
+}
+
+export function patchPageType(
+  jobId: string, typeId: number, body: Partial<Pick<PageType, 'name' | 'run_layout' | 'run_lines' | 'run_ocr'>>,
+): Promise<Omit<PageType, 'pages'>> {
+  return request(`/api/jobs/${jobId}/page-types/${typeId}`, json('PATCH', body))
+}
+
+/** Give pages a type; null makes them text again. */
+export function setPagesType(jobId: string, pageIds: number[], typeId: number | null): Promise<{ pages: number }> {
+  return request(`/api/jobs/${jobId}/pages/type`, json('POST', { page_ids: pageIds, type_id: typeId }))
 }
 
 export interface ClusterSession {

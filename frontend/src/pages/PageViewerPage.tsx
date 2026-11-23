@@ -75,6 +75,7 @@ import type { Tool } from '../editor/types'
 import { ShortcutSheet } from '../editor/ShortcutSheet'
 import { StatusBar } from '../editor/StatusBar'
 import { ModelProvenance } from '../components/viewer/ModelProvenance'
+import { PageInfo } from '../components/viewer/PageInfo'
 import type { Notice } from '../editor/StatusBar'
 import { useZoomReadout } from '../editor/useZoomReadout'
 import { useImageSurface } from '../hooks/useImageSurface'
@@ -3787,6 +3788,11 @@ export function PageViewerPage() {
       header={{
         left: (<>
           {page && <span className="min-w-0 truncate text-xs text-ink-subtle">{page.filename}</span>}
+          {page && (
+            <PageInfo jobId={jobId} pageId={page.id} pageType={page.page_type} metadata={page.metadata}
+                      canEdit={canEdit} canManage={canManage}
+                      onChange={(next) => setPage((p) => (p ? { ...p, ...next } : p))} />
+          )}
           {page && (
             <NoteTag note={page.note} title={page.filename} canEdit={canEdit} addable onSave={async (text) => {
               const note = await setPageNote(page.id, text)

@@ -9,8 +9,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageStat
 
 from app import (align, auto_decode, backend_client, candidates, config, conventions, corpus, geometry, iiif,
-                 iiif_transcripts, layout_classes, layout_shapes, layout_templates, ocr_phase, pdf, registry, scans,
-                 store)
+                 iiif_transcripts, layout_classes, layout_shapes, layout_templates, ocr_phase, page_types, pdf, registry,
+                 scans, store)
 from app.caches import counted_page
 from app.ocr_phase import is_cancelled
 from app.remote_models import RemoteLayout, RemoteLines, RemoteOcrEngine, scan_image
@@ -150,6 +150,10 @@ def layout_image(page) -> Image.Image:
 
 
 def phase_layout(conn, job_id: str, stage, batch_size: int):
+    # A page type with layout off passes its pages by, as the dataset's own switch would.
+    conn.execute("UPDATE pages SET status = 'layout_done', layout_skipped = 1 WHERE job_id = ? AND deleted = 0 "
+                 f"AND status = 'ingested' AND NOT {page_types.runs('layout')}", (job_id,))
+    conn.commit()
     pages = conn.execute(
         "SELECT * FROM pages WHERE job_id = ? AND deleted = 0 AND status = 'ingested' ORDER BY idx",
         (job_id,)).fetchall()
@@ -367,8 +371,8 @@ def lines_in_elements(stage, img, elements, el_boxes, rings=None):
 
 def phase_lines(conn, job_id: str, stage, line_mode: str):
     pages = conn.execute(
-        "SELECT * FROM pages WHERE job_id = ? AND deleted = 0 AND status = 'layout_done' ORDER BY idx",
-        (job_id,)).fetchall()
+        "SELECT * FROM pages WHERE job_id = ? AND deleted = 0 AND status = 'layout_done' "
+        f"AND {page_types.runs('lines')} ORDER BY idx", (job_id,)).fetchall()
     done = conn.execute(
         "SELECT COUNT(*) c FROM elements e JOIN pages p ON e.page_id = p.id "
         "WHERE p.job_id = ? AND p.deleted = 0 AND e.deleted = 0 "
@@ -443,7 +447,7 @@ def stale_elements(conn, job_id: str):
         predicate, args = layout_classes.STALE_LINES_EXPLICIT_SQL, ()
     return conn.execute(
         f'SELECT e.id, e.page_id FROM elements e JOIN pages p ON e.page_id = p.id '
-        f'WHERE p.job_id = ? AND p.deleted = 0 AND {predicate} '
+        f"WHERE p.job_id = ? AND p.deleted = 0 AND {predicate} AND {page_types.runs('lines', 'p')} "
         f'ORDER BY e.page_id, e.order_idx',
         (job_id, *args)).fetchall()
 
@@ -637,10 +641,12 @@ def run(conn, job_id: str, job_path: Path, layout_batch_size: int, ocr_chunk_lin
             return conn.execute(
                 'SELECT 1 FROM lines l JOIN elements e ON l.element_id = e.id JOIN pages p ON e.page_id = p.id '
                 "WHERE p.job_id = ? AND p.deleted = 0 AND e.deleted = 0 AND e.kind != 'container' "
-                'AND l.deleted = 0 AND (l.text IS NULL OR l.needs_ocr = 1) LIMIT 1', (job_id,)).fetchone() is not None
+                f"AND l.deleted = 0 AND (l.text IS NULL OR l.needs_ocr = 1) AND {page_types.runs('ocr', 'p')} LIMIT 1",
+                (job_id,)).fetchone() is not None
         reads = STEP_READS.get(phase)
+        runs = page_types.runs(phase) if phase in page_types.STEPS else '1'
         return reads is None or conn.execute(
-            'SELECT 1 FROM pages WHERE job_id = ? AND deleted = 0 AND status = ? LIMIT 1',
+            f'SELECT 1 FROM pages WHERE job_id = ? AND deleted = 0 AND status = ? AND {runs} LIMIT 1',
             (job_id, reads)).fetchone() is not None
 
     try:

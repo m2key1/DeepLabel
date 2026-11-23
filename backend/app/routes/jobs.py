@@ -13,7 +13,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from app import (blobs, caches, config, consensus, conventions, corpus, data_use, decode, evaluator, geometry,
-                 iiif, iiif_transcripts, imports, ingest, ingest_queue, jobs, layout_shapes, layout_templates, llm, map_classes, model_registry,
+                 iiif, iiif_transcripts, imports, ingest, ingest_queue, jobs, layout_shapes, layout_templates, llm, map_classes, metadata, model_registry,
                  page_rows, queue_eta, reading_order, recognize, registry, schemas, store, trainer)
 from app.deps import (ROLE_NAMES, SWAPPABLE, VISIBLE_JOB_IDS, WRITERS, belongs_to_workspace, can_access_job, manages_workspace,
                       current_user, get_db, get_user, require_job_access, require_job_manager, require_job_role,
@@ -532,13 +532,14 @@ def create_job_from_iiif(body: IiifJob, conn=Depends(get_db), user: str = Depend
     _insert_job(conn, job_id, user, body, o, workspace, iiif_source={
         'manifest': manifest['url'], 'label': manifest['label'],
         'attribution': manifest['attribution'], 'rights': manifest['rights']})
+    conn.execute('UPDATE jobs SET metadata = ? WHERE id = ?', (json.dumps(manifest['metadata']), job_id))
     page_ids = ingest.insert_pages(conn, job_id, entries)
     for (_, source), canvas in zip(entries, canvases):
         transcript = ({'transcript': canvas['transcript'], 'reviewed': body.transcriptions_reviewed}
                       if body.use_transcriptions and canvas.get('transcript') else {})
-        conn.execute('UPDATE pages SET iiif = ? WHERE id = ?', (json.dumps(
+        conn.execute('UPDATE pages SET iiif = ?, metadata = ? WHERE id = ?', (json.dumps(
             {**{k: canvas[k] for k in ('canvas', 'label', 'width', 'height', 'image')}, **transcript}),
-            page_ids[source]))
+            json.dumps(canvas['metadata']), page_ids[source]))
     layout_templates.copy_into(conn, job_id, body.layout_template_id)
     _queue_unless_held(conn, job_id)
     conn.commit()
@@ -899,6 +900,7 @@ def job_info(job_id: str, conn=Depends(get_db), user: dict = Depends(current_use
         'created_at': job['created_at'],
         'task': job['task'],
         'line_mode': job['line_mode'],
+        'metadata': metadata.of(row['metadata']),
         'group': store.workspace_name(group, user['username']) if group else None,
         'shared_with': job['shared_with'],
         'pages': pages['live'],
