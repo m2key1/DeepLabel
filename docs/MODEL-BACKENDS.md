@@ -1057,15 +1057,18 @@ again with `TRAIN_RESUME` set and resubmits it in the same remote directory, up 
 `SLURM_MAX_RESUMES` times (default 3); the run stays one training and counts its resumes.
 
 **Metrics.** A train block declares what its trainer reports as `metrics`:
-`[{key, label, unit, better, headline, detail}]`, where `unit` is `fraction`, `number`,
-`gb`, `seconds` or `per_second`, `better` is `higher` or `lower`, exactly one metric is the
-`headline`, and `detail` folds a metric away on the run page (per-decoder-layer losses, an
-EMA copy's scores). A `*` in a key matches many, one per class, and `{}` in the label is
+`[{key, label, unit, better, headline, selects, detail}]`, where `unit` is `fraction`,
+`number`, `gb`, `seconds` or `per_second`, `better` is `higher` or `lower`, exactly one metric
+is the `headline`, at most one is marked `selects` when the trainer keeps the best epoch of a
+metric other than its headline (DeepLayout keeps its EMA copy's best mAP50-95, while box mAP50
+is its headline), and `detail` folds a metric away on the run page (per-decoder-layer losses,
+an EMA copy's scores). A `*` in a key matches many, one per class, and `{}` in the label is
 what it matched (`val/AP/*` labelled `AP {}`). The SDK adds the two every trainer can
 report, `lr` and `gpu/peak_memory_gb` (`train.system_metrics`), and stamps every point
 `ProgressLog` writes with `ts`. DeepLabel keeps the declaration with the run when it
 starts, and the run page charts by it - its headline first - and works out the time per
-epoch and the items per second from the stamps and the split.
+epoch and the items per second from the stamps and the split. The page names a running run's
+best on its headline, and the epoch it keeps by `selects`, else by the headline.
 
 **Final evaluation.** A layout or lines entrypoint ends with `evaluate.after_training`: the
 trained weights read the snapshot's validation pages through the backend's own predict

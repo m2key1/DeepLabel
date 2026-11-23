@@ -110,6 +110,8 @@ the version in the app's footer opens.
 
 ### Fixed
 
+- A running layout or line run's page shows its best on its own headline (box mAP50, F1)
+  instead of "best cer", and the epoch it keeps by the metric its trainer keeps it by (#151).
 - The page editor's Run menu opens in full again, no longer cut off by the editor bar (#144).
 - A training chart with a single reported point draws it as a dot instead of looking empty (#143).
 - The training pre-flight counts a small layout set's steps at the 200 pages an epoch trains (#148).

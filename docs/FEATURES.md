@@ -543,6 +543,10 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
 - A finished cluster run brings back only its model and figures, not the trainer's own
   checkpoints, and its folder on the cluster is removed once the model is registered. A run
   that failed keeps its folder.
+- A running run's page heads with its best so far on its trainer's headline (CER, F1 or box
+  mAP50) and the epoch it reached it. **Best so far** and **Kept** name the epoch the trainer
+  keeps, which is not always the headline's best: a layout run keeps the epoch its smoothed
+  (EMA) mAP50-95 was best at.
 - A running run whose validation has not improved for 10 epochs says so under **How it
   went**. Where its trainer can (DeepOCR), **Stop and keep epoch N** ends it at once as
   finished, with its best epoch as the model; the same button sits beside **Cancel**, which

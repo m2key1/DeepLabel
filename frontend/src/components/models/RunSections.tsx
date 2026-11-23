@@ -10,7 +10,7 @@ import { cardChrome } from '../ui/Card'
 import { tableCell, tableHeadRow, tableRow } from '../ui/Table'
 import { headlineScore } from './families'
 import type { Check } from './runChecks'
-import { bestEpoch, duration, materialOf, runSeconds } from './runFacts'
+import { bestOn, duration, keptMetric, materialOf, runSeconds } from './runFacts'
 
 const heading = 'mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-muted'
 
@@ -170,7 +170,7 @@ export function TrainingFacts({ run, points, onAllSettings }: {
   onAllSettings: () => void
 }) {
   const seconds = runSeconds(run, points)
-  const kept = bestEpoch(points)
+  const kept = bestOn(points, keptMetric(run.metric_info))?.epoch ?? null
   const perStep = (run.batch_size ?? 0) * (run.grad_accum_steps ?? 1) * (run.target === 'slurm' ? run.gpu_count ?? 1 : 1)
   const parts = [run.batch_size, run.grad_accum_steps && run.grad_accum_steps > 1 ? run.grad_accum_steps : null,
                  run.target === 'slurm' && (run.gpu_count ?? 1) > 1 ? `${run.gpu_count} GPUs` : null].filter(Boolean)

@@ -71,6 +71,10 @@ test.describe('Scenario: a fine-tune stops once its validation stops improving',
     const stalled = page.locator('[data-testid="run-check"][data-check="stalled"]')
     await expect(stalled).toContainText('Validation has not improved since epoch 2', { timeout: 120_000 })
     await expect(page.getByTestId('finish-training')).toHaveText('Stop and keep epoch 2')
+    // Named after the headline the stub declares, CER, at its best so far (#151).
+    const best = page.getByTestId('stat-best')
+    await expect(best.locator('dt')).toHaveText('best CER')
+    await expect(best.locator('dd')).toHaveText(['20.00%', 'e2'])
     await stalled.getByTestId('keep-best').click()
 
     await expect.poll(async () => (await listTrainings()).find((t) => t.id === created.id)?.status,

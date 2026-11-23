@@ -1,4 +1,4 @@
-import type { Evaluation, ProgressPoint, Training } from '../../api'
+import type { Evaluation, MetricInfo, ProgressPoint, Training } from '../../api'
 
 /** Which material an evaluation scored: its run's validation lines, or the datasets it was
  *  given, as one key. */
@@ -22,9 +22,31 @@ export function runSeconds(run: Training, points: ProgressPoint[]): number | nul
   return stamps.length > 1 ? Math.max(...stamps) - Math.min(...stamps) : null
 }
 
-/** The epoch the run's checkpoint came from: the best on its headline curve. */
-export function bestEpoch(points: ProgressPoint[]): number | null {
-  const best = points.reduce<ProgressPoint | null>(
-    (b, p) => (typeof p.cer === 'number' && (b === null || p.cer < b.cer!) ? p : b), null)
-  return best?.epoch ?? null
+export interface RunMetric { key: string; label: string; higherIsBetter: boolean }
+
+const asRunMetric = (metric: MetricInfo): RunMetric =>
+  ({ key: metric.key, label: metric.label ?? metric.key, higherIsBetter: metric.better === 'higher' })
+
+/** The metric a run is judged by, as its trainer declares it: CER for one that declares none. */
+export function headlineMetric(info: MetricInfo[] | null | undefined): RunMetric {
+  const headline = info?.find((m) => m.headline)
+  return headline ? asRunMetric(headline) : { key: 'cer', label: 'CER', higherIsBetter: false }
+}
+
+/** The metric whose best epoch the trainer keeps: the one it declares as picking the
+ *  checkpoint, else its headline. */
+export function keptMetric(info: MetricInfo[] | null | undefined): RunMetric {
+  const picker = info?.find((m) => m.selects)
+  return picker ? asRunMetric(picker) : headlineMetric(info)
+}
+
+/** The first epoch with the best value on a metric's curve, and that value. */
+export function bestOn(points: ProgressPoint[], metric: RunMetric): { epoch: number; value: number } | null {
+  let best: { epoch: number; value: number } | null = null
+  for (const point of points) {
+    const value = (point as unknown as Record<string, unknown>)[metric.key]
+    if (typeof value !== 'number' || point.epoch === undefined) continue
+    if (best === null || (metric.higherIsBetter ? value > best.value : value < best.value)) best = { epoch: point.epoch, value }
+  }
+  return best
 }

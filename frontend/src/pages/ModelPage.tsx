@@ -20,7 +20,7 @@ import { ModelDetails } from '../components/models/ModelDetails'
 import { DataPanel, TrainingPanel } from '../components/models/RunPanels'
 import { HowItWent, ScoresTable, TrainedOn, TrainingFacts } from '../components/models/RunSections'
 import { LayoutComparison } from '../components/models/LayoutComparison'
-import { bestEpoch, duration, materialOf, runSeconds } from '../components/models/runFacts'
+import { bestOn, duration, headlineMetric, keptMetric, materialOf, runSeconds } from '../components/models/runFacts'
 import { SOURCE_LABELS, buildFamilies, headlineScore } from '../components/models/families'
 import { runChecks } from '../components/models/runChecks'
 import { epochTotal, isFinished } from '../components/models/runStatus'
@@ -213,7 +213,7 @@ function ModelView({ model, run, models, trainings, evaluations, error, setError
 
   const finished = run ? isFinished(run.status) : true
   const mine = run !== null && canEdit && (isAdmin || run.owner === user)
-  const kept = bestEpoch(points)
+  const kept = run ? bestOn(points, keptMetric(run.metric_info))?.epoch ?? null : null
   const keepBest = () => run && finishTraining(run.id).then(refresh).catch((e: Error) => setError(e.message))
   const managesModels = can('models.manage')
   const ownsModel = model !== null && model.owner === user
@@ -348,18 +348,18 @@ function ModelView({ model, run, models, trainings, evaluations, error, setError
   )
 }
 
-/** Where a run without a model stands: its best so far, its epoch and how long it has run. */
+/** Where a run without a model stands: its best so far on its headline, its epoch and how long it has run. */
 function RunProgress({ run, points }: { run: Training; points: ProgressPoint[] }) {
   const last = points[points.length - 1]
-  const kept = bestEpoch(points)
-  const best = points.find((p) => p.epoch === kept)?.cer ?? null
+  const headline = headlineMetric(run.metric_info)
+  const best = bestOn(points, headline)
   const seconds = runSeconds(run, points)
   return (
     <dl className="mt-3 flex flex-wrap items-baseline gap-5 text-xs">
-      <div data-testid="stat-best-cer" className="flex items-baseline gap-1">
-        <dt className="text-ink-subtle">best cer</dt>
-        <dd className="font-mono text-sm font-medium tabular-nums text-ink">{percent(best)}</dd>
-        {kept !== null && <dd className="text-ink-subtle">e{kept}</dd>}
+      <div data-testid="stat-best" className="flex items-baseline gap-1 whitespace-nowrap">
+        <dt className="text-ink-subtle">best {headline.label}</dt>
+        <dd className="font-mono text-sm font-medium tabular-nums text-ink">{percent(best?.value ?? null)}</dd>
+        {best && <dd className="text-ink-subtle">e{best.epoch}</dd>}
       </div>
       <div className="flex items-baseline gap-1">
         <dt className="text-ink-subtle">epoch</dt>

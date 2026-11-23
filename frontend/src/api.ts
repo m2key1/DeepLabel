@@ -802,6 +802,8 @@ export interface MetricInfo {
   better?: 'higher' | 'lower'
   headline?: boolean
   detail?: boolean
+  /** The metric whose best epoch the trainer keeps as its checkpoint, when not the headline. */
+  selects?: boolean
 }
 
 /** A layout or lines run's last word: the trained model reading the
