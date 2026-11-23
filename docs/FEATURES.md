@@ -88,6 +88,14 @@ another of your datasets already has stops the Source step, with a link to that 
   be fetched again with **Retry** on the dataset page. The dataset keeps its manifest,
   attribution and rights, shows them under its name, and every export carries them. Private
   and internal addresses are never fetched.
+- When the archive publishes its own transcriptions, the form says for how many pages and in
+  what form, and **Use them** is on. A page's ALTO file linked under seeAlso is taken first
+  (else a PAGE XML or hOCR file), and its text annotations otherwise; a few pages are fetched
+  while the form is open to check they hold text, and the rest when the dataset starts. A
+  transcribed page keeps the archive's lines and outlines, in Unassigned without boxes, and
+  skips line detection and reading; the other pages go through every step. The lines arrive
+  unchecked unless **They are reviewed** is ticked. A transcription that cannot be had
+  leaves its page to the pipeline.
 - **Pages** shows the scans as thumbnails; untick any to leave it out, or give a range such
   as `3-22, 35`. A PDF is opened in the browser and shown as its pages, so a cover or a
   stretch of a long volume can be left out; only the pages left in are made into the

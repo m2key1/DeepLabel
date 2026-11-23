@@ -1436,8 +1436,19 @@ export interface IiifCanvas {
   thumbnail: string
 }
 
+/** The transcriptions a manifest offers: how many pages have one and of what kind, and what
+ *  a sample of them held when fetched. */
+export interface IiifTranscriptions {
+  pages: number
+  kinds: ('alto' | 'page' | 'hocr' | 'annotations')[]
+  sampled: number
+  sampled_with_text: number
+  sampled_lines: number
+}
+
 export type IiifInspection =
-  | ({ kind: 'manifest'; url: string; version: 2 | 3; canvases: IiifCanvas[]; max_pages: number; max_width: number }
+  | ({ kind: 'manifest'; url: string; version: 2 | 3; canvases: IiifCanvas[]; max_pages: number; max_width: number
+       transcriptions: IiifTranscriptions }
      & Omit<IiifSource, 'manifest'>)
   | { kind: 'collection'; url: string; label: string; max_pages: number
       members: { url: string; label: string; kind: 'manifest' | 'collection' }[] }
@@ -1452,10 +1463,16 @@ export function iiifThumbnailUrl(url: string): string {
   return `/api/iiif/thumbnail?url=${encodeURIComponent(url)}`
 }
 
+/** `transcriptions` says whether the archive's own transcriptions are taken, and whether
+ *  they arrive checked. */
 export function createJobFromIiif(
   manifest: string, canvases: string[], options: JobOptions,
+  transcriptions: { use: boolean; reviewed: boolean },
 ): Promise<{ job_id: string; pages: number }> {
-  return request('/api/jobs/iiif', json('POST', { ...options, manifest, canvases }))
+  return request('/api/jobs/iiif', json('POST', {
+    ...options, manifest, canvases,
+    use_transcriptions: transcriptions.use, transcriptions_reviewed: transcriptions.reviewed,
+  }))
 }
 
 /** Download again the IIIF pages whose image could not be fetched. */

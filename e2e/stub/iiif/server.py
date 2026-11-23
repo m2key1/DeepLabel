@@ -1,6 +1,9 @@
 """A small IIIF archive for the e2e stack: manifests in both Presentation versions, a
 collection of them, and an image service that draws each page on request.
 
+The transcribed manifest offers an ALTO file for its first canvas and text annotations for
+its second, and nothing for its third.
+
 A manifest's address may carry ?run=<token>; the token is threaded into its image URLs,
 so each scenario's pages are its own. The last canvas of the v3 manifest fails its first
 full-size request and succeeds after, which is how a scenario sees a failed download and
@@ -58,6 +61,46 @@ def v2_manifest(run: str) -> dict:
             'sequences': [{'canvases': canvases}]}
 
 
+# What the transcribed manifest's archive read on its first two canvases, in canvas pixels.
+ALTO_LINES = [('Johann Wiesinger, Bauer', 120, 200, 900, 60), ('zu Ebersdorf', 120, 300, 500, 60)]
+ANNOTATED_LINES = [('Taufbuch der Pfarre', 120, 160, 800, 60)]
+
+
+def transcribed_manifest(run: str) -> dict:
+    manifest = v3_manifest(run)
+    manifest['id'] = f'{BASE}/v3t/manifest.json?run={run}'
+    manifest['label'] = {'en': ['Baptisms 1790']}
+    canvases = manifest['items'][:3]
+    for n, canvas in enumerate(canvases, 1):
+        canvas['id'] = f'{BASE}/canvas/t-{run}/{n}'
+        image = canvas['items'][0]['items'][0]['body']
+        service = f'{BASE}/img/t-{run}-{n}'
+        image['id'], image['service'][0]['id'] = f'{service}/full/max/0/default.jpg', service
+    canvases[0]['seeAlso'] = [{'id': f'{BASE}/alto/{run}/1.xml', 'type': 'Dataset', 'format': 'application/xml',
+                               'profile': 'http://www.loc.gov/standards/alto/v4/alto.xsd'}]
+    canvases[1]['annotations'] = [{'id': f'{BASE}/annotations/{run}/2', 'type': 'AnnotationPage'}]
+    manifest['items'] = canvases
+    return manifest
+
+
+def alto(run: str) -> bytes:
+    lines = ''.join(
+        f'<TextLine HPOS="{x}" VPOS="{y}" WIDTH="{w}" HEIGHT="{h}"><String CONTENT="{text}"/></TextLine>'
+        for text, x, y, w, h in ALTO_LINES)
+    return (f'<?xml version="1.0" encoding="UTF-8"?><alto xmlns="http://www.loc.gov/standards/alto/ns-v4#"><Layout>'
+            f'<Page WIDTH="{WIDTH}" HEIGHT="{HEIGHT}"><PrintSpace><TextBlock HPOS="100" VPOS="150" WIDTH="1000" '
+            f'HEIGHT="300">{lines}</TextBlock></PrintSpace></Page></Layout></alto>').encode()
+
+
+def annotations(run: str) -> dict:
+    return {'@context': 'http://iiif.io/api/presentation/3/context.json', 'id': f'{BASE}/annotations/{run}/2',
+            'type': 'AnnotationPage', 'items': [
+                {'id': f'{BASE}/annotations/{run}/2/{i}', 'type': 'Annotation', 'motivation': 'supplementing',
+                 'body': {'type': 'TextualBody', 'value': text, 'format': 'text/plain'},
+                 'target': f'{BASE}/canvas/t-{run}/2#xywh={x},{y},{w},{h}'}
+                for i, (text, x, y, w, h) in enumerate(ANNOTATED_LINES)]}
+
+
 def collection(run: str) -> dict:
     return {'@context': 'http://iiif.io/api/presentation/3/context.json', 'id': f'{BASE}/collection.json?run={run}',
             'type': 'Collection', 'label': {'en': ['Council minutes']},
@@ -86,10 +129,14 @@ class Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         run = (parse_qs(parts.query).get('run') or ['default'])[0]
         documents = {'/v3/manifest.json': v3_manifest, '/v2/manifest.json': v2_manifest,
-                     '/collection.json': collection}
+                     '/v3t/manifest.json': transcribed_manifest, '/collection.json': collection}
         if parts.path in documents:
             return self._send(200, json.dumps(documents[parts.path](run)).encode(), 'application/ld+json')
         segments = parts.path.strip('/').split('/')
+        if len(segments) == 3 and segments[0] == 'alto':
+            return self._send(200, alto(segments[1]), 'application/xml')
+        if len(segments) == 3 and segments[0] == 'annotations':
+            return self._send(200, json.dumps(annotations(segments[1])).encode(), 'application/ld+json')
         if len(segments) == 6 and segments[0] == 'img' and segments[2] == 'full':
             key, size = segments[1], segments[3]
             width = WIDTH if size in ('max', 'full') else int(size.rstrip(','))

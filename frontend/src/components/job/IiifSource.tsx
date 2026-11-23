@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { iiifThumbnailUrl, inspectIiif } from '../../api'
-import type { IiifInspection } from '../../api'
+import type { IiifInspection, IiifTranscriptions } from '../../api'
+import { plural } from '../../util'
+import { CheckField } from '../ui/Field'
 
 export type IiifManifest = Extract<IiifInspection, { kind: 'manifest' }>
 type IiifCollection = Extract<IiifInspection, { kind: 'collection' }>
@@ -9,9 +11,19 @@ export interface IiifChoice {
   url: string
   collection: IiifCollection | null
   manifest: IiifManifest | null
+  /** Take the archive's transcriptions where a page has one. */
+  useTranscriptions: boolean
+  /** They arrive checked, as reviewed text. */
+  transcriptionsReviewed: boolean
 }
 
-export const NO_IIIF: IiifChoice = { url: '', collection: null, manifest: null }
+export const NO_IIIF: IiifChoice = {
+  url: '', collection: null, manifest: null, useTranscriptions: true, transcriptionsReviewed: false,
+}
+
+const TRANSCRIPT_KIND: Record<IiifTranscriptions['kinds'][number], string> = {
+  alto: 'ALTO', page: 'PAGE XML', hocr: 'hOCR', annotations: 'text annotations',
+}
 
 /** The IIIF source of a new dataset: a manifest or collection address, read by the
  *  backend, then the manifest's facts or the collection's members to choose from. */
@@ -21,20 +33,26 @@ export function IiifSource({ value, onChange }: {
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The newest load: an older one answering after it - a sample of transcriptions takes a
+  // while - must not put its manifest back.
+  const latest = useRef(0)
 
   const load = async (url: string, collection = value.collection) => {
+    const asked = ++latest.current
     setBusy(true)
     setError(null)
     try {
       const found = await inspectIiif(url)
+      if (asked !== latest.current) return
       onChange(found.kind === 'manifest'
-        ? { url, collection, manifest: found }
-        : { url, collection: found, manifest: null })
+        ? { ...value, url, collection, manifest: found }
+        : { ...value, url, collection: found, manifest: null })
     } catch (err) {
+      if (asked !== latest.current) return
       setError((err as Error).message)
       onChange({ ...value, url, manifest: null })
     } finally {
-      setBusy(false)
+      if (asked === latest.current) setBusy(false)
     }
   }
 
@@ -111,6 +129,10 @@ export function IiifSource({ value, onChange }: {
                 ? 'Attribution and rights are kept on the dataset and carried by every export.'
                 : 'The manifest names no attribution or rights - check them with the archive.'}
             </p>
+            {manifest.transcriptions.pages > 0 && (
+              <Transcriptions found={manifest.transcriptions} pages={manifest.canvases.length} value={value}
+                              onChange={onChange} />
+            )}
             {manifest.canvases.length > manifest.max_pages && (
               <p data-testid="iiif-too-many" className="mt-1.5 text-xs text-warn">
                 One dataset takes at most {manifest.max_pages} pages - choose them on the next step.
@@ -118,6 +140,41 @@ export function IiifSource({ value, onChange }: {
             )}
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+/** What the archive transcribed, and whether to take it. Transcribed pages keep the archive's
+ *  lines and skip line detection and reading; the others go through every step as usual. */
+function Transcriptions({ found, pages, value, onChange }: {
+  found: IiifTranscriptions
+  pages: number
+  value: IiifChoice
+  onChange: (next: IiifChoice) => void
+}) {
+  const kinds = found.kinds.map((kind) => TRANSCRIPT_KIND[kind]).join(' and ')
+  const thin = found.sampled > 0 && found.sampled_with_text < found.sampled
+  return (
+    <div data-testid="iiif-transcriptions" className="mt-3 space-y-1.5 border-t border-line pt-3">
+      <p className="text-sm">
+        <span className="font-medium">Transcriptions found for {found.pages} of {plural(pages, 'page')}</span>
+        <span className="text-ink-muted"> ({kinds})</span>
+      </p>
+      {thin && (
+        <p data-testid="iiif-transcriptions-thin" className="text-xs text-warn">
+          Of {plural(found.sampled, 'page')} looked at, {found.sampled_with_text} held any text.
+        </p>
+      )}
+      <CheckField data-testid="iiif-use-transcriptions" label="Use them"
+                  help="Those pages keep the archive's lines and skip line detection and reading"
+                  checked={value.useTranscriptions}
+                  onChange={(on) => onChange({ ...value, useTranscriptions: on })} />
+      {value.useTranscriptions && (
+        <CheckField data-testid="iiif-transcriptions-reviewed" label="They are reviewed"
+                    help="Their lines arrive checked, as text a person has read"
+                    checked={value.transcriptionsReviewed}
+                    onChange={(on) => onChange({ ...value, transcriptionsReviewed: on })} />
       )}
     </div>
   )

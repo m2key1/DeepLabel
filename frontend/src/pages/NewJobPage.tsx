@@ -490,6 +490,11 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
         ? `${canvasesKept.length} of ${manifest.canvases.length} included`
         : `${keptItems.length} of ${pageItems.length} included`,
     }] : []),
+    ...(manifest && manifest.transcriptions.pages > 0 ? [{
+      label: 'Transcriptions', step: 'source' as Step,
+      value: !iiif.useTranscriptions ? 'not taken'
+        : `the archive's, where a page has one${iiif.transcriptionsReviewed ? ' - arriving checked' : ''}`,
+    }] : []),
     ...(applies.run && !isMap ? [
       { label: 'Runs', step: 'run' as Step,
         value: PHASE_CHOICES.filter(([key]) => ran(key)).map(([, label]) => label).join(', ') || 'nothing yet' },
@@ -648,7 +653,8 @@ export function NewJobPage({ edit }: { edit?: JobWithoutPages } = {}) {
       } else if (mode === 'upload') {
         job_id = (await upload(sentFiles, pdfPages)).job_id
       } else if (manifest) {
-        job_id = (await createJobFromIiif(manifest.url, canvasesKept.map((c) => c.canvas), jobOptions())).job_id
+        job_id = (await createJobFromIiif(manifest.url, canvasesKept.map((c) => c.canvas), jobOptions(),
+                                          { use: iiif.useTranscriptions, reviewed: iiif.transcriptionsReviewed })).job_id
       } else {
         const res = await createJobFromPath(serverPath.trim(), jobOptions())
         if (res.skipped_symlinks.length > 0) {

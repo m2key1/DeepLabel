@@ -1,6 +1,6 @@
 import { test, expect } from '../helpers/test'
 import { createDataset, wizardStep } from '../helpers/new-dataset'
-import { getJob, uniqueName, waitForJobStatus } from '../helpers/api'
+import { getJob, jobPageIds, pageLines, uniqueName, waitForJobStatus } from '../helpers/api'
 
 // The fixture archive (e2e/stub/iiif/server.py), as the backend reaches it on the stack's
 // network. A run token keeps each scenario's pages its own; the last canvas of the v3
@@ -115,4 +115,34 @@ test.describe('Scenario: a dataset made from a IIIF manifest', () => {
     await page.getByTestId('task-text').click()
     await expect(page.getByTestId('source-iiif')).toBeVisible()
   })
+
+  test("an archive's own transcriptions come in on their pages, and the rest go through every step (#63)",
+    async ({ page }) => {
+      const manifest = `${ARCHIVE}/v3t/manifest.json?run=${run()}`
+      await page.goto('/new')
+      await page.getByLabel('Job name').fill(uniqueName('Transcribed at the archive'))
+      await page.getByTestId('source-iiif').click()
+      await page.getByLabel('IIIF manifest or collection URL').fill(manifest)
+      await page.getByTestId('iiif-load').click()
+
+      const offered = page.getByTestId('iiif-transcriptions')
+      await expect(offered).toContainText('Transcriptions found for 2 of 3 pages (ALTO and text annotations)')
+      await expect(page.getByTestId('iiif-use-transcriptions')).toBeChecked()
+      await expect(page.getByTestId('iiif-transcriptions-reviewed')).not.toBeChecked()
+      await expect(page.getByTestId('new-job-summary').locator('[data-label="Transcriptions"]'))
+        .toContainText("the archive's, where a page has one")
+      await createDataset(page)
+      await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
+      const jobId = page.url().split('/').pop()!
+      await waitForJobStatus(jobId, 'done', 90_000)
+
+      // The archive's readings on the first two pages, unchecked; the third read by the pipeline.
+      const [first, second, third] = await jobPageIds(jobId)
+      const read = async (pageId: number) => (await pageLines(jobId, pageId)).map((l) => [l.text, l.checked])
+      expect(await read(first)).toEqual([['Johann Wiesinger, Bauer', false], ['zu Ebersdorf', false]])
+      expect(await read(second)).toEqual([['Taufbuch der Pfarre', false]])
+      const pipeline = await pageLines(jobId, third)
+      expect(pipeline.length).toBeGreaterThan(0)
+      expect(pipeline.every((l) => l.text_author.startsWith('model:'))).toBe(true)
+    })
 })

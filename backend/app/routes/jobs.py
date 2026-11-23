@@ -13,7 +13,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from app import (blobs, caches, config, consensus, conventions, corpus, data_use, decode, evaluator, geometry,
-                 iiif, imports, ingest, ingest_queue, jobs, layout_shapes, layout_templates, llm, map_classes, model_registry,
+                 iiif, iiif_transcripts, imports, ingest, ingest_queue, jobs, layout_shapes, layout_templates, llm, map_classes, model_registry,
                  page_rows, queue_eta, reading_order, recognize, registry, schemas, store, trainer)
 from app.deps import (ROLE_NAMES, SWAPPABLE, VISIBLE_JOB_IDS, WRITERS, belongs_to_workspace, can_access_job, manages_workspace,
                       current_user, get_db, get_user, require_job_access, require_job_manager, require_job_role,
@@ -377,6 +377,9 @@ class PathJob(JobOptions):
 class IiifJob(JobOptions):
     manifest: str
     canvases: list[str]
+    # The archive's own transcriptions, where a page has one, and whether they arrive checked.
+    use_transcriptions: bool = True
+    transcriptions_reviewed: bool = False
 
 
 def _checked_options(conn, body: JobOptions) -> dict:
@@ -480,7 +483,9 @@ def inspect_iiif(body: IiifInspect, user: str = Depends(get_user), _editor=Depen
     """A manifest's pages, or a collection's members, for the New dataset form to choose from."""
     if not body.url.strip():
         raise HTTPException(400, 'give the address of a IIIF manifest or collection')
-    return {**_read_iiif(body.url), 'max_pages': config.IIIF_MAX_PAGES, 'max_width': config.IIIF_MAX_WIDTH}
+    found = _read_iiif(body.url)
+    offered = {'transcriptions': iiif_transcripts.sample(found['canvases'])} if found['kind'] == 'manifest' else {}
+    return {**found, **offered, 'max_pages': config.IIIF_MAX_PAGES, 'max_width': config.IIIF_MAX_WIDTH}
 
 
 @router.get('/api/iiif/thumbnail')
@@ -529,8 +534,11 @@ def create_job_from_iiif(body: IiifJob, conn=Depends(get_db), user: str = Depend
         'attribution': manifest['attribution'], 'rights': manifest['rights']})
     page_ids = ingest.insert_pages(conn, job_id, entries)
     for (_, source), canvas in zip(entries, canvases):
+        transcript = ({'transcript': canvas['transcript'], 'reviewed': body.transcriptions_reviewed}
+                      if body.use_transcriptions and canvas.get('transcript') else {})
         conn.execute('UPDATE pages SET iiif = ? WHERE id = ?', (json.dumps(
-            {k: canvas[k] for k in ('canvas', 'label', 'width', 'height', 'image')}), page_ids[source]))
+            {**{k: canvas[k] for k in ('canvas', 'label', 'width', 'height', 'image')}, **transcript}),
+            page_ids[source]))
     layout_templates.copy_into(conn, job_id, body.layout_template_id)
     _queue_unless_held(conn, job_id)
     conn.commit()

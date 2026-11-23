@@ -3,6 +3,7 @@ import ipaddress
 import json
 import re
 import socket
+import time
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -12,6 +13,9 @@ from PIL import Image
 from app import config
 
 TIMEOUT = 30
+# The whole of one fetch: TIMEOUT is per read, so a server sending a byte at a time would
+# otherwise hold it for as long as it liked.
+FETCH_SECONDS = 120
 MAX_REDIRECTS = 5
 MAX_MANIFEST_BYTES = 20 << 20
 MAX_THUMBNAIL_BYTES = 2 << 20
@@ -47,6 +51,7 @@ def _require_public(host: str) -> None:
 def fetch(url: str, max_bytes: int, what: str) -> tuple[bytes, str]:
     """The body and content type at `url`, following redirects by hand so every hop is
     checked for an internal address, and stopping once the body passes `max_bytes`."""
+    started = time.monotonic()
     with _client() as client:
         for _ in range(MAX_REDIRECTS + 1):
             parts = urlsplit(url)
@@ -67,6 +72,8 @@ def fetch(url: str, max_bytes: int, what: str) -> tuple[bytes, str]:
                         body += chunk
                         if len(body) > max_bytes:
                             raise IiifError(f'{what} is larger than {_size(max_bytes)}')
+                        if time.monotonic() - started > FETCH_SECONDS:
+                            raise IiifError(f'{what} took longer than {FETCH_SECONDS} s to arrive')
                     return bytes(body), response.headers.get('content-type', '')
             except httpx.HTTPError as error:
                 raise IiifError(f'{what} could not be fetched: {error}')
@@ -145,6 +152,116 @@ def _image_resource(canvas: dict, v3: bool) -> dict:
     return body if isinstance(body, dict) else {}
 
 
+# The seeAlso files read as a canvas's transcription, by a mark their profile, format or
+# address carries, and the order one kind is preferred to another.
+TRANSCRIPT_FILES = (('alto', 'alto'), ('page', 'primaresearch'), ('page', 'pagecontent'), ('hocr', 'hocr'))
+FILE_PREFERENCE = ('alto', 'page', 'hocr')
+# The v3 motivations of an annotation that transcribes; a v2 transcription is a text resource
+# under any motivation but commenting.
+TRANSCRIBING = {'supplementing', 'transcribing'}
+XYWH = re.compile(r'xywh=(?:(pixel|percent):)?([\d.]+),([\d.]+),([\d.]+),([\d.]+)')
+SVG_POINTS = re.compile(r'points\s*=\s*["\']([^"\']+)["\']')
+
+
+def _listed(node) -> list:
+    return node if isinstance(node, list) else [node] if node else []
+
+
+def annotation_text(annotation) -> str | None:
+    """What a transcription annotation reads, or None for any other annotation."""
+    if not isinstance(annotation, dict):
+        return None
+    motivations = {m.split(':')[-1] for m in _listed(annotation.get('motivation')) if isinstance(m, str)}
+    if 'commenting' in motivations:
+        return None
+    for body in _listed(annotation.get('body') or annotation.get('resource')):
+        if not isinstance(body, dict):
+            continue
+        if 'TextualBody' in _type(body) and motivations & TRANSCRIBING:
+            value = text(body.get('value'))
+        elif 'ContentAsText' in _type(body) or 'chars' in body:
+            value = text(body.get('chars'))
+        else:
+            continue
+        if value:
+            return value
+    return None
+
+
+def annotation_outline(annotation: dict, width: float, height: float) -> list[list[float]] | None:
+    """Where on the canvas an annotation sits, as a polygon over the page from 0 to 1: an SVG
+    polygon where it gives one, else its xywh region, in pixels or percent. None for an
+    outline that does not read, which leaves the one annotation out rather than the page."""
+    try:
+        return _outline(annotation, width, height)
+    except (ValueError, TypeError, ZeroDivisionError):
+        return None
+
+
+def _outline(annotation: dict, width: float, height: float) -> list[list[float]] | None:
+    marks = []
+    for target in _listed(annotation.get('target') or annotation.get('on')):
+        marks.append(_id(target) or '')
+        if isinstance(target, dict):
+            marks += [str(s.get('value', '')) for s in _listed(target.get('selector')) if isinstance(s, dict)]
+    clamp = lambda v: max(0.0, min(v, 1.0))
+    for mark in marks:
+        if points := SVG_POINTS.search(mark):
+            numbers = [float(n) for n in re.split(r'[\s,]+', points.group(1).strip())]
+            corners = [[clamp(x / width), clamp(y / height)] for x, y in zip(numbers[0::2], numbers[1::2])]
+            if len(corners) >= 3:
+                return corners
+    for mark in marks:
+        if region := XYWH.search(mark):
+            x, y, w, h = (float(n) for n in region.groups()[1:])
+            if region.group(1) == 'percent':
+                x, y, w, h = x * width / 100, y * height / 100, w * width / 100, h * height / 100
+            x0, y0, x1, y1 = clamp(x / width), clamp(y / height), clamp((x + w) / width), clamp((y + h) / height)
+            return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+    return None
+
+
+def _transcript(canvas: dict, v3: bool) -> dict | None:
+    """Where the archive's own transcription of a canvas is: a seeAlso file, ALTO before
+    PAGE before hOCR, or else its text annotations - those it carries, and pages of them to
+    fetch."""
+    files = []
+    for link in _listed(canvas.get('seeAlso')):
+        url = _id(link)
+        if not url:
+            continue
+        declared = ' '.join(str(link.get(key, '')) for key in ('profile', 'format', 'label')).lower() \
+            if isinstance(link, dict) else ''
+        # What the link says it is, before what its address happens to contain.
+        kind = next((kind for kind, mark in TRANSCRIPT_FILES if mark in declared), None) \
+            or next((kind for kind, mark in TRANSCRIPT_FILES if mark in url.lower()), None)
+        if kind:
+            files.append((FILE_PREFERENCE.index(kind), kind, url))
+    if files:
+        _, kind, url = min(files)
+        return {'kind': kind, 'url': url}
+    pages = []
+    for page in _listed(canvas.get('annotations') if v3 else canvas.get('otherContent')):
+        if not isinstance(page, (dict, str)):
+            continue
+        carried = page.get('items') if isinstance(page, dict) and v3 else \
+            page.get('resources') if isinstance(page, dict) else None
+        if carried:
+            transcribed = [a for a in carried if annotation_text(a)]
+            if transcribed:
+                pages.append({'annotations': transcribed})
+        elif _id(page):
+            pages.append({'url': _id(page)})
+    return {'kind': 'annotations', 'pages': pages} if pages else None
+
+
+def _dimension(value) -> int | None:
+    try:
+        return int(float(value)) if value not in (None, '') else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _canvas(canvas: dict, v3: bool) -> dict:
     resource = _image_resource(canvas, v3)
     service = _image_service(resource)
@@ -153,9 +270,12 @@ def _canvas(canvas: dict, v3: bool) -> dict:
              else _id(resource))
     thumbnail = (f'{service}/full/{THUMBNAIL_WIDTH},/0/default.jpg' if service
                  else _id(_first(canvas.get('thumbnail'))) or _id(resource))
+    transcript = _transcript(canvas, v3)
+    # A canvas that gives no size of its own takes its image's, which places its annotations.
     return {'canvas': _id(canvas), 'label': text(canvas.get('label')),
-            'width': canvas.get('width'), 'height': canvas.get('height'),
-            'image': image, 'thumbnail': thumbnail}
+            'width': _dimension(canvas.get('width')) or _dimension(resource.get('width')),
+            'height': _dimension(canvas.get('height')) or _dimension(resource.get('height')),
+            'image': image, 'thumbnail': thumbnail, **({'transcript': transcript} if transcript else {})}
 
 
 def parse(document: dict, url: str) -> dict:
@@ -192,7 +312,7 @@ def read(url: str) -> dict:
     body, _ = fetch(url.strip(), MAX_MANIFEST_BYTES, 'the manifest')
     try:
         document = json.loads(body)
-    except ValueError:
+    except (ValueError, RecursionError):
         raise IiifError('the address did not return JSON - is it the manifest itself?')
     if not isinstance(document, dict):
         raise IiifError('this is neither a IIIF manifest nor a collection')

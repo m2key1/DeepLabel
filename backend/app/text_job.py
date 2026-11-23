@@ -9,7 +9,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageStat
 
 from app import (align, auto_decode, backend_client, candidates, config, conventions, corpus, geometry, iiif,
-                 layout_classes, layout_shapes, layout_templates, ocr_phase, pdf, registry, scans, store)
+                 iiif_transcripts, layout_classes, layout_shapes, layout_templates, ocr_phase, pdf, registry, scans,
+                 store)
 from app.caches import counted_page
 from app.ocr_phase import is_cancelled
 from app.remote_models import RemoteLayout, RemoteLines, RemoteOcrEngine, scan_image
@@ -126,6 +127,9 @@ def phase_ingest(conn, job_id: str, job_path: Path):
         if scans.ingest_page(conn, page, job_path, seen, config.BLOBS_DIR, 'ingested') != 'ingested':
             uncounted = True
             continue
+        # The archive's own transcription moves the page past the steps that would make one.
+        if page['iiif'] and iiif_transcripts.apply(conn, page):
+            uncounted = True
         done += 1
         store.update_counters(conn, job_id, pages_ingested=done)
         if is_cancelled(conn, job_id):
