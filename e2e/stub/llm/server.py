@@ -44,6 +44,7 @@ BEHAVIOURS = {
     # Answers with the prompt it was given, so a scenario can assert exactly which wording
     # reached the provider - the only oracle for whose prompt won.
     'stub-echo': (200, ''),
+    'stub-echo-all': (200, ''),
     # A reasoning model: it answers with its working and no transcription until the request
     # turns thinking off, which is what per-model extra fields exist for.
     'stub-thinking': (200, ''),
@@ -88,6 +89,14 @@ def _prompt_of(request: dict) -> str:
             if isinstance(part, dict) and part.get('type') == 'text':
                 return part.get('text', '')
     return ''
+
+
+def _sequence_of(request: dict) -> str:
+    """Everything in the one user message, in order: the text parts as they are and each
+    picture as [image], the page included - where a placed reference landed, readable."""
+    return ''.join(part.get('text', '') if part.get('type') == 'text' else '[image]'
+                   for message in request.get('messages', [])
+                   for part in message.get('content', []) if isinstance(part, dict))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -142,6 +151,8 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(SLOW_SECONDS)
         if model == 'stub-echo':
             content = json.dumps([_prompt_of(request)])
+        if model == 'stub-echo-all':
+            content = json.dumps([_sequence_of(request)])
         if model == 'stub-mandatory-reasoning':
             if 'reasoning' in request:
                 self._send(400, {'error': {

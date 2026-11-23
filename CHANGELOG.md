@@ -12,6 +12,8 @@ the version in the app's footer opens.
 
 - Search every dataset you can open at once, from Search in the top bar (#41).
 - A dataset's History tab lists its runs, opens what each changed, and reverts one (#39).
+- Your default prompt is an always-open, self-saving editor with your reference images placed
+  in the text, sent to the model in that order (#35, first part).
 - A IIIF import takes the archive's own transcriptions - an ALTO, PAGE or hOCR file, or text
   annotations - onto their pages (#63).
 - The New job wizard shows a PDF as its pages, so single pages or ranges of it can be left out before upload (#46).

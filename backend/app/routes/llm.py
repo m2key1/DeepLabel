@@ -96,7 +96,8 @@ def put_prompt(body: PromptBody, conn=Depends(get_db), user: dict = Depends(curr
                _on=Depends(require_enabled)):
     """Set the caller's own default. Every model they have not given words of its own
     follows it from the next run onwards; readings already taken are left alone."""
-    return {'prompt': llm.set_user_prompt(conn, user['username'], _clean_prompt(body.prompt)),
+    wording = llm.own_pictures_only(conn, user['username'], _clean_prompt(body.prompt))
+    return {'prompt': llm.set_user_prompt(conn, user['username'], wording),
             'default': llm.DEFAULT_PROMPT}
 
 

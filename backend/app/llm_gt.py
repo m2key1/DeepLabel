@@ -265,11 +265,11 @@ def _prepare(conn, read) -> dict:
     prompt = rendered_prompt(conn, read['job_id'], page)
     shown = llm.references(conn, read['requested_by'], read['job_id'])
     return {'base_url': connection['base_url'], 'key': key, 'model': model['model'],
-            'prompt': llm.with_references(prompt, len(shown)),
+            # A corpus's wording is the dataset's, and places no picture (llm.placing).
+            'parts': llm.ask_parts(prompt, shown, None),
             'prompt_hash': llm.ask_digest(prompt, shown), 'image': image,
             'temperature': model['temperature'], 'max_tokens': model['max_tokens'],
-            'extra': llm.extra_body(model),
-            'references': [(row['mime'], row['bytes']) for row in shown]}
+            'extra': llm.extra_body(model)}
 
 
 def _finish(conn, read, result: dict) -> None:

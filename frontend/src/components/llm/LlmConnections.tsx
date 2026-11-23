@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createLlmConnection, createLlmModel, deleteLlmConnection, deleteLlmModel, getLlmPrompt,
-  getLlmSettings, patchLlmConnection, patchLlmModel, probeLlmConnection, putLlmPrompt,
-  type LlmConnection, type LlmModel, type LlmSettings,
+  getLlmSettings, listLlmReferences, patchLlmConnection, patchLlmModel, probeLlmConnection, putLlmPrompt,
+  type LlmConnection, type LlmModel, type LlmReference, type LlmSettings,
 } from '../../api'
 import { useAuth } from '../../auth'
 import { Badge } from '../ui/Badge'
@@ -11,6 +11,7 @@ import { useAutoClear } from '../../messages'
 import { Input, Textarea } from '../ui/Field'
 import { Section } from '../ui/Section'
 import { LlmReferences } from './LlmReferences'
+import { PromptEditor } from './PromptEditor'
 import { VisibilityBadge } from './VisibilityBadge'
 
 
@@ -382,7 +383,14 @@ export function LlmConnections() {
   const [settings, setSettings] = useState<LlmSettings | null>(null)
   const [shipped, setShipped] = useState('')
   const [personal, setPersonal] = useState('')
-  const [promptDraft, setPromptDraft] = useState<string | null>(null)
+  // What the editor holds: the person's wording, or the shipped one until they change it.
+  const [wording, setWording] = useState<string | null>(null)
+  const [saved, setSaved] = useState<'saving' | 'saved' | null>(null)
+  const saveTimer = useRef<number | undefined>(undefined)
+  const saves = useRef(0)
+  const inFlight = useRef<Promise<unknown> | null>(null)
+  const [picturesLoaded, setPicturesLoaded] = useState(false)
+  const [pictures, setPictures] = useState<LlmReference[]>([])
   const [name, setName] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -395,32 +403,59 @@ export function LlmConnections() {
       .then((r) => {
         setShipped(r.default)
         setPersonal(r.prompt)
+        setWording(r.prompt || r.default)
       })
       .catch(() => undefined)
   }, [])
+  const refreshPictures = useCallback(() => {
+    listLlmReferences()
+      .then((r) => setPictures(r.inherited ? [] : r.references))
+      .catch(() => undefined)
+      .finally(() => setPicturesLoaded(true))
+  }, [])
+  useEffect(refreshPictures, [refreshPictures])
 
   useEffect(refresh, [refresh])
 
   const fail = (e: unknown) => setError((e as Error).message)
 
-  const savePrompt = async () => {
-    setError(null)
-    try {
-      const saved = await putLlmPrompt(promptDraft ?? '')
-      setPersonal(saved.prompt)
-      setPromptDraft(null)
-      refresh()
-    } catch (e) {
-      fail(e)
-    }
+  /** Saved a moment after the typing stops. Wording that is the shipped one again is stored
+   *  as none, so it follows the shipped wording from then on. */
+  const editPrompt = (next: string) => {
+    setWording(next)
+    setSaved('saving')
+    window.clearTimeout(saveTimer.current)
+    saveTimer.current = window.setTimeout(async () => {
+      const stored = next.trim() === shipped.trim() ? '' : next
+      const asked = ++saves.current
+      try {
+        const saving = putLlmPrompt(stored)
+        inFlight.current = saving
+        const answer = await saving
+        // An answer overtaken by later typing, or by a reset, has nothing left to say.
+        if (asked !== saves.current) return
+        setPersonal(answer.prompt)
+        // The server trims the ends, which the editor keeps under the cursor, and drops
+        // pictures that are not this person's, which it must show.
+        if (answer.prompt !== stored.trim()) setWording(answer.prompt || shipped)
+        setSaved('saved')
+      } catch (e) {
+        setSaved(null)
+        fail(e)
+      }
+    }, 700)
   }
 
   const resetPrompt = async () => {
     setError(null)
+    window.clearTimeout(saveTimer.current)
+    saves.current += 1
+    // A save already on its way would otherwise land after the reset and undo it.
+    await inFlight.current?.catch(() => undefined)
     try {
       setPersonal((await putLlmPrompt('')).prompt)
-      setPromptDraft(null)
-      refresh()
+      setWording(shipped)
+      setSaved('saved')
     } catch (e) {
       fail(e)
     }
@@ -458,51 +493,30 @@ export function LlmConnections() {
       <div className="mb-4 rounded border border-line p-3">
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">Your default prompt</span>
-          <span className="text-xs text-ink-muted">
+          <span data-testid="default-prompt-state" className="text-xs text-ink-muted">
             {personal ? 'your own wording' : 'the shipped wording'}
           </span>
-          <div className="ml-auto flex items-center gap-1.5">
-            {promptDraft === null ? (
-              <Button size="xs" onClick={() => setPromptDraft(personal || shipped)}
-                      data-testid="edit-default-prompt">
-                Edit
-              </Button>
-            ) : (
-              <>
-                <Button size="xs" variant="primary" onClick={savePrompt}
-                        data-testid="save-default-prompt">Save</Button>
-                {personal && (
-                  <Button size="xs" onClick={resetPrompt} data-testid="reset-default-prompt">
-                    Back to shipped
-                  </Button>
-                )}
-                <Button size="xs" variant="ghost" onClick={() => setPromptDraft(null)}>Cancel</Button>
-              </>
-            )}
-          </div>
+          <span data-testid="default-prompt-saved" aria-live="polite" className="text-xs text-ink-subtle">
+            {saved === 'saving' ? 'Saving…' : saved === 'saved' ? 'Saved' : ''}
+          </span>
+          {personal && (
+            <Button size="xs" className="ml-auto" onClick={resetPrompt} data-testid="reset-default-prompt">
+              Back to shipped
+            </Button>
+          )}
         </div>
-        {promptDraft === null ? (
-          <pre data-testid="default-prompt"
-               className="max-h-32 overflow-auto whitespace-pre-wrap font-mono text-xs text-ink-muted">
-            {personal || shipped}
-          </pre>
-        ) : (
-          <Textarea
-            value={promptDraft}
-            onChange={(e) => setPromptDraft(e.target.value)}
-            rows={10}
-            aria-label="Your default prompt"
-            data-testid="default-prompt-editor"
-            className="w-full font-mono text-xs"
-          />
+        {wording !== null && picturesLoaded && (
+          <PromptEditor value={wording} onChange={editPrompt} pictures={pictures}
+                        label="Your default prompt" testId="default-prompt" />
         )}
         <p className="mt-1 text-xs text-ink-muted">
-          Used by every model without its own wording, on your runs.
+          Used by every model without its own wording, on your runs. A model is sent your text with
+          the pictures where they stand, then any of your pictures it does not place, then the page.
         </p>
       </div>
 
       <div className="mb-4 rounded border border-line p-3">
-        <LlmReferences canEdit={settings.enabled} onError={setError} />
+        <LlmReferences canEdit={settings.enabled} onError={setError} onSummary={refreshPictures} />
       </div>
 
       {!settings.enabled ? (

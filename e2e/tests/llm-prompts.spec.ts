@@ -4,6 +4,7 @@ import {
   seedLlmConnection, uniqueName,
 } from '../helpers/api'
 import { pickModel } from '../helpers/llm'
+import { scanPng } from '../helpers/image'
 import { datasetAction } from '../helpers/dataset'
 
 const DEV = identity('dev', 'admin')
@@ -41,12 +42,14 @@ async function readAndEcho(page: import('@playwright/test').Page, jobId: string,
  *  test's wording. */
 async function setPersonalPrompt(page: import('@playwright/test').Page, text: string | null) {
   await page.goto('/settings?section=llm')
-  await page.getByTestId('edit-default-prompt').click()
+  // The editor appears once the prompt has loaded, and with it whether there is one to reset.
+  await expect(page.getByTestId('default-prompt')).toBeVisible()
   if (text === null) {
-    await page.getByTestId('reset-default-prompt').click()
+    // Already the shipped wording when there is nothing to go back from.
+    const reset = page.getByTestId('reset-default-prompt')
+    if (await reset.count()) await reset.click()
   } else {
-    await page.getByTestId('default-prompt-editor').fill(text)
-    await page.getByTestId('save-default-prompt').click()
+    await page.getByTestId('default-prompt').fill(text)
   }
   await expect.poll(async () => (await backendFetch('/api/llm/prompt', { headers: DEV })).prompt)
     .toBe(text ?? '')
@@ -228,4 +231,47 @@ test.describe('Scenario: a model that thinks before it answers', () => {
       await expect(page.getByTestId('llm-progress-error')).toContainText('answered with its reasoning')
       await expect(page.getByTestId('llm-progress-error')).toContainText('enable_thinking')
     })
+
+  test('a picture placed in the wording reaches the model where it stands (#35)', async ({ page }) => {
+    const connection = uniqueName('Echo all')
+    await seedLlmConnection(connection, ['stub-echo-all'], DEV)
+    await setPersonalPrompt(page, null)
+    await page.goto('/settings?section=llm')
+    await page.getByTestId('llm-reference-file').setInputFiles(
+      { name: 'rings.png', mimeType: 'image/png', buffer: scanPng(120, 60, 7) })
+    const place = page.getByTestId('prompt-place-picture')
+    await expect(place).toHaveCount(1)
+    const [picture] = (await backendFetch('/api/llm/references', { headers: DEV })).references
+    try {
+      const editor = page.getByTestId('default-prompt')
+      await editor.fill('Rings mean ae: ')
+      await place.click()
+      await editor.pressSequentially(' Read the page.\nKeep the old spelling.')
+      await expect(editor.getByTestId('prompt-picture')).toHaveCount(1)
+      await expect.poll(async () => (await backendFetch('/api/llm/prompt', { headers: DEV })).prompt)
+        .toBe(`Rings mean ae: {{image:${picture.id}}} Read the page.\nKeep the old spelling.`)
+      await expect(page.getByTestId('default-prompt-state')).toHaveText('your own wording')
+
+      // Reopened, the picture is back in its place.
+      await page.reload()
+      await expect(page.getByTestId('default-prompt').getByTestId('prompt-picture')).toHaveAttribute(
+        'data-image-id', String(picture.id))
+
+      const jobId = await seedDistinctPagesJob(uniqueName('Placed picture'), 1, 60)
+      await page.goto(`/jobs/${jobId}`)
+      await datasetAction(page, 'llm-read-open')
+      await pickModel(page, connection, 'stub-echo-all').check()
+      await page.getByTestId('llm-start').click()
+      const [pageId] = await jobPageIds(jobId)
+      await expect.poll(async () => (await pageCandidates(pageId))
+        .filter((c) => c.source === 'llm' && !c.dismissed).map((c) => c.text), { timeout: 30_000 })
+        .toEqual(['Rings mean ae: [image] Read the page.\nKeep the old spelling.\n\nBefore the page you are shown 1 reference image. '
+                  + 'The last image is the page to transcribe; everything before it is reference material and '
+                  + 'is never transcribed.[image]'])
+    } finally {
+      // Every spec reads as this person: their prompt and pictures go back as they were.
+      await backendFetch(`/api/llm/references/${picture.id}`, { method: 'DELETE', headers: DEV })
+      await setPersonalPrompt(page, null)
+    }
+  })
 })

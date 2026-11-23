@@ -467,6 +467,12 @@ reader.
   API keys are stored encrypted and never shown again in full.
 - Each model can have its own prompt, token limit and extra request fields. A dataset can
   have its own prompt and up to four reference images (for example a glyph chart).
+- **Your default prompt** under Settings is always open and saves itself as you type; it
+  says whether it is the shipped wording or your own, and **Back to shipped** resets it.
+  Place your reference images in it at the cursor: each sits in the text as a small picture
+  you can remove, and a model receives exactly that order - your text with the pictures
+  where they stand, then any of your pictures it does not place, then the page. Deleting a
+  picture takes it out of the wording too.
 - Start a reading from the dataset, a page selection, or a single page in the viewer. The
   dialog shows the number of calls before anything is sent. A scan already read by the
   same model and prompt is not sent again.

@@ -58,7 +58,7 @@ def conn(tmp_path, monkeypatch, secret):
 def answers(monkeypatch, lines, seen: list | None = None):
     def transcribe(base_url, api_key, model, prompt, image, *args, **kwargs):
         if seen is not None:
-            seen.append(prompt)
+            seen.append(''.join(part['text'] for part in prompt if 'text' in part))
         return {'text': json.dumps(lines), 'prompt_tokens': 10, 'completion_tokens': 5}
     monkeypatch.setattr(llm_client, 'transcribe', transcribe)
 

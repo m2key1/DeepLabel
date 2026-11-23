@@ -422,11 +422,11 @@ def _prepare(conn, read) -> dict:
                                   job_prompt(conn, read['job_id']))
     shown = llm.references(conn, read['requested_by'], read['job_id'])
     return {'base_url': connection['base_url'], 'key': key, 'model': model['model'],
-            'prompt': llm.with_references(prompt, len(shown)),
+            'parts': llm.ask_parts(prompt, shown, llm.placing(conn, model, read['requested_by'],
+                                                              job_prompt(conn, read['job_id']), shown)),
             'prompt_hash': llm.ask_digest(prompt, shown), 'image': image,
             'temperature': model['temperature'], 'max_tokens': model['max_tokens'],
-            'extra': llm.extra_body(model),
-            'references': [(row['mime'], row['bytes']) for row in shown]}
+            'extra': llm.extra_body(model)}
 
 
 def _finish(conn, read, result: dict) -> None:

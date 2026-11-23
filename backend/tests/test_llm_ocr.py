@@ -573,12 +573,21 @@ class TestRestart:
                              'raw_text': '["First line"]'}
 
 
+def wording(parts) -> str:
+    """The text of what a model was sent, its pictures left out."""
+    return ''.join(part['text'] for part in parts if 'text' in part)
+
+
+def pictures(parts) -> list:
+    return [(part['mime'], part['data']) for part in parts if 'mime' in part]
+
+
 class TestPrompts:
     def test_a_dataset_prompt_replaces_the_models_and_is_recorded(self, conn, monkeypatch):
         seen = []
 
         def transcribe(base_url, api_key, model, prompt, image, temperature=0.0, *args, **kwargs):
-            seen.append(prompt)
+            seen.append(wording(prompt))
             return {'text': json.dumps(['First line']), 'prompt_tokens': 1, 'completion_tokens': 1}
         monkeypatch.setattr(llm_client, 'transcribe', transcribe)
         conn.execute("UPDATE jobs SET llm_prompt = 'Kurrent script, 1750s.' WHERE id = 'j1'")
@@ -717,8 +726,8 @@ class TestWhatTheModelIsShown:
         seen = []
 
         def transcribe(base_url, api_key, model, prompt, image, temperature=0.0,
-                       max_tokens=None, extra=None, references=()):
-            seen.append(list(references))
+                       max_tokens=None, extra=None):
+            seen.append(pictures(prompt))
             return {'text': json.dumps(['First line']), 'prompt_tokens': 1, 'completion_tokens': 1}
         monkeypatch.setattr(llm_client, 'transcribe', transcribe)
         return seen
@@ -753,8 +762,8 @@ class TestWhatTheModelIsShown:
         seen = []
 
         def transcribe(base_url, api_key, model, prompt, image, temperature=0.0,
-                       max_tokens=None, extra=None, references=()):
-            seen.append(prompt)
+                       max_tokens=None, extra=None):
+            seen.append(wording(prompt))
             return {'text': json.dumps(['First line']), 'prompt_tokens': 1, 'completion_tokens': 1}
         monkeypatch.setattr(llm_client, 'transcribe', transcribe)
         return seen
@@ -789,6 +798,43 @@ class TestWhatTheModelIsShown:
         llm_ocr.drain_once(conn)
 
         assert seen == ['transcribe']
+
+    def sent_by(self, monkeypatch) -> list:
+        seen = []
+
+        def transcribe(base_url, api_key, model, prompt, image, temperature=0.0,
+                       max_tokens=None, extra=None):
+            seen.append(prompt)
+            return {'text': json.dumps(['First line']), 'prompt_tokens': 1, 'completion_tokens': 1}
+        monkeypatch.setattr(llm_client, 'transcribe', transcribe)
+        return seen
+
+    def test_wording_someone_else_wrote_places_none_of_the_runners_pictures(self, conn, monkeypatch):
+        # A model's wording is its publisher's: were its tokens honoured, they would send the
+        # runner's private pictures to the publisher's endpoint.
+        seen = self.sent_by(monkeypatch)
+        private = llm.add_reference(conn, 'alice', None, 'mine.png', 'image/png', CHART + b'private')
+        llm.add_reference(conn, 'alice', 'j1', 'chart.png', 'image/png', CHART)
+        conn.execute('UPDATE llm_models SET prompt = ? WHERE id = 1', (f'Read. {{{{image:{private}}}}}',))
+        conn.commit()
+
+        llm_ocr.enqueue(conn, 'j1', [1], ALICE)
+        llm_ocr.drain_once(conn)
+
+        assert pictures(seen[0]) == [('image/png', CHART)]
+        assert wording(seen[0]).startswith(f'Read. {{{{image:{private}}}}}\n\nBefore the page')
+
+    def test_the_runners_own_wording_places_their_pictures_where_they_stand(self, conn, monkeypatch):
+        seen = self.sent_by(monkeypatch)
+        mine = llm.add_reference(conn, 'alice', None, 'mine.png', 'image/png', CHART)
+        conn.execute("UPDATE llm_models SET prompt = '' WHERE id = 1")
+        llm.set_user_prompt(conn, 'alice', f'See {{{{image:{mine}}}}} then read.')
+
+        llm_ocr.enqueue(conn, 'j1', [1], ALICE)
+        llm_ocr.drain_once(conn)
+
+        assert seen[0] == [{'text': 'See '}, {'mime': 'image/png', 'data': CHART},
+                           {'text': ' then read.\n\n' + llm.REFERENCE_NOTE.format(count=1, plural='')}]
 
     def test_a_dataset_showing_nothing_keeps_the_digest_it_always_had(self, conn):
         """Otherwise adding this feature would have made every reading ever taken stale."""

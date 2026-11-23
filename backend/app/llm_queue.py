@@ -73,9 +73,9 @@ def fetch(prepared: dict) -> dict:
         return prepared
     try:
         answer = llm_client.transcribe(prepared['base_url'], prepared['key'], prepared['model'],
-                                       prepared['prompt'], prepared['image'],
+                                       prepared['parts'], prepared['image'],
                                        prepared['temperature'], prepared['max_tokens'],
-                                       prepared['extra'], prepared['references'])
+                                       prepared['extra'])
     except llm_client.LlmError as exc:
         return {'error': str(exc)}
     return {**answer, 'prompt_hash': prepared['prompt_hash']}

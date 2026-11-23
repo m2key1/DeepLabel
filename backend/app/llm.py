@@ -311,15 +311,63 @@ def effective_gt_prompt(job_prompt: str = '') -> str:
     return (job_prompt or '').strip() or DEFAULT_GT_PROMPT
 
 
-def with_references(prompt: str, count: int) -> str:
-    """The wording as it is actually sent. A model shown a glyph chart before the page is
-    looking at two pictures and, unless the wording says which is which, may transcribe the
-    chart. Said here rather than left to each prompt, because it is a fact about the payload
-    this code builds rather than something a corpus knows about itself."""
-    if not count:
-        return prompt
-    note = REFERENCE_NOTE.format(count=count, plural='' if count == 1 else 's')
-    return f'{prompt}\n\n{note}'
+# A reference picture set in the wording where it stands, by its id: {{image:12}}. Not a
+# page placeholder - PLACEHOLDER takes word characters only - so render() leaves it be.
+IMAGE_TOKEN = re.compile(r'\{\{image:(\d+)\}\}')
+
+
+def placeable(conn, username: str, shown: list) -> dict:
+    """The pictures a person's wording may place, by id: their own, and those shown on this run."""
+    return {row['id']: row for row in [*_held_references(conn, username, None), *shown]}
+
+
+def placing(conn, model: dict, username: str, job_prompt: str, shown: list) -> dict | None:
+    """What the wording in force may place, or None where it places nothing: only a
+    person's own wording places their pictures. A dataset's wording or a model's is
+    someone else's to write, and honoured there it would send the runner's private
+    pictures to wherever the model is."""
+    own = not (job_prompt or '').strip() and not (model.get('prompt') or '').strip() \
+        and user_prompt(conn, username)
+    return placeable(conn, username, shown) if own else None
+
+
+def ask_parts(prompt: str, shown: list, pictures: dict | None) -> list[dict]:
+    """The wording and pictures in the order a model receives them before the page: each
+    picture the wording places where it stands, then those in force it does not place.
+    Wording that places none goes as it always went - the text, then every picture.
+
+    A model shown a glyph chart before the page is looking at two pictures and, unless the
+    wording says which is which, may transcribe the chart. That is said after the wording,
+    because it is a fact about the payload this code builds rather than something a corpus
+    knows about itself."""
+    parts: list[dict] = []
+    placed = set()
+
+    def say(text: str) -> None:
+        if parts and 'text' in parts[-1]:
+            parts[-1] = {'text': parts[-1]['text'] + text}
+        elif text:
+            parts.append({'text': text})
+
+    for i, piece in enumerate(IMAGE_TOKEN.split(prompt) if pictures is not None else [prompt]):
+        row = pictures.get(int(piece)) if i % 2 and pictures is not None else None
+        if row is not None:
+            parts.append({'mime': row['mime'], 'data': row['bytes']})
+            placed.add(row['id'])
+        elif not i % 2:
+            say(piece)
+    rest = [{'mime': row['mime'], 'data': row['bytes']} for row in shown if row['id'] not in placed]
+    count = sum(1 for part in parts if 'mime' in part) + len(rest)
+    if count:
+        note = REFERENCE_NOTE.format(count=count, plural='' if count == 1 else 's')
+        say(f'\n\n{note}' if parts and 'text' in parts[-1] else note)
+    return [*parts, *rest]
+
+
+def own_pictures_only(conn, username: str, prompt: str) -> str:
+    """The wording with any picture that is not the person's own taken out."""
+    own = {row['id'] for row in _held_references(conn, username, None)}
+    return IMAGE_TOKEN.sub(lambda found: found.group(0) if int(found.group(1)) in own else '', prompt)
 
 
 # What a model can be shown before the page, and how much of it. Small because every
@@ -373,7 +421,14 @@ def add_reference(conn, owner: str, job_id: str | None, filename: str, mime: str
 
 
 def delete_reference(conn, reference_id: int) -> bool:
+    """Forget a picture, and take it out of the wording of whoever placed it."""
+    row = conn.execute('SELECT owner FROM llm_references WHERE id = ?', (reference_id,)).fetchone()
     deleted = conn.execute('DELETE FROM llm_references WHERE id = ?', (reference_id,)).rowcount
+    if row is not None:
+        held = user_prompt(conn, row['owner'])
+        kept = IMAGE_TOKEN.sub(lambda found: '' if int(found.group(1)) == reference_id else found.group(0), held)
+        if kept != held:
+            conn.execute('UPDATE llm_prompts SET prompt = ? WHERE owner = ?', (kept, row['owner']))
     conn.commit()
     return bool(deleted)
 

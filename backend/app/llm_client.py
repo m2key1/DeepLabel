@@ -189,23 +189,24 @@ def _picture(mime: str, data: bytes) -> dict:
             'image_url': {'url': f'data:{mime};base64,' + base64.b64encode(data).decode()}}
 
 
-def transcribe(base_url: str, api_key: str | None, model: str, prompt: str,
+def transcribe(base_url: str, api_key: str | None, model: str, prompt: str | Sequence[dict],
                image: bytes, temperature: float = 0.0, max_tokens: int | None = None,
-               extra: dict | None = None,
-               references: Sequence[tuple[str, bytes]] = ()) -> dict:
+               extra: dict | None = None) -> dict:
     """One page, one model, one call. Returns the raw message and what it cost, and never
     interprets the text - parsing into lines is the caller's business, so the exact answer
     is what gets stored.
 
-    Anything the model is being shown - a chart of the glyphs a corpus prints, a specimen
-    alphabet - goes between the wording and the page, so a prompt may say 'the first image
-    is a reference chart' and be describing where they actually landed.
+    `prompt` is the wording, or the wording and pictures (llm.ask_parts) in the order they
+    are sent - a chart of the glyphs a corpus prints sits where the prompt says it does, so
+    'the first image is a reference chart' describes where it actually landed. The page
+    comes last.
     """
+    parts = [{'text': prompt}] if isinstance(prompt, str) else prompt
     message = {
         'role': 'user',
         'content': [
-            {'type': 'text', 'text': prompt},
-            *(_picture(mime, data) for mime, data in references),
+            *({'type': 'text', 'text': part['text']} if 'text' in part else _picture(part['mime'], part['data'])
+              for part in parts),
             _picture('image/jpeg', image),
         ],
     }

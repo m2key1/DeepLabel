@@ -78,16 +78,17 @@ class TestWithSomethingToShow:
     say 'the first image is a reference chart' if that is genuinely where it lands."""
 
     def test_references_sit_between_the_wording_and_the_page(self, sent):
-        llm_client.transcribe('http://llm/v1', None, 'a-model', 'Transcribe.', PAGE,
-                              references=[('image/png', CHART)])
+        llm_client.transcribe('http://llm/v1', None, 'a-model',
+                              [{'text': 'Transcribe.'}, {'mime': 'image/png', 'data': CHART}], PAGE)
 
         assert kinds(sent) == ['text', 'image_url', 'image_url']
         assert images(sent) == ['data:image/png;base64,YSBjaGFydCBvZiBnbHlwaHM=',
                                 'data:image/jpeg;base64,dGhlIHBhZ2UgYXMganBlZw==']
 
     def test_several_are_sent_in_the_order_given(self, sent):
-        llm_client.transcribe('http://llm/v1', None, 'a-model', 'Transcribe.', PAGE,
-                              references=[('image/png', CHART), ('image/webp', ALPHABET)])
+        llm_client.transcribe('http://llm/v1', None, 'a-model',
+                              [{'text': 'Transcribe.'}, {'mime': 'image/png', 'data': CHART},
+                               {'mime': 'image/webp', 'data': ALPHABET}], PAGE)
 
         assert images(sent)[:2] == ['data:image/png;base64,YSBjaGFydCBvZiBnbHlwaHM=',
                                     'data:image/webp;base64,YSBzcGVjaW1lbiBhbHBoYWJldA==']
@@ -95,8 +96,8 @@ class TestWithSomethingToShow:
 
     def test_each_keeps_its_own_type(self, sent):
         """A png sent as a jpeg is a picture some providers refuse outright."""
-        llm_client.transcribe('http://llm/v1', None, 'a-model', 'Transcribe.', PAGE,
-                              references=[('image/webp', ALPHABET)])
+        llm_client.transcribe('http://llm/v1', None, 'a-model',
+                              [{'text': 'Transcribe.'}, {'mime': 'image/webp', 'data': ALPHABET}], PAGE)
 
         assert images(sent)[0].startswith('data:image/webp;base64,')
 
