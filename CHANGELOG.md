@@ -10,6 +10,8 @@ the version in the app's footer opens.
 
 ### Added
 
+- A finished layout run is scored beside its base model on its held-out pages, per class
+  and page by page, on the run's page; older runs get it from a button (#150).
 - Search every dataset you can open at once, from Search in the top bar (#41).
 - A dataset's History tab lists its runs, opens what each changed, and reverts one (#39).
 - Your default prompt is an always-open, self-saving editor with your reference images placed

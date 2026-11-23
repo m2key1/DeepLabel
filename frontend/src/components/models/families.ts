@@ -1,5 +1,5 @@
 import type { Evaluation, OcrDecode, RegistryModel, Training } from '../../api'
-import { countsLines, scoreOf } from '../evaluation/score'
+import { countsLines, isLayoutScores, scoreOf } from '../evaluation/score'
 
 // The mode a score is shown in: what Automatic reads with - a token decoder's own reading,
 // else the reranked beam - then beam, the only mode older runs scored their test sets in.
@@ -78,11 +78,14 @@ function trainingScore(metrics: Record<string, unknown> | null): Score | null {
 }
 
 /** The test-set score - an OCR model's CER in the mode Automatic reads with, a line
- *  model's F1 - else the validation one, marked as such. */
+ *  model's F1, a layout model's mAP50 - else the validation one, marked as such. */
 export function versionScore(model: RegistryModel, run: Training | null, evaluations: Evaluation[]): Score | null {
   const scored = evaluations.filter((ev) => ev.model_id === model.id && ev.status === 'done' && scoreOf(ev) !== null)
   const score = (ev: Evaluation | undefined, kind: ScoreKind): Score | null => {
     if (!ev) return null
+    if (ev.metrics && isLayoutScores(ev.metrics)) {
+      return { value: scoreOf(ev)!, metric: 'mAP50', kind: ev.source.split === 'test' ? 'test' : kind, lowerIsBetter: false }
+    }
     return countsLines(ev)
       ? { value: scoreOf(ev)!, metric: 'F1', kind, lowerIsBetter: false }
       : { value: ev.cer!, metric: 'CER', kind, lowerIsBetter: true }

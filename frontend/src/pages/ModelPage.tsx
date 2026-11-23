@@ -19,6 +19,7 @@ import { EvaluationTabs } from '../components/models/EvaluationTabs'
 import { ModelDetails } from '../components/models/ModelDetails'
 import { DataPanel, TrainingPanel } from '../components/models/RunPanels'
 import { HowItWent, ScoresTable, TrainedOn, TrainingFacts } from '../components/models/RunSections'
+import { LayoutComparison } from '../components/models/LayoutComparison'
 import { bestEpoch, duration, materialOf, runSeconds } from '../components/models/runFacts'
 import { SOURCE_LABELS, buildFamilies, headlineScore } from '../components/models/families'
 import { runChecks } from '../components/models/runChecks'
@@ -294,10 +295,14 @@ function ModelView({ model, run, models, trainings, evaluations, error, setError
       </header>
 
       <div className="mb-10 space-y-8">
-        {model && <ScoresTable model={model} base={base} run={run} evaluations={evaluations} materialName={materialName} />}
+        {model && model.task === 'layout' && run ? (
+          <LayoutComparison run={run} model={model} base={base} evaluations={evaluations} canCompare={mine}
+                            onChange={refresh} onError={setError} />
+        ) : model && <ScoresTable model={model} base={base} run={run} evaluations={evaluations} materialName={materialName} />}
         {run && (
           <TrainedOn run={run} preflight={preflight}
                      evaluationFor={(split) => headlineScore(scored.filter((ev) => ev.training_id === run.id
+                       && ev.source.split === undefined
                        && (split === 'val' ? ev.source.snapshot !== undefined : ev.source.jobs !== undefined)))} />
         )}
         {run && <TrainingFacts run={run} points={points} onAllSettings={() => show('training')} />}

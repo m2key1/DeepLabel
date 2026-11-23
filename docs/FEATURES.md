@@ -613,6 +613,14 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   ones. The evaluation's page lists its pages worst first and draws the chosen page's
   checked outlines in the colour of what they were counted as, with the found lines dashed
   over them. A finished lines run gets its new model and its base scored on its test pages.
+- A finished layout run is set beside its base model on the pages it held out: its test
+  pages, or failing those its validation pages, as its snapshot froze them. Both models find
+  the boxes of every such page, their labels placed under the dataset's classes the way a
+  reading places them, and are scored against the checked boxes as the layout trainers score
+  themselves: AP per class at IoU 0.50 and over 0.50 to 0.95, a found box matching at most one
+  checked box. The run's page shows both scores per class with the change, then the pages
+  worst first, each drawn three times - the checked boxes, the base model's and the new
+  model's. A run that finished before this existed gets the same from **Compare with ...**.
 - A queued or running evaluation can be cancelled by its owner or an admin. It keeps its
   place in the list without scores, and **Retry** runs it again.
 - Each evaluation has a page with its CER, WER and line count, and the same **Lines** and

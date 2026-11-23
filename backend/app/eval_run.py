@@ -5,9 +5,10 @@ from pathlib import Path
 
 from PIL import Image
 
-from app import backend_client, config, data_use, eval_material, evaluator, line_scores, registry, store, text_job
+from app import (backend_client, config, data_use, eval_material, evaluator, layout_comparison, layout_scores,
+                 layout_templates, line_scores, registry, store, text_job)
 from app.eval_metrics import line_record
-from app.remote_models import RemoteLines, RemoteOcrEngine
+from app.remote_models import RemoteLayout, RemoteLines, RemoteOcrEngine
 from app.scoring import corpus_scores, group_breakdown
 
 
@@ -93,6 +94,50 @@ def score_lines(conn, evaluation: dict, make_stage, pages_out: Path) -> None:
                      line_count=summary['truth'], breakdown=json.dumps(breakdown) if breakdown else None)
 
 
+def score_layout(conn, evaluation: dict, detector_for, pages_out: Path) -> None:
+    """Detect the boxes of every page the run held out, as its snapshot froze them, place
+    the model's labels under the dataset's classes the way a reading places them, and score
+    them against the checked boxes - each page recorded, for the run's side by side."""
+    source = json.loads(evaluation['source'])
+    try:
+        coco, groups, folder = layout_comparison.frozen(source['snapshot'], source['split'])
+    except FileNotFoundError:
+        evaluator.finish(conn, evaluation['id'], status='error',
+                         error=f"the run kept no {source['split']} pages to compare on")
+        return
+    names = {category['id']: category['name'] for category in coco['categories']}
+    sizes = {image['id']: (image['width'], image['height']) for image in coco['images']}
+    truth: dict[int, list] = {}
+    for anno in coco['annotations']:
+        (width, height), (x, y, w, h) = sizes[anno['image_id']], anno['bbox']
+        truth.setdefault(anno['image_id'], []).append(
+            {'class': names[anno['category_id']], 'bbox': [x / width, y / height, (x + w) / width, (y + h) / height]})
+    detectors, vocabularies, pages = {}, {}, []
+    with pages_out.open('w', encoding='utf-8') as records:
+        for image in coco['images']:
+            job_id = groups.get(Path(image['file_name']).stem) or image['file_name'].split('_', 1)[0]
+            if job_id not in detectors:
+                detectors[job_id] = detector_for(job_id)
+                vocabularies[job_id] = layout_templates.vocabulary(conn, job_id, evaluation['model_id'])
+            path = folder / 'images' / image['file_name']
+            with Image.open(path) as opened:
+                scan = text_job.fit_for_layout(opened.convert('RGB'))
+            [layout] = detectors[job_id].detect([scan], [str(path)])
+            scan.close()
+            # Keyed by the dataset's class as the snapshot names it, before Schematismus
+            # renames PageNumber and WeirdTable for storage.
+            found = [{'class': placed, 'bbox': detection.bbox, 'confidence': detection.confidence}
+                     for detection in [*layout.content, *layout.containers]
+                     if (placed := vocabularies[job_id].place(detection.raw_class_name)) is not None]
+            page = {'truth': truth.get(image['id'], []), 'found': found}
+            pages.append(page)
+            records.write(json.dumps({'page_id': layout_comparison.page_id(conn, image['file_name'], job_id),
+                                      'job_id': job_id, 'map_50': layout_scores.score([page])['mAP_50'],
+                                      'boxes': page}) + '\n')
+    summary = {**layout_scores.score(pages), 'split': source['split']}
+    evaluator.finish(conn, evaluation['id'], status='done', metrics=json.dumps(summary), line_count=summary['truth'])
+
+
 def main():
     """An evaluation, read on the model's backend by the app's own interpreter."""
     parser = argparse.ArgumentParser()
@@ -114,7 +159,14 @@ def main():
         evaluator.finish(conn, evaluation['id'], status='error',
                             error=f'model {evaluation["model_id"]} is not on a configured model backend')
         return
-    if registry.get_model(conn, evaluation['model_id'])['task'] == 'lines':
+    task = registry.get_model(conn, evaluation['model_id'])['task']
+    if task == 'layout':
+        model_id = evaluation['model_id']
+        score_layout(conn, evaluation,
+                     lambda job_id: RemoteLayout(conn, client, model_id, layout_templates.vocabulary(conn, job_id, model_id)),
+                     evaluator.pages_path(evaluation['id']))
+        return
+    if task == 'lines':
         score_lines(conn, evaluation, lambda: RemoteLines(conn, client, evaluation['model_id']),
                     evaluator.pages_path(evaluation['id']))
         return

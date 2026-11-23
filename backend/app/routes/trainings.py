@@ -5,7 +5,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import (augmentations, backend_client, config, data_use, line_shapes, preflight, registry,
+from app import (augmentations, backend_client, config, data_use, layout_comparison, line_shapes, preflight, registry,
                  remote_training, slurm_session, store, train_snapshot, trainer, tunables)
 from app.deps import WRITERS, can_access_job, current_user, get_db, require_job_access, require_job_manager, require_role
 
@@ -546,6 +546,24 @@ def retry_training(training_id: int, conn=Depends(get_db), user: dict = Depends(
         threading.Thread(target=_submit_slurm_bg, args=(training_id, attempt), daemon=True).start()
     return trainer.training_payload(
         conn.execute('SELECT * FROM trainings WHERE id = ?', (training_id,)).fetchone())
+
+
+@router.post('/api/trainings/{training_id}/compare')
+def compare_training(training_id: int, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Compare a finished layout run with its base model, as a run finishing now is."""
+    training = trainer.get_training(conn, training_id)
+    if training is None:
+        raise HTTPException(404)
+    if user['role'] != 'admin' and training['owner'] != user['username']:
+        raise HTTPException(403, 'not permitted')
+    if training['task'] != 'layout' or training['status'] != 'done' or not training['model_id']:
+        raise HTTPException(409, 'only a finished layout run is compared with its base model')
+    if layout_comparison.compared(conn, training_id):
+        raise HTTPException(409, 'this run is already compared with its base model')
+    scheduled = layout_comparison.schedule(conn, training, training['model_id'])
+    if not scheduled:
+        raise HTTPException(409, 'the run kept no pages to compare on')
+    return {'evaluations': scheduled}
 
 
 @router.post('/api/trainings/{training_id}/finish')

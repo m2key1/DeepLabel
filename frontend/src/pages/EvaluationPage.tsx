@@ -8,7 +8,8 @@ import { ErrorsTab } from '../components/evaluation/ErrorsTab'
 import { HeadlineShort } from '../components/evaluation/Headline'
 import { LinesTab } from '../components/evaluation/LinesTab'
 import { LineEvaluation } from '../components/evaluation/LineEvaluation'
-import { decodeName } from '../components/evaluation/score'
+import { decodeName, isLayoutScores } from '../components/evaluation/score'
+import { percent } from '../components/evaluation/format'
 import { count } from '../components/evaluation/format'
 import { Badge } from '../components/ui/Badge'
 import { Button, buttonClass } from '../components/ui/Button'
@@ -108,6 +109,7 @@ function EvaluationView({ id }: { id: string | undefined }) {
   const canRun = isAdmin || evaluation.owner === user
   const noun = checkedJob ? 'check' : 'evaluation'
   const countsLines = evaluation.model_task === 'lines'
+  const findsBoxes = evaluation.model_task === 'layout'
   const modelLink = (
     <Link to={`/models/${evaluation.model_id}`} className="hover:text-accent-ink">
       <span data-testid="evaluation-title">{evaluation.model_name ?? `Model ${evaluation.model_id}`}</span>
@@ -179,10 +181,24 @@ function EvaluationView({ id }: { id: string | undefined }) {
         <EmptyState>This {noun} failed{evaluation.error ? `: ${evaluation.error}` : ''}.</EmptyState>
       )}
       {(evaluation.status === 'queued' || evaluation.status === 'running') && (
-        <EmptyState>This {noun} is {evaluation.status}; its {countsLines ? 'pages' : 'lines'} appear here when it finishes.</EmptyState>
+        <EmptyState>
+          This {noun} is {evaluation.status}; its {countsLines || findsBoxes ? 'pages' : 'lines'} appear here when it finishes.
+        </EmptyState>
       )}
-      {evaluation.status === 'done' && evaluation.metrics && <LineEvaluation evalId={evaluation.id} scores={evaluation.metrics} />}
-      {evaluation.status === 'done' && !countsLines && lineRows === 0 && (
+      {evaluation.status === 'done' && evaluation.metrics && isLayoutScores(evaluation.metrics) && (
+        <p data-testid="layout-evaluation" className="text-sm text-ink-muted">
+          mAP50 {percent(evaluation.metrics.mAP_50)} · mAP50-95 {percent(evaluation.metrics.mAP_50_95)} on{' '}
+          {evaluation.metrics.pages} pages and {evaluation.metrics.truth} checked boxes.
+          {evaluation.training_id !== null && (
+            <> Set beside its base model, page by page, on <Link to={`/models/runs/${evaluation.training_id}`}
+                                                                   className="text-accent-ink hover:underline">its run</Link>.</>
+          )}
+        </p>
+      )}
+      {evaluation.status === 'done' && evaluation.metrics && !isLayoutScores(evaluation.metrics) && (
+        <LineEvaluation evalId={evaluation.id} scores={evaluation.metrics} />
+      )}
+      {evaluation.status === 'done' && !countsLines && !findsBoxes && lineRows === 0 && (
         <EmptyState>
           {evaluation.hidden_lines > 0
             ? 'Every line of this evaluation belongs to a dataset you cannot open.'

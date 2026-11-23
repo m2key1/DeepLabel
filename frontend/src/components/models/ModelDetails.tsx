@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { ConventionFlag, Evaluation, LayoutTemplate, ModelUsage, OcrDecode, RegistryModel, Training } from '../../api'
+import type {
+  ConventionFlag, Evaluation, LayoutTemplate, LineScores, ModelUsage, OcrDecode, RegistryModel, Training,
+} from '../../api'
 import { conventionLabel } from '../conventionLabel'
 import { percent } from '../evaluation/format'
-import { decodeName } from '../evaluation/score'
+import { decodeName, isLayoutScores } from '../evaluation/score'
 import { DECODE_NAMES } from '../job/processing'
 import { Badge } from '../ui/Badge'
 import { Section } from '../ui/Section'
@@ -53,9 +55,14 @@ function EvaluationLine({ ev, canRun, onRetry, onCancel }: {
   return (
     <div>
       <span data-testid="eval-row" className="block text-xs text-ink-muted">
-        {ev.status === 'done' && ev.metrics ? (
+        {ev.status === 'done' && ev.metrics && isLayoutScores(ev.metrics) ? (
           <>
-            <span className="font-medium text-ink">F1 {percent(ev.metrics.f1)}</span>
+            <span className="font-medium text-ink">mAP50 {percent(ev.metrics.mAP_50)}</span>
+            {` · ${ev.metrics.truth} checked boxes`}
+          </>
+        ) : ev.status === 'done' && ev.metrics ? (
+          <>
+            <span className="font-medium text-ink">F1 {percent((ev.metrics as LineScores).f1)}</span>
             {` · ${ev.metrics.truth} checked lines`}
           </>
         ) : ev.status === 'done' && ev.cer !== null ? (

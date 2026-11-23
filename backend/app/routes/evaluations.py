@@ -21,7 +21,8 @@ def _source_label(conn, source: dict, user: dict) -> str:
     if 'snapshot' in source:
         row = conn.execute('SELECT name FROM trainings WHERE id = ?',
                            (source['snapshot'],)).fetchone()
-        return f"valid split of {row['name']}" if row else 'a valid split'
+        split = source.get('split', 'valid')
+        return f"{split} split of {row['name']}" if row else f'a {split} split'
     names = []
     for job_id in source.get('jobs', []):
         row = conn.execute('SELECT name FROM jobs WHERE id = ?', (job_id,)).fetchone()
@@ -107,16 +108,21 @@ def _page_records(conn, eval_id: int, user: dict) -> list[dict]:
 
 @router.get('/api/evaluations/{eval_id}/pages')
 def evaluation_pages(eval_id: int, conn=Depends(get_db), user: dict = Depends(current_user)):
-    """A line model's evaluation page by page, worst first: each page's counts and where it
-    sits, without its outlines."""
+    """A line or layout model's evaluation page by page, worst first: each page's score and
+    where it sits, without its outlines or boxes."""
     _evaluation_or_404(conn, eval_id)
     pages = []
     for record in _page_records(conn, eval_id, user):
         page = conn.execute('SELECT idx, filename FROM pages WHERE id = ?', (record['page_id'],)).fetchone()
-        pages.append({**{key: value for key, value in record.items() if key != 'outlines'},
+        pages.append({**{key: value for key, value in record.items() if key not in SHAPES},
                       'page_idx': page['idx'] if page else None, 'filename': page['filename'] if page else None})
-    pages.sort(key=lambda page: (page['f1'] is None, page['f1'] if page['f1'] is not None else 0))
+    worst = lambda page: page.get('f1', page.get('map_50'))
+    pages.sort(key=lambda page: (worst(page) is None, worst(page) or 0))
     return {'pages': pages}
+
+
+# What a page record draws rather than counts: a line model's outlines, a layout model's boxes.
+SHAPES = ('outlines', 'boxes')
 
 
 @router.get('/api/evaluations/{eval_id}/pages/{page_id}')

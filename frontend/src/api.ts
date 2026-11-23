@@ -846,7 +846,7 @@ export interface Evaluation {
   model_id: number
   training_id: number | null
   /** A check reads a dataset with a model to find wrong ground truth; it is no score of the model. */
-  source: { snapshot?: number; jobs?: string[]; test_pages?: boolean; check?: boolean }
+  source: { snapshot?: number; jobs?: string[]; test_pages?: boolean; check?: boolean; split?: 'test' | 'valid' }
   /** What was scored, named and redacted server-side; absent on a create response. */
   source_label?: string
   /** Per-dataset scores when the material spans several datasets; names resolved server-side.
@@ -859,8 +859,9 @@ export interface Evaluation {
   cer: number | null
   wer: number | null
   line_count: number | null
-  /** A line model's lines counted against the checked outlines; null for an OCR model. */
-  metrics?: LineScores | null
+  /** A line model's lines counted against the checked outlines, or a layout model's boxes
+   *  scored against the checked boxes; null for an OCR model. */
+  metrics?: LineScores | LayoutScores | null
   owner: string
   created_at: string
 }
@@ -1963,6 +1964,42 @@ export function getEvaluationPages(evalId: number): Promise<{ pages: EvaluatedPa
 
 export function getEvaluationPage(evalId: number, pageId: number): Promise<EvaluatedPageOutlines> {
   return request(`/api/evaluations/${evalId}/pages/${pageId}`)
+}
+
+/** A layout model's boxes scored against the checked ones, COCO-style (layout_scores). */
+export interface LayoutScores {
+  mAP_50: number | null
+  mAP_50_95: number | null
+  per_class: Record<string, { ap_50: number; ap_50_95: number; truth: number; found: number }>
+  pages: number
+  truth: number
+  found: number
+  /** Which of the run's held-out pages: its test pages, or failing those its validation pages. */
+  split: 'test' | 'valid'
+}
+
+export interface LayoutBox { class: string; bbox: number[]; confidence?: number | null }
+
+export interface LayoutEvaluatedPage {
+  page_id: number | null
+  job_id: string
+  map_50: number | null
+  page_idx: number | null
+  filename: string | null
+}
+
+export function getLayoutEvaluationPages(evalId: number): Promise<{ pages: LayoutEvaluatedPage[] }> {
+  return request(`/api/evaluations/${evalId}/pages`)
+}
+
+export function getLayoutEvaluationPage(evalId: number, pageId: number):
+  Promise<Omit<LayoutEvaluatedPage, 'page_idx' | 'filename'> & { boxes: { truth: LayoutBox[]; found: LayoutBox[] } }> {
+  return request(`/api/evaluations/${evalId}/pages/${pageId}`)
+}
+
+/** Compare a finished layout run with its base model, as a run finishing now is. */
+export function compareTraining(trainingId: number): Promise<{ evaluations: number[] }> {
+  return request(`/api/trainings/${trainingId}/compare`, json('POST', {}))
 }
 
 /** Read every checked line of a dataset with a model, to find wrong transcriptions. */

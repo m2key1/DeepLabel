@@ -11,8 +11,8 @@ import threading
 import time
 from pathlib import Path
 
-from app import (backend_client, caches, config, conventions, data_use, decode, evaluator, line_shapes, registry,
-                 remote_training, slurm_session, store, train_snapshot, weights)
+from app import (backend_client, caches, config, conventions, data_use, decode, evaluator, layout_comparison,
+                 line_shapes, registry, remote_training, slurm_session, store, train_snapshot, weights)
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -322,8 +322,7 @@ def register_result(conn, training: dict, out_dir: Path) -> int:
         weights.store_model_files(conn, model_id)
     except OSError as error:
         print(f'weight store: model {model_id} not stored: {error}', file=sys.stderr)
-    if training['task'] in ('ocr', 'lines'):
-        _schedule_scores(conn, training, model_id)
+    _schedule_scores(conn, training, model_id)
     return model_id
 
 
@@ -331,6 +330,9 @@ def _schedule_scores(conn, training: dict, model_id: int) -> None:
     """What a finished run is scored on, now that it has something to be compared with.
     Scheduling the baseline at submit put a long local GPU job beside the snapshot transfer,
     and on 2026-09-11 the two together took the machine off the network."""
+    if training['task'] == 'layout':
+        layout_comparison.schedule(conn, training, model_id)
+        return
     reads_text = training['task'] == 'ocr'
     if reads_text:
         evaluator.create_baseline(conn, training)
