@@ -624,28 +624,22 @@ def cancel(conn, training_id: int) -> bool:
 def delete(conn, training: dict):
     """Remove the training's artifacts and row. An archived model it produced goes
     too - its checkpoint lives in the deleted directory - so every reference to
-    that model is cleared first (readers fall back to the task default)."""
+    that model is cleared first (readers fall back to the task default). The rows go
+    before the files, so a delete that fails leaves no model without its checkpoint."""
+    # Queued evals would find no snapshot to read once the directory is gone.
+    conn.execute("DELETE FROM evaluations WHERE training_id = ? AND status = 'queued'",
+                 (training['id'],))
+    conn.execute('UPDATE evaluations SET training_id = NULL WHERE training_id = ?', (training['id'],))
+    conn.execute('DELETE FROM trainings WHERE id = ?', (training['id'],))
+    if training.get('model_id'):
+        weights.delete_model(conn, training['model_id'])
+    conn.commit()
     shutil.rmtree(config.training_dir(training['id']), ignore_errors=True)
     if training['target'] == 'slurm' and slurm_available():
         try:
             _ssh(['rm', '-rf', f'{config.SLURM_REMOTE_DIR}/{training["id"]}'])
         except Exception:
             pass
-    # Queued evals would find no snapshot to read once the directory is gone.
-    conn.execute("DELETE FROM evaluations WHERE training_id = ? AND status = 'queued'",
-                 (training['id'],))
-    conn.execute('UPDATE evaluations SET training_id = NULL WHERE training_id = ?', (training['id'],))
-    conn.execute('DELETE FROM trainings WHERE id = ?', (training['id'],))
-    model_id = training.get('model_id')
-    if model_id:
-        for col in ('model_layout_id', 'model_lines_id', 'model_ocr_id'):
-            conn.execute(f'UPDATE jobs SET {col} = NULL WHERE {col} = ?', (model_id,))
-        conn.execute('UPDATE models SET trained_from = NULL WHERE trained_from = ?', (model_id,))
-        conn.execute('UPDATE trainings SET base_model_id = NULL WHERE base_model_id = ?', (model_id,))
-        conn.execute('DELETE FROM evaluations WHERE model_id = ?', (model_id,))
-        weights.forget_model(conn, model_id)
-        conn.execute('DELETE FROM models WHERE id = ?', (model_id,))
-    conn.commit()
 
 
 def slurm_available() -> bool:

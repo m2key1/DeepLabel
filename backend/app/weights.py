@@ -104,6 +104,23 @@ def forget_model(conn, model_id: int) -> None:
             blob_path(sha256).unlink(missing_ok=True)
 
 
+def delete_model(conn, model_id: int) -> None:
+    """Removes a model, its scores and its stored files. Datasets set to it fall back to
+    their task's default, and pages it ran on, runs based on it and models trained from it
+    or replacing it no longer name it. Lines keep its id, read as a deleted model's work."""
+    for column in registry.JOB_MODEL_COLUMNS.values():
+        conn.execute(f'UPDATE jobs SET {column} = NULL WHERE {column} = ?', (model_id,))
+    for stage in ('layout', 'lines'):
+        conn.execute(f'UPDATE pages SET {stage}_model_id = NULL WHERE {stage}_model_id = ?', (model_id,))
+    for column in ('trained_from', 'supersedes'):
+        conn.execute(f'UPDATE models SET {column} = NULL WHERE {column} = ?', (model_id,))
+    conn.execute('UPDATE trainings SET base_model_id = NULL WHERE base_model_id = ?', (model_id,))
+    for table in ('declined_models', 'layout_label_maps', 'evaluations'):
+        conn.execute(f'DELETE FROM {table} WHERE model_id = ?', (model_id,))
+    forget_model(conn, model_id)
+    conn.execute('DELETE FROM models WHERE id = ?', (model_id,))
+
+
 def import_map_registry(conn) -> list[int]:
     """Turns each models/mapseg/registry.json entry into a models row, once (by ref)."""
     from app import model_registry

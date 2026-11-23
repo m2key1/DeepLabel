@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import config, newer_models, registry, schemas, weights
+from app import config, newer_models, registry, schemas, trainer, weights
 from app.deps import WRITERS, get_db, has_capability, require_role
 
 router = APIRouter(tags=['models'])
@@ -132,6 +132,51 @@ def patch_model(model_id: int, body: ModelPatch, conn=Depends(get_db),
         'LEFT JOIN trainings ON trainings.model_id = models.id WHERE models.id = ?',
         (model_id,)).fetchone()
     return registry.model_payload(updated) | {'runs_on': weights.serving_backend(updated)}
+
+
+@router.delete('/api/models/{model_id}')
+def delete_model(model_id: int, conn=Depends(get_db), user: dict = Depends(require_role(*WRITERS))):
+    """Delete an archived model for good. A trained one goes with its run and the checkpoint
+    in the run's directory, by its run's owner or an admin; one nobody trained, by an admin."""
+    row = registry.get_model(conn, model_id)
+    if row is None:
+        raise HTTPException(404)
+    run = conn.execute('SELECT id FROM trainings WHERE model_id = ?', (model_id,)).fetchone()
+    producer = trainer.get_training(conn, run['id']) if run else None
+    if user['role'] != 'admin' and (producer is None or producer['owner'] != user['username']):
+        raise HTTPException(403, 'not permitted')
+    if row['is_default']:
+        raise HTTPException(409, 'the default model cannot be deleted - promote another first')
+    if not row['archived']:
+        raise HTTPException(409, 'archive the model before deleting it')
+    if row['source'] == 'backend':
+        raise HTTPException(409, 'its backend adds it again every time it starts - leave it archived instead')
+    busy = _working_with(conn, row)
+    if busy:
+        raise HTTPException(409, f'{busy} - wait for it to finish or cancel it')
+    if producer is not None:
+        trainer.delete(conn, producer)
+    else:
+        weights.delete_model(conn, model_id)
+        conn.commit()
+    return {'ok': True}
+
+
+def _working_with(conn, model) -> str | None:
+    """Work that holds the model from its start and would lose it halfway: a run fine-tuning
+    it, a dataset being read with it, an evaluation of it."""
+    run = conn.execute('SELECT name FROM trainings WHERE base_model_id = ? AND status IN (?, ?, ?)',
+                       (model['id'], *trainer.CANCELLABLE_STATUSES)).fetchone()
+    if run:
+        return f'run "{run["name"]}" starts from this model'
+    column = registry.JOB_MODEL_COLUMNS.get(model['task'])
+    dataset = column and conn.execute(f"SELECT name FROM jobs WHERE status = 'running' AND {column} = ?",
+                                      (model['id'],)).fetchone()
+    if dataset:
+        return f'dataset "{dataset["name"]}" is being read with this model'
+    if conn.execute("SELECT 1 FROM evaluations WHERE model_id = ? AND status = 'running'", (model['id'],)).fetchone():
+        return 'an evaluation of this model is running'
+    return None
 
 
 @router.get('/api/models/{model_id}/usage')

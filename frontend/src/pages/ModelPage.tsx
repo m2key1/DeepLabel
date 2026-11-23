@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  cancelEvaluation, cancelTraining, deleteTraining, finishTraining, getLayoutTemplates, getModelUsage, getTrainingPreflight,
-  listConventionFlags, listEvaluationLines, listEvaluations, listModels, listTrainings, patchModel, retryEvaluation,
-  retryTraining, trainingProgress,
+  cancelEvaluation, cancelTraining, deleteModel, deleteTraining, finishTraining, getLayoutTemplates, getModelUsage,
+  getTrainingPreflight, listConventionFlags, listEvaluationLines, listEvaluations, listModels, listTrainings, patchModel,
+  retryEvaluation, retryTraining, trainingProgress,
 } from '../api'
 import type {
   ConventionFlag, Evaluation, LayoutTemplate, ModelUsage, ProgressPoint, RegistryModel, Training,
@@ -33,7 +33,7 @@ import { Tabs, panelId, tabId } from '../components/ui/Tabs'
 import { widePageShell } from '../components/ui/page'
 import { usePolling } from '../hooks/usePolling'
 import { useAutoClear } from '../messages'
-import { formatDate } from '../util'
+import { formatDate, plural } from '../util'
 
 const STAGE: Record<string, string> = { layout: 'Layout detection', lines: 'Line segmentation', ocr: 'OCR' }
 
@@ -222,12 +222,23 @@ function ModelView({ model, run, models, trainings, evaluations, error, setError
   const version = family?.versions.find((v) => v.key === `m${model!.id}`) ?? null
   const apply = (body: { is_default?: boolean; archived?: boolean }) =>
     model && patchModel(model.id, body).then(refresh).catch((e: Error) => setError(e.message))
+  // A builtin comes back whenever its backend starts, so it is only ever archived.
+  const deletable = model !== null && model.archived && !model.is_default && model.source !== 'backend'
+    && (run ? mine : isAdmin)
+  const removeModel = () => {
+    if (!model) return
+    const taken = run ? ', its training run and its checkpoint' : ' and its stored weights'
+    const fallback = usage && usage.pinned > 0
+      ? `\n\n${plural(usage.pinned, 'dataset')} set to it will fall back to the default model.` : ''
+    if (!window.confirm(`Delete "${model.name}"${taken} for good?${fallback}`)) return
+    deleteModel(model.id).then(() => navigate('/models')).catch((e: Error) => setError(e.message))
+  }
 
   return (
     <div className={widePageShell}>
       <header className="mb-8">
         <div className="flex flex-wrap items-start gap-3">
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 grow basis-64">
             <h1 className="flex flex-wrap items-center gap-2 font-serif text-2xl font-semibold">
               {title}
               {model?.is_default && <Badge tone="accent">★ DEFAULT</Badge>}
@@ -265,6 +276,9 @@ function ModelView({ model, run, models, trainings, evaluations, error, setError
               <Button size="xs" data-testid="archive-model" onClick={() => apply({ archived: !model.archived })}>
                 {model.archived ? 'Unarchive' : 'Archive'}
               </Button>
+            )}
+            {deletable && (
+              <Button size="xs" variant="danger" data-testid="delete-model" onClick={removeModel}>Delete</Button>
             )}
             {run && finished && canEdit && (
               <Link to={`/models/train?task=${run.task}&from=${run.id}`} data-testid="rerun-training"

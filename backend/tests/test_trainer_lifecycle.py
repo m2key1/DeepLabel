@@ -347,6 +347,56 @@ class TestDeleting:
         row = conn.execute('SELECT training_id, cer FROM evaluations').fetchone()
         assert (row['training_id'], row['cer']) == (None, 0.04)
 
+    def test_the_files_stay_when_the_rows_cannot_go(self, conn, training, tmp_path, monkeypatch):
+        """Otherwise a failed delete leaves a model on record whose checkpoint is gone."""
+        directory = tmp_path / 'trainings' / '1'
+        directory.mkdir(parents=True)
+
+        def refuse(*_):
+            raise RuntimeError('locked')
+        monkeypatch.setattr('app.weights.delete_model', refuse)
+
+        with pytest.raises(RuntimeError):
+            trainer.delete(conn, training)
+
+        assert directory.exists()
+
+    def test_the_pages_it_ran_on_no_longer_name_it(self, conn, training):
+        """They name the model that last ran on them, under a foreign key that would
+        otherwise refuse the delete."""
+        conn.execute("INSERT INTO pages (id, job_id, idx, filename, source_file, layout_model_id, lines_model_id) "
+                     "VALUES (7, 'j1', 0, 'p.png', 'p.png', 2, 2)")
+        conn.commit()
+
+        trainer.delete(conn, training)
+
+        assert tuple(conn.execute('SELECT layout_model_id, lines_model_id FROM pages WHERE id = 7').fetchone()) \
+            == (None, None)
+
+    def test_a_newer_version_no_longer_says_it_replaces_it(self, conn, training):
+        conn.execute("INSERT INTO models (id, task, name, checkpoint, supersedes) VALUES (3, 'ocr', 'Newer', '/n.pt', 2)")
+        conn.commit()
+
+        trainer.delete(conn, training)
+
+        assert conn.execute('SELECT supersedes FROM models WHERE id = 3').fetchone()[0] is None
+
+    def test_a_dataset_that_said_not_now_to_it_forgets_it(self, conn, training):
+        conn.execute("INSERT INTO declined_models (job_id, task, model_id) VALUES ('j1', 'ocr', 2)")
+        conn.commit()
+
+        trainer.delete(conn, training)
+
+        assert conn.execute('SELECT COUNT(*) FROM declined_models').fetchone()[0] == 0
+
+    def test_what_a_dataset_reads_its_labels_as_goes_with_it(self, conn, training):
+        conn.execute("INSERT INTO layout_label_maps (job_id, model_id, label, class_id) VALUES ('j1', 2, 'text', NULL)")
+        conn.commit()
+
+        trainer.delete(conn, training)
+
+        assert conn.execute('SELECT COUNT(*) FROM layout_label_maps').fetchone()[0] == 0
+
 
 class TestReadingOneBack:
     def test_a_run_that_does_not_exist_reads_as_nothing(self, conn):

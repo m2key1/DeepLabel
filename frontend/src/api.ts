@@ -1912,6 +1912,11 @@ export function patchModel(
   return request(`/api/models/${modelId}`, json('PATCH', body))
 }
 
+/** An archived model for good: a trained one with its run and checkpoint. */
+export async function deleteModel(modelId: number): Promise<void> {
+  await request(`/api/models/${modelId}`, { method: 'DELETE' })
+}
+
 export interface ModelUsage {
   /** Datasets that read with this model: pinned to it, plus those following it as the default. */
   datasets: number

@@ -249,6 +249,121 @@ class TestManagingTheRegistry:
         assert patch(client, 2, {'lm_path': str(lm)}, headers=ADMIN).status_code == 200
 
 
+class TestDeleting:
+    """A second, deliberate step after archiving (#152). A trained model goes with its run
+    and the checkpoint that lives in the run's directory; one nobody trained is admin only."""
+
+    @pytest.fixture(autouse=True)
+    def trainings_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr('app.config.TRAININGS_DIR', tmp_path / 'trainings')
+        monkeypatch.setattr('app.config.SLURM_HOST', '')
+        return tmp_path / 'trainings'
+
+    @staticmethod
+    def delete(client, model_id, headers=ADMIN):
+        return client.delete(f'/api/models/{model_id}', headers=headers)
+
+    def test_a_model_in_use_is_archived_first(self, client):
+        response = self.delete(client, 2, headers=ALICE)
+
+        assert (response.status_code, response.json()['detail']) == (409, 'archive the model before deleting it')
+        assert 'Alice run' in listed(client)
+
+    def test_whoever_trained_it_deletes_it_with_its_run_and_checkpoint(self, client, conn, trainings_dir):
+        checkpoint = trainings_dir / '1' / 'output' / 'best_model.pt'
+        checkpoint.parent.mkdir(parents=True)
+        checkpoint.write_bytes(b'weights')
+        assert patch(client, 2, {'archived': True}, headers=ALICE).status_code == 200
+
+        assert self.delete(client, 2, headers=ALICE).status_code == 200
+
+        assert 'Alice run' not in listed(client, include_archived=True)
+        assert conn.execute('SELECT COUNT(*) FROM trainings').fetchone()[0] == 0
+        assert not (trainings_dir / '1').exists()
+
+    def test_an_admin_may_delete_a_model_somebody_else_trained(self, client):
+        patch(client, 2, {'archived': True})
+
+        assert self.delete(client, 2).status_code == 200
+        assert 'Alice run' not in listed(client, include_archived=True)
+
+    def test_somebody_else_may_not(self, client):
+        patch(client, 2, {'archived': True})
+
+        assert self.delete(client, 2, headers=BOB).status_code == 403
+        assert 'Alice run' in listed(client, include_archived=True)
+
+    def test_nor_may_a_manager_who_did_not_train_it(self, client):
+        """Managing the registry tidies it; deleting takes a checkpoint away for good."""
+        patch(client, 2, {'archived': True})
+
+        assert self.delete(client, 2, headers=TestManagingTheRegistry.MANAGER).status_code == 403
+
+    def test_a_model_nobody_trained_is_deleted_by_admins_only(self, client, conn):
+        conn.execute("INSERT INTO model_files (model_id, role, filename, sha256, size) VALUES (4, 'weights', 'old.pt', 'ab12', 7)")
+        conn.execute("INSERT INTO jobs (id, name, owner, status, model_ocr_id) VALUES ('j1', 'Volume', 'alice', 'done', 4)")
+        conn.commit()
+
+        assert self.delete(client, 4, headers=ALICE).status_code == 403
+        assert self.delete(client, 4).status_code == 200
+
+        assert 'Retired' not in listed(client, include_archived=True)
+        assert conn.execute('SELECT COUNT(*) FROM model_files').fetchone()[0] == 0
+        # Set to it, the dataset now reads with its task's default.
+        assert conn.execute("SELECT model_ocr_id FROM jobs WHERE id = 'j1'").fetchone()[0] is None
+
+    def test_the_default_cannot_be_deleted(self, client):
+        response = self.delete(client, 1)
+
+        assert (response.status_code, response.json()['detail']) == \
+            (409, 'the default model cannot be deleted - promote another first')
+
+    def test_a_model_shipped_with_its_backend_is_kept_archived(self, client, conn):
+        """Its backend offers it again every time it starts, so deleting it would not last."""
+        conn.execute("INSERT INTO models (id, task, name, source, checkpoint, backend, archived) "
+                     "VALUES (5, 'lines', 'kraken (builtin)', 'backend', '', 'lines', 1)")
+        conn.commit()
+
+        response = self.delete(client, 5)
+
+        assert (response.status_code, response.json()['detail']) == \
+            (409, 'its backend adds it again every time it starts - leave it archived instead')
+        assert 'kraken (builtin)' in listed(client, include_archived=True)
+
+    def test_a_run_still_to_start_from_it_keeps_it(self, client, conn):
+        """It would quietly start from another model instead."""
+        conn.execute("INSERT INTO trainings (id, name, task, status, owner, base_model_id, created_at) "
+                     "VALUES (2, 'Next', 'ocr', 'queued', 'alice', 4, '2026-02-01 00:00:00')")
+        conn.commit()
+
+        response = self.delete(client, 4)
+
+        assert (response.status_code, response.json()['detail']) == \
+            (409, 'run "Next" starts from this model - wait for it to finish or cancel it')
+
+    def test_a_dataset_being_read_with_it_keeps_it(self, client, conn):
+        """Its run holds the model's id from the start, and writes it onto every page it reads."""
+        conn.execute("INSERT INTO jobs (id, name, owner, status, model_ocr_id) VALUES ('j1', 'Volume', 'alice', 'running', 4)")
+        conn.commit()
+
+        response = self.delete(client, 4)
+
+        assert (response.status_code, response.json()['detail']) == \
+            (409, 'dataset "Volume" is being read with this model - wait for it to finish or cancel it')
+
+    def test_an_evaluation_running_on_it_keeps_it(self, client, conn):
+        conn.execute("INSERT INTO evaluations (model_id, decode, owner, status) VALUES (4, 'greedy', 'root', 'running')")
+        conn.commit()
+
+        response = self.delete(client, 4)
+
+        assert (response.status_code, response.json()['detail']) == \
+            (409, 'an evaluation of this model is running - wait for it to finish or cancel it')
+
+    def test_a_model_that_does_not_exist_is_a_404(self, client):
+        assert self.delete(client, 99).status_code == 404
+
+
 class TestFamilies:
     """A family takes its root's name, and whoever manages models may give it
     one of its own - on the root, the one model every member descends from."""

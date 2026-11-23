@@ -511,6 +511,11 @@ backends up as described in [MODEL-BACKENDS.md](MODEL-BACKENDS.md).
   **Rerun**.
 - Every task has a default model. Archived models leave the pickers but stay on record and
   can be unarchived.
+- An archived model's page offers **Delete**, to whoever trained it and to admins: it removes
+  the model for good, with its run and checkpoint, and datasets set to it fall back to their
+  task's default. A model nobody trained (imported) is deleted by admins only; the default is
+  never deleted, and one shipped with its backend stays archived, since the backend offers it
+  again whenever it starts.
 - Mark a model as the **new version of** another under **Edit**, even when it was not
   trained from it. Its page then shows "New version of ..." and "Replaced by ...", and its
   family graph draws the versions as one line, each fine-tune branching off its own version.

@@ -10,6 +10,8 @@ the version in the app's footer opens.
 
 ### Added
 
+- An archived model can be deleted from its page, with its run and checkpoint, by whoever
+  trained it or an admin (#152).
 - A finished layout run is scored beside its base model on its held-out pages, per class
   and page by page, on the run's page; older runs get it from a button (#150).
 - Search every dataset you can open at once, from Search in the top bar (#41).
@@ -110,6 +112,8 @@ the version in the app's footer opens.
 
 ### Fixed
 
+- Deleting a training run no longer fails when its model had read pages or was named as
+  replaced by a newer one (#152).
 - A running layout or line run's page shows its best on its own headline (box mAP50, F1)
   instead of "best cer", and the epoch it keeps by the metric its trainer keeps it by (#151).
 - The page editor's Run menu opens in full again, no longer cut off by the editor bar (#144).
