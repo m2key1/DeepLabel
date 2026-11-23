@@ -1,11 +1,12 @@
 import { Link } from 'react-router-dom'
 
-export type DatasetView = 'pages' | 'transcript'
+export type DatasetView = 'pages' | 'transcript' | 'history'
 
 const VIEWS: { view: DatasetView; label: string; path: string; title: string }[] = [
   { view: 'pages', label: 'Pages', path: '', title: 'The pages, their state and the scans' },
   { view: 'transcript', label: 'Transcript', path: '/transcript',
     title: 'Read the recognized text in order - reviewed lines in full ink' },
+  { view: 'history', label: 'History', path: '/history', title: 'Every run of the dataset, and the way back from one' },
 ]
 
 /** The ways into a text dataset, as tabs under its header. They are pages of their own, so

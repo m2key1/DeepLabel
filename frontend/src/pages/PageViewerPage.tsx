@@ -237,6 +237,8 @@ export function PageViewerPage() {
   const reviewParam = searchParams.get('review')
   const reviewMode = reviewParam !== null
   const maxConf = Number(reviewParam) || 0.85
+  // Reviewing what one run changed, from its history, rather than what the models doubted.
+  const reviewRun = Number(searchParams.get('run')) || null
   const [queue, setQueue] = useState<ReviewQueue | null>(null)
   const pendingLine = useRef<number | null>(null)
   const armedFor = useRef<string | null>(null)
@@ -526,8 +528,8 @@ export function PageViewerPage() {
   useEffect(() => {
     if (!reviewMode) return
     setShowLinePolys(true)
-    getReviewQueue(jobId, maxConf).then(setQueue).catch((e: Error) => setError(e.message))
-  }, [reviewMode, jobId, maxConf])
+    getReviewQueue(jobId, maxConf, reviewRun).then(setQueue).catch((e: Error) => setError(e.message))
+  }, [reviewMode, jobId, maxConf, reviewRun])
 
   const orderedPages = useMemo(
     () => (job ? job.pages.filter((p) => !p.deleted && !isUncounted(p)).sort((a, b) => a.idx - b.idx) : []),
@@ -2235,9 +2237,9 @@ export function PageViewerPage() {
         return
       }
       pendingLine.current = target.id
-      navigate(`/jobs/${jobId}/pages/${target.page_id}?review=${maxConf}`)
+      navigate(`/jobs/${jobId}/pages/${target.page_id}?review=${maxConf}${reviewRun ? `&run=${reviewRun}` : ''}`)
     },
-    [queue, activeLine, page, pageId, jobId, maxConf, navigate],
+    [queue, activeLine, page, pageId, jobId, maxConf, reviewRun, navigate],
   )
 
   /** The whole of what Shift+Enter means: this line is done with, so it is checked off and
@@ -3831,6 +3833,7 @@ export function PageViewerPage() {
               {queuePosition === -1
                 ? `${queue.total} to review`
                 : `Review ${queuePosition + 1} / ${queue.total}`}
+              {reviewRun ? <span data-testid="review-run">lines a run changed</span> : (
               <select
                 value={maxConf}
                 onChange={(e) => {
@@ -3847,6 +3850,7 @@ export function PageViewerPage() {
                   </option>
                 ))}
               </select>
+              )}
               <Link to={`/jobs/${jobId}/pages/${pageId}`} className="underline underline-offset-2">
                 exit
               </Link>

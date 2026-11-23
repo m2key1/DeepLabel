@@ -21,6 +21,7 @@ import { Shell } from './components/NavBar'
 import { JobsPage } from './pages/JobsPage'
 import { QueuePage } from './pages/QueuePage'
 import { SearchPage } from './pages/SearchPage'
+import { HistoryPage } from './pages/HistoryPage'
 import { NewJobPage } from './pages/NewJobPage'
 import { JobDetailPage } from './pages/JobDetailPage'
 import { LayoutTemplatesPage } from './pages/LayoutTemplatesPage'
@@ -82,6 +83,7 @@ const router = createBrowserRouter([
           { path: '/jobs/:id', element: <JobDetailPage /> },
           { path: '/jobs/:id/settings', element: <DatasetSettingsPage /> },
           { path: '/jobs/:id/transcript', element: <TranscriptPage /> },
+          { path: '/jobs/:id/history', element: <HistoryPage /> },
           // The Corpus tab was folded into the dataset's menus; old links land on the dataset.
           { path: '/jobs/:id/corpus', element: <DatasetRedirect /> },
           { path: '/jobs/:id/pages/:pageId', element: <PageViewerPage /> },

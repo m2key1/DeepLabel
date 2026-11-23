@@ -562,7 +562,10 @@ export function JobDetailPage() {
   const filters = useMemo(
     () => pageFilters(isMap, noLayout, documents.length > 0).filter((f) => canEdit || !f.editorsOnly),
     [isMap, noLayout, canEdit, documents.length])
-  const filter = filters.find((f) => f.key === searchParams.get('filter')) ?? filters[0]
+  // A run's pages come from its history rather than from a chip of their own.
+  const runFilter = /^run:\d+$/.test(searchParams.get('filter') ?? '')
+    ? { key: searchParams.get('filter') as PageFilter, label: 'Last changed by a run' } : null
+  const filter = runFilter ?? filters.find((f) => f.key === searchParams.get('filter')) ?? filters[0]
   const setFilter = (key: PageFilter) =>
     setSearchParams(key === 'all' ? {} : { filter: key }, { replace: true })
 
@@ -1468,8 +1471,8 @@ export function JobDetailPage() {
       <div className="min-w-0 flex-1">
       {(job.pages_live ?? 0) > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          {filters.map((f) => {
-            const count = chipCounts[f.key] ?? 0
+          {[...filters, ...(runFilter ? [runFilter] : [])].map((f) => {
+            const count = f === runFilter ? matched : chipCounts[f.key] ?? 0
             const active = filter.key === f.key
             // An empty Deleted or No-layout chip is noise on the datasets that have
             // neither, but both have to stay put while one is the selected filter.

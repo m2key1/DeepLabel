@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import time
 
@@ -99,6 +100,23 @@ SORTS = {
 
 MAX_LIMIT = 500
 
+# 'run:<id>': the pages holding a line or box whose newest revision is that run's - what it
+# changed and nobody has touched since. Not a chip of its own: it comes from a run's history.
+RUN_FILTER = re.compile(r'run:(\d+)')
+
+
+def last_changed_by(kind: str, run: str) -> str:
+    """The ids of the rows of a kind whose newest revision is the run's, read from the run's
+    own revisions rather than from every row of the dataset."""
+    return (f"SELECT r.target_id FROM revisions r WHERE r.run_id = {run} AND r.target_type = '{kind}' "
+            f"AND r.id = (SELECT MAX(id) FROM revisions WHERE target_type = '{kind}' AND target_id = r.target_id)")
+
+
+_CHANGED_BY_RUN = (
+    'id IN (SELECT e.page_id FROM lines l JOIN elements e ON e.id = l.element_id '
+    f"WHERE l.id IN ({last_changed_by('line', ':run')}) AND l.deleted = 0 AND e.deleted = 0 "
+    f"UNION SELECT page_id FROM elements WHERE id IN ({last_changed_by('element', ':run')}) AND deleted = 0)")
+
 
 class BadQuery(Exception):
     """A filter or sort the table does not offer, named so the route can refuse it."""
@@ -114,14 +132,15 @@ def fetch(conn: sqlite3.Connection, job_id: str, *, task: str, page_filter: str 
     reviewed would answer with nothing. `task` is the dataset's, which decides what
     reviewed means on it."""
     filters = _filters(task)
-    if page_filter not in filters:
-        raise BadQuery(f'filter must be one of {sorted(filters)}')
+    by_run = RUN_FILTER.fullmatch(page_filter)
+    if page_filter not in filters and by_run is None:
+        raise BadQuery(f'filter must be one of {sorted(filters)}, or run:<id>')
     if sort not in SORTS:
         raise BadQuery(f'sort must be one of {sorted(SORTS)}')
     limit = max(1, min(limit, MAX_LIMIT))
     offset = max(0, offset)
 
-    where = filters[page_filter]
+    where = f'{_WORK} AND {_CHANGED_BY_RUN}' if by_run else filters[page_filter]
     # A page with nothing to measure goes last whichever way the sort runs. SQLite puts
     # NULL first ascending, which would open a confidence sort on the pages that have no
     # reading at all - "not read yet" is not "read worst", and the point of that sort is
@@ -130,13 +149,13 @@ def fetch(conn: sqlite3.Connection, job_id: str, *, task: str, page_filter: str 
     # appear on two screens or on neither.
     column = SORTS[sort]
     order = (f'({column}) IS NULL ASC, {column} {"DESC" if descending else "ASC"}, idx ASC')
-    args = {'job_id': job_id, 'limit': limit, 'offset': offset}
+    args = {'job_id': job_id, 'limit': limit, 'offset': offset, **({'run': int(by_run[1])} if by_run else {})}
 
     # The chips count every filter already, and hold the answer; only 'all' counts fewer
-    # pages than it lists.
-    if page_filter in COUNTED:
+    # pages than it lists, and a run's pages are no chip.
+    if page_filter in COUNTED or by_run:
         matched = conn.execute(
-            f'SELECT COUNT(*) c FROM ({_ROWS}) WHERE {where}', {'job_id': job_id}).fetchone()['c']
+            f'SELECT COUNT(*) c FROM ({_ROWS}) WHERE {where}', args).fetchone()['c']
     else:
         matched = counts(conn, job_id, task=task)[page_filter]
     rows = conn.execute(

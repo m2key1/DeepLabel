@@ -573,11 +573,18 @@ def _with_stage(conn, job_id: str, task: str, use):
         stage.close()
 
 
+# The page status each step takes its work from.
+STEP_READS = {'ingest': 'pending', 'layout': 'ingested', 'lines': 'layout_done'}
+
+
 def run(conn, job_id: str, job_path: Path, layout_batch_size: int, ocr_chunk_lines: int):
     """Every phase of a text job in order, each stage's model opened as the phase starts
     and closed as it ends, so one card holds one model at a time."""
     job = conn.execute('SELECT line_mode, run_layout, run_lines, run_ocr, gt_autocheck, gt_ordered, '
                        'reference_overlap FROM jobs WHERE id = ?', (job_id,)).fetchone()
+    run_id = store.begin_run(conn, job_id)
+    store.revision_run.set(run_id)
+    conn.commit()
 
     def skip_layout():
         # Layout disabled: advance ingested pages so the line/OCR phases (which key on
@@ -615,11 +622,30 @@ def run(conn, job_id: str, job_path: Path, layout_batch_size: int, ocr_chunk_lin
             phases.append(('align', lambda: phase_align(conn, job_id, bool(job['gt_autocheck']),
                                                         bool(job['gt_ordered']))))
 
+    def has_work(phase: str) -> bool:
+        """Whether the step has anything to do here: the run records the steps it ran, not
+        every one it passed through on its way to the one it was queued for."""
+        if phase == 'layout' and not job['run_layout']:
+            return False
+        if phase == 'relines':
+            return bool(stale_elements(conn, job_id))
+        if phase == 'ocr':
+            return conn.execute(
+                'SELECT 1 FROM lines l JOIN elements e ON l.element_id = e.id JOIN pages p ON e.page_id = p.id '
+                "WHERE p.job_id = ? AND p.deleted = 0 AND e.deleted = 0 AND e.kind != 'container' "
+                'AND l.deleted = 0 AND (l.text IS NULL OR l.needs_ocr = 1) LIMIT 1', (job_id,)).fetchone() is not None
+        reads = STEP_READS.get(phase)
+        return reads is None or conn.execute(
+            'SELECT 1 FROM pages WHERE job_id = ? AND deleted = 0 AND status = ? LIMIT 1',
+            (job_id, reads)).fetchone() is not None
+
     try:
         for phase, fn in phases:
             if is_cancelled(conn, job_id):
                 return
             store.set_job_state(conn, job_id, phase=phase)
+            if has_work(phase):
+                store.note_phase(conn, run_id, phase)
             fn()
         # Whatever is still homeless gets one more chance now that every line exists and
         # has been read - this is where a page-level transcription finds its lines.

@@ -1299,8 +1299,9 @@ export function getQueue(): Promise<QueueState> {
   return request('/api/queue')
 }
 
-export function getReviewQueue(jobId: string, maxConf: number): Promise<ReviewQueue> {
-  return request(`/api/jobs/${jobId}/review?max_conf=${maxConf}`)
+/** With `run`, the lines that run changed and nobody has touched since, whatever their confidence. */
+export function getReviewQueue(jobId: string, maxConf: number, run?: number | null): Promise<ReviewQueue> {
+  return request(`/api/jobs/${jobId}/review?max_conf=${maxConf}${run ? `&run=${run}` : ''}`)
 }
 
 export function startJob(jobId: string): Promise<{ ok: boolean }> {
@@ -1739,6 +1740,8 @@ export interface BulkPreview {
 export type PageFilter =
   'all' | 'reviewed' | 'lines-reviewed' | 'layout-reviewed' | 'unreviewed-lines' | 'layout-unchecked'
   | 'lines-complete' | 'lines-unchecked' | 'no-layout' | 'test-pages' | 'has-note' | 'no-document-match' | 'deleted'
+  /** The pages a run changed that nobody has touched since, opened from its history. */
+  | `run:${number}`
 
 export type PageSort =
   'idx' | 'filename' | 'dimensions' | 'status' | 'layout' | 'lines' | 'checked' | 'confidence' | 'llm' | 'test'
@@ -3313,6 +3316,52 @@ export function searchCorpus(
   if (ask.group) params.set('group_id', ask.group)
   if (ask.job) params.set('job_id', ask.job)
   return request(`/api/search?${params}`, { signal })
+}
+
+/** One queued start of a dataset's steps, and what its writes changed. */
+export interface RunRecord {
+  id: number
+  /** 'new', 'rerun:<phase>', 'page:<phase>', or null where the system queued it. */
+  reason: string | null
+  started_by: string | null
+  /** The steps it went through, in order. */
+  phases: string[]
+  queued_at: string
+  started_at: string | null
+  finished_at: string | null
+  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled'
+  /** Lines and boxes it wrote to. */
+  changed: { lines: number; boxes: number }
+  reverted_at: string | null
+  reverted_by: string | null
+  /** Ended, not reverted, and it changed something. */
+  revertable: boolean
+}
+
+export interface RunHistory {
+  job: { id: string; name: string; status: JobStatus; my_role?: Role }
+  runs: RunRecord[]
+}
+
+export interface RunRevertPreview {
+  restore: { lines: number; boxes: number }
+  remove: { lines: number; boxes: number }
+  /** Rows you edited since: your edits stay on them. */
+  kept: { lines: number; boxes: number }
+  /** Why it cannot be reverted, or null. */
+  refused: string | null
+}
+
+export function listRuns(jobId: string): Promise<RunHistory> {
+  return request(`/api/jobs/${jobId}/runs`)
+}
+
+export function runRevertPreview(jobId: string, runId: number): Promise<RunRevertPreview> {
+  return request(`/api/jobs/${jobId}/runs/${runId}/revert`)
+}
+
+export function revertRun(jobId: string, runId: number): Promise<RunRevertPreview> {
+  return request(`/api/jobs/${jobId}/runs/${runId}/revert`, { method: 'POST' })
 }
 
 export function jobEventsUrl(jobId: string): string {

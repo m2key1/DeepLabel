@@ -75,6 +75,7 @@ def redetect_one(conn, job_id: str) -> dict:
         f"WHERE p.job_id = ? AND p.deleted = 0 AND {layout_classes.STALE_LINES_SQL})",
         (job_id, *layout_classes.STALE_LINES_ARGS))
     _queue(conn, job_id)
+    store.note_run(conn, job_id, None, 'redetect')
     return {'ok': True, **stale}
 
 
@@ -201,6 +202,7 @@ def reocr_one(conn, job_id: str, scope: str, user: dict) -> dict:
             (job_id,))
     store.enable_ocr_phase(conn, job_id)  # asking for a re-read is asking for the phase
     _queue(conn, job_id)
+    store.note_run(conn, job_id, user['username'], f'reread:{scope}')
     return {'ok': True, 'lines': _pending_reocr(conn, job_id)}
 
 
@@ -387,6 +389,7 @@ def rerun_one(conn, job_id: str, from_phase: str, force: bool, user: str,
     if only_missing:
         match = _missing(body.from_phase)
     require_rerun(conn, job, body.from_phase, body.force, match)
+    since = store.begin_span(conn)
 
     discarded = rerun_discards(conn, job_id, body.from_phase)
     # Deleted pages must never be handed back to the runner.
@@ -453,6 +456,7 @@ def rerun_one(conn, job_id: str, from_phase: str, force: bool, user: str,
     if not only_missing or dropped_lines:
         switch_on_phase(conn, job, body.from_phase)
     _queue(conn, job_id)
+    store.note_run(conn, job_id, user, f'rerun:{body.from_phase}', since)
     # The counters still describe the discarded work, so the bars would read against
     # stale totals (e.g. 76/75) until the re-run happens to overwrite each one.
     store.recount_pages(conn, job_id)
@@ -701,11 +705,13 @@ def run_page(page_id: int, body: RunPhase, conn=Depends(get_db),
     _valid_phase(body.phase)
     _runnable_job(conn, page['job_id'], user)
     costs = _page_costs(conn, page_id)
+    since = store.begin_span(conn)
     try:
         _stage_page_run(conn, page, body.phase, user['username'])
     except NotRunnable as exc:
         raise HTTPException(exc.status, exc.reason)
     _queue(conn, page['job_id'])
+    store.note_run(conn, page['job_id'], user['username'], f'page:{body.phase}', since)
     conn.commit()
     return {'ok': True, 'phase': body.phase, **costs[body.phase]}
 
@@ -734,6 +740,7 @@ def run_pages(job_id: str, body: RunPages, conn=Depends(get_db),
             raise HTTPException(404, f'no such page in this dataset: {page_id}')
         chosen.append(held[page_id])
     staged, skipped = [], []
+    since = store.begin_span(conn)
     for page in chosen:
         try:
             _stage_page_run(conn, page, body.phase, user['username'])
@@ -746,5 +753,6 @@ def run_pages(job_id: str, body: RunPages, conn=Depends(get_db),
         # refused with the reason rather than reported as a run that did nothing.
         raise HTTPException(400, skipped[0]['reason'])
     _queue(conn, job_id)
+    store.note_run(conn, job_id, user['username'], f'pages:{body.phase}', since)
     conn.commit()
     return {'ok': True, 'phase': body.phase, 'pages': len(staged), 'skipped': skipped}

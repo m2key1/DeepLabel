@@ -914,7 +914,7 @@ def job_info(job_id: str, conn=Depends(get_db), user: dict = Depends(current_use
 
 
 @router.get('/api/jobs/{job_id}/review')
-def review_queue(job_id: str, max_conf: float = 0.85, include_checked: bool = False,
+def review_queue(job_id: str, max_conf: float = 0.85, include_checked: bool = False, run: int | None = None,
                  conn=Depends(get_db), user: dict = Depends(current_user)):
     """Lines worth reviewing, in reading order across the whole job: the ones the OCR model
     doubted, and the ones language models settled among themselves that nobody has checked -
@@ -927,15 +927,18 @@ def review_queue(job_id: str, max_conf: float = 0.85, include_checked: bool = Fa
     settled = 'l.corrected_by LIKE ? AND l.checked = 0'
     # Sent from an evaluation page: queued checked or not, until a person checks it again.
     flagged = 'rf.line_id IS NOT NULL'
+    # A run's lines instead: what it changed that nobody has touched since.
+    worth = (f"l.id IN ({page_rows.last_changed_by('line', '?')})" if run is not None
+             else f'({doubted}) OR ({settled}) OR ({flagged})')
     rows = conn.execute(
         'SELECT l.id, l.confidence, e.page_id, p.idx page_idx, rf.line_id IS NOT NULL flagged '
         'FROM lines l JOIN elements e ON l.element_id = e.id JOIN pages p ON e.page_id = p.id '
         'LEFT JOIN review_flags rf ON rf.line_id = l.id '
         f"WHERE p.job_id = ? AND {caches.counted_page('p')} AND e.kind != 'container' "
         "AND e.class_name != 'Divider' AND e.deleted = 0 AND l.deleted = 0 "
-        f'AND (({doubted}) OR ({settled}) OR ({flagged})) '
+        f'AND ({worth}) '
         'ORDER BY p.idx, e.order_idx, l.order_idx',
-        (job_id, max_conf, consensus.SETTLED_BY + '%')).fetchall()
+        (job_id, run) if run is not None else (job_id, max_conf, consensus.SETTLED_BY + '%')).fetchall()
     return {'max_conf': max_conf, 'total': len(rows),
             'lines': [{'id': r['id'], 'page_id': r['page_id'], 'page_idx': r['page_idx'],
                        'confidence': r['confidence'], 'flagged': bool(r['flagged'])} for r in rows]}

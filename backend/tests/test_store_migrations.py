@@ -203,6 +203,7 @@ class TestMigrations:
         'pages': ['content_hash', 'deleted', 'filename', 'height', 'id', 'idx', 'job_id', 'layout_checked', 'lines_checked', 'source_file', 'source_page', 'source_pdf', 'status', 'width'],
         'regions': ['checked', 'class_id', 'deleted', 'holes', 'id', 'order_idx', 'page_id', 'points'],
         'review_flags': ['created_at', 'evaluation_id', 'flagged_by', 'line_id'],
+        'runs': ['finished_at', 'id', 'job_id', 'phases', 'queued_at', 'reason', 'reverted_at', 'reverted_by', 'started_at', 'started_by', 'status'],
         'revisions': ['action', 'author', 'created_at', 'id', 'job_id', 'snapshot', 'target_id', 'target_type'],
         'training_preflights': ['created_at', 'error', 'id', 'owner', 'request', 'result', 'status', 'task'],
         'trainings': ['base_model_id', 'created_at', 'dataset_job_ids', 'epochs', 'error', 'id', 'metrics', 'model_id', 'name', 'owner', 'phase', 'pid', 'slurm_job_id', 'snapshot_counts', 'status', 'target', 'task', 'val_fraction'],
@@ -1710,4 +1711,25 @@ def test_a_database_from_before_the_search_index_indexes_its_lines(tmp_path):
         (1, 'mueller'), (2, 'hueber')]
     store.connect(db).close()
     assert conn.execute('SELECT COUNT(*) FROM line_search').fetchone()[0] == 2
+    conn.close()
+
+
+def test_a_database_from_before_runs_records_them_from_the_next_queue(tmp_path):
+    """Runs start with the build that has them (#39): an older dataset has none to list, and
+    its next queued start opens its first."""
+    db = tmp_path / 'app.db'
+    conn = store.connect(db)
+    conn.execute("INSERT INTO jobs (id, name, status) VALUES ('j1', 'Volume', 'done')")
+    conn.commit()
+    keep_jobs = sorted(cols(conn, 'jobs') - {'run_id'})
+    keep_revisions = sorted(cols(conn, 'revisions') - {'run_id'})
+    conn.close()
+    strip_column(db, 'jobs', keep_jobs)
+    strip_column(db, 'revisions', keep_revisions)
+
+    conn = store.connect(db)
+    assert conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == 0
+    conn.execute("UPDATE jobs SET status = 'queued' WHERE id = 'j1'")
+    assert [tuple(r) for r in conn.execute("SELECT j.run_id, r.job_id FROM jobs j JOIN runs r ON r.id = j.run_id")] == [
+        (1, 'j1')]
     conn.close()

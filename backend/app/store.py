@@ -86,7 +86,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     use_training INTEGER NOT NULL DEFAULT 1,
     use_test INTEGER NOT NULL DEFAULT 1,
     use_external_llm INTEGER NOT NULL DEFAULT 1,
-    use_export INTEGER NOT NULL DEFAULT 1
+    use_export INTEGER NOT NULL DEFAULT 1,
+    -- The run it is queued for or going through, and the one it last went through.
+    run_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS pages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -276,8 +278,26 @@ CREATE TABLE IF NOT EXISTS revisions (
     snapshot TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     client_id TEXT,
-    checks_line INTEGER NOT NULL DEFAULT 0
+    checks_line INTEGER NOT NULL DEFAULT 0,
+    -- The run that wrote it; NULL for people's edits and for whatever came before runs.
+    run_id INTEGER
 );
+-- One queued start of a dataset's steps: what started it, the phases it went through and
+-- whether it was taken back. Its writes are the revisions that carry its id.
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    reason TEXT,
+    started_by TEXT,
+    phases TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'queued',
+    queued_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    finished_at TEXT,
+    reverted_at TEXT,
+    reverted_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_runs_job ON runs(job_id, id);
 -- The transcription-convention flags people and models speak of: the name is what a model
 -- declares and a dataset stores, the label and description are what people read.
 CREATE TABLE IF NOT EXISTS convention_flags (
@@ -894,8 +914,11 @@ def connect(db_path: Path) -> sqlite3.Connection:
                                AS was_checked
                     FROM revisions WHERE target_type = 'line')
                 WHERE action != 'origin' AND now_checked = 1 AND COALESCE(was_checked, 0) = 0)""")
+    if 'run_id' not in revision_cols:
+        conn.execute('ALTER TABLE revisions ADD COLUMN run_id INTEGER')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_revisions_person '
                  'ON revisions(author, target_type, checks_line, action, target_id)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_revisions_run ON revisions(run_id, target_type, target_id)')
     page_cols = {row[1] for row in conn.execute('PRAGMA table_info(pages)')}
     if 'layout_checked' not in page_cols:
         conn.execute('ALTER TABLE pages ADD COLUMN layout_checked INTEGER NOT NULL DEFAULT 0')
@@ -935,6 +958,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
         # Existing rows predate line tracing, so the default is exactly right.
         conn.execute("ALTER TABLE regions ADD COLUMN kind TEXT NOT NULL DEFAULT 'polygon'")
     job_cols = {row[1] for row in conn.execute('PRAGMA table_info(jobs)')}
+    if 'run_id' not in job_cols:
+        conn.execute('ALTER TABLE jobs ADD COLUMN run_id INTEGER')
     if 'line_mode' not in job_cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN line_mode TEXT NOT NULL DEFAULT 'per_crop'")
     if 'reading_order' not in job_cols:
@@ -1116,6 +1141,21 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute(f"CREATE TRIGGER IF NOT EXISTS {table}_finished_at AFTER UPDATE OF status ON {table} "
                      "WHEN NEW.status IN ('done', 'error', 'cancelled') AND OLD.status IN ('queued', 'preparing', 'running') "
                      f"BEGIN UPDATE {table} SET finished_at = datetime('now') WHERE rowid = NEW.rowid; END")
+    # A run opens as a dataset at rest is queued - a restart putting a running one back carries
+    # on the same run - and closes as the dataset comes to rest again. A new dataset is made
+    # 'queued' by the column's default, so being queued from there opens its first.
+    conn.execute("CREATE TRIGGER IF NOT EXISTS jobs_run_opened AFTER UPDATE OF status ON jobs "
+                 "WHEN NEW.status = 'queued' AND (OLD.status NOT IN ('queued', 'preparing', 'running') "
+                 'OR NEW.run_id IS NULL) '
+                 'BEGIN INSERT INTO runs (job_id) VALUES (NEW.id); '
+                 'UPDATE jobs SET run_id = last_insert_rowid() WHERE rowid = NEW.rowid; END')
+    conn.execute("CREATE TRIGGER IF NOT EXISTS jobs_run_moved AFTER UPDATE OF status ON jobs "
+                 "WHEN NEW.run_id IS NOT NULL AND NEW.status IN ('running', 'done', 'error', 'cancelled') "
+                 'BEGIN UPDATE runs SET status = NEW.status, '
+                 "started_at = CASE WHEN NEW.status = 'running' THEN COALESCE(started_at, datetime('now')) "
+                 'ELSE started_at END, '
+                 "finished_at = CASE WHEN NEW.status = 'running' THEN NULL ELSE datetime('now') END "
+                 'WHERE id = NEW.run_id AND finished_at IS NULL; END')
     # 'rescored' named a mode the engine did not run: with an LM configured it did beam
     # search instead, so every job and evaluation recorded the wrong name. Relabel to what
     # actually ran - once, guarded by user_version, or a later deliberate 'rescored' would
@@ -1413,6 +1453,8 @@ def snapshot_region(row: sqlite3.Row) -> dict:
 # The tab whose request is being served, set once per request by the web layer so that
 # every revision the request logs carries it without each caller passing it down.
 revision_client: ContextVar[str | None] = ContextVar('revision_client', default=None)
+# The run a runner is writing for, stamped on every revision it logs.
+revision_run: ContextVar[int | None] = ContextVar('revision_run', default=None)
 
 
 def log_revision(conn: sqlite3.Connection, target_type: str, target_id: int, job_id: str,
@@ -1420,9 +1462,40 @@ def log_revision(conn: sqlite3.Connection, target_type: str, target_id: int, job
     """Append one revision. Never commits - the caller's transaction must carry
     both the materialized write and this log entry."""
     conn.execute('INSERT INTO revisions (target_type, target_id, job_id, author, action, snapshot, client_id, '
-                 'checks_line) VALUES (?,?,?,?,?,?,?,?)',
+                 'checks_line, run_id) VALUES (?,?,?,?,?,?,?,?,?)',
                  (target_type, target_id, job_id, author, action, json.dumps(snapshot),
-                  revision_client.get(), checks_line(conn, target_type, target_id, action, snapshot)))
+                  revision_client.get(), checks_line(conn, target_type, target_id, action, snapshot),
+                  revision_run.get()))
+
+
+def begin_run(conn: sqlite3.Connection, job_id: str) -> int:
+    """The run a runner starts on: the one the dataset was queued for, or a new one where
+    nothing opened one - a dataset put straight on the queue, or a run already closed."""
+    run = conn.execute('SELECT r.id, r.finished_at FROM jobs j JOIN runs r ON r.id = j.run_id WHERE j.id = ?',
+                       (job_id,)).fetchone()
+    if run is None or run['finished_at'] is not None:
+        run_id = conn.execute('INSERT INTO runs (job_id) VALUES (?)', (job_id,)).lastrowid
+        conn.execute('UPDATE jobs SET run_id = ? WHERE id = ?', (run_id, job_id))
+    else:
+        run_id = run['id']
+    conn.execute("UPDATE runs SET status = 'running', started_at = COALESCE(started_at, datetime('now')) "
+                 'WHERE id = ?', (run_id,))
+    return run_id
+
+
+def note_phase(conn: sqlite3.Connection, run_id: int, phase: str) -> None:
+    conn.execute("UPDATE runs SET phases = json_insert(phases, '$[#]', ?) WHERE id = ?", (phase, run_id))
+
+
+def note_run(conn: sqlite3.Connection, job_id: str, started_by: str | None, reason: str,
+             since: int | None = None) -> None:
+    """Who queued the dataset's run and why, and the revisions logged since `since` in
+    queueing it - what a re-run discards before it starts - as the run's own."""
+    run_id = conn.execute('SELECT run_id FROM jobs WHERE id = ?', (job_id,)).fetchone()['run_id']
+    conn.execute('UPDATE runs SET started_by = ?, reason = ? WHERE id = ?', (started_by, reason, run_id))
+    if since is not None:
+        conn.execute('UPDATE revisions SET run_id = ? WHERE job_id = ? AND id > ? AND run_id IS NULL',
+                     (run_id, job_id, since))
 
 
 def checks_line(conn: sqlite3.Connection, target_type: str, target_id: int, action: str, snapshot: dict) -> bool:

@@ -311,3 +311,167 @@ def _payload(conn, page_id: int, touched, span) -> dict:
             'removed_regions': removed_regions, 'span': span,
             'reading_order': conn.execute('SELECT reading_order FROM pages WHERE id = ?',
                                           (page_id,)).fetchone()['reading_order']}
+
+
+# What a run wrote to, in the words its history and its revert are told in.
+RUN_ROWS = {'line': 'lines', 'element': 'boxes'}
+
+
+def _no_rows() -> dict:
+    return {'lines': 0, 'boxes': 0}
+
+
+def rows_phrase(counts: dict) -> str:
+    lines, boxes = counts['lines'], counts['boxes']
+    return ' and '.join([*([f"{lines} line{'' if lines == 1 else 's'}"] if lines else []),
+                         *([f"{boxes} box{'' if boxes == 1 else 'es'}"] if boxes else [])])
+
+
+# What a field held when an older snapshot does not say: the line detection's own create logs
+# a partial snapshot, of a row that was live, unchecked and unturned.
+SNAPSHOT_DEFAULTS = {'line': {'deleted': False, 'orientation': 0, 'check_source': None, 'corrected_by': None},
+                     'element': {'deleted': False, 'checked': False, 'lines_bbox': None, 'polygon': None}}
+
+
+def _whole(kind: str, snapshot: dict | None) -> dict | None:
+    return None if snapshot is None else {**SNAPSHOT_DEFAULTS[kind], **snapshot}
+
+
+def _since_run(conn, kind: str, target_id: int, first: int, run_id: int, user: str) -> tuple[set, set, bool]:
+    """What happened to a row from the run's first write to it on, other than the run's own
+    writes - a person may edit a line while the run is still going: the fields `user`
+    changed, who else changed it, and whether a later run that still stands wrote to it."""
+    mine, others, overrun = set(), set(), False
+    previous = _whole(kind, _snapshot_of(conn, first))
+    for r in conn.execute(
+            'SELECT r.author, r.run_id, r.snapshot, ru.reverted_at FROM revisions r '
+            'LEFT JOIN runs ru ON ru.id = r.run_id '
+            'WHERE r.target_type = ? AND r.target_id = ? AND r.id > ? ORDER BY r.id', (kind, target_id, first)):
+        snapshot = _whole(kind, json.loads(r['snapshot']))
+        changed = {f for f, v in snapshot.items() if v != previous.get(f)} - DERIVED_FIELDS[kind]
+        if r['run_id'] == run_id:
+            pass
+        elif r['run_id'] is not None and r['reverted_at'] is None:
+            overrun = True
+        elif changed and store.is_person(r['author']):
+            if r['author'] == user:
+                mine |= changed
+            else:
+                others.add(r['author'])
+        previous = snapshot
+    return mine, others, overrun
+
+
+def _reading(line: dict) -> str | None:
+    return line.get('corrected_text') or line.get('text')
+
+
+def plan_run_revert(conn, run_id: int, user: str) -> tuple[dict, list]:
+    """What reverting the run would do, and the goals that do it. Each row the run wrote goes
+    back to how it stood just before the run's first write to it, and a row it made goes. A
+    field the reverting person changed since keeps their value, and a line they checked since
+    keeps the reading they checked. Another person's edit since, or a later run over the same
+    rows that still stands, refuses it: putting back what the run replaced would take theirs
+    with it."""
+    preview = {'restore': _no_rows(), 'remove': _no_rows(), 'kept': _no_rows(), 'refused': None}
+    if conn.execute('SELECT reverted_at FROM runs WHERE id = ?', (run_id,)).fetchone()['reverted_at']:
+        return {**preview, 'refused': 'it was reverted already'}, []
+    others: dict[str, dict] = {}
+    later = _no_rows()
+    goals = []
+    for target in conn.execute(
+            "SELECT target_type kind, target_id id, MIN(id) first, MAX(id) last FROM revisions "
+            "WHERE run_id = ? AND action != 'origin' AND target_type IN ('line', 'element') "
+            'GROUP BY target_type, target_id ORDER BY MIN(id)', (run_id,)).fetchall():
+        kind, noun = target['kind'], RUN_ROWS[target['kind']]
+        mine, by_others, overrun = _since_run(conn, kind, target['id'], target['first'], run_id, user)
+        if overrun:
+            later[noun] += 1
+            continue
+        for person in by_others:
+            others.setdefault(person, _no_rows())[noun] += 1
+        current = conn.execute(f'SELECT * FROM {TABLES[kind]} WHERE id = ?', (target['id'],)).fetchone()
+        if by_others or current is None:
+            continue
+        now = SNAPSHOTS[kind](current)
+        before = _whole(kind, _snapshot_at(conn, kind, target['id'], target['first'] - 1))
+        if before is None:
+            goal = now if mine else None
+        else:
+            goal = {**before, **{field: now[field] for field in mine if field in now}}
+        if kind == 'line' and 'checked' in mine and now['checked'] and _reading(goal or {}) != _reading(now):
+            goal = now
+        if mine:
+            preview['kept'][noun] += 1
+        if goal is None:
+            if not now['deleted']:
+                preview['remove'][noun] += 1
+                goals.append((kind, target['id'], None))
+        elif any(goal[f] != now.get(f) for f in goal if f not in DERIVED_FIELDS[kind]):
+            preview['restore'][noun] += 1
+            goals.append((kind, target['id'], goal))
+    # A box the revert would take off keeps standing while a line it holds stays: the line
+    # would otherwise live on under a box nothing shows.
+    removed = {target_id for kind, target_id, goal in goals if kind == 'line' and goal is None}
+    for kind, target_id, goal in list(goals):
+        if kind == 'element' and goal is None and any(
+                row['id'] not in removed for row in conn.execute(
+                    'SELECT id FROM lines WHERE element_id = ? AND deleted = 0', (target_id,))):
+            goals.remove((kind, target_id, goal))
+            preview['remove']['boxes'] -= 1
+            preview['kept']['boxes'] += 1
+    if others:
+        names = sorted(others)
+        who = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+        total = {noun: sum(counts[noun] for counts in others.values()) for noun in ('lines', 'boxes')}
+        preview['refused'] = (f"{who} {'has' if len(names) == 1 else 'have'} edited "
+                              f'{rows_phrase(total)} this run changed since')
+    elif any(later.values()):
+        preview['refused'] = f'a later run changed {rows_phrase(later)} this run changed; revert that one first'
+    return preview, goals
+
+
+def _settle_status(conn, page_id: int) -> None:
+    """The step a page is through, read off what is on it once a revert has put it back: page
+    statuses carry no revisions, and a page a revert empties has to be ready to be read again."""
+    lines = conn.execute(
+        'SELECT COUNT(*) total, COALESCE(SUM(l.text IS NOT NULL), 0) read FROM lines l '
+        'JOIN elements e ON e.id = l.element_id WHERE e.page_id = ? AND e.deleted = 0 AND l.deleted = 0',
+        (page_id,)).fetchone()
+    boxes = conn.execute("SELECT COUNT(*) FROM elements WHERE page_id = ? AND deleted = 0 AND kind = 'content'",
+                         (page_id,)).fetchone()[0]
+    status = ('done' if lines['read'] == lines['total'] else 'lines_done') if lines['total'] \
+        else 'layout_done' if boxes else 'ingested'
+    conn.execute("UPDATE pages SET status = ? WHERE id = ? AND status IN ('ingested', 'layout_done', 'lines_done', 'done')",
+                 (status, page_id))
+
+
+def revert_run(conn, job_id: str, run_id: int, user: str) -> dict:
+    """Put back what the run replaced, as plan_run_revert says, under the write lock so no
+    edit lands between the plan and the writes. Logged as a machine's writes in the person's
+    name, like a re-run's: taking a run back is not anybody's edit of the rows."""
+    store.write_lock(conn)
+    preview, goals = plan_run_revert(conn, run_id, user)
+    if preview['refused']:
+        raise Conflict({'message': preview['refused']})
+    _refuse_missing_classes(conn, job_id, goals)
+    touched = _apply(conn, goals, f'system:revert@{user}')
+    for element_id in touched['elements']:
+        geometry.resequence_lines(conn, element_id)
+    pages = [row['page_id'] for row in conn.execute(
+        f"SELECT DISTINCT page_id FROM elements WHERE id IN ({', '.join('?' * len(touched['elements']))})",
+        tuple(touched['elements']))]
+    for page_id in pages:
+        geometry.resequence_page(conn, page_id)
+        _settle_status(conn, page_id)
+    store.recount_pages(conn, job_id, commit=False)
+    conn.execute("UPDATE runs SET reverted_at = datetime('now'), reverted_by = ? WHERE id = ?", (user, run_id))
+    conn.commit()
+
+    for page_id in pages:
+        candidates.rematch_page(conn, page_id)
+    for line_id in touched['lines']:
+        training.enqueue(line_id)
+    if touched['reverted_elements']:
+        dataset_sync.enqueue(job_id)
+    return preview

@@ -308,3 +308,26 @@ def test_a_page_layout_passed_by_is_marked_and_a_later_layout_run_clears_the_mar
     page = conn.execute('SELECT status, layout_skipped FROM pages WHERE id = 1').fetchone()
     assert tuple(page) == ('layout_done', 0)
     assert store.get_job(conn, 'j1')['counters']['pages_layout_done'] == 1
+
+
+def test_a_run_records_its_phases_and_every_write_it_makes(conn, backend, tmp_path):
+    """The runner's writes are its run's (#39): each revision carries the run, and the run
+    lists the phases it went through."""
+    run(conn, tmp_path)
+    runs = conn.execute('SELECT id, phases, status FROM runs').fetchall()
+    assert [(json.loads(r['phases']), r['status']) for r in runs] == [(['ingest', 'layout', 'lines', 'ocr'], 'done')]
+    written = {(r['target_type'], r['target_id'], r['run_id']) for r in conn.execute(
+        "SELECT target_type, target_id, run_id FROM revisions WHERE action != 'origin'")}
+    made = {('element', r['id'], runs[0]['id']) for r in conn.execute('SELECT id FROM elements')} | {
+        ('line', r['id'], runs[0]['id']) for r in conn.execute('SELECT id FROM lines')}
+    assert written == made
+
+
+def test_a_reread_records_only_the_step_it_ran(conn, backend, tmp_path):
+    run(conn, tmp_path)
+    conn.execute("UPDATE lines SET needs_ocr = 1")
+    conn.execute("UPDATE jobs SET status = 'running' WHERE id = 'j1'")
+    conn.commit()
+    run(conn, tmp_path)
+    assert [json.loads(r['phases']) for r in conn.execute('SELECT phases FROM runs ORDER BY id')] == [
+        ['ingest', 'layout', 'lines', 'ocr'], ['ocr']]

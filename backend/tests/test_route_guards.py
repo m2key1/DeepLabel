@@ -25,6 +25,8 @@ ACCESS_CHECKS = {
     '_pipeline_or_404', '_owned_training', 'get_training', 'accessible_job',
     # The layout class routes' check: require_job_manager by another name.
     '_editing',
+    # The runs routes': require_job_access, then the run looked up within that dataset only.
+    '_run_of',
     # Shared with the bulk router so one dataset and a whole selection are gated by the
     # same code. It calls require_job_access and then the Manager check; a route that
     # delegates to it is as gated as one that inlines them.

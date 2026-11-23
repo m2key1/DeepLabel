@@ -215,6 +215,17 @@ source and pages. Changes apply to the next run; nothing already recognised is t
 - A map dataset keeps a smaller **Settings**: its name, and its tile size if it cut its own tiles.
 - **Re-run** a phase over the dataset (from the **Run** menu on its page), a selection of
   pages, or a single page. The dialog says what will be replaced before it runs.
+- A dataset's **History** tab lists its runs, newest first: each time it was queued, what
+  started it (a re-run, a page run, a re-read), who did, the steps it went through and how
+  many lines and boxes it changed. **Its pages** opens the page table on the pages it
+  changed that nobody has touched since, and **Review its lines** walks those lines in
+  Review. A Manager can **Revert** a run: every line and box it wrote goes back to how it
+  stood before it, and what it made is taken off the pages. Lines you edited since keep your
+  edits, a line you checked keeps the reading you checked, and a box still holding a line you
+  kept stays. A page the revert leaves empty goes back to be processed again on the next
+  run. Page sign-offs a layout re-run took away do not come back. The dialog counts all of this
+  before anything changes, and refuses when a colleague has edited what the run changed
+  since, or when a later run changed the same lines and has not been reverted itself.
 - A step that was off when some pages went through - layout skipped, or lines or OCR switched
   off at the time - is remembered per page. Once it is switched on, the dataset's Managers
   see a banner naming the step and how many pages it has not run on; **Run on those pages…**
