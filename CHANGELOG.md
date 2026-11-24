@@ -10,6 +10,8 @@ the version in the app's footer opens.
 
 ### Added
 
+- IIIF manifests and collections in Presentation API 4, which the IIIF cookbook already publishes,
+  are read like version 3 (#153).
 - A second factor at sign-in: an authenticator app and recovery codes, set up on DeepLabel's
   own sign-in page, asked at every sign-in where a deployment requires it, and reset by an
   admin for a lost phone (#135). `python -m app.second_factor_setup` requires it on Authentik.

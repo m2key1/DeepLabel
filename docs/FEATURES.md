@@ -80,7 +80,7 @@ another of your datasets already has stops the Source step, with a link to that 
 - Upload images, PDFs, a zip of scans, or a transcribed dataset as a zip, or (admins)
   point at a folder on the server. The form lists every file and lets you remove any
   before sending.
-- Or paste a **IIIF** manifest address (Presentation API 2 or 3) for a text dataset; a
+- Or paste a **IIIF** manifest address (Presentation API 2, 3 or 4) for a text dataset; a
   collection lists its manifests to choose from. The form shows the manifest's title, page
   count, attribution and rights. The pages are downloaded through the archive's image server
   when the dataset starts, no wider than the deployment allows, and from then on behave like

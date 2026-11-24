@@ -1,5 +1,5 @@
-"""A small IIIF archive for the e2e stack: manifests in both Presentation versions, a
-collection of them, and an image service that draws each page on request.
+"""A small IIIF archive for the e2e stack: manifests in Presentation 2, 3 and 4, a
+collection, and an image service that draws each page on request.
 
 The transcribed manifest offers an ALTO file for its first canvas and text annotations for
 its second, and nothing for its third.
@@ -59,6 +59,26 @@ def v2_manifest(run: str) -> dict:
     return {'@context': 'http://iiif.io/api/presentation/2/context.json', '@id': f'{BASE}/v2/manifest.json?run={run}',
             '@type': 'sc:Manifest', 'label': 'Council minutes 1782', 'attribution': ATTRIBUTION,
             'sequences': [{'canvases': canvases}]}
+
+
+def v4_manifest(run: str) -> dict:
+    """Two pages in Presentation 4: listed motivations, object targets, and a timeline between them."""
+    def canvas(n: int, label: str) -> dict:
+        service = f'{BASE}/img/v4-{run}-{n}'
+        return {'id': f'{BASE}/v4canvas/{run}/{n}', 'type': 'Canvas', 'label': {'none': [label]},
+                'width': WIDTH, 'height': HEIGHT,
+                'items': [{'id': f'{BASE}/v4page/{run}/{n}', 'type': 'AnnotationPage', 'items': [{
+                    'id': f'{BASE}/v4anno/{run}/{n}', 'type': 'Annotation', 'motivation': ['painting'],
+                    'target': {'id': f'{BASE}/v4canvas/{run}/{n}', 'type': 'Canvas'},
+                    'body': {'id': f'{service}/full/max/0/default.jpg', 'type': 'Image', 'format': 'image/jpeg',
+                             'width': WIDTH, 'height': HEIGHT,
+                             'service': [{'id': service, 'type': 'ImageService3', 'profile': 'level1'}]}}]}]}
+    first, second = (canvas(n, label) for n, label in enumerate(LABELS[:2], 1))
+    timeline = {'id': f'{BASE}/v4timeline/{run}', 'type': 'Timeline', 'duration': 60.0, 'items': []}
+    return {'@context': 'http://iiif.io/api/presentation/4/context.json', 'id': f'{BASE}/v4/manifest.json?run={run}',
+            'type': 'Manifest', 'label': {'en': ['Council minutes 1783']},
+            'requiredStatement': {'label': {'en': ['Attribution']}, 'value': {'en': [ATTRIBUTION]}},
+            'rights': RIGHTS, 'items': [first, timeline, second]}
 
 
 # What the transcribed manifest's archive read on its first two canvases, in canvas pixels.
@@ -129,7 +149,8 @@ class Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         run = (parse_qs(parts.query).get('run') or ['default'])[0]
         documents = {'/v3/manifest.json': v3_manifest, '/v2/manifest.json': v2_manifest,
-                     '/v3t/manifest.json': transcribed_manifest, '/collection.json': collection}
+                     '/v4/manifest.json': v4_manifest, '/v3t/manifest.json': transcribed_manifest,
+                     '/collection.json': collection}
         if parts.path in documents:
             return self._send(200, json.dumps(documents[parts.path](run)).encode(), 'application/ld+json')
         segments = parts.path.strip('/').split('/')

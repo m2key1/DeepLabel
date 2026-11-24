@@ -99,6 +99,30 @@ test.describe('Scenario: a dataset made from a IIIF manifest', () => {
     await expect(page.getByTestId('iiif-pages')).toHaveText('4, IIIF Presentation 3')
   })
 
+  test('a Presentation 4 manifest makes a dataset like any other (#153)', async ({ page }) => {
+    const token = run()
+    const manifest = `${ARCHIVE}/v4/manifest.json?run=${token}`
+    await page.goto('/new')
+    await page.getByLabel('Job name').fill(uniqueName('From IIIF 4'))
+    await page.getByTestId('source-iiif').click()
+    await page.getByLabel('IIIF manifest or collection URL').fill(manifest)
+    await page.getByTestId('iiif-load').click()
+
+    await expect(page.getByTestId('iiif-label')).toHaveText('Council minutes 1783')
+    await expect(page.getByTestId('iiif-pages')).toHaveText('2, IIIF Presentation 4')
+    await page.getByTestId('wizard-next').click()
+    await expect(page.getByTestId('page-pick')).toHaveText(['1 · fol. 1r', '2 · fol. 1v'])
+
+    await createDataset(page)
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f]{12}$/)
+    const jobId = page.url().split('/').pop()!
+    await waitForJobStatus(jobId, 'done', 60_000)
+    const job = await getJob(jobId)
+    expect(job.iiif_source).toEqual({ manifest, label: 'Council minutes 1783', attribution: ATTRIBUTION, rights: RIGHTS })
+    expect((job.pages as Page[]).map((p) => [p.filename, p.status])).toEqual([
+      ['0001_fol-1r.jpg', 'done'], ['0002_fol-1v.jpg', 'done']])
+  })
+
   test('an internal address is refused, and map datasets have no IIIF source', async ({ page }) => {
     await page.goto('/new')
     await page.getByLabel('Job name').fill(uniqueName('Refused'))

@@ -77,7 +77,7 @@ export function IiifSource({ value, onChange }: {
         </button>
       </div>
       <p className="mt-1 text-xs text-ink-muted">
-        Presentation API 2 or 3, or a collection of manifests. The pages are downloaded from the
+        Presentation API 2, 3 or 4, or a collection of manifests. The pages are downloaded from the
         archive&rsquo;s image server when the dataset starts.
       </p>
       {error && <p data-testid="iiif-error" role="alert" className="mt-2 text-sm text-danger">{error}</p>}

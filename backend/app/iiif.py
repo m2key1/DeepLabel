@@ -123,10 +123,10 @@ def text(value) -> str:
     return str(value)
 
 
-def _is_v3(document: dict) -> bool:
+def _version(document: dict) -> int:
     context = document.get('@context')
-    contexts = context if isinstance(context, list) else [context]
-    return any(isinstance(c, str) and 'presentation/3' in c for c in contexts)
+    declared = ' '.join(c for c in (context if isinstance(context, list) else [context]) if isinstance(c, str))
+    return 4 if 'presentation/4' in declared else 3 if 'presentation/3' in declared else 2
 
 
 def _image_service(resource: dict) -> str | None:
@@ -287,9 +287,11 @@ def _metadata(node: dict) -> list[dict]:
 
 def parse(document: dict, url: str) -> dict:
     """A manifest's canvases with what they are called and where their image is, or a
-    collection's members, read from Presentation API 2 or 3."""
+    collection's members, read from Presentation API 2, 3 or 4."""
     kind = _type(document)
-    v3 = _is_v3(document)
+    version = _version(document)
+    # Version 4 keeps version 3's items, annotation pages and bodies for a page with an image.
+    v3 = version >= 3
     if kind in ('Collection', 'sc:Collection'):
         members = document.get('items') if v3 else (
             document.get('members') or (document.get('manifests') or []) + (document.get('collections') or []))
@@ -311,7 +313,7 @@ def parse(document: dict, url: str) -> dict:
     else:
         attribution = text(document.get('attribution'))
         rights = text(document.get('license'))
-    return {'kind': 'manifest', 'url': url, 'label': text(document.get('label')), 'version': 3 if v3 else 2,
+    return {'kind': 'manifest', 'url': url, 'label': text(document.get('label')), 'version': version,
             'attribution': attribution, 'rights': rights, 'metadata': _metadata(document), 'canvases': pages}
 
 

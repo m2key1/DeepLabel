@@ -1,4 +1,4 @@
-"""Datasets made from IIIF manifests: reading both Presentation versions, the address
+"""Datasets made from IIIF manifests: reading Presentation 2, 3 and 4, the address
 checks every fetch passes, the download at ingest, and the annotations exported back."""
 import io
 import json
@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app import config, export, iiif, store, text_job
+from app import config, export, iiif, iiif_transcripts, store, text_job
 from app.deps import get_db
 from app.main import app
 
@@ -65,6 +65,33 @@ V3 = {
 }
 
 
+# Version 4 keeps version 3's shape for a page with an image, but lists motivations, gives
+# targets as objects, and holds containers other than canvases.
+V4 = {
+    '@context': 'http://iiif.io/api/presentation/4/context.json', 'type': 'Manifest',
+    'id': f'{ARCHIVE}/v4/manifest', 'label': {'en': ['Council minutes 1783']},
+    'requiredStatement': {'label': {'en': ['Attribution']}, 'value': {'en': ['Town archive, Nr. 18']}},
+    'rights': 'http://creativecommons.org/publicdomain/mark/1.0/',
+    'items': [
+        {'id': f'{ARCHIVE}/c4/1', 'type': 'Canvas', 'label': {'none': ['1']}, 'width': 2000, 'height': 3000,
+         'items': [{'type': 'AnnotationPage', 'items': [{
+             'type': 'Annotation', 'motivation': ['painting'], 'target': {'id': f'{ARCHIVE}/c4/1', 'type': 'Canvas'},
+             'body': {'id': f'{ARCHIVE}/img4/1/full/max/0/default.jpg', 'type': 'Image', 'width': 2000, 'height': 3000,
+                      'service': [{'id': f'{ARCHIVE}/img4/1', 'type': 'ImageService3'}]}}]}],
+         'annotations': [{'type': 'AnnotationPage', 'items': [{
+             'type': 'Annotation', 'motivation': ['supplementing'],
+             'body': {'type': 'TextualBody', 'value': 'Anno 1783'},
+             'target': {'type': 'SpecificResource', 'source': {'id': f'{ARCHIVE}/c4/1', 'type': 'Canvas'},
+                        'selector': {'type': 'FragmentSelector', 'value': 'xywh=200,300,1000,150'}}}]}]},
+        {'id': f'{ARCHIVE}/t4/1', 'type': 'Timeline', 'duration': 60.0, 'items': []},
+        {'id': f'{ARCHIVE}/c4/2', 'type': 'Canvas', 'label': {'none': ['2']}, 'width': 2000, 'height': 3000,
+         'items': [{'type': 'AnnotationPage', 'items': [{
+             'type': 'Annotation', 'motivation': ['painting'], 'target': {'id': f'{ARCHIVE}/c4/2', 'type': 'Canvas'},
+             'body': {'id': f'{ARCHIVE}/plain/4-2.png', 'type': 'Image', 'width': 2000, 'height': 3000}}]}]},
+    ],
+}
+
+
 @pytest.fixture
 def archive(monkeypatch):
     """A fake archive behind fake DNS: every request is recorded, every host resolves to
@@ -115,6 +142,32 @@ class TestReadingManifests:
             ('1', f'{ARCHIVE}/plain/1.jpg', f'{ARCHIVE}/plain/1-thumb.jpg'),
             ('2', f'{ARCHIVE}/img3/2/full/2000,/0/default.jpg', f'{ARCHIVE}/img3/2/full/240,/0/default.jpg'),
         ]
+
+    def test_a_v4_manifest_is_read_like_v3_and_its_other_containers_passed_by(self):
+        manifest = iiif.parse(V4, V4['id'])
+
+        assert (manifest['version'], manifest['label'], manifest['attribution'], manifest['rights']) == (
+            4, 'Council minutes 1783', 'Town archive, Nr. 18', 'http://creativecommons.org/publicdomain/mark/1.0/')
+        assert [(c['canvas'], c['label'], c['width'], c['height'], c['image'], c['thumbnail'])
+                for c in manifest['canvases']] == [
+            (f'{ARCHIVE}/c4/1', '1', 2000, 3000, f'{ARCHIVE}/img4/1/full/2000,/0/default.jpg',
+             f'{ARCHIVE}/img4/1/full/240,/0/default.jpg'),
+            (f'{ARCHIVE}/c4/2', '2', 2000, 3000, f'{ARCHIVE}/plain/4-2.png', f'{ARCHIVE}/plain/4-2.png'),
+        ]
+
+    def test_a_v4_canvases_transcription_annotation_becomes_its_line(self):
+        first, second = iiif.parse(V4, V4['id'])['canvases']
+
+        assert 'transcript' not in second
+        assert iiif_transcripts.lines(first['transcript'], first['width'], first['height']) == [
+            {'polygon': [[0.1, 0.1], [0.6, 0.1], [0.6, 0.15], [0.1, 0.15]], 'text': 'Anno 1783'}]
+
+    def test_a_v4_collection_lists_its_members(self):
+        v4 = {'@context': 'http://iiif.io/api/presentation/4/context.json', 'type': 'Collection',
+              'label': {'en': ['All']},
+              'items': [{'id': f'{ARCHIVE}/m/4', 'type': 'Manifest', 'label': {'en': ['1783']}}]}
+
+        assert iiif.parse(v4, 'u')['members'] == [{'url': f'{ARCHIVE}/m/4', 'label': '1783', 'kind': 'manifest'}]
 
     def test_a_v3_manifests_metadata_reads_its_language_maps(self):
         manifest = iiif.parse({**V3, 'metadata': [{'label': {'en': ['Date'], 'de': ['Datum']},

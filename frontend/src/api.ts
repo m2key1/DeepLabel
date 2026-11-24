@@ -1473,7 +1473,7 @@ export interface IiifTranscriptions {
 }
 
 export type IiifInspection =
-  | ({ kind: 'manifest'; url: string; version: 2 | 3; canvases: IiifCanvas[]; max_pages: number; max_width: number
+  | ({ kind: 'manifest'; url: string; version: 2 | 3 | 4; canvases: IiifCanvas[]; max_pages: number; max_width: number
        transcriptions: IiifTranscriptions }
      & Omit<IiifSource, 'manifest'>)
   | { kind: 'collection'; url: string; label: string; max_pages: number
