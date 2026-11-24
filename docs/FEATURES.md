@@ -51,11 +51,15 @@ under its toolbar and the workspace rail, which stay in place, and ends with the
   open it to that workspace's people; **Back to Sandbox** returns a selection to its creators'
   Sandboxes. A dataset moved into a Sandbox is taken from the people given it on its own, and
   the move says so first.
-- A workspace's people are its members: a Manager among them adds and removes people, renames
-  it, and deletes it once it is empty. Someone can also be given a single dataset of a
-  workspace; it then sits under **Shared with you** in their list, without the workspace's
-  name. A dataset in a Sandbox is shared by moving it into a workspace: its **Share** says so
-  and offers the move.
+- A workspace's people are its members. A Manager among them opens **Members…** on its
+  heading, or clicks its member count, to see each member's role, add someone by typing their
+  name and remove people; each change is saved at once. They also rename it, and delete it once
+  it is empty.
+- A dataset's **Members…** gives it to someone on its own, who then finds it under **Shared
+  with you**, without the workspace's name. It also makes an Annotator a Reviewer on that one
+  dataset, or a Reviewer an Annotator, whether they were given the dataset or belong to the
+  workspace; the role lapses once they no longer reach the dataset. A dataset in a Sandbox is
+  shared by moving it into a workspace: its **Members…** says so and offers the move.
 - Admins see everyone else's Sandboxes after the workspaces, under their own heading, each
   marked **Private** and named for whose it is.
 - Tick several datasets, or use a workspace's menu, to act on all of them at once: re-run,
@@ -719,7 +723,8 @@ polygons) and *line tracing* (boundary lines, open or closed).
 
 ## Collaboration
 
-- **Workspaces and sharing:** share a dataset with people directly or through its workspace.
+- **Workspaces and members:** give people a whole workspace or a single dataset, from its
+  **Members** dialog.
 - **Notes:** a dataset and each of its pages can carry one note everyone with access can read,
   such as how far a volume has been checked. Anyone who can edit adds it with **+ Note** in
   the dataset's title or the page viewer's toolbar; a **Note** tag then marks it there, on the
@@ -776,9 +781,10 @@ in Authentik, which nobody has to see or visit.
     open and creates datasets. What an Annotator draws waits for a Reviewer to check it.
   - **Reviewer:** also marks lines, boxes, tiles and pages checked.
   - **Manager:** also runs models again, reads with LLMs, changes a dataset's settings and
-    data use, marks test pages, exports, trains, deletes and shares.
+    data use, marks test pages, exports, trains, deletes and adds people.
   - **Admin:** everything, everywhere, including people and settings.
-  Whoever created a dataset manages it, whatever their role.
+  Whoever created a dataset manages it, whatever their role. On a single dataset an Annotator
+  can be made a Reviewer, or a Reviewer an Annotator.
 - On top of the role, admins grant or take away per person what uses a shared resource:
   managing models, training locally or on the cluster, and the recognition API. A Viewer
   writes nothing, so the one grant a Viewer takes is the recognition API, which writes

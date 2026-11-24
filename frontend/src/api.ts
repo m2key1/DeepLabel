@@ -157,6 +157,8 @@ export interface Job {
   line_width: number
   group_id: number | null
   shared_with: string[]
+  /** Whoever was made Reviewer on this dataset alone, or Annotator. */
+  roles: Record<string, DatasetRole>
   pages_total?: number
   layout_checked_pages?: number
   /** Pages marked as test data, which no training uses. */
@@ -696,6 +698,8 @@ export interface ModelPicks {
 }
 
 export type Role = 'admin' | 'manager' | 'reviewer' | 'annotator' | 'viewer'
+/** The two roles that can be swapped for each other on a single dataset. */
+export type DatasetRole = 'annotator' | 'reviewer'
 
 export type ModelTask = 'layout' | 'lines' | 'ocr'
 
@@ -1721,8 +1725,10 @@ export function setJobGroup(jobId: string, groupId: number | null): Promise<{ gr
   return request(`/api/jobs/${jobId}`, json('PATCH', { group_id: groupId }))
 }
 
-export function shareJob(jobId: string, usernames: string[]): Promise<{ shared_with: string[] }> {
-  return request(`/api/jobs/${jobId}/share`, json('PUT', { usernames }))
+/** The people given a dataset alone, and the roles set on it for anyone who reaches it. */
+export function shareJob(jobId: string, usernames: string[], roles: Record<string, DatasetRole>):
+  Promise<{ shared_with: string[]; roles: Record<string, DatasetRole> }> {
+  return request(`/api/jobs/${jobId}/share`, json('PUT', { usernames, roles }))
 }
 
 export function shareGroup(groupId: number, usernames: string[]): Promise<{ shared_with: string[] }> {
@@ -1864,6 +1870,8 @@ export interface UserName {
   /** Where their picture is, or null for an account that has none - which draws its
    *  initials instead, so this must not be an address that 404s. */
   avatar: string | null
+  /** The account's role, which a profile shows anyone too. */
+  role: Role
 }
 
 export function getUserNames(): Promise<{ users: UserName[] }> {

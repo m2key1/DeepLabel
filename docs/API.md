@@ -53,6 +53,13 @@ A dataset made over the API lands in your private Sandbox, which nobody else see
 to instead; `GET /api/groups` lists them, your Sandbox among them (`sandbox_of`). A dataset of a
 workspace you do not belong to, given to you on its own, comes with `group_id: null`.
 
+A workspace's Managers set its members with `PUT /api/groups/{id}/share`
+(`{"usernames": [...]}`), and with `PUT /api/jobs/{id}/share` the people given one dataset on
+its own and the roles set on it: `{"usernames": ["rita"], "roles": {"lena": "reviewer"}}` makes
+Lena, an Annotator, a Reviewer on that dataset alone; leaving `roles` out keeps the roles already
+set. A dataset carries its `roles` in the same shape. `GET /api/users/names` lists the accounts
+to choose from, with their roles.
+
 `POST /api/lines/texts` corrects many lines in one request (up to 5000), each as a single
 edit would; the lines it could not write come back with the reason:
 

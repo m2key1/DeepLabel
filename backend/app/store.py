@@ -700,11 +700,18 @@ CREATE TABLE IF NOT EXISTS groups (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     sandbox_of TEXT
 );
--- Someone given one dataset alone. role, Annotator or Reviewer, swaps theirs on it.
+-- Someone given one dataset alone.
 CREATE TABLE IF NOT EXISTS job_assignees (
     job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
     username TEXT NOT NULL,
-    role TEXT,
+    PRIMARY KEY (job_id, username)
+);
+-- An Annotator made Reviewer on one dataset, or a Reviewer made Annotator (#132), whether
+-- they reach it through its workspace or were given it alone. See forget_unreached_roles.
+CREATE TABLE IF NOT EXISTS job_roles (
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    username TEXT NOT NULL,
+    role TEXT NOT NULL,
     PRIMARY KEY (job_id, username)
 );
 CREATE TABLE IF NOT EXISTS group_assignees (
@@ -850,6 +857,7 @@ MODEL_DATASETS_BACKFILL = 6
 ABBREVIATIONS_NOT_OFFERED = 7
 CONVENTION_EXAMPLES = 8
 WORKSPACES = 9
+DATASET_ROLES = 10
 
 # The dataset fields behind each data use a dataset's owner can switch off.
 DATA_USE_COLUMNS = {'training': 'use_training', 'test': 'use_test',
@@ -1097,8 +1105,6 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE jobs ADD COLUMN group_id INTEGER REFERENCES groups(id)')
     if 'sandbox_of' not in {r[1] for r in conn.execute('PRAGMA table_info(groups)')}:
         conn.execute('ALTER TABLE groups ADD COLUMN sandbox_of TEXT')
-    if 'role' not in {r[1] for r in conn.execute('PRAGMA table_info(job_assignees)')}:
-        conn.execute('ALTER TABLE job_assignees ADD COLUMN role TEXT')
     if 'ocr_decode' not in job_cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN ocr_decode TEXT NOT NULL DEFAULT 'beam'")
     if 'ocr_convention' not in job_cols:
@@ -1379,6 +1385,12 @@ def connect(db_path: Path) -> sqlite3.Connection:
     if conn.execute('PRAGMA user_version').fetchone()[0] < WORKSPACES:
         _move_into_workspaces(conn)
         conn.execute(f'PRAGMA user_version = {WORKSPACES}')
+    if conn.execute('PRAGMA user_version').fetchone()[0] < DATASET_ROLES:
+        # Before #132 a role on one dataset was kept beside the people given it alone.
+        if 'role' in {r[1] for r in conn.execute('PRAGMA table_info(job_assignees)')}:
+            conn.execute('INSERT OR IGNORE INTO job_roles (job_id, username, role) '
+                         'SELECT job_id, username, role FROM job_assignees WHERE role IS NOT NULL')
+        conn.execute(f'PRAGMA user_version = {DATASET_ROLES}')
     conn.commit()
     _index_line_text(conn)
     return conn
@@ -1431,6 +1443,18 @@ def workspace_name(row, viewer: str) -> str:
 def is_sandbox(conn, group_id: int) -> bool:
     row = conn.execute('SELECT sandbox_of FROM groups WHERE id = ?', (group_id,)).fetchone()
     return row is not None and row['sandbox_of'] is not None
+
+
+def forget_unreached_roles(conn) -> None:
+    """A role set on one dataset lapses once its person no longer reaches the dataset -
+    taken out of its workspace, off the dataset, or the dataset moved away - so letting
+    them back in later does not quietly bring it back."""
+    conn.execute(
+        'DELETE FROM job_roles WHERE NOT EXISTS ('
+        '  SELECT 1 FROM job_assignees a WHERE a.job_id = job_roles.job_id AND a.username = job_roles.username'
+        ') AND NOT EXISTS ('
+        '  SELECT 1 FROM jobs j JOIN group_assignees g ON g.group_id = j.group_id'
+        '  WHERE j.id = job_roles.job_id AND g.username = job_roles.username)')
 
 
 def sandbox_id(conn, username: str) -> int:

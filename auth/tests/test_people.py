@@ -61,3 +61,10 @@ def test_an_unknown_name_is_not_found(client):
 
 def test_nobody_signed_out_may_ask(client):
     assert client.get('/api/people/bob').status_code == 401
+
+
+def test_the_people_pickers_carry_each_account_role(client):
+    """A Members dialog shows what each person may do (#132): the account role, as a profile has it."""
+    listed = client.get('/api/users/names', cookies=_session('root')).json()['users']
+
+    assert {u['username']: u['role'] for u in listed} == {'root': 'admin', 'bob': 'member', 'carol': 'viewer'}

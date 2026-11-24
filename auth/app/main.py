@@ -585,14 +585,15 @@ def get_person(username: str, user: dict = Depends(current_user)):
 
 @app.get('/api/users/names', dependencies=[Depends(require_role('admin', 'manager'))])
 def get_user_names():
-    """Just usernames, for assignment pickers - members may not read roles or status."""
+    """The people pickers' list: names, pictures and account roles, which a profile shows
+    anyone anyway - not whether an account is active, nor its email."""
     conn = store.connect(config.DB_PATH)
     try:
         rows = store.list_users(conn)
     finally:
         conn.close()
     return {'users': [{'id': u['id'], 'username': u['username'] or u['subject'],
-                       'display_name': u['display_name'],
+                       'display_name': u['display_name'], 'role': u['role'],
                        'avatar': avatars.url_for(u['username'] or u['subject'], u['avatar'])}
                       for u in rows if u['active']]}
 

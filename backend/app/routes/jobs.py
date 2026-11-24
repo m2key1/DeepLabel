@@ -97,17 +97,30 @@ def _resolve_map_model(conn, is_map: bool, model_id, run_predict: bool, task: st
     return model_id, classes
 
 
-def _job_payload(conn, row, shared_with: list[str] | None = None) -> dict:
+def _job_payload(conn, row, shared_with: list[str] | None = None, roles: dict[str, str] | None = None) -> dict:
     """One dataset as the list and the detail view read it. Deliberately without its size
     on disk: that means walking every rendition and line crop of every dataset the caller
     can see, which is what the dataset list spent its time on before rendering anything.
     The info endpoint reports it, beside the breakdown that gives it meaning. The list
-    passes `shared_with` in, read once for every dataset it shows."""
+    passes `shared_with` and `roles` in, read once for every dataset it shows."""
     job = store.job_row_to_dict(row)
     if shared_with is None:
         shared_with = [r['username'] for r in conn.execute(
             'SELECT username FROM job_assignees WHERE job_id = ? ORDER BY username', (job['id'],))]
+    if roles is None:
+        roles = {r['username']: r['role'] for r in conn.execute(
+            'SELECT username, role FROM job_roles WHERE job_id = ? ORDER BY username', (job['id'],))}
     job['shared_with'] = shared_with
+    job['roles'] = roles
+    return job
+
+
+def _seen_by(job: dict, user: dict, reachable) -> dict:
+    """A dataset as its viewer may know it: someone given it alone, outside its workspace,
+    learns neither the workspace nor the roles its members have on it (decision 334)."""
+    job['group_id'] = shown_group_id(job['group_id'], reachable)
+    if job['group_id'] is None:
+        job['roles'] = {name: role for name, role in job['roles'].items() if name == user['username']}
     return job
 
 
@@ -714,20 +727,18 @@ def list_jobs(conn=Depends(get_db), user: dict = Depends(current_user)):
                             {'me': user['username']}).fetchall()
     progress = caches.job_progress(conn)
     shared: dict[str, list[str]] = {}
-    # The caller's own role on a dataset given to them with one, from the same rows.
-    swapped: dict[str, str] = {}
-    for r in conn.execute('SELECT job_id, username, role FROM job_assignees ORDER BY username'):
+    for r in conn.execute('SELECT job_id, username FROM job_assignees ORDER BY username'):
         shared.setdefault(r['job_id'], []).append(r['username'])
-        if r['username'] == user['username'] and r['role']:
-            swapped[r['job_id']] = r['role']
+    roles: dict[str, dict[str, str]] = {}
+    for r in conn.execute('SELECT job_id, username, role FROM job_roles ORDER BY username'):
+        roles.setdefault(r['job_id'], {})[r['username']] = r['role']
     empty = {'pages_total': 0, 'layout_checked_pages': 0, 'test_pages': 0, 'lines_total': 0, 'lines_done': 0}
     reachable = reachable_group_ids(conn, user)
     payloads = []
     for row in rows:
-        job = _job_payload(conn, row, shared.get(row['id'], []))
-        job['group_id'] = shown_group_id(job['group_id'], reachable)
+        job = _seen_by(_job_payload(conn, row, shared.get(row['id'], []), roles.get(row['id'], {})), user, reachable)
         job.update(progress.get(job['id'], empty))
-        job['my_role'] = role_given(row['owner'], user, swapped.get(row['id']))
+        job['my_role'] = role_given(row['owner'], user, job['roles'].get(user['username']))
         payloads.append(job)
     return payloads
 
@@ -788,8 +799,7 @@ def get_job(job_id: str, pages: bool = True, conn=Depends(get_db),
     row = conn.execute('SELECT * FROM jobs WHERE id = ?', (job_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
-    job = _job_payload(conn, row)
-    job['group_id'] = shown_group_id(job['group_id'], reachable_group_ids(conn, user))
+    job = _seen_by(_job_payload(conn, row), user, reachable_group_ids(conn, user))
     job['my_role'] = role_on_job(conn, job_id, user)
     job['unreadable'] = [{**dict(r), 'iiif': bool(r['iiif'])} for r in conn.execute(
         "SELECT id, filename, error, iiif FROM pages WHERE job_id = ? AND deleted = 0 AND status = 'unreadable' "
@@ -1154,6 +1164,7 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
             target = home
             # A Sandbox is private: the people given the dataset on its own lose it there.
             conn.execute('DELETE FROM job_assignees WHERE job_id = ?', (job_id,))
+            conn.execute('DELETE FROM job_roles WHERE job_id = ?', (job_id,))
         elif not belongs_to_workspace(conn, body.group_id, user):
             raise HTTPException(404, 'workspace not found')
         elif store.is_sandbox(conn, body.group_id):
@@ -1161,6 +1172,7 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
         else:
             target = body.group_id
         conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (target, job_id))
+        store.forget_unreached_roles(conn)
     for task, column in MODEL_COLUMNS.items():
         if column not in fields:
             continue
@@ -1264,28 +1276,34 @@ def patch_job(job_id: str, body: JobPatch, conn=Depends(get_db), user: dict = De
 
 class Share(BaseModel):
     usernames: list[str]
-    # An Annotator made Reviewer on this dataset, or a Reviewer made Annotator, by name.
-    roles: dict[str, str] = {}
+    # An Annotator made Reviewer on this dataset, or a Reviewer made Annotator, by name:
+    # anyone who reaches it, through its workspace or given it alone. Left out, they stay.
+    roles: dict[str, str] | None = None
 
 
 @router.put('/api/jobs/{job_id}/share')
 def share_job(job_id: str, body: Share, conn=Depends(get_db), user: dict = Depends(current_user)):
-    """Replace the people given this dataset alone, each with the role they have on it."""
+    """Replace the people given this dataset alone, and the roles set on it."""
     require_job_manager(conn, job_id, user)
     group_id = conn.execute('SELECT group_id FROM jobs WHERE id = ?', (job_id,)).fetchone()['group_id']
     if group_id is not None and store.is_sandbox(conn, group_id):
         raise HTTPException(409, 'a dataset in a Sandbox is shared by moving it into a workspace')
     if group_id is not None and not manages_workspace(conn, group_id, user):
         raise HTTPException(403, 'not permitted: this takes a Manager of the workspace')
-    if any(role not in SWAPPABLE for role in body.roles.values()):
+    if any(role not in SWAPPABLE for role in (body.roles or {}).values()):
         raise HTTPException(400, 'on one dataset someone is an Annotator or a Reviewer')
     names = sorted({n.strip() for n in body.usernames if n.strip()})
-    roles = {n.strip(): role for n, role in body.roles.items()}
     conn.execute('DELETE FROM job_assignees WHERE job_id = ?', (job_id,))
-    conn.executemany('INSERT INTO job_assignees (job_id, username, role) VALUES (?, ?, ?)',
-                     [(job_id, n, roles.get(n)) for n in names])
+    conn.executemany('INSERT INTO job_assignees (job_id, username) VALUES (?, ?)', [(job_id, n) for n in names])
+    if body.roles is not None:
+        conn.execute('DELETE FROM job_roles WHERE job_id = ?', (job_id,))
+        conn.executemany('INSERT INTO job_roles (job_id, username, role) VALUES (?, ?, ?)',
+                         [(job_id, n.strip(), role) for n, role in body.roles.items() if n.strip()])
+    store.forget_unreached_roles(conn)
     conn.commit()
-    return {'job_id': job_id, 'shared_with': names}
+    kept = {r['username']: r['role'] for r in conn.execute(
+        'SELECT username, role FROM job_roles WHERE job_id = ? ORDER BY username', (job_id,))}
+    return {'job_id': job_id, 'shared_with': names, 'roles': kept}
 
 
 def _data_use_payload(conn, job_id: str) -> dict:

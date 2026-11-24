@@ -108,6 +108,9 @@ the version in the app's footer opens.
   a dataset are no longer recorded. New job asks which workspace a dataset is made in, and a + on
   each workspace starts one there. Nobody sees a workspace they do not belong to: a dataset given
   to them on its own is listed under Shared with you.
+- A Members dialog replaces Share, as in Label Studio (#132): it lists a workspace's or a
+  dataset's people with their roles, adds someone by typing their name and saves each change at
+  once. On one dataset it makes an Annotator a Reviewer, or a Reviewer an Annotator.
 - Line corrections are saved unchecked; checking is a step of its own.
 - The page editor: labels on every box in edit mode (#77), lines that stay in the box they lie in
   (#71), a class pressed over gathered shapes draws a tight box (#74), Ctrl draws over a selected

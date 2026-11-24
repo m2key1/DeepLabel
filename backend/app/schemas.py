@@ -36,6 +36,8 @@ class JobSummary(BaseModel):
     counters: Counters
     created_at: str
     shared_with: list[str]
+    # Annotator or Reviewer, by name, for whoever was given the other role on this dataset alone.
+    roles: dict[str, str]
     error: str | None
     run_layout: bool
     run_lines: bool

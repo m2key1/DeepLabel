@@ -186,7 +186,7 @@ def role_on_job(conn, job_id: str, user: dict) -> str | None:
     if not can_access_job(conn, job_id, user):
         return None
     owner = conn.execute('SELECT owner FROM jobs WHERE id = ?', (job_id,)).fetchone()['owner']
-    swapped = conn.execute('SELECT role FROM job_assignees WHERE job_id = ? AND username = ?',
+    swapped = conn.execute('SELECT role FROM job_roles WHERE job_id = ? AND username = ?',
                            (job_id, user['username'])).fetchone()
     return role_given(owner, user, swapped['role'] if swapped else None)
 

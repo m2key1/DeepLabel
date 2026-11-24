@@ -178,6 +178,7 @@ class TestMigrations:
         'groups': ['created_at', 'id', 'name', 'owner'],
         'gt_reads': ['completion_tokens', 'created_at', 'error', 'finished_at', 'id', 'job_id', 'label', 'llm_model_id', 'model', 'page_id', 'prompt_hash', 'prompt_tokens', 'raw_text', 'requested_by', 'status'],
         'job_assignees': ['job_id', 'username'],
+        'job_roles': ['job_id', 'username', 'role'],
         'recognition_caps': ['account', 'monthly_lines'],
         'recognition_requests': ['account', 'batches_done', 'created_at', 'error', 'fields', 'files', 'files_done',
                                  'finished_at', 'id', 'names', 'queued_at', 'route', 'started_at', 'status'],
@@ -1615,7 +1616,7 @@ class TestWorkspaces:
     def test_a_fresh_database_has_the_columns(self, tmp_path):
         conn = store.connect(tmp_path / 'app.db')
         assert 'sandbox_of' in cols(conn, 'groups')
-        assert 'role' in cols(conn, 'job_assignees')
+        assert cols(conn, 'job_roles') == {'job_id', 'username', 'role'}
         conn.close()
 
     def test_an_older_database_moves_into_workspaces(self, tmp_path):
@@ -1652,7 +1653,30 @@ class TestWorkspaces:
         assert [tuple(r) for r in conn.execute('SELECT job_id, username FROM job_assignees ORDER BY job_id')] == [
             ('given-1', 'erin'), ('given-2', 'erin')]
         assert [r[0] for r in conn.execute('SELECT action FROM job_log')] == ['data_use']
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == store.WORKSPACES
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == store.DATASET_ROLES
+        conn.close()
+
+    def test_a_role_set_on_one_dataset_moves_to_a_table_of_its_own(self, tmp_path):
+        """A role on one dataset was kept with the people given it alone; it now stands apart,
+        so a workspace's members can have one too without being given the dataset (#132)."""
+        db = tmp_path / 'app.db'
+        conn = store.connect(db)
+        if 'role' not in cols(conn, 'job_assignees'):
+            conn.execute('ALTER TABLE job_assignees ADD COLUMN role TEXT')
+        conn.executescript("""
+            INSERT INTO jobs (id, name, owner) VALUES ('j1', 'Band 1878', 'alice');
+            INSERT INTO job_assignees (job_id, username, role) VALUES ('j1', 'bob', 'reviewer'), ('j1', 'erin', NULL);
+        """)
+        conn.execute('PRAGMA user_version = 9')
+        conn.commit()
+        conn.close()
+
+        conn = store.connect(db)
+        assert [tuple(r) for r in conn.execute('SELECT job_id, username, role FROM job_roles')] == [
+            ('j1', 'bob', 'reviewer')]
+        assert [tuple(r) for r in conn.execute('SELECT job_id, username FROM job_assignees ORDER BY username')] == [
+            ('j1', 'bob'), ('j1', 'erin')]
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == store.DATASET_ROLES
         conn.close()
 
     def test_it_runs_once(self, tmp_path):

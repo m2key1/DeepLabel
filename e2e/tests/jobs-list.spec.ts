@@ -35,8 +35,8 @@ test.describe('Scenario: managing datasets from the list', () => {
     await page.goto('/')
     const card = page.getByTestId('job-card').filter({ hasText: name })
     await card.getByTestId('job-menu').click()
-    await card.getByRole('button', { name: 'Share…' }).click()
-    // A Sandbox is private, so Share says why it cannot add anyone and offers the way out (#131).
+    await card.getByRole('button', { name: 'Members…' }).click()
+    // A Sandbox is private, so Members says why it cannot add anyone and offers the way out (#131).
     await expect(page.getByTestId('share-sandboxed')).toHaveText(
       "It is in e2e-seeder's Sandbox, which only e2e-seeder can see. "
       + 'To share it, move it into a workspace: everyone in that workspace can then open it.')
@@ -46,9 +46,10 @@ test.describe('Scenario: managing datasets from the list', () => {
     await expect.poll(async () => (await getJob(jobId)).group_id).toBe(group.id)
 
     await card.getByTestId('job-menu').click()
-    await card.getByRole('button', { name: 'Share…' }).click()
-    await page.getByRole('checkbox', { name: username }).check()
-    await page.getByRole('button', { name: 'Save' }).click()
+    await card.getByRole('button', { name: 'Members…' }).click()
+    await page.getByRole('combobox', { name: 'Add someone' }).fill(username)
+    await page.getByRole('option', { name: new RegExp(username) }).click()
+    await page.getByRole('button', { name: 'Done' }).click()
     await expect(card.getByText('shared with 1')).toBeVisible()
     await expect.poll(async () => (await getJob(jobId)).shared_with).toEqual([username])
   })

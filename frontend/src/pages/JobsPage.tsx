@@ -16,13 +16,14 @@ import { AccessStack, reachOf } from '../components/job/AccessStack'
 import { COLUMNS, DEFAULT_COLUMNS, NAME_MIN, columnWidths, columnsForWidth, loadColumns,
   phasesOf, saveColumns }
   from '../components/job/columns'
-import { ShareDialog } from '../components/job/ShareDialog'
+import { MembersDialog } from '../components/job/MembersDialog'
+import type { MembersTarget } from '../components/job/MembersDialog'
 import { MapSettingsDialog } from '../components/job/MapSettingsDialog'
 import { NewerModelsDialog } from '../components/job/NewerModelsDialog'
 import { GroupSettingsDialog } from '../components/job/GroupSettingsDialog'
 import { MoveToGroupDialog } from '../components/job/MoveToGroupDialog'
 import {
-  groupSize, inListOrder, newDatasetIn, newDatasetTitle, takesNewDatasets, workspaceKind,
+  groupSize, inListOrder, memberCount, newDatasetIn, newDatasetTitle, takesNewDatasets, workspaceKind,
 } from '../components/job/groups'
 import { sharedPrefix } from '../components/job/sharedPrefix'
 import { PresenceAvatars } from '../components/presence/PresenceAvatars'
@@ -228,8 +229,7 @@ export function JobsPage() {
   const [moveJob, setMoveJob] = useState<Job | null>(null)
   const [mapSettingsJob, setMapSettingsJob] = useState<Job | null>(null)
   const [newerFor, setNewerFor] = useState<{ job: Job; offers: NewerModelOffer[] } | null>(null)
-  const [shareTarget, setShareTarget] = useState<
-    { kind: 'dataset'; job: Job } | { kind: 'group'; group: Group } | null>(null)
+  const [membersOf, setMembersOf] = useState<MembersTarget | null>(null)
   const [settingsGroup, setSettingsGroup] = useState<Group | null>(null)
 
   // What is on screen is in the address, so a filtered list can be sent to someone and
@@ -631,10 +631,11 @@ export function JobsPage() {
   // opens a dataset to the group's members; the way back is to its creator's Sandbox.
   const moveTargets = groups.filter((g) => !g.sandbox_of && (isAdmin || g.shared_with.includes(user)))
 
-  // Adding people is the group's Managers'; a Sandbox dataset's Share explains the move instead.
-  const canShareDataset = (job: Job) => {
+  // Adding people is the workspace's Managers'; a Sandbox dataset's Members explains the move
+  // instead. A dataset given to someone alone shows no workspace, so they have nothing to manage.
+  const canManageMembers = (job: Job) => {
     const group = groups.find((g) => g.id === job.group_id)
-    return !group || !!group.sandbox_of || group.can_manage
+    return !!group && (!!group.sandbox_of || group.can_manage)
   }
 
   /** The datasets in a run the caller does not manage. Any one of them refuses the whole
@@ -712,8 +713,8 @@ export function JobsPage() {
     onToggleMenu: () => showCardPopover('menu', openMenu === job.id ? null : job.id),
     onMasks: (fused: boolean) => void downloadMasks(job.id, fused),
     onMove: () => setMoveJob(job),
-    onShare: () => setShareTarget({ kind: 'dataset', job }),
-    canShare: canShareDataset(job),
+    onMembers: () => setMembersOf({ kind: 'dataset', job, group: groups.find((g) => g.id === job.group_id) }),
+    canManageMembers: canManageMembers(job),
     // A map dataset has only its name and tile size left to change; a text one, everything it was made with.
     onSettings: () => (isTileTask(job.task) ? setMapSettingsJob(job) : navigate(`/jobs/${job.id}/settings`)),
     onCancel: () => void onCancel(job),
@@ -980,15 +981,18 @@ export function JobsPage() {
             </span>
           )}
         </div>
-        {group && (group.shared_with?.length ?? 0) > 0 && (
-          <span
-            data-testid="group-shared"
-            title={`Members: ${group.shared_with.join(', ')}`}
-            className="text-xs text-ink-subtle"
-          >
-            {group.shared_with.length} member{group.shared_with.length === 1 ? '' : 's'}
+        {group && (group.shared_with?.length ?? 0) > 0 && (canManage ? (
+          <button data-testid="group-shared" title={`Members: ${group.shared_with.join(', ')}`}
+                  onClick={() => setMembersOf({ kind: 'workspace', group })}
+                  className="whitespace-nowrap text-xs text-ink-subtle hover:text-accent-ink hover:underline">
+            {memberCount(group)}
+          </button>
+        ) : (
+          <span data-testid="group-shared" title={`Members: ${group.shared_with.join(', ')}`}
+                className="whitespace-nowrap text-xs text-ink-subtle">
+            {memberCount(group)}
           </span>
-        )}
+        ))}
         <span className="ml-auto flex items-center gap-1">
           {group && canEdit && takesNewDatasets(group, user, isAdmin) && (
             <Link to={newDatasetIn(group)} data-testid="new-dataset-in" title={newDatasetTitle(group, user)}
@@ -1032,9 +1036,9 @@ export function JobsPage() {
           {group && renamingGroup !== group.id && (
             <>
               {canManage && (
-                <Button variant="ghost" size="xs" data-testid="group-share"
-                        onClick={() => setShareTarget({ kind: 'group', group })}>
-                  Share…
+                <Button variant="ghost" size="xs" data-testid="group-members"
+                        onClick={() => setMembersOf({ kind: 'workspace', group })}>
+                  Members…
                 </Button>
               )}
               {canSettle && (
@@ -1471,25 +1475,15 @@ export function JobsPage() {
           onError={setError}
         />
       )}
-      {shareTarget && (
-        <ShareDialog
-          target={shareTarget.kind === 'dataset'
-            ? { kind: 'dataset', id: shareTarget.job.id }
-            : { kind: 'group', id: shareTarget.group.id }}
-          title={shareTarget.kind === 'dataset' ? shareTarget.job.name : shareTarget.group.name}
-          sandboxed={shareTarget.kind === 'dataset'
-            && !!groups.find((g) => g.id === shareTarget.job.group_id)?.sandbox_of}
+      {membersOf && (
+        <MembersDialog
+          target={membersOf}
+          onClose={() => setMembersOf(null)}
+          onChanged={refresh}
           onMoveInstead={() => {
-            if (shareTarget.kind === 'dataset') setMoveJob(shareTarget.job)
-            setShareTarget(null)
+            if (membersOf.kind === 'dataset') setMoveJob(membersOf.job)
+            setMembersOf(null)
           }}
-          owner={shareTarget.kind === 'dataset' ? shareTarget.job.owner : shareTarget.group.owner}
-          sharedWith={shareTarget.kind === 'dataset'
-            ? shareTarget.job.shared_with
-            : (shareTarget.group.shared_with ?? [])}
-          onClose={() => setShareTarget(null)}
-          onShared={refresh}
-          onError={setError}
         />
       )}
     </div>

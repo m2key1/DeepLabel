@@ -347,6 +347,74 @@ class TestARoleOnOneDataset:
         api.put('/api/jobs/j1/share', json={'usernames': ['max'], 'roles': {'max': 'annotator'}}, headers=ANNA)
         assert self.role_on(api, 'j1', MAX) == 'manager'
 
+    def test_a_workspace_member_is_made_reviewer_without_being_given_it_alone(self, client):
+        """Most people reach a dataset through its workspace, so that is where the switch is
+        needed - and switching a role gives nobody a dataset they did not reach (#132)."""
+        api, _ = client
+        response = api.put('/api/jobs/j1/share', json={'usernames': ['rita'], 'roles': {'lena': 'reviewer'}},
+                           headers=ANNA)
+        assert response.status_code == 200, response.text
+        assert self.role_on(api, 'j1', LENA) == 'reviewer'
+        assert self.role_on(api, 'j2', LENA) == 'manager'
+        job = api.get('/api/jobs/j1', params={'pages': 'false'}, headers=ANNA).json()
+        assert (job['shared_with'], job['roles']) == (['rita'], {'lena': 'reviewer'})
+        assert api.patch('/api/lines/1', json={'checked': True}, headers=LENA).status_code == 200
+
+    def test_the_list_names_the_roles_set_on_each_dataset(self, client):
+        api, _ = client
+        api.put('/api/jobs/j1/share', json={'usernames': ['rita'], 'roles': {'lena': 'reviewer', 'rita': 'annotator'}},
+                headers=ANNA)
+        listed = {j['id']: j['roles'] for j in api.get('/api/jobs', headers=ANNA).json()}
+        assert listed == {'j1': {'lena': 'reviewer', 'rita': 'annotator'}, 'j2': {}, 'j-anna': {}}
+
+    def test_a_role_lapses_when_its_person_leaves_the_workspace(self, client):
+        """Taken out and let back in, Lena is an Annotator again, not the Reviewer she once was."""
+        api, _ = client
+        api.put('/api/jobs/j1/share', json={'usernames': ['rita'], 'roles': {'lena': 'reviewer'}}, headers=ANNA)
+        assert api.put('/api/groups/1/share', json={'usernames': ['anna', 'ben']}, headers=ANNA).status_code == 200
+        assert api.put('/api/groups/1/share', json={'usernames': ['anna', 'ben', 'lena']},
+                       headers=ANNA).status_code == 200
+        assert self.role_on(api, 'j1', LENA) == 'annotator'
+        assert api.get('/api/jobs/j1', params={'pages': 'false'}, headers=ANNA).json()['roles'] == {}
+
+    def test_a_role_lapses_when_the_dataset_moves_where_its_person_is_not(self, client):
+        api, conn = client
+        conn.execute("INSERT INTO groups (id, name, owner) VALUES (4, 'Matriken', 'anna')")
+        conn.execute("INSERT INTO group_assignees (group_id, username) VALUES (4, 'anna')")
+        conn.commit()
+        api.put('/api/jobs/j1/share', json={'usernames': ['rita'], 'roles': {'lena': 'reviewer', 'rita': 'annotator'}},
+                headers=ANNA)
+        assert api.patch('/api/jobs/j1', json={'group_id': 4}, headers=ANNA).status_code == 200
+        # Rita was given the dataset itself and keeps it, role and all; Lena reached it
+        # through the workspace it left.
+        assert api.get('/api/jobs/j1', params={'pages': 'false'}, headers=ANNA).json()['roles'] == {
+            'rita': 'annotator'}
+        assert api.put('/api/groups/4/share', json={'usernames': ['anna', 'lena']}, headers=ANNA).status_code == 200
+        assert self.role_on(api, 'j1', LENA) == 'annotator'
+
+    def test_someone_given_the_dataset_alone_learns_no_workspace_members_role(self, client):
+        """Lena's role there would name her as a member of a workspace Rita does not see (decision 334)."""
+        api, _ = client
+        api.put('/api/jobs/j1/share', json={'usernames': ['rita'], 'roles': {'lena': 'reviewer', 'rita': 'annotator'}},
+                headers=ANNA)
+
+        listed = {j['id']: j['roles'] for j in api.get('/api/jobs', headers=RITA).json()}
+        alone = api.get('/api/jobs/j1', params={'pages': 'false'}, headers=RITA).json()['roles']
+
+        assert (listed, alone) == ({'j1': {'rita': 'annotator'}}, {'rita': 'annotator'})
+        assert api.get('/api/jobs/j1', params={'pages': 'false'}, headers=LENA).json()['roles'] == {
+            'lena': 'reviewer', 'rita': 'annotator'}
+
+    def test_giving_the_dataset_without_naming_roles_keeps_them(self, client):
+        """A script that only says who is given the dataset leaves the roles set on it alone."""
+        api, _ = client
+        api.put('/api/jobs/j1/share', json={'usernames': ['rita'], 'roles': {'lena': 'reviewer'}}, headers=ANNA)
+
+        response = api.put('/api/jobs/j1/share', json={'usernames': ['rita', 'max']}, headers=ANNA)
+
+        assert (response.status_code, response.json()['roles']) == (200, {'lena': 'reviewer'})
+        assert self.role_on(api, 'j1', LENA) == 'reviewer'
+
     def test_only_annotator_and_reviewer_are_swapped(self, client):
         api, _ = client
         response = api.put('/api/jobs/j1/share', json={'usernames': ['rita'], 'roles': {'rita': 'manager'}},

@@ -6,6 +6,11 @@ export function groupSize(group: Group, jobs: Job[]): number {
   return group.count ?? jobs.filter((j) => j.group_id === group.id).length
 }
 
+export function memberCount(group: Group): string {
+  const n = group.shared_with.length
+  return `${n} member${n === 1 ? '' : 's'}`
+}
+
 export type WorkspaceKind = 'own-sandbox' | 'workspace' | 'other-sandbox'
 
 export function workspaceKind(group: Group, viewer: string): WorkspaceKind {

@@ -28,8 +28,8 @@ interface JobActionsProps {
   onToggleMenu: () => void
   onMasks: (fused: boolean) => void
   onMove: () => void
-  onShare: () => void
-  canShare: boolean
+  onMembers: () => void
+  canManageMembers: boolean
   /** The dataset's creation settings, to change them. */
   onSettings: () => void
   onCancel: () => void
@@ -147,7 +147,7 @@ export function JobActions(p: JobActionsProps) {
             <div ref={menu.ref}
                  className={`${menu.className} right-0 z-10 w-40 overflow-hidden ${popoverChrome} py-1`}>
               <button onClick={p.onMove} className={menuItem}>Move to workspace…</button>
-              {p.canShare && <button onClick={p.onShare} className={menuItem}>Share…</button>}
+              {p.canManageMembers && <button onClick={p.onMembers} className={menuItem}>Members…</button>}
               <button onClick={p.onSettings} data-testid="settings-open" className={menuItem}>
                 Settings…
               </button>

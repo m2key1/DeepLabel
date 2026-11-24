@@ -84,6 +84,7 @@ def share_group(group_id: int, body: GroupShare, conn=Depends(get_db),
     conn.execute('DELETE FROM group_assignees WHERE group_id = ?', (group_id,))
     conn.executemany('INSERT INTO group_assignees (group_id, username) VALUES (?, ?)',
                      [(group_id, n) for n in names])
+    store.forget_unreached_roles(conn)
     conn.commit()
     return {'id': group_id, 'shared_with': names}
 

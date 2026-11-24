@@ -30,7 +30,8 @@ def client(tmp_path, monkeypatch):
     conn = store.connect(tmp_path / 'app.db')
     conn.executescript("""
         INSERT INTO jobs (id, name, owner, status, task) VALUES ('j1', 'Volume', 'alice', 'done', 'text');
-        INSERT INTO job_assignees (job_id, username, role) VALUES ('j1', 'bob', 'reviewer');
+        INSERT INTO job_assignees (job_id, username) VALUES ('j1', 'bob');
+        INSERT INTO job_roles (job_id, username, role) VALUES ('j1', 'bob', 'reviewer');
         INSERT INTO pages (id, job_id, idx, filename, source_file, status) VALUES (1, 'j1', 0, 'a.png', '/a.png', 'done');
         INSERT INTO elements (id, page_id, order_idx, class_name, bbox, kind) VALUES
             (1, 1, 0, 'Paragraph', '[0, 0, 1, 1]', 'content');

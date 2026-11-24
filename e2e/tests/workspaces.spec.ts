@@ -43,9 +43,9 @@ test.describe('Scenario: a dataset starts in its creator\'s Sandbox (#131)', () 
     await benPage.goto('/')
     await expect(benPage.getByTestId('job-card').filter({ hasText: name })).toHaveCount(0)
 
-    // Share says why nobody is added to a Sandbox, without asking for the people she may not list.
+    // Members says why nobody is added to a Sandbox, without asking for the people she may not list.
     await card.getByTestId('job-menu').click()
-    await card.getByRole('button', { name: 'Share…' }).click()
+    await card.getByRole('button', { name: 'Members…' }).click()
     await expect(lenaPage.getByTestId('share-sandboxed')).toHaveText(
       'It is in your Sandbox, which only you can see. To share it, move it into a workspace: everyone in that workspace can then open it.')
     await expect(lenaPage.getByRole('alert')).toHaveCount(0)
@@ -55,11 +55,11 @@ test.describe('Scenario: a dataset starts in its creator\'s Sandbox (#131)', () 
     await lenaPage.getByRole('button', { name: 'Move to workspace…' }).click()
     await lenaPage.getByRole('button', { name: workspace.name, exact: true }).click()
     await expect.poll(async () => (await groupOf(jobId)).id).toBe(workspace.id)
-    // In the group, adding people is its Managers', so an Annotator is offered no Share.
+    // In the workspace, adding people is its Managers', so an Annotator is offered no Members.
     await lenaPage.reload()
     await card.getByTestId('job-menu').click()
     await expect(card.getByRole('button', { name: 'Settings…' })).toBeVisible()
-    await expect(card.getByRole('button', { name: 'Share…' })).toHaveCount(0)
+    await expect(card.getByRole('button', { name: 'Members…' })).toHaveCount(0)
 
     await benPage.reload()
     await expect(benPage.getByTestId('job-card').filter({ hasText: name })).toHaveCount(1)
@@ -84,9 +84,10 @@ test.describe('Scenario: a Manager decides who belongs to a group (#131)', () =>
     await page.getByPlaceholder('Workspace name').fill(name)
     await page.keyboard.press('Enter')
     const section = page.locator(`[data-testid="list-section"][data-title="${name}"]`)
-    await section.getByTestId('group-share').click()
-    await page.getByRole('checkbox', { name: ben }).check()
-    await page.getByRole('button', { name: 'Save' }).click()
+    await section.getByTestId('group-members').click()
+    await page.getByRole('combobox', { name: 'Add someone' }).fill(ben)
+    await page.getByRole('option', { name: new RegExp(ben) }).click()
+    await page.getByRole('button', { name: 'Done' }).click()
     const members = async () => ((await backendFetch('/api/groups')) as { name: string; shared_with: string[] }[])
       .find((g) => g.name === name)?.shared_with
     await expect.poll(members).toEqual([ben, manager])
@@ -99,7 +100,7 @@ test.describe('Scenario: a Manager decides who belongs to a group (#131)', () =>
     await benPage.goto('/')
     const benSection = benPage.locator(`[data-testid="list-section"][data-title="${name}"]`)
     await expect(benSection).toHaveCount(1)
-    await expect(benSection.getByTestId('group-share')).toHaveCount(0)
+    await expect(benSection.getByTestId('group-members')).toHaveCount(0)
     await benContext.close()
     await monaContext.close()
   })
