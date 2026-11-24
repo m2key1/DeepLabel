@@ -80,6 +80,7 @@ def test_a_row_carries_what_the_table_shows(client):
         'min_confidence': 0.8, 'avg_confidence': pytest.approx(0.85),
         'llm_models': 0,
         'regions_total': 0, 'regions_checked': 0,
+        'assignee': None,
     }]
 
 
@@ -111,6 +112,8 @@ def test_each_chip_says_how_many_it_would_show(client):
         'no-document-match': 5,
         # Pages 3 and 4 went through line detection and have no line.
         'found-nothing': 2,
+        # Nobody was handed a page.
+        'mine': 0, 'unassigned': 5,
         # Nobody gave a page a type, so every one is text.
         'type:1': 5, 'type:2': 0, 'type:3': 0, 'type:4': 0, 'type:5': 0,
         'deleted': 1,
@@ -190,7 +193,7 @@ def test_a_duplicate_is_listed_but_counted_by_no_chip(client, conn):
         'all': 5, 'lines-reviewed': 1, 'layout-reviewed': 4, 'unreviewed-lines': 2,
         'layout-unchecked': 1, 'no-layout': 1, 'test-pages': 0, 'has-note': 0,
         'lines-complete': 0, 'lines-unchecked': 5, 'no-document-match': 5, 'found-nothing': 2,
-        'type:1': 5, 'type:2': 0, 'type:3': 0, 'type:4': 0, 'type:5': 0, 'deleted': 1}
+        'mine': 0, 'unassigned': 5, 'type:1': 5, 'type:2': 0, 'type:3': 0, 'type:4': 0, 'type:5': 0, 'deleted': 1}
     assert [r['id'] for r in get(client, filter='no-layout', limit=50).json()['rows']] == [3]
     job = client.get('/api/jobs/j1', params={'pages': 'false'}, headers=ALICE).json()
     assert job['pages_live'] == 5

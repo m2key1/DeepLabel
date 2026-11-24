@@ -707,12 +707,18 @@ CREATE TABLE IF NOT EXISTS job_assignees (
     PRIMARY KEY (job_id, username)
 );
 -- An Annotator made Reviewer on one dataset, or a Reviewer made Annotator (#132), whether
--- they reach it through its workspace or were given it alone. See forget_unreached_roles.
+-- they reach it through its workspace or were given it alone. See forget_unreached.
 CREATE TABLE IF NOT EXISTS job_roles (
     job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
     username TEXT NOT NULL,
     role TEXT NOT NULL,
     PRIMARY KEY (job_id, username)
+);
+-- Whom a Manager handed a page to (#137): one person for now, a second keyer with #37.
+CREATE TABLE IF NOT EXISTS page_assignees (
+    page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    username TEXT NOT NULL,
+    PRIMARY KEY (page_id, username)
 );
 CREATE TABLE IF NOT EXISTS group_assignees (
     group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -1445,16 +1451,50 @@ def is_sandbox(conn, group_id: int) -> bool:
     return row is not None and row['sandbox_of'] is not None
 
 
-def forget_unreached_roles(conn) -> None:
-    """A role set on one dataset lapses once its person no longer reaches the dataset -
-    taken out of its workspace, off the dataset, or the dataset moved away - so letting
-    them back in later does not quietly bring it back."""
+def forget_unreached(conn) -> None:
+    """A role set on one dataset, and its pages handed to someone, lapse once that person
+    no longer reaches the dataset - taken out of its workspace, off the dataset, or the
+    dataset moved away - so letting them back in later does not quietly bring them back,
+    and the pages are free for someone else."""
     conn.execute(
         'DELETE FROM job_roles WHERE NOT EXISTS ('
         '  SELECT 1 FROM job_assignees a WHERE a.job_id = job_roles.job_id AND a.username = job_roles.username'
         ') AND NOT EXISTS ('
         '  SELECT 1 FROM jobs j JOIN group_assignees g ON g.group_id = j.group_id'
         '  WHERE j.id = job_roles.job_id AND g.username = job_roles.username)')
+    conn.execute(
+        'DELETE FROM page_assignees WHERE username NOT IN ('
+        f'  {_PEOPLE_OF_JOB.format(job="(SELECT job_id FROM pages WHERE id = page_assignees.page_id)")})')
+
+
+# The people a dataset belongs to: its creator, its workspace's members and whoever was given
+# it alone - not an admin, who reaches every dataset and is none of its people.
+_PEOPLE_OF_JOB = ('SELECT owner FROM jobs WHERE id = {job} '
+                  'UNION SELECT username FROM job_assignees WHERE job_id = {job} '
+                  'UNION SELECT g.username FROM group_assignees g JOIN jobs j ON j.group_id = g.group_id '
+                  'WHERE j.id = {job}')
+
+
+def people_of_job(conn, job_id: str) -> list[str]:
+    """Who may be handed a dataset's pages, by name."""
+    return sorted(row[0] for row in conn.execute(_PEOPLE_OF_JOB.format(job=':job'), {'job': job_id}))
+
+
+def assignments(conn, job_id: str) -> dict:
+    """Who has which of a dataset's pages, and which pages nobody has, by the numbers its page
+    table shows. Only pages that are work: a deleted, duplicate or unreadable one is no one's."""
+    people: dict[str, list[int]] = {name: [] for name in people_of_job(conn, job_id)}
+    unassigned: list[int] = []
+    for row in conn.execute(
+            'SELECT p.idx, a.username FROM pages p LEFT JOIN page_assignees a ON a.page_id = p.id '
+            f'WHERE p.job_id = ? AND {caches.counted_page("p")} ORDER BY p.idx', (job_id,)):
+        number = row['idx'] + 1
+        if row['username'] is None:
+            unassigned.append(number)
+        else:
+            people.setdefault(row['username'], []).append(number)
+    return {'people': [{'username': name, 'pages': pages} for name, pages in sorted(people.items())],
+            'unassigned': unassigned}
 
 
 def sandbox_id(conn, username: str) -> int:

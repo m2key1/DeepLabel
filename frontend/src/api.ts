@@ -224,6 +224,8 @@ export interface PageSummary {
   llm_models?: number
   regions_total?: number
   regions_checked?: number
+  /** Whom a Manager handed the page to, or null while nobody has it. */
+  assignee?: string | null
 }
 
 /** A duplicate or an unreadable scan: never rendered, nothing to review, counted nowhere. */
@@ -1802,9 +1804,12 @@ export type PageFilter =
   | `run:${number}`
   /** A page type's pages, unset pages counting as text. */
   | `type:${number}`
+  /** The pages handed to oneself, to nobody, or to one person. */
+  | 'mine' | 'unassigned' | `assigned:${string}`
 
 export type PageSort =
   'idx' | 'filename' | 'dimensions' | 'status' | 'type' | 'layout' | 'lines' | 'checked' | 'confidence' | 'llm' | 'test'
+  | 'assignee'
 
 export interface PageRowsQuery {
   filter?: PageFilter
@@ -2280,6 +2285,23 @@ export function patchPageType(
 /** Give pages a type; null makes them text again. */
 export function setPagesType(jobId: string, pageIds: number[], typeId: number | null): Promise<{ pages: number }> {
   return request(`/api/jobs/${jobId}/pages/type`, json('POST', { page_ids: pageIds, type_id: typeId }))
+}
+
+/** Who has which of a dataset's pages, by the numbers its page table shows: everyone the
+ *  dataset belongs to, with the pages they were handed, and the pages nobody has. */
+export interface Assignments {
+  people: { username: string; pages: number[] }[]
+  unassigned: number[]
+}
+
+export function getAssignments(jobId: string): Promise<Assignments> {
+  return request(`/api/jobs/${jobId}/assignments`)
+}
+
+/** Hands pages to one person, taking them from whoever had them; null takes them back. */
+export function assignPages(jobId: string, assignee: string | null,
+                            pages: { page_ids: number[] } | { numbers: number[] }): Promise<Assignments> {
+  return request(`/api/jobs/${jobId}/assignments`, json('PUT', { assignee, ...pages }))
 }
 
 /** A rights statement a scan or a transcription may carry, by its canonical URI. */

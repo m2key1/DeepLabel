@@ -8,7 +8,8 @@ from PIL import Image
 from app import (augmentations, caches, config, dataset_sync, geometry, ingest_queue, jobs, llm_gt, llm_ocr,
                  llm_queue, store, trainer, training, weights)
 from app.deps import LEGACY_ROLES
-from app.routes import (augmentations as augmentation_routes, backend_api, bulk, contributors, conventions, elements,
+from app.routes import (assignments, augmentations as augmentation_routes, backend_api, bulk, contributors, conventions,
+                        elements,
                         evaluations, exports, groups, lines, llm, maps, models, pages, people, pipeline, presence,
                         recognize, reference as reference_routes, runs, search, trainings, transcript)
 from app.routes import jobs as job_routes
@@ -122,6 +123,7 @@ def get_tasks():
 app.include_router(job_routes.router)
 app.include_router(layout_template_routes.router)
 app.include_router(page_type_routes.router)
+app.include_router(assignments.router)
 app.include_router(metadata_routes.router)
 app.include_router(rights_routes.router)
 app.include_router(conventions.router)

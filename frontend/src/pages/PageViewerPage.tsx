@@ -53,6 +53,7 @@ import {
 import { boxChrome } from '../components/chrome'
 import { Splitter } from '../components/ui/Splitter'
 import { LineLoupe } from '../components/viewer/LineLoupe'
+import { stepPage } from '../components/viewer/pageSteps'
 import { LineCandidates, MACHINE_ID, offeredReadings } from '../components/viewer/LineCandidates'
 import { LineReadings } from '../components/viewer/LineReadings'
 import { UnmatchedReadings } from '../components/viewer/UnmatchedReadings'
@@ -227,7 +228,7 @@ const ELEMENT_PENS: Record<ElementShape, { label: string; hint: string; editHint
 }
 
 export function PageViewerPage() {
-  const { canEdit } = useAuth()
+  const { canEdit, user } = useAuth()
   const canReread = canEdit
   const { hotkeys: hk, keyboard: vkbd, keyboardMode, keyboardSource, pageOverlays,
           save: saveSettings } = useSettings()
@@ -532,6 +533,7 @@ export function PageViewerPage() {
     getReviewQueue(jobId, maxConf, reviewRun).then(setQueue).catch((e: Error) => setError(e.message))
   }, [reviewMode, jobId, maxConf, reviewRun])
 
+  const openIdx = page?.idx
   const orderedPages = useMemo(
     () => (job ? job.pages.filter((p) => !p.deleted && !isUncounted(p)).sort((a, b) => a.idx - b.idx) : []),
     [job],
@@ -2253,9 +2255,8 @@ export function PageViewerPage() {
     if (at !== -1 && at + 1 < list.length) return activateLine(list[at + 1].id)
     // Last line of the page: on to the next one, first line focused. Within an element the
     // rest of the page is still ahead, so that stays put.
-    if (stage === 'element') return
-    const here = orderedPages.findIndex((p) => String(p.id) === pageId)
-    const next = here === -1 ? undefined : orderedPages[here + 1]
+    if (stage === 'element' || !page) return
+    const next = stepPage(orderedPages, page.idx, 1, user)
     if (next) {
       pendingFirstLine.current = next.id
       navigate(`/jobs/${jobId}/pages/${next.id}`)
@@ -2263,12 +2264,11 @@ export function PageViewerPage() {
   }
 
   useEffect(() => {
-    const gotoPage = (delta: number) => {
-      const cur = orderedPages.findIndex((p) => String(p.id) === pageId)
-      const next = cur + delta
-      if (cur !== -1 && next >= 0 && next < orderedPages.length) {
-        navigate(`/jobs/${jobId}/pages/${orderedPages[next].id}`)
-      }
+    // From the open page's place, which an annotator's list need not hold: one of someone
+    // else's pages opened from a link.
+    const gotoPage = (delta: 1 | -1) => {
+      const next = openIdx !== undefined && stepPage(orderedPages, openIdx, delta, user)
+      if (next) navigate(`/jobs/${jobId}/pages/${next.id}`)
     }
     const onKey = (e: KeyboardEvent) => {
       const t = e.target
@@ -2503,7 +2503,7 @@ export function PageViewerPage() {
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
     }
-  }, [jobId, pageId, orderedPages, stage, navigate, editingId, activeLine, listLines, sortedPageLines, showLines,
+  }, [jobId, pageId, openIdx, orderedPages, user, stage, navigate, editingId, activeLine, listLines, sortedPageLines, showLines,
       canLineNav, reviewMode, reviewLines, gotoQueued, editing, selectedId, layoutClasses, cutArmed, mergeSet,
       canEdit, canReread, drag, lineDraft, boxDraft, polyDraft, tool, armed, readingCursor, candidatesByLine])
 

@@ -26,6 +26,7 @@ import {
   markTestPages,
   listPageTypes,
   setPagesType,
+  assignPages,
   BLANK_PAGE_TYPE,
   TEXT_PAGE_TYPE,
   setPageLayoutChecked,
@@ -98,6 +99,8 @@ import { ExportBlockedNote, ExportMenu, exportBlocked } from '../components/job/
 import { DataUseChips } from '../components/job/DataUseSwitches'
 import { LayoutClassesDialog } from '../components/job/LayoutClassesDialog'
 import { PageTypesDialog } from '../components/job/PageTypesDialog'
+import { AssignPagesDialog } from '../components/job/AssignPagesDialog'
+import { useAssignments } from '../components/job/assignments'
 import { RightsChip } from '../components/job/RightsDialog'
 import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
 import { SettleAgainDialog } from '../components/job/SettleAgainDialog'
@@ -124,7 +127,7 @@ const PHASE_LABELS: Record<PagePhase, string> = {
   ocr: 'A re-read',
 }
 
-type SortKey = 'idx' | 'filename' | 'dimensions' | 'status' | 'type' | 'layout' | 'lines' | 'checked' | 'confidence'
+type SortKey = 'idx' | 'filename' | 'assignee' | 'dimensions' | 'status' | 'type' | 'layout' | 'lines' | 'checked' | 'confidence'
   | 'llm' | 'regions' | 'test'
 
 // Why a page is left out of the work, on hover over its status.
@@ -141,11 +144,14 @@ type Column = { key: SortKey; label: string; title?: string }
 
 type PageFilter = PageFilterKey
 
-type PageFilterDef = { key: PageFilter; label: string; editorsOnly?: boolean }
+type PageFilterDef = { key: PageFilter; label: string; editorsOnly?: boolean; person?: string }
 
 // Chips that are noise on the datasets that have none of their pages, so they show only once
 // there are some - or while one is the selected filter, which has to stay put.
-const HIDDEN_WHEN_EMPTY = new Set<string>(['deleted', 'no-layout', 'test-pages', 'found-nothing'])
+// The bulk bar's choice for taking pages back; no username is written this way.
+const NOBODY_OPTION = '(nobody)'
+
+const HIDDEN_WHEN_EMPTY = new Set<string>(['deleted', 'no-layout', 'test-pages', 'found-nothing', 'mine'])
 
 // What each chip matches, and how many, is the backend's (page_rows.FILTERS): one rule in
 // one place, so a chip's count and its rows cannot disagree. This only says which chips a
@@ -157,8 +163,15 @@ const HIDDEN_WHEN_EMPTY = new Set<string>(['deleted', 'no-layout', 'test-pages',
 // A tile has no layout and no lines: its one review is the Reviewed flag, so a map job gets
 // that chip and none of the text ones, which could only ever come back empty. A dataset
 // that skipped layout has no layout to mark complete, so the layout chips go there.
-const pageFilters = (isMap: boolean, noLayout: boolean, withDocuments: boolean, types: PageType[]): PageFilterDef[] => [
+const pageFilters = (isMap: boolean, noLayout: boolean, withDocuments: boolean, types: PageType[],
+                     assignees: string[]): PageFilterDef[] => [
   { key: 'all', label: 'All' },
+  // Whose work a page is (#137): the pages handed to oneself, to nobody, or to one person.
+  ...(isMap ? [] : [
+    { key: 'mine' as PageFilter, label: 'Assigned to me' },
+    { key: 'unassigned' as PageFilter, label: 'Unassigned' },
+    ...assignees.map((name) => ({ key: `assigned:${name}` as PageFilter, label: name, person: name })),
+  ]),
   ...(isMap ? [
     { key: 'reviewed' as PageFilter, label: 'Reviewed' },
   ] : [
@@ -188,6 +201,7 @@ const pageFilters = (isMap: boolean, noLayout: boolean, withDocuments: boolean, 
 const TEXT_COLUMNS: Column[] = [
   { key: 'idx', label: '#' },
   { key: 'filename', label: 'Filename' },
+  { key: 'assignee', label: 'Assigned to', title: 'Whom a Manager handed the page to' },
   { key: 'dimensions', label: 'Dimensions' },
   { key: 'status', label: 'Status' },
   { key: 'type', label: 'Type', title: 'Cover, blank and the rest: which steps a run takes on the page' },
@@ -279,6 +293,7 @@ export function JobDetailPage() {
   const [removeReadingsOpen, setRemoveReadingsOpen] = useState(false)
   const [classesOpen, setClassesOpen] = useState(false)
   const [pageTypesOpen, setPageTypesOpen] = useState(false)
+  const [assignOpen, setAssignOpen] = useState(false)
   const [pageTypes, setPageTypes] = useState<PageType[]>([])
   // The pages a read is scoped to, or undefined for the whole dataset. Held apart from the
   // table's selection, which the dialog must not follow while it is open.
@@ -437,7 +452,11 @@ export function JobDetailPage() {
   // A Type column is noise where every page is text and none is offered as blank.
   const typesInUse = Object.entries(chipCounts).some(([key, n]) =>
     n > 0 && (key === 'found-nothing' || (key.startsWith('type:') && key !== `type:${TEXT_PAGE_TYPE}`)))
-  const columns = available.filter((c) => !hiddenColumns.includes(c.key) && (c.key !== 'type' || typesInUse))
+  // Whose pages they are says something once some are handed out, which leaves some unassigned
+  // fewer than all - for an annotator too, whose view holds their own and nobody's.
+  const assignmentsInUse = 'unassigned' in chipCounts && chipCounts.unassigned < (chipCounts.all ?? 0)
+  const columns = available.filter((c) => !hiddenColumns.includes(c.key) && (c.key !== 'type' || typesInUse)
+    && (c.key !== 'assignee' || assignmentsInUse))
 
   const startReview = () =>
     review?.total && navigate(`/jobs/${jobId}/pages/${review.lines[0].page_id}?review=${maxConf}`)
@@ -579,11 +598,15 @@ export function JobDetailPage() {
   }, [jobId, isMap, refetch])
   useEffect(() => loadDocuments(), [loadDocuments])
   const [searchParams, setSearchParams] = useSearchParams()
+  const assignees = useMemo(
+    () => Object.keys(chipCounts).filter((key) => key.startsWith('assigned:')).map((key) => key.slice('assigned:'.length)),
+    [chipCounts])
   const filters = useMemo(
-    () => pageFilters(isMap, noLayout, documents.length > 0, pageTypes).filter((f) => canEdit || !f.editorsOnly),
-    [isMap, noLayout, canEdit, documents.length, pageTypes])
+    () => pageFilters(isMap, noLayout, documents.length > 0, pageTypes, assignees)
+      .filter((f) => canEdit || !f.editorsOnly),
+    [isMap, noLayout, canEdit, documents.length, pageTypes, assignees])
   // A run's pages come from its history rather than from a chip of their own.
-  const runFilter = /^run:\d+$/.test(searchParams.get('filter') ?? '')
+  const runFilter: PageFilterDef | null = /^run:\d+$/.test(searchParams.get('filter') ?? '')
     ? { key: searchParams.get('filter') as PageFilter, label: 'Last changed by a run' } : null
   const filter = runFilter ?? filters.find((f) => f.key === searchParams.get('filter')) ?? filters[0]
   const setFilter = (key: PageFilter) =>
@@ -705,6 +728,18 @@ export function JobDetailPage() {
   }, [jobId, isMap])
   useEffect(() => loadPageTypes(), [loadPageTypes])
   const typeName = (typeId: number) => pageTypes.find((type) => type.id === typeId)?.name
+  // Loaded once a Manager has pages selected, which is when the bar offers to hand them out.
+  const { assignable } = useAssignments(jobId, canManage && !isMap && selected.size > 0)
+  const assignTo = (assignee: string | null) => {
+    // A duplicate or unreadable scan is no one's work, so it is not handed out.
+    const handed = selectedPages.filter((p) => !isUncounted(p))
+    assignPages(jobId, assignee, { page_ids: handed.map((p) => p.id) })
+      .then(() => {
+        refetch()
+        setNotice(`${plural(handed.length, 'page')} ${assignee ? `handed to ${assignee}` : 'taken back'}.`)
+      })
+      .catch((e: Error) => setError(e.message))
+  }
   const setTypeOf = (pageIds: number[], typeId: number) =>
     setPagesType(jobId, pageIds, typeId).then(() => { refetch(); loadPageTypes() }).catch((e: Error) => setError(e.message))
 
@@ -897,6 +932,13 @@ export function JobDetailPage() {
     switch (key) {
       case 'idx':
         return <span className="text-ink-muted">{page.idx + 1}</span>
+      case 'assignee':
+        return page.assignee ? (
+          <span className="inline-flex min-w-0 max-w-36 items-center gap-1.5" title={page.assignee}>
+            <Avatar name={page.assignee} size="xs" />
+            <span data-testid="page-assignee" className="truncate">{page.assignee === user ? 'You' : page.assignee}</span>
+          </span>
+        ) : null
       case 'filename':
         return (
           <span className="inline-flex max-w-full items-center gap-1.5">
@@ -1275,6 +1317,11 @@ export function JobDetailPage() {
                   hint: 'Cover, blank and the rest, and which steps a run takes on each',
                   testId: 'page-types',
                   onSelect: () => setPageTypesOpen(true),
+                }, {
+                  label: 'Assign pages…',
+                  hint: 'Hand pages or ranges to the people of this dataset',
+                  testId: 'assign-pages',
+                  onSelect: () => setAssignOpen(true),
                 }] : []),
                 // A Manager's, like the agreement settings they apply; offered once readings
                 // are on file, since there is nothing to settle or remove before.
@@ -1430,6 +1477,9 @@ export function JobDetailPage() {
       {classesOpen && (
         <LayoutClassesDialog jobId={jobId} canEdit={canManage} onClose={() => setClassesOpen(false)} onChanged={refetch} />
       )}
+      {assignOpen && job && (
+        <AssignPagesDialog job={job} onClose={() => setAssignOpen(false)} onChanged={refetch} />
+      )}
       {pageTypesOpen && (
         <PageTypesDialog jobId={jobId} canEdit={canManage} onClose={() => setPageTypesOpen(false)}
                          onChanged={() => { refetch(); loadPageTypes() }} />
@@ -1495,6 +1545,14 @@ export function JobDetailPage() {
               {pageTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
             </Select>
           )}
+          {canManage && !isMap && selectedLive > 0 && assignable.length > 0 && (
+            <Select size="xs" data-testid="bulk-assign" aria-label="Assign the selected pages to" value=""
+                    onChange={(e) => assignTo(e.target.value === NOBODY_OPTION ? null : e.target.value)}>
+              <option value="" disabled>Assign to…</option>
+              {assignable.map((a) => <option key={a.username} value={a.username}>{a.display_name || a.username}</option>)}
+              <option value={NOBODY_OPTION}>Nobody</option>
+            </Select>
+          )}
           {canManage && !isMap && selectedLive > 0 && (
             <button data-testid="bulk-test-pages" className={actionClass}
                     onClick={() => markTest(selectedPages.map((p) => p.id), !allTest)}>
@@ -1530,18 +1588,22 @@ export function JobDetailPage() {
           {[...filters, ...(runFilter ? [runFilter] : [])].map((f) => {
             const count = f === runFilter ? matched : chipCounts[f.key] ?? 0
             const active = filter.key === f.key
-            if (count === 0 && !active && (HIDDEN_WHEN_EMPTY.has(f.key) || f.key.startsWith('type:'))) return null
+            if (count === 0 && !active
+              && (HIDDEN_WHEN_EMPTY.has(f.key) || f.key.startsWith('type:') || f.key.startsWith('assigned:'))) return null
+            if (f.key === 'unassigned' && !assignmentsInUse && !active) return null
             return (
               <button
                 key={f.key}
                 data-testid={`page-filter-${f.key}`}
                 onClick={() => setFilter(f.key)}
-                className={`rounded-full border px-2.5 py-0.5 text-xs ${
+                className={`inline-flex items-center gap-1 rounded-full border py-0.5 text-xs ${
+                  f.person ? 'pl-0.5 pr-2.5' : 'px-2.5'} ${
                   active
                     ? 'border-accent bg-accent-wash font-medium text-accent-ink'
                     : 'border-line text-ink-muted hover:border-line-strong'
                 }`}
               >
+                {f.person && <Avatar name={f.person} size="xs" className="h-4 w-4 text-[8px]" />}
                 {f.label} · {count}
               </button>
             )

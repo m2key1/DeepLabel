@@ -60,6 +60,14 @@ Lena, an Annotator, a Reviewer on that dataset alone; leaving `roles` out keeps 
 set. A dataset carries its `roles` in the same shape. `GET /api/users/names` lists the accounts
 to choose from, with their roles.
 
+A dataset's Managers hand its pages out with `PUT /api/jobs/{id}/assignments`:
+`{"assignee": "lena", "numbers": [1, 2, 3]}` gives Lena pages 1 to 3 as the page table numbers
+them (or name them by `page_ids`), taking them from whoever had them; `"assignee": null` takes
+them back. Deleted, duplicate and unreadable pages in a range are passed by. The answer, like
+`GET /api/jobs/{id}/assignments`, lists everyone the dataset belongs to with their page numbers,
+and the pages nobody has. Each page in `/page-rows` and in the dataset's page list carries its
+`assignee`, and `/page-rows` filters on `mine`, `unassigned` and `assigned:<username>`.
+
 `POST /api/lines/texts` corrects many lines in one request (up to 5000), each as a single
 edit would; the lines it could not write come back with the reason:
 

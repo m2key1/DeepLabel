@@ -852,8 +852,10 @@ def get_job(job_id: str, pages: bool = True, conn=Depends(get_db),
         'SELECT page_id, COUNT(DISTINCT llm_model_id) models FROM candidates '
         "WHERE source = 'llm' AND dismissed = 0 AND llm_model_id IS NOT NULL "
         'AND page_id IN (SELECT id FROM pages WHERE job_id = ?) GROUP BY page_id', (job_id,))}
+    # An annotator is listed the pages handed to them and the ones nobody has (#137).
+    own_pages_only = job['my_role'] == 'annotator'
     job['pages'] = [
-        {**dict(p),
+        {**{key: p[key] for key in p.keys() if key != 'mine'},
          'layout_checked': bool(p['layout_checked']),
          'lines_checked': bool(p['lines_checked']),
          'deleted': bool(p['deleted']),
@@ -866,8 +868,11 @@ def get_job(job_id: str, pages: bool = True, conn=Depends(get_db),
          'lines_total': line_counts[p['id']]['total'] if p['id'] in line_counts else 0,
          'lines_reviewed': (line_counts[p['id']]['done'] or 0) if p['id'] in line_counts else 0}
         for p in conn.execute(
-            'SELECT id, idx, filename, width, height, status, layout_checked, lines_checked, deleted, is_test '
-            'FROM pages WHERE job_id = ? ORDER BY idx', (job_id,))]
+            'SELECT id, idx, filename, width, height, status, layout_checked, lines_checked, deleted, is_test, '
+            '(SELECT MIN(a.username) FROM page_assignees a WHERE a.page_id = pages.id) assignee, '
+            'EXISTS (SELECT 1 FROM page_assignees a WHERE a.page_id = pages.id AND a.username = ?) mine '
+            'FROM pages WHERE job_id = ? ORDER BY idx', (user['username'], job_id))
+        if not own_pages_only or p['assignee'] is None or p['mine']]
     return job
 
 
@@ -957,6 +962,11 @@ def review_queue(job_id: str, max_conf: float = 0.85, include_checked: bool = Fa
     require_job_access(conn, job_id, user)
     if conn.execute('SELECT id FROM jobs WHERE id = ?', (job_id,)).fetchone() is None:
         raise HTTPException(404)
+    # An annotator reviews on their own pages and the ones nobody has (#137).
+    own_pages_only = role_on_job(conn, job_id, user) == 'annotator'
+    seen = ('AND (NOT EXISTS (SELECT 1 FROM page_assignees a WHERE a.page_id = p.id) '
+            'OR EXISTS (SELECT 1 FROM page_assignees a WHERE a.page_id = p.id AND a.username = ?)) '
+            if own_pages_only else '')
     doubted = 'l.confidence IS NOT NULL AND l.confidence < ? ' + ('' if include_checked else 'AND l.checked = 0 ')
     settled = 'l.corrected_by LIKE ? AND l.checked = 0'
     # Sent from an evaluation page: queued checked or not, until a person checks it again.
@@ -970,9 +980,10 @@ def review_queue(job_id: str, max_conf: float = 0.85, include_checked: bool = Fa
         'LEFT JOIN review_flags rf ON rf.line_id = l.id '
         f"WHERE p.job_id = ? AND {caches.counted_page('p')} AND e.kind != 'container' "
         "AND e.class_name != 'Divider' AND e.deleted = 0 AND l.deleted = 0 "
-        f'AND ({worth}) '
+        f'{seen}AND ({worth}) '
         'ORDER BY p.idx, e.order_idx, l.order_idx',
-        (job_id, run) if run is not None else (job_id, max_conf, consensus.SETTLED_BY + '%')).fetchall()
+        (job_id, *([user['username']] if own_pages_only else []),
+         *((run,) if run is not None else (max_conf, consensus.SETTLED_BY + '%')))).fetchall()
     return {'max_conf': max_conf, 'total': len(rows),
             'lines': [{'id': r['id'], 'page_id': r['page_id'], 'page_idx': r['page_idx'],
                        'confidence': r['confidence'], 'flagged': bool(r['flagged'])} for r in rows]}
@@ -1172,7 +1183,8 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
         else:
             target = body.group_id
         conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (target, job_id))
-        store.forget_unreached_roles(conn)
+        store.forget_unreached(conn)
+        page_rows.forget_counts(conn, job_id)
     for task, column in MODEL_COLUMNS.items():
         if column not in fields:
             continue
@@ -1299,8 +1311,9 @@ def share_job(job_id: str, body: Share, conn=Depends(get_db), user: dict = Depen
         conn.execute('DELETE FROM job_roles WHERE job_id = ?', (job_id,))
         conn.executemany('INSERT INTO job_roles (job_id, username, role) VALUES (?, ?, ?)',
                          [(job_id, n.strip(), role) for n, role in body.roles.items() if n.strip()])
-    store.forget_unreached_roles(conn)
+    store.forget_unreached(conn)
     conn.commit()
+    page_rows.forget_counts(conn, job_id)
     kept = {r['username']: r['role'] for r in conn.execute(
         'SELECT username, role FROM job_roles WHERE job_id = ? ORDER BY username', (job_id,))}
     return {'job_id': job_id, 'shared_with': names, 'roles': kept}

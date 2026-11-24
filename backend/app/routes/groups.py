@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import layout_shapes, store
+from app import layout_shapes, page_rows, store
 from app.deps import (REACHABLE_GROUP_IDS, VISIBLE_JOB_IDS, can_access_job, can_reach_group, current_user,
                       get_db, manages_workspace, require_role)
 from app.routes.bulk import each_isolated
@@ -84,8 +84,9 @@ def share_group(group_id: int, body: GroupShare, conn=Depends(get_db),
     conn.execute('DELETE FROM group_assignees WHERE group_id = ?', (group_id,))
     conn.executemany('INSERT INTO group_assignees (group_id, username) VALUES (?, ?)',
                      [(group_id, n) for n in names])
-    store.forget_unreached_roles(conn)
+    store.forget_unreached(conn)
     conn.commit()
+    page_rows.forget_counts()
     return {'id': group_id, 'shared_with': names}
 
 

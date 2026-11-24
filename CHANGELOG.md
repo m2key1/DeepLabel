@@ -10,6 +10,9 @@ the version in the app's footer opens.
 
 ### Added
 
+- Assigning pages: a Manager hands a dataset's pages or ranges to its people, the page table
+  shows and filters whose each page is, an Annotator's table keeps to their own pages and the
+  unassigned ones, and Next in the page viewer goes to your next page (#137).
 - IIIF manifests and collections in Presentation API 4, which the IIIF cookbook already publishes,
   are read like version 3 (#153).
 - A second factor at sign-in: an authenticator app and recovery codes, set up on DeepLabel's

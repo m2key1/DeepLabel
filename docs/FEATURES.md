@@ -725,6 +725,15 @@ polygons) and *line tracing* (boundary lines, open or closed).
 
 - **Workspaces and members:** give people a whole workspace or a single dataset, from its
   **Members** dialog.
+- **Assigning pages:** a Manager hands a dataset's pages out from **⋯ > Assign pages…**, by
+  page number or range (`1-40, 52`) to anyone the dataset belongs to, or from a selection in
+  the page table with **Assign to…**. The dialog lists who has which pages and which nobody
+  has. Once pages are handed out, the page table gains an **Assigned to** column and the
+  filters **Assigned to me**, **Unassigned** and one per person. An Annotator's table lists
+  only the pages handed to them and the ones nobody has; a page of someone else's still opens
+  from a link or Search. In the page viewer, Next and Previous keep to the pages handed to
+  you, whenever you have any. Someone taken out of the workspace, or off the dataset, gives
+  their pages back.
 - **Notes:** a dataset and each of its pages can carry one note everyone with access can read,
   such as how far a volume has been checked. Anyone who can edit adds it with **+ Note** in
   the dataset's title or the page viewer's toolbar; a **Note** tag then marks it there, on the

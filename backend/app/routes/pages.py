@@ -13,7 +13,8 @@ from pydantic import BaseModel
 from app import (blobs, caches, candidates, config, dataset_sync, geometry, layout_templates, llm_ocr, metadata,
                  page_rows, provenance, reading_order, renditions, revert, rotation, serializers, store, training)
 from app.deps import (IMMUTABLE_CACHE, WRITERS, current_user, get_db, get_user, require_job_access,
-                      require_job_manager, require_page_access, require_role, require_role_on, require_unchanged)
+                      require_job_manager, require_page_access, require_role, require_role_on, require_unchanged,
+                      role_on_job)
 from app.routes.jobs import Note
 
 router = APIRouter(tags=['pages'])
@@ -36,12 +37,13 @@ def job_page_rows(job_id: str, filter: str = 'all', sort: str = 'idx', desc: boo
     # A deleted page is for whoever may restore it: the Deleted chip is where one is undone from.
     if filter == 'deleted' and user['role'] == 'viewer':
         raise HTTPException(403, 'not permitted')
+    seen_by = {'me': user['username'], 'own_pages_only': role_on_job(conn, job_id, user) == 'annotator'}
     try:
         answer = page_rows.fetch(conn, job_id, task=job['task'], page_filter=filter, sort=sort,
-                                 descending=desc, offset=offset, limit=limit)
+                                 descending=desc, offset=offset, limit=limit, **seen_by)
     except page_rows.BadQuery as e:
         raise HTTPException(400, str(e)) from None
-    answer['counts'] = page_rows.counts(conn, job_id, task=job['task'])
+    answer['counts'] = page_rows.counts(conn, job_id, task=job['task'], **seen_by)
     return answer
 
 

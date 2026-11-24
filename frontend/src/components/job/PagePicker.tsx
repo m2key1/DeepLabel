@@ -35,6 +35,17 @@ export function parseRanges(text: string, count: number): Set<number> | null {
   return picked.size ? picked : null
 }
 
+/** Positions as "3-22, 35", the way parseRanges reads them; `numbers` in ascending order. */
+export function formatRanges(numbers: number[]): string {
+  const runs: [number, number][] = []
+  for (const n of numbers) {
+    const last = runs[runs.length - 1]
+    if (last && n === last[1] + 1) last[1] = n
+    else runs.push([n, n])
+  }
+  return runs.map(([from, to]) => (from === to ? `${from}` : `${from}-${to}`)).join(', ')
+}
+
 /** The pages picked for a new dataset as thumbnails, each ticked unless left out, with a
  *  range field for long volumes. */
 export function PagePicker<K>({ items, excluded, onToggle, onExclude, unit = 'file', note }: {

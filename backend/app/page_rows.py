@@ -43,7 +43,9 @@ SELECT p.id, p.idx, p.filename, p.width, p.height, p.status,
        (SELECT COUNT(*) FROM regions r
          WHERE r.page_id = p.id AND r.deleted = 0) regions_total,
        (SELECT COUNT(*) FROM regions r
-         WHERE r.page_id = p.id AND r.deleted = 0 AND r.checked = 1) regions_checked
+         WHERE r.page_id = p.id AND r.deleted = 0 AND r.checked = 1) regions_checked,
+       (SELECT MIN(a.username) FROM page_assignees a WHERE a.page_id = p.id) assignee,
+       EXISTS (SELECT 1 FROM page_assignees a WHERE a.page_id = p.id AND a.username = :me) assigned_to_me
 FROM pages p WHERE p.job_id = :job_id
 """
 
@@ -70,8 +72,14 @@ FILTERS = {
     'test-pages': f'{_WORK} AND is_test = 1',
     'has-note': 'deleted = 0 AND note IS NOT NULL',
     'found-nothing': f'{_WORK} AND {_FOUND_NOTHING}',
+    'mine': f'{_WORK} AND assigned_to_me',
+    'unassigned': f'{_WORK} AND assignee IS NULL',
     'deleted': 'deleted = 1',
 }
+
+# An annotator works on their own pages and the ones nobody has (#137): every chip, count and
+# row they are shown keeps to those. Nothing is locked - a link still opens any page.
+_THEIRS_OR_NOBODYS = '(assignee IS NULL OR assigned_to_me)'
 
 # A tile has no boxes and no lines: the Reviewed toggle in the tile editor writes
 # layout_checked, and that flag alone is its review.
@@ -101,6 +109,7 @@ SORTS = {
     'regions': 'CAST(regions_checked AS REAL) / NULLIF(regions_total, 0)',
     # A line job's ratio is always 1, so its column sorts by how many were traced.
     'regions-total': 'regions_total',
+    'assignee': 'assignee',
 }
 
 MAX_LIMIT = 500
@@ -129,14 +138,15 @@ class BadQuery(Exception):
 
 def fetch(conn: sqlite3.Connection, job_id: str, *, task: str, page_filter: str = 'all',
           sort: str = 'idx', descending: bool = False,
-          offset: int = 0, limit: int = 100) -> dict:
+          offset: int = 0, limit: int = 100, me: str = '', own_pages_only: bool = False) -> dict:
     """One screenful of a dataset's page table, and how many the filter matched in total,
     so the table can say where it is - the detail endpoint's every-page answer is 10 MB of
     JSON on the largest volume here. Filtered and ordered in SQL before the slice: applied
     after it, asking for the first fifty unreviewed pages of a volume whose first fifty are
     reviewed would answer with nothing. `task` is the dataset's, which decides what
-    reviewed means on it."""
-    filters = _filters(conn, job_id, task)
+    reviewed means on it; `me` is who asks, and `own_pages_only` keeps an annotator to
+    their pages and the unassigned."""
+    filters = _filters(conn, job_id, task, own_pages_only)
     by_run = RUN_FILTER.fullmatch(page_filter)
     if page_filter not in filters and by_run is None:
         raise BadQuery(f'filter must be one of {sorted(filters)}, or run:<id>')
@@ -154,7 +164,10 @@ def fetch(conn: sqlite3.Connection, job_id: str, *, task: str, page_filter: str 
     # appear on two screens or on neither.
     column = SORTS[sort]
     order = (f'({column}) IS NULL ASC, {column} {"DESC" if descending else "ASC"}, idx ASC')
-    args = {'job_id': job_id, 'limit': limit, 'offset': offset, **({'run': int(by_run[1])} if by_run else {})}
+    if own_pages_only:
+        where = f'({where}) AND {_THEIRS_OR_NOBODYS}'
+    args = {'job_id': job_id, 'me': me, 'limit': limit, 'offset': offset,
+            **({'run': int(by_run[1])} if by_run else {})}
 
     # The chips count every filter already, and hold the answer; only 'all' counts fewer
     # pages than it lists, and a run's pages are no chip.
@@ -162,7 +175,7 @@ def fetch(conn: sqlite3.Connection, job_id: str, *, task: str, page_filter: str 
         matched = conn.execute(
             f'SELECT COUNT(*) c FROM ({_ROWS}) WHERE {where}', args).fetchone()['c']
     else:
-        matched = counts(conn, job_id, task=task)[page_filter]
+        matched = counts(conn, job_id, task=task, me=me, own_pages_only=own_pages_only)[page_filter]
     offered = '0' if ingest.is_tile_task(task) else f'{_WORK} AND {_FOUND_NOTHING}'
     rows = conn.execute(
         f'SELECT *, ({offered}) blank_offer FROM ({_ROWS}) WHERE {where} ORDER BY {order} LIMIT :limit OFFSET :offset',
@@ -175,11 +188,12 @@ def fetch(conn: sqlite3.Connection, job_id: str, *, task: str, page_filter: str 
     }
 
 
-_counts: dict[tuple[str, str], tuple[float, tuple, dict[str, int]]] = {}
+_counts: dict[tuple[str, str, str, bool], tuple[float, tuple, dict[str, int]]] = {}
 COUNTS_TTL = 15
 
 
-def counts(conn: sqlite3.Connection, job_id: str, *, task: str) -> dict[str, int]:
+def counts(conn: sqlite3.Connection, job_id: str, *, task: str, me: str = '',
+           own_pages_only: bool = False) -> dict[str, int]:
     """How many pages each chip would show, so the table can label them without asking
     once per chip.
 
@@ -189,9 +203,9 @@ def counts(conn: sqlite3.Connection, job_id: str, *, task: str) -> dict[str, int
     progress is - the database it came from, and the highest ids it depends on - and
     counted again only when those moved for this dataset, so checking a line shows up
     immediately, work elsewhere costs nothing, and the TTL only covers writes that add no
-    row.
+    row. Held for each person apart, since 'mine' and an annotator's view are their own.
     """
-    key = (caches.db_key(conn), job_id)
+    key = (caches.db_key(conn), job_id, me, own_pages_only)
     stamp = caches.change_stamp(conn)
     held = _counts.get(key)
     if held is not None and time.time() - held[0] < COUNTS_TTL:
@@ -203,11 +217,12 @@ def counts(conn: sqlite3.Connection, job_id: str, *, task: str) -> dict[str, int
                 _counts[key] = held = (held[0], stamp, held[2])
         if held is not None:
             return held[2]
-    filters = _filters(conn, job_id, task)
+    filters = _filters(conn, job_id, task, own_pages_only)
     selects = ', '.join(
         f'SUM(CASE WHEN {COUNTED.get(name, clause)} THEN 1 ELSE 0 END) "{name}"'
         for name, clause in filters.items())
-    row = conn.execute(f'SELECT {selects} FROM ({_ROWS})', {'job_id': job_id}).fetchone()
+    seen = f' WHERE {_THEIRS_OR_NOBODYS}' if own_pages_only else ''
+    row = conn.execute(f'SELECT {selects} FROM ({_ROWS}){seen}', {'job_id': job_id, 'me': me}).fetchone()
     answer = {name: row[name] or 0 for name in filters}
     _counts[key] = (time.time(), stamp, answer)
     return answer
@@ -217,18 +232,33 @@ def forget_counts(conn: sqlite3.Connection | None = None, job_id: str | None = N
     """For a write behind the stamp's back: one dataset's, or every held answer."""
     if job_id is None:
         _counts.clear()
-    else:
-        _counts.pop((caches.db_key(conn), job_id), None)
+        return
+    # A snapshot of the keys: another request may be adding its own meanwhile.
+    for key in list(_counts):
+        if key[:2] == (caches.db_key(conn), job_id):
+            _counts.pop(key, None)
 
 
-def _filters(conn: sqlite3.Connection, job_id: str, task: str) -> dict[str, str]:
+def _filters(conn: sqlite3.Connection, job_id: str, task: str, own_pages_only: bool = False) -> dict[str, str]:
     """What the chips mean on a dataset of this task: a tile is reviewed by its flag, a
-    page by what was checked on it, and 'type:<id>' lists a page type's pages."""
+    page by what was checked on it, 'type:<id>' lists a page type's pages and
+    'assigned:<username>' the pages handed to one person - other than for an annotator,
+    whose view holds no one else's."""
     if ingest.is_tile_task(task):
         return TILE_FILTERS
     types = conn.execute('SELECT type_id FROM job_page_types WHERE job_id = ? ORDER BY type_id', (job_id,))
-    return {**FILTERS, **{f'type:{row["type_id"]}': f'{_WORK} AND COALESCE(page_type, {page_types.TEXT}) = {row["type_id"]}'
-                          for row in types}}
+    people = [] if own_pages_only else conn.execute(
+        'SELECT DISTINCT a.username FROM page_assignees a JOIN pages p ON p.id = a.page_id '
+        'WHERE p.job_id = ? ORDER BY a.username', (job_id,))
+    return {**FILTERS,
+            **{f'type:{row["type_id"]}': f'{_WORK} AND COALESCE(page_type, {page_types.TEXT}) = {row["type_id"]}'
+               for row in types},
+            **{f'assigned:{row["username"]}': f'{_WORK} AND assignee = {_quoted(row["username"])}' for row in people}}
+
+
+def _quoted(text: str) -> str:
+    """A name as an SQL string literal, for a filter built from what is stored."""
+    return "'" + text.replace("'", "''") + "'"
 
 
 def _as_page(row: sqlite3.Row) -> dict:
@@ -236,5 +266,6 @@ def _as_page(row: sqlite3.Row) -> dict:
     for flag in ('layout_checked', 'lines_checked', 'layout_skipped', 'deleted', 'is_test', 'document_match',
                  'blank_offer'):
         page[flag] = bool(page[flag])
+    del page['assigned_to_me']
     page['note'] = store.note_of(page)
     return page
