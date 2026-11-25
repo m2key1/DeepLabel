@@ -45,6 +45,9 @@ SELECT p.id, p.idx, p.filename, p.width, p.height, p.status,
        (SELECT COUNT(*) FROM regions r
          WHERE r.page_id = p.id AND r.deleted = 0 AND r.checked = 1) regions_checked,
        (SELECT MIN(a.username) FROM page_assignees a WHERE a.page_id = p.id) assignee,
+       -- A double-keyed page's other keyer (#37).
+       (SELECT CASE WHEN COUNT(*) > 1 THEN MAX(a.username) END FROM page_assignees a
+         WHERE a.page_id = p.id) second_assignee,
        EXISTS (SELECT 1 FROM page_assignees a WHERE a.page_id = p.id AND a.username = :me) assigned_to_me,
        {review} review,
        (SELECT r.note FROM page_reviews r WHERE r.page_id = p.id AND r.state = 'sent_back') review_note
@@ -77,6 +80,7 @@ FILTERS = {
     'mine': f'{_WORK} AND assigned_to_me',
     'unassigned': f'{_WORK} AND assignee IS NULL',
     'handed-in': f"{_WORK} AND review = 'handed_in'",
+    'partly-handed-in': f"{_WORK} AND review = 'partly_handed_in'",
     'sent-back': f"{_WORK} AND review = 'sent_back'",
     'signed-off': f"{_WORK} AND review = 'signed_off'",
     'deleted': 'deleted = 1',
@@ -259,7 +263,8 @@ def _filters(conn: sqlite3.Connection, job_id: str, task: str, own_pages_only: b
     return {**FILTERS,
             **{f'type:{row["type_id"]}': f'{_WORK} AND COALESCE(page_type, {page_types.TEXT}) = {row["type_id"]}'
                for row in types},
-            **{f'assigned:{row["username"]}': f'{_WORK} AND assignee = {_quoted(row["username"])}' for row in people}}
+            **{f'assigned:{row["username"]}': f'{_WORK} AND {_quoted(row["username"])} IN (assignee, second_assignee)'
+               for row in people}}
 
 
 def _quoted(text: str) -> str:

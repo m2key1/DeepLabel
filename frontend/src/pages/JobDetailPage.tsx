@@ -101,6 +101,7 @@ import { DataUseChips } from '../components/job/DataUseSwitches'
 import { LayoutClassesDialog } from '../components/job/LayoutClassesDialog'
 import { PageTypesDialog } from '../components/job/PageTypesDialog'
 import { AssignPagesDialog } from '../components/job/AssignPagesDialog'
+import { formatRanges } from '../components/job/PagePicker'
 import { useAssignments } from '../components/job/assignments'
 import { RightsChip } from '../components/job/RightsDialog'
 import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
@@ -153,10 +154,12 @@ type PageFilterDef = { key: PageFilter; label: string; editorsOnly?: boolean; pe
 const NOBODY_OPTION = '(nobody)'
 
 const HIDDEN_WHEN_EMPTY = new Set<string>(['deleted', 'no-layout', 'test-pages', 'found-nothing', 'mine',
-  'handed-in', 'sent-back', 'signed-off'])
+  'partly-handed-in', 'handed-in', 'sent-back', 'signed-off'])
 
-// Where a page stands in review (#36), as its chip in the table says it.
+// Where a page stands in review (#36), as its chip in the table says it; a double-keyed page
+// is partly handed in while one of its two keyers is (#37).
 const REVIEW_SHOWN: Record<Exclude<ReviewState, null>, { label: string; tone: Tone }> = {
+  partly_handed_in: { label: '1 of 2 handed in', tone: 'neutral' },
   handed_in: { label: 'Handed in', tone: 'accent' },
   sent_back: { label: 'Sent back', tone: 'warn' },
   signed_off: { label: 'Signed off', tone: 'ok' },
@@ -182,7 +185,7 @@ const pageFilters = (isMap: boolean, noLayout: boolean, withDocuments: boolean, 
     ...assignees.map((name) => ({ key: `assigned:${name}` as PageFilter, label: name, person: name })),
     // Where pages stand in review (#36): handed in, sent back, signed off.
     ...Object.entries(REVIEW_SHOWN).map(([state, { label }]) =>
-      ({ key: state.replace('_', '-') as PageFilter, label })),
+      ({ key: state.replaceAll('_', '-') as PageFilter, label })),
   ]),
   ...(isMap ? [
     { key: 'reviewed' as PageFilter, label: 'Reviewed' },
@@ -306,7 +309,8 @@ export function JobDetailPage() {
   const [removeReadingsOpen, setRemoveReadingsOpen] = useState(false)
   const [classesOpen, setClassesOpen] = useState(false)
   const [pageTypesOpen, setPageTypesOpen] = useState(false)
-  const [assignOpen, setAssignOpen] = useState(false)
+  // The pages the dialog opens on, as ranges; null while it is closed.
+  const [assigning, setAssigning] = useState<string | null>(null)
   const [pageTypes, setPageTypes] = useState<PageType[]>([])
   // The pages a read is scoped to, or undefined for the whole dataset. Held apart from the
   // table's selection, which the dialog must not follow while it is open.
@@ -946,13 +950,20 @@ export function JobDetailPage() {
     switch (key) {
       case 'idx':
         return <span className="text-ink-muted">{page.idx + 1}</span>
-      case 'assignee':
-        return page.assignee ? (
-          <span className="inline-flex min-w-0 max-w-36 items-center gap-1.5" title={page.assignee}>
-            <Avatar name={page.assignee} size="xs" />
-            <span data-testid="page-assignee" className="truncate">{page.assignee === user ? 'You' : page.assignee}</span>
+      case 'assignee': {
+        // A double-keyed page has two keyers (#37).
+        const keyers = [page.assignee, page.second_assignee].filter((name): name is string => !!name)
+        return keyers.length > 0 ? (
+          <span className="inline-flex min-w-0 max-w-36 items-center gap-1.5" title={keyers.join(', ')}>
+            <span className="flex shrink-0 -space-x-1">
+              {keyers.map((name) => <Avatar key={name} name={name} size="xs" className="ring-1 ring-surface" />)}
+            </span>
+            <span data-testid="page-assignee" className="truncate">
+              {keyers.map((name) => (name === user ? 'You' : name)).join(', ')}
+            </span>
           </span>
         ) : null
+      }
       case 'review':
         return page.review ? (
           <Badge tone={REVIEW_SHOWN[page.review].tone} data-testid="page-review" data-state={page.review}
@@ -1342,7 +1353,7 @@ export function JobDetailPage() {
                   label: 'Assign pages…',
                   hint: 'Hand pages or ranges to the people of this dataset',
                   testId: 'assign-pages',
-                  onSelect: () => setAssignOpen(true),
+                  onSelect: () => setAssigning(''),
                 }] : []),
                 // A Manager's, like the agreement settings they apply; offered once readings
                 // are on file, since there is nothing to settle or remove before.
@@ -1498,8 +1509,9 @@ export function JobDetailPage() {
       {classesOpen && (
         <LayoutClassesDialog jobId={jobId} canEdit={canManage} onClose={() => setClassesOpen(false)} onChanged={refetch} />
       )}
-      {assignOpen && job && (
-        <AssignPagesDialog job={job} onClose={() => setAssignOpen(false)} onChanged={refetch} />
+      {assigning !== null && job && (
+        <AssignPagesDialog job={job} pages={assigning} onClose={() => setAssigning(null)} onChanged={refetch}
+                           onKeying={(keying) => setJob((p) => (p ? { ...p, ...keying } : p))} />
       )}
       {pageTypesOpen && (
         <PageTypesDialog jobId={jobId} canEdit={canManage} onClose={() => setPageTypesOpen(false)}
@@ -1566,7 +1578,15 @@ export function JobDetailPage() {
               {pageTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
             </Select>
           )}
-          {canManage && !isMap && selectedLive > 0 && assignable.length > 0 && (
+          {canManage && !isMap && selectedLive > 0 && job?.double_keying && (
+            // Two keyers to a page are chosen in the dialog, which opens on the selected pages.
+            <button data-testid="bulk-assign-keyers" className={actionClass}
+                    onClick={() => setAssigning(formatRanges(selectedPages.filter((p) => !isUncounted(p))
+                      .map((p) => p.idx + 1)))}>
+              Assign…
+            </button>
+          )}
+          {canManage && !isMap && selectedLive > 0 && !job?.double_keying && assignable.length > 0 && (
             <Select size="xs" data-testid="bulk-assign" aria-label="Assign the selected pages to" value=""
                     onChange={(e) => assignTo(e.target.value === NOBODY_OPTION ? null : e.target.value)}>
               <option value="" disabled>Assign to…</option>

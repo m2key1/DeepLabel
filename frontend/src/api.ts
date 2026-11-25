@@ -125,6 +125,10 @@ export interface Job {
   llm_model_ids?: number[]
   llm_consensus_min?: number
   llm_autocheck?: boolean
+  /** Two people key each page, blind to each other (#37), from empty lines or from the
+   *  text the lines carry. */
+  double_keying?: boolean
+  keying_from_empty?: boolean
   /** Whether the local OCR model counts as one of the voices above. Off by default: on a
    *  dataset training that model, letting it confirm its own targets approves the mistakes
    *  it already makes. */
@@ -226,13 +230,16 @@ export interface PageSummary {
   regions_checked?: number
   /** Whom a Manager handed the page to, or null while nobody has it. */
   assignee?: string | null
+  /** A double-keyed page's other keyer. */
+  second_assignee?: string | null
   /** Where the page stands in review, in the page table; a send-back's note beside it. */
   review?: ReviewState
   review_note?: string | null
 }
 
-/** Handed in by its assignee, then signed off by a Reviewer or sent back to them (#36). */
-export type ReviewState = 'handed_in' | 'signed_off' | 'sent_back' | null
+/** Handed in by its assignee, then signed off by a Reviewer or sent back to them (#36). A
+ *  double-keyed page is partly handed in while one of its two keyers is (#37). */
+export type ReviewState = 'handed_in' | 'partly_handed_in' | 'signed_off' | 'sent_back' | null
 
 export interface PageReview {
   state: ReviewState
@@ -241,6 +248,15 @@ export interface PageReview {
   at: string | null
   /** What the assignee is to do on a page sent back. */
   note: string | null
+}
+
+/** Who keys a double-keyed page (#37). Open while it is being keyed: until both keyers have
+ *  handed it in. */
+export interface PageKeying {
+  keyers: string[]
+  handed_in: string[]
+  from_empty: boolean
+  open: boolean
 }
 
 /** A duplicate or an unreadable scan: never rendered, nothing to review, counted nowhere. */
@@ -413,6 +429,8 @@ export interface PageDetail {
   is_test: boolean
   note: Note | null
   review: PageReview
+  /** Null where the dataset keys each page once. */
+  keying: PageKeying | null
   /** How far the scan has been turned, 0/90/180/270. */
   rotation: number
   elements: PageElement[]
@@ -1824,7 +1842,7 @@ export type PageFilter =
   | `type:${number}`
   /** The pages handed to oneself, to nobody, or to one person. */
   | 'mine' | 'unassigned' | `assigned:${string}`
-  | 'handed-in' | 'sent-back' | 'signed-off'
+  | 'handed-in' | 'partly-handed-in' | 'sent-back' | 'signed-off'
 
 export type PageSort =
   'idx' | 'filename' | 'dimensions' | 'status' | 'type' | 'layout' | 'lines' | 'checked' | 'confidence' | 'llm' | 'test'
@@ -2337,10 +2355,18 @@ export function getAssignments(jobId: string): Promise<Assignments> {
   return request(`/api/jobs/${jobId}/assignments`)
 }
 
-/** Hands pages to one person, taking them from whoever had them; null takes them back. */
+/** Hands pages to one person, or to two keyers of a double-keyed dataset, taking them from
+ *  whoever had them; null takes them back. */
 export function assignPages(jobId: string, assignee: string | null,
-                            pages: { page_ids: number[] } | { numbers: number[] }): Promise<Assignments> {
-  return request(`/api/jobs/${jobId}/assignments`, json('PUT', { assignee, ...pages }))
+                            pages: { page_ids: number[] } | { numbers: number[] },
+                            secondKeyer: string | null = null): Promise<Assignments> {
+  return request(`/api/jobs/${jobId}/assignments`, json('PUT', { assignee, second_keyer: secondKeyer, ...pages }))
+}
+
+/** Have two people key each page of the dataset, blind to each other, or one as before (#37). */
+export function setKeying(jobId: string, doubleKeying: boolean, fromEmpty: boolean)
+  : Promise<{ double_keying: boolean; from_empty: boolean }> {
+  return request(`/api/jobs/${jobId}/keying`, json('PUT', { double_keying: doubleKeying, from_empty: fromEmpty }))
 }
 
 /** A rights statement a scan or a transcription may carry, by its canonical URI. */

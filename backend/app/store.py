@@ -95,7 +95,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     use_external_llm INTEGER NOT NULL DEFAULT 1,
     use_export INTEGER NOT NULL DEFAULT 1,
     -- The run it is queued for or going through, and the one it last went through.
-    run_id INTEGER
+    run_id INTEGER,
+    -- Two people key each page, blind to each other (#37), from empty lines or from the text
+    -- the lines carry.
+    double_keying INTEGER NOT NULL DEFAULT 0,
+    keying_from_empty INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS pages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -716,13 +720,22 @@ CREATE TABLE IF NOT EXISTS job_roles (
     role TEXT NOT NULL,
     PRIMARY KEY (job_id, username)
 );
--- Whom a Manager handed a page to (#137): one person for now, a second keyer with #37.
+-- Whom a Manager handed a page to (#137): one person, or two keyers in a double-keyed dataset (#37).
 CREATE TABLE IF NOT EXISTS page_assignees (
     page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
     username TEXT NOT NULL,
     -- When they handed the page in as done (#36); it goes with the assignment.
     handed_in_at TEXT,
     PRIMARY KEY (page_id, username)
+);
+-- What a keyer of a double-keyed page typed on a line (#37), apart from the line itself until
+-- both keyers have handed the page in. See keying.py.
+CREATE TABLE IF NOT EXISTS keyings (
+    line_id INTEGER NOT NULL REFERENCES lines(id) ON DELETE CASCADE,
+    username TEXT NOT NULL,
+    text TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (line_id, username)
 );
 -- A Reviewer's word on a page (#36): 'signed_off', or 'sent_back' to its assignee with a note.
 -- A sign-off holds only while every line is checked: see SIGN_OFF_LAPSES.
@@ -1048,6 +1061,9 @@ def connect(db_path: Path) -> sqlite3.Connection:
                      f"SELECT jobs.id, d.* FROM jobs, (VALUES {page_types.DEFAULT_ROWS}) d WHERE jobs.task = 'text'")
     if 'handed_in_at' not in {row[1] for row in conn.execute('PRAGMA table_info(page_assignees)')}:
         conn.execute('ALTER TABLE page_assignees ADD COLUMN handed_in_at TEXT')
+    if 'double_keying' not in job_cols:
+        conn.execute('ALTER TABLE jobs ADD COLUMN double_keying INTEGER NOT NULL DEFAULT 0')
+        conn.execute('ALTER TABLE jobs ADD COLUMN keying_from_empty INTEGER NOT NULL DEFAULT 0')
     for trigger in SIGN_OFF_LAPSES:
         conn.execute(trigger)
     # Every way a text dataset comes to be - upload, import, IIIF - gives it its copy.
@@ -1521,21 +1537,30 @@ def assignments(conn, job_id: str) -> dict:
 
 # Where a page stands in review (#36), over a page id: signed off, else handed in, else sent
 # back, else NULL. A sign-off outranks the hand-in it answered, which is kept for when it lapses.
+# A page is handed in once everyone who has it has handed it in, and a double-keyed one (#37)
+# only once both its keyers have; until then a hand-in leaves it partly handed in.
+_HANDED_IN = 'SELECT 1 FROM page_assignees a WHERE a.page_id = {page} AND a.handed_in_at IS NOT NULL'
+_KEYERS_NEEDED = ('SELECT CASE WHEN kj.double_keying = 1 THEN 2 ELSE 1 END FROM pages kp '
+                  'JOIN jobs kj ON kj.id = kp.job_id WHERE kp.id = {page}')
 REVIEW_STATE = (
     "CASE WHEN EXISTS (SELECT 1 FROM page_reviews r WHERE r.page_id = {page} AND r.state = 'signed_off') "
     "THEN 'signed_off' "
-    "WHEN EXISTS (SELECT 1 FROM page_assignees a WHERE a.page_id = {page} AND a.handed_in_at IS NOT NULL) "
+    "WHEN NOT EXISTS (SELECT 1 FROM page_assignees a WHERE a.page_id = {page} AND a.handed_in_at IS NULL) "
+    f"AND (SELECT COUNT(*) FROM page_assignees a WHERE a.page_id = {{page}}) >= ({_KEYERS_NEEDED}) "
     "THEN 'handed_in' "
     "WHEN EXISTS (SELECT 1 FROM page_reviews r WHERE r.page_id = {page} AND r.state = 'sent_back') "
-    "THEN 'sent_back' END")
+    "THEN 'sent_back' "
+    f"WHEN EXISTS ({_HANDED_IN}) THEN 'partly_handed_in' END")
 
 
 def page_review(conn, page_id: int) -> dict:
-    """Where the page stands in review, who put it there and when, and a send-back's note."""
+    """Where the page stands in review, who put it there and when, and a send-back's note. A
+    hand-in names whoever handed it in last."""
     state = conn.execute(f'SELECT {REVIEW_STATE.format(page=":page")}', {'page': page_id}).fetchone()[0]
-    if state == 'handed_in':
+    if state in ('handed_in', 'partly_handed_in'):
         row = conn.execute('SELECT username by_user, handed_in_at at, NULL note FROM page_assignees '
-                           'WHERE page_id = ? AND handed_in_at IS NOT NULL ORDER BY username', (page_id,)).fetchone()
+                           'WHERE page_id = ? AND handed_in_at IS NOT NULL ORDER BY handed_in_at DESC, username',
+                           (page_id,)).fetchone()
     elif state is not None:
         row = conn.execute('SELECT by_user, at, note FROM page_reviews WHERE page_id = ?', (page_id,)).fetchone()
     else:
@@ -1924,6 +1949,8 @@ def job_row_to_dict(row: sqlite3.Row) -> dict:
     job['ocr_convention_read'] = json.loads(read) if read is not None else None
     job['llm_consensus_min'] = int(job.get('llm_consensus_min') or 2)
     job['llm_autocheck'] = bool(job.get('llm_autocheck', 0))
+    job['double_keying'] = bool(job.get('double_keying', 0))
+    job['keying_from_empty'] = bool(job.get('keying_from_empty', 0))
     job['llm_consensus_with_ocr'] = bool(job.get('llm_consensus_with_ocr', 0))
     job['gt_autocheck'] = bool(job.get('gt_autocheck', 0))
     job['gt_ordered'] = bool(job.get('gt_ordered', 0))

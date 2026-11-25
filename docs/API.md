@@ -77,6 +77,16 @@ someone has; `DELETE /api/pages/{id}/review` takes either back. Each answers wit
 `/page-rows` carries each page's `review` and `review_note` and filters on `handed-in`,
 `sent-back` and `signed-off`. A training's `signed_off_only` keeps an OCR run to signed-off pages.
 
+`PUT /api/jobs/{id}/keying` with `{"double_keying": true, "from_empty": false}` has two people key
+each page, blind to each other; a dataset carries `double_keying` and `keying_from_empty`. Its
+assignments then take a `second_keyer`, whoever keeps a page keeps their hand-in and typing, and
+`/page-rows` carries each page's `second_assignee`. A keyer's `PATCH /api/lines/{id}` text is kept
+apart from the line and served to them alone, until the page is signed off; any other write of
+theirs to the page answers 403. The page carries `keying` - `keyers`, `handed_in`, `from_empty` and
+`open` while it is being keyed. The second keyer's hand-in compares the two: lines typed alike are
+checked with `check_source` `keyed`, and the rest offered as readings for the Reviewer. A page one
+keyer has handed in is `partly_handed_in`, which `/page-rows` filters on as `partly-handed-in`.
+
 `POST /api/lines/texts` corrects many lines in one request (up to 5000), each as a single
 edit would; the lines it could not write come back with the reason:
 

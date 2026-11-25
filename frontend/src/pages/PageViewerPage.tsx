@@ -229,8 +229,7 @@ const ELEMENT_PENS: Record<ElementShape, { label: string; hint: string; editHint
 }
 
 export function PageViewerPage() {
-  const { canEdit, user } = useAuth()
-  const canReread = canEdit
+  const { canEdit: mayEdit, user } = useAuth()
   const { hotkeys: hk, keyboard: vkbd, keyboardMode, keyboardSource, pageOverlays,
           save: saveSettings } = useSettings()
   const { id, pageId } = useParams<{ id: string; pageId: string }>()
@@ -251,13 +250,19 @@ export function PageViewerPage() {
   const [job, setJob] = useState<JobDetail | null>(null)
   // Checking a line, a box or a page is a Reviewer's; running models and the page's test
   // flag are a Manager's. An Annotator corrects and sees what was checked.
-  const canCheck = reaches(job?.my_role, 'reviewer')
   const canManage = reaches(job?.my_role, 'manager')
   // What the OCR model resizes a line to, for the loupe. Null until a run has recorded it.
   const [ocrModel, setOcrModel] = useState<RegistryModel | null>(null)
   // What the server last sent. What is shown is this with every edit not yet in it laid
   // on top, so an edit shows the moment it is made and never waits for the server (#72).
   const [basePage, setPage] = useState<PageDetail | null>(null)
+  // A keyer of a double-keyed page (#37) types its text and nothing else, and once both keyers
+  // are in, nothing at all: the boxes and lines stay as they are so both keyings describe them.
+  const keyer = !!user && !!basePage?.keying?.keyers.includes(user)
+  const canEdit = mayEdit && (!keyer || !!basePage?.keying?.open)
+  const canEditShape = canEdit && !keyer
+  const canReread = canEditShape
+  const canCheck = reaches(job?.my_role, 'reviewer') && !keyer
   const queueHooks = useRef<QueueHooks>({ onRefused: () => undefined, onIdle: () => undefined })
   const [edits] = useState(() => new EditQueue<PageDetail>({
     onRefused: (label, error) => queueHooks.current.onRefused(label, error),
@@ -793,7 +798,7 @@ export function PageViewerPage() {
     })
 
   const rotateLine = async (line: Line | null, dir: 1 | -1 = 1) => {
-    if (!line || !canEdit) return
+    if (!line || !canEditShape) return
     const turned = ((((lineOrient(line) || 0) + dir * 90) % 360) + 360) % 360
     setPendingOrient((m) => new Map(m).set(line.id, turned))
     try {
@@ -2091,6 +2096,8 @@ export function PageViewerPage() {
 
   const startEdit = (line: Line) => {
     setActiveLine(line.id)
+    // Only for whoever can save it: not a Viewer, nor a keyer once both keyings are in (#37).
+    if (!canEdit) return
     setEditingId(line.id)
     setEditBase(line.revision)
     setDraft(displayed(line.corrected_text ?? line.text ?? ''))
@@ -2338,17 +2345,17 @@ export function PageViewerPage() {
       const combo = eventCombo(e)
       // '' is a bare modifier press, and also what an unbound command holds.
       if (!combo) return
-      if (combo === hkRef.current.edit && canEdit) {
+      if (combo === hkRef.current.edit && canEditShape) {
         e.preventDefault()
         setEditing((v) => !v)
         return
       }
-      if (combo === hkRef.current.rotateCw && canEdit) {
+      if (combo === hkRef.current.rotateCw && canEditShape) {
         e.preventDefault()
         loupeRotate.current(1)
         return
       }
-      if (combo === hkRef.current.rotateCcw && canEdit) {
+      if (combo === hkRef.current.rotateCcw && canEditShape) {
         e.preventDefault()
         loupeRotate.current(-1)
         return
@@ -2519,7 +2526,7 @@ export function PageViewerPage() {
     }
   }, [jobId, pageId, openIdx, orderedPages, user, stage, navigate, editingId, activeLine, listLines, sortedPageLines, showLines,
       canLineNav, reviewMode, reviewLines, gotoQueued, editing, selectedId, layoutClasses, cutArmed, mergeSet,
-      canEdit, canReread, drag, lineDraft, boxDraft, polyDraft, tool, armed, readingCursor, candidatesByLine])
+      canEdit, canEditShape, canReread, drag, lineDraft, boxDraft, polyDraft, tool, armed, readingCursor, candidatesByLine])
 
   const elementById = useMemo(() => new Map(elements.map((e) => [e.id, e])), [elements])
   // What the overlays draw: the region list can mute individual boxes.
@@ -3338,7 +3345,7 @@ export function PageViewerPage() {
           </button>
         )}
         <span className={ACTION_SLOT}>
-          {canEdit && (
+          {canEditShape && (
             <button type="button" data-testid="delete-line"
                     onClick={(e) => {
                       e.stopPropagation()
@@ -3896,7 +3903,7 @@ export function PageViewerPage() {
                            onClick={() => setShowConfidence((v) => !v)}>Confidence</GroupButton>
               <GroupButton on={showOrder} onClick={() => setShowOrder((v) => !v)}>Order</GroupButton>
             </ButtonGroup>}
-            {canEdit && page && (
+            {canEditShape && page && (
               <>
                 {!textOnly && <BarDivider />}
                 {canManage && (
@@ -3956,7 +3963,7 @@ export function PageViewerPage() {
             >
               <PanelIcon collapsed={ocrFrac <= 0.03} />
             </Button>}
-            {canEdit && (
+            {canEditShape && (
               <ButtonGroup aria-label="Mode">
                 <GroupButton on={!editing} onClick={() => setEditing(false)} title="Look and read - Esc">
                   View
@@ -4192,9 +4199,14 @@ export function PageViewerPage() {
             {!inElement ? (
               <div className={`flex h-full flex-col overflow-hidden p-3 ${boxChrome}`}>
                 {page && job && (
-                  <PageReview pageId={page.id} review={page.review} mine={pageAssignee !== null && pageAssignee === user}
-                              assigned={pageAssignee !== null} canReview={canCheck} unchecked={uncheckedLines}
-                              onChange={(review) => setPage((p) => (p ? { ...p, review } : p))} onError={setError} />
+                  <PageReview pageId={page.id} review={page.review} keying={page.keying} me={user ?? ''}
+                              assignees={page.keying?.keyers ?? (pageAssignee ? [pageAssignee] : [])}
+                              canReview={canCheck} unchecked={uncheckedLines}
+                              onChange={(review) => {
+                                setPage((p) => (p ? { ...p, review } : p))
+                                // A keyer's hand-in may have the keyings compared, which writes the lines.
+                                if (page.keying) void reloadPage()
+                              }} onError={setError} />
                 )}
                 <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2">
                   <span className="text-[11px] font-medium text-ink-muted">

@@ -58,13 +58,15 @@ def element_payload(row, lines: list, revision: int) -> dict:
             'lines': lines, 'revision': revision}
 
 
-def lines_of_element(conn, element_id: int) -> list[dict]:
+def lines_of_element(conn, element_id: int, seen=None) -> list[dict]:
+    """The element's live lines; `seen` is how the person asking sees them (keying.lens)."""
     rows = conn.execute('SELECT * FROM lines WHERE element_id = ? AND deleted = 0 ORDER BY order_idx',
                         (element_id,)).fetchall()
     ids = [r['id'] for r in rows]
     revisions = store.latest_revisions(conn, 'line', ids)
     authors = registry.line_readers(conn, ids)
-    return [line_dict(r, revisions[r['id']], authors[r['id']]) for r in rows]
+    lines = [line_dict(r, revisions[r['id']], authors[r['id']]) for r in rows]
+    return [seen(line) for line in lines] if seen else lines
 
 
 def element_with_lines(conn, element_id: int) -> dict:

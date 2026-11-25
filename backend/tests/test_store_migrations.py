@@ -82,6 +82,20 @@ class TestMigrations:
             'sign_off_lapses_on_a_new_line', 'sign_off_lapses_on_a_line', 'sign_off_lapses_on_a_box'}
         conn.close()
 
+    def test_a_database_from_before_double_keying_gains_its_switches_and_table(self, tmp_path):
+        db = tmp_path / 'app.db'
+        store.connect(db).close()
+        raw = sqlite3.connect(db)
+        raw.execute('DROP TABLE IF EXISTS keyings')
+        raw.commit()
+        raw.close()
+        strip_column(db, 'jobs', self.ORIGINAL_COLUMNS['jobs'])
+
+        conn = store.connect(db)
+        assert cols(conn, 'keyings') == {'line_id', 'username', 'text', 'at'}
+        assert cols(conn, 'jobs') >= {'double_keying', 'keying_from_empty'}
+        conn.close()
+
     def test_pages_carry_the_reference_columns(self, tmp_path):
         conn = store.connect(tmp_path / 'app.db')
         assert cols(conn, 'pages') >= {'reference_text', 'reference_document',
@@ -211,6 +225,7 @@ class TestMigrations:
         'gt_reads': ['completion_tokens', 'created_at', 'error', 'finished_at', 'id', 'job_id', 'label', 'llm_model_id', 'model', 'page_id', 'prompt_hash', 'prompt_tokens', 'raw_text', 'requested_by', 'status'],
         'job_assignees': ['job_id', 'username'],
         'job_roles': ['job_id', 'username', 'role'],
+        'keyings': ['at', 'line_id', 'text', 'username'],
         'page_assignees': ['page_id', 'username'],
         'page_reviews': ['at', 'by_user', 'note', 'page_id', 'state'],
         'recognition_caps': ['account', 'monthly_lines'],

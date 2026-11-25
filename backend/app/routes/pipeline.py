@@ -4,7 +4,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import candidates, characters, config, ingest, layout_classes, newer_models, page_types, registry, store
+from app import (candidates, characters, config, ingest, keying, layout_classes, newer_models, page_types, registry,
+                 store)
 from app.caches import counted_page
 from app.deps import (current_user, get_db, get_user, require_job_access, require_job_manager, require_page_access,
                       role_on_job, role_reaches)
@@ -710,6 +711,7 @@ def run_page(page_id: int, body: RunPhase, conn=Depends(get_db),
     to the page's pool first, so corrections come back onto whatever is detected this time
     instead of being lost."""
     require_page_access(conn, page_id, user)
+    keying.refuse(conn, 'page', page_id, user)
     page = conn.execute(
         'SELECT id, job_id, status, source_file FROM pages WHERE id = ? AND deleted = 0',
         (page_id,)).fetchone()

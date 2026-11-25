@@ -10,8 +10,9 @@ from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
 from pydantic import BaseModel
 
-from app import (blobs, caches, candidates, config, dataset_sync, geometry, layout_templates, llm_ocr, metadata,
-                 page_rows, provenance, reading_order, renditions, revert, rotation, serializers, store, training)
+from app import (blobs, caches, candidates, config, dataset_sync, geometry, keying, layout_templates, llm_ocr,
+                 metadata, page_rows, provenance, reading_order, renditions, revert, rotation, serializers, store,
+                 training)
 from app.deps import (IMMUTABLE_CACHE, WRITERS, current_user, get_db, get_user, require_job_access,
                       require_job_manager, require_page_access, require_role, require_role_on, require_unchanged,
                       role_on_job)
@@ -52,6 +53,8 @@ def page_candidates(page_id: int, conn=Depends(get_db), user: dict = Depends(cur
     """Every transcription held for this page - what OCR read, what people corrected, what
     a language model returned - whether it currently sits on a line or is waiting for one."""
     require_page_access(conn, page_id, user)
+    if keying.blind(conn, page_id, user['username']):
+        return {'candidates': []}
     return {'candidates': candidates.for_page(conn, page_id)}
 
 
@@ -74,6 +77,7 @@ def patch_candidate(candidate_id: int, body: CandidatePatch, conn=Depends(get_db
     if row is None:
         raise HTTPException(404)
     require_page_access(conn, row['page_id'], user)
+    keying.refuse(conn, 'page', row['page_id'], user)
     if row['dismissed']:
         raise HTTPException(409, 'this reading has been superseded by a newer one')
     if body.line_id is not None and conn.execute(
@@ -92,6 +96,7 @@ def delete_candidate(candidate_id: int, conn=Depends(get_db), user: dict = Depen
     if row is None:
         raise HTTPException(404)
     require_page_access(conn, row['page_id'], user)
+    keying.refuse(conn, 'page', row['page_id'], user)
     try:
         llm_ocr.remove_candidate(conn, candidate_id)
     except llm_ocr.CannotRemove as error:
@@ -109,7 +114,9 @@ def page_results(job_id: str, page_id: int, conn=Depends(get_db), user: dict = D
     element_rows = conn.execute(
         'SELECT * FROM elements WHERE page_id = ? AND deleted = 0 ORDER BY order_idx', (page_id,)).fetchall()
     element_revisions = store.latest_revisions(conn, 'element', [e['id'] for e in element_rows])
-    elements = [serializers.element_payload(e, serializers.lines_of_element(conn, e['id']), element_revisions[e['id']])
+    seen = keying.lens(conn, page_id, user['username'])
+    elements = [serializers.element_payload(e, serializers.lines_of_element(conn, e['id'], seen),
+                                            element_revisions[e['id']])
                 for e in element_rows]
     names = store.job_class_names(conn, job_id)
     region_rows = conn.execute(
@@ -125,6 +132,8 @@ def page_results(job_id: str, page_id: int, conn=Depends(get_db), user: dict = D
             'lines_checked': bool(page['lines_checked']), 'is_test': bool(page['is_test']),
             'note': store.note_of(dict(page)),
             'review': store.page_review(conn, page_id),
+            # Two people keying the page blind (#37), or None where it is keyed once.
+            'keying': keying.state(conn, page_id),
             'metadata': metadata.of(page['metadata']), 'page_type': page['page_type'],
             'elements': elements, 'regions': regions,
             # What the lines of a page with no layout are ordered by: this page's own
@@ -137,7 +146,7 @@ def page_results(job_id: str, page_id: int, conn=Depends(get_db), user: dict = D
             'provenance': provenance.page_provenance(conn, page),
             # The stretch of a document the corpus cut put on this page, if any.
             'reference': {'document': page['reference_document'], 'text': page['reference_text'],
-                          'anchors': page['reference_anchors']} if page['reference_text'] else None,
+                          'anchors': page['reference_anchors']} if page['reference_text'] and not seen else None,
             # Where a live view of this page starts listening for other people's edits.
             'job_revision': store.job_revision(conn, job_id),
             'revision': store.latest_revision(conn, 'page', page_id)}
@@ -297,6 +306,7 @@ def patch_page(page_id: int, body: PagePatch, conn=Depends(get_db), user: str = 
                auth: dict = Depends(current_user)):
     """Update one page's review flags, rotation or deleted state."""
     require_page_access(conn, page_id, auth)
+    keying.refuse(conn, 'page', page_id, auth)
     if body.layout_checked is not None or body.lines_checked is not None:
         require_role_on(conn, 'page', page_id, auth, 'reviewer')
     row = conn.execute('SELECT job_id, deleted, status FROM pages WHERE id = ?', (page_id,)).fetchone()
@@ -347,6 +357,7 @@ def revert_page_span(page_id: int, body: RevertBody, conn=Depends(get_db), user:
     the write that made them answered with; undo and redo differ only in which end of
     it the page is returned to."""
     require_page_access(conn, page_id, auth)
+    keying.refuse(conn, 'page', page_id, auth)
     row = conn.execute('SELECT job_id, deleted FROM pages WHERE id = ?', (page_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
@@ -371,6 +382,7 @@ def turn_page(page_id: int, body: PageTurn, conn=Depends(get_db), user: str = De
     """Turn a scan the right way up, and everything drawn on it with it. The turn is kept
     rather than carried: what comes back is the page as if it had been scanned that way."""
     require_page_access(conn, page_id, auth)
+    keying.refuse(conn, 'page', page_id, auth)
     try:
         turned = rotation.turn_page(conn, page_id, body.degrees, user)
     except rotation.CannotTurn as exc:

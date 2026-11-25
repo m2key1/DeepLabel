@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel, field_validator
 
-from app import caches, candidates, config, geometry, linecrop, serializers, store, training
+from app import caches, candidates, config, geometry, keying, linecrop, serializers, store, training
 from app.deps import (IMMUTABLE_CACHE, current_user, get_db, get_user, job_of, require_job_manager,
                       require_line_access, require_page_access, require_role_on, require_unchanged, role_on_job,
                       role_reaches)
@@ -39,6 +39,9 @@ def patch_line(line_id: int, body: LinePatch, conn=Depends(get_db), user: str = 
                auth: dict = Depends(current_user)):
     """Correct a line's text, geometry, orientation or reviewed flag."""
     require_line_access(conn, line_id, auth)
+    page_id = keying.page_of(conn, 'line', line_id)
+    if keying.role(conn, page_id, auth['username']):
+        return _key(conn, page_id, line_id, body, auth)
     if _checks(body.checked, 'corrected_text' in body.model_fields_set):
         require_role_on(conn, 'line', line_id, auth, 'reviewer')
     row = _line_row(conn, line_id)
@@ -84,6 +87,20 @@ def patch_line(line_id: int, body: LinePatch, conn=Depends(get_db), user: str = 
     return {**serializers.get_line(conn, line_id), 'span': span}
 
 
+def _key(conn, page_id: int, line_id: int, body: LinePatch, auth: dict) -> dict:
+    """A keyer's save (#37): their text alone, kept apart from the line and shown to them. Locked
+    before it looks, so it cannot land after the other keyer's hand-in has compared the page."""
+    store.write_lock(conn)
+    if body.polygon is not None or body.orientation is not None or body.checked:
+        keying.refuse(conn, 'page', page_id, auth)
+    if keying.role(conn, page_id, auth['username']) == 'keyed':
+        raise HTTPException(403, keying.KEYED)
+    if 'corrected_text' in body.model_fields_set:
+        keying.type_text(conn, line_id, auth['username'], body.corrected_text)
+        conn.commit()
+    return keying.lens(conn, page_id, auth['username'])(serializers.get_line(conn, line_id))
+
+
 def _write_text(conn, row, line_id: int, text: str | None, checked: bool, user: str,
                 from_reading: bool = False) -> None:
     """A check is given to one text, so new text - typed, taken from a reading, or the
@@ -122,6 +139,10 @@ def set_texts(body: list[LineText], conn=Depends(get_db), user: str = Depends(ge
         if reason:
             failed.append({'id': item.id, 'reason': reason})
             continue
+        if keying.role(conn, row['page_id'], auth['username']):
+            keying.type_text(conn, item.id, auth['username'], item.text)
+            written.append(item.id)
+            continue
         store.ensure_origin(conn, 'line', item.id, user)
         _write_text(conn, row, item.id, item.text, item.checked, user)
         store.log_line(conn, item.id, user, 'update')
@@ -153,6 +174,11 @@ def _unwritable(conn, item: LineText, row, auth: dict) -> str | None:
         require_line_access(conn, item.id, auth)
     except HTTPException:
         return 'not found'
+    keyer = keying.role(conn, row['page_id'], auth['username'])
+    if keyer == 'keyed':
+        return keying.KEYED
+    if keyer and item.checked:
+        return keying.KEYING_ONLY
     if item.checked and not role_reaches(role_on_job(conn, job_of(conn, 'line', item.id), auth), 'reviewer'):
         return 'checking takes a Reviewer'
     if row['deleted']:
@@ -190,6 +216,7 @@ def delete_line(line_id: int, revision: int | None = None, conn=Depends(get_db),
     someone saved since - the same guard as a patch, on the query string since a DELETE
     carries no body."""
     require_line_access(conn, line_id, auth)
+    keying.refuse(conn, 'line', line_id, auth)
     row = conn.execute('SELECT element_id FROM lines WHERE id = ?', (line_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
@@ -214,6 +241,7 @@ def reocr_line(line_id: int, conn=Depends(get_db), _user: str = Depends(get_user
     """Manually flag one line for re-OCR; the batch worker re-queues its job on the usual
     cadence and the OCR phase re-reads it (old text stays until the fresh read lands)."""
     require_line_access(conn, line_id, auth)
+    keying.refuse(conn, 'line', line_id, auth)
     row = conn.execute(
         'SELECT l.id, p.job_id FROM lines l JOIN elements e ON l.element_id = e.id '
         'JOIN pages p ON e.page_id = p.id WHERE l.id = ? AND l.deleted = 0', (line_id,)).fetchone()
@@ -243,6 +271,7 @@ def split_line(line_id: int, body: LineSplit, conn=Depends(get_db), user: str = 
     """Split a line in two: along a drawn cut line, or at an axis-aligned position. A quad
     stays two quads; a polygon line is cut wherever the cut crosses it."""
     require_line_access(conn, line_id, auth)
+    keying.refuse(conn, 'line', line_id, auth)
     row = conn.execute('SELECT * FROM lines WHERE id = ? AND deleted = 0', (line_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
@@ -320,6 +349,7 @@ def merge_lines(body: LineMerge, conn=Depends(get_db), user: str = Depends(get_u
     """Merge adjacent lines into one."""
     for lid in body.ids:
         require_line_access(conn, lid, auth)
+        keying.refuse(conn, 'line', lid, auth)
     if len(body.ids) < 2:
         raise HTTPException(400, 'merge needs at least two lines')
     rows = [conn.execute('SELECT * FROM lines WHERE id = ? AND deleted = 0', (i,)).fetchone()
@@ -415,6 +445,7 @@ def create_line(page_id: int, body: LineCreate, conn=Depends(get_db), user: str 
                 auth: dict = Depends(current_user)):
     """Add a hand-drawn line to a page."""
     require_page_access(conn, page_id, auth)
+    keying.refuse(conn, 'page', page_id, auth)
     page = conn.execute('SELECT deleted FROM pages WHERE id = ?', (page_id,)).fetchone()
     if page is None:
         raise HTTPException(404)

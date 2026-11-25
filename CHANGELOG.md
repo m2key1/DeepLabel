@@ -16,6 +16,8 @@ the version in the app's footer opens.
 - Handing in and signing off: an assignee hands their page in, a Reviewer signs off a page whose
   lines are all checked or sends it back with a note, an unchecked line takes a sign-off back,
   and an OCR run can train only on signed-off pages (#36).
+- Double-keying: with a dataset's switch on, two people type each page without seeing each other's
+  text, the lines they typed alike are checked, and a Reviewer settles the rest from both versions (#37).
 - IIIF manifests and collections in Presentation API 4, which the IIIF cookbook already publishes,
   are read like version 3 (#153).
 - A second factor at sign-in: an authenticator app and recovery codes, set up on DeepLabel's

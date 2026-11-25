@@ -738,12 +738,24 @@ polygons) and *line tracing* (boundary lines, open or closed).
 - **Handing in and signing off:** in the page viewer, the person a page is assigned to presses
   **Hand in** once it is done, and can take it back until it is reviewed. A Reviewer, Manager
   or admin presses **Sign off** on any page whose lines are all checked, handed in or not; with
-  lines still unchecked the header says how many, and Sign off says so instead. **Send back…**
+  lines still unchecked the row above the lines says how many, and Sign off says so instead. **Send back…**
   returns a handed-in page to its assignee with a note they see on the page; every edit and
   check made on it stays, and they hand it in again; given to someone else, the page starts
   afresh. A line that loses its check afterwards - an Annotator's correction, a new unchecked
   line, a re-read - takes the sign-off back, and the page waits for a Reviewer again. Once any page has been handed in, the page table gains a
   **Review** column and the filters **Handed in**, **Sent back** and **Signed off**.
+- **Double-keying:** for ground truth that has to be independent, a Manager ticks **Two people
+  key each page** in **Assign pages…** and gives each page two keyers. Each keyer types the text
+  alone: the other's typing stays hidden, and so do the readings and the corpus text, and the boxes
+  and lines are fixed for them. **Keyers start from empty lines** hides the recognised text too;
+  otherwise both start from it, which is faster but lets through a misreading both overlook. Once
+  both have pressed **Hand in**, the lines they typed alike - spacing and Unicode form aside; case,
+  quotes and dashes count - are checked, and every other line waits for the Reviewer with both
+  versions offered on it, their differences marked. The Reviewer takes one or types the text,
+  checks the line and signs the page off; a double-keyed page is not sent back. Until it is signed off, each keyer sees
+  only their own version. While one keyer is in, the page shows **1 of 2 handed in**, a filter of
+  its own, so a page whose second keyer never finishes can be found and given to someone else;
+  whoever stays keeps their typing.
 - **Notes:** a dataset and each of its pages can carry one note everyone with access can read,
   such as how far a volume has been checked. Anyone who can edit adds it with **+ Note** in
   the dataset's title or the page viewer's toolbar; a **Note** tag then marks it there, on the

@@ -6,8 +6,8 @@ from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel
 
-from app import (caches, candidates, config, dataset_sync, geometry, layout_shapes, layout_templates, serializers,
-                 store, training)
+from app import (caches, candidates, config, dataset_sync, geometry, keying, layout_shapes, layout_templates,
+                 serializers, store, training)
 from app.deps import (IMMUTABLE_CACHE, current_user, get_db, get_user, draws_checked, require_element_access,
                       require_page_access, require_role_on, require_unchanged)
 
@@ -63,6 +63,7 @@ def patch_element(element_id: int, body: ElementPatch, conn=Depends(get_db),
                   user: str = Depends(get_user)):
     """Update one element's class, geometry, reading order or reviewed flag."""
     require_element_access(conn, element_id, auth)
+    keying.refuse(conn, 'element', element_id, auth)
     if body.checked is not None:
         require_role_on(conn, 'element', element_id, auth, 'reviewer')
     if conn.execute('SELECT id FROM elements WHERE id = ?', (element_id,)).fetchone() is None:
@@ -135,6 +136,7 @@ def create_element(page_id: int, body: ElementCreate, conn=Depends(get_db),
                    user: str = Depends(get_user)):
     """Add a hand-drawn element to a page."""
     require_page_access(conn, page_id, auth)
+    keying.refuse(conn, 'page', page_id, auth)
     page = conn.execute('SELECT deleted FROM pages WHERE id = ?', (page_id,)).fetchone()
     if page is None:
         raise HTTPException(404)
@@ -171,6 +173,7 @@ def delete_element(element_id: int, revision: int | None = None, conn=Depends(ge
     """Soft-delete an element. Its lines stay, falling to the box around them or to
     Unassigned; only deleting a line throws its transcription away."""
     require_element_access(conn, element_id, auth)
+    keying.refuse(conn, 'element', element_id, auth)
     row = conn.execute('SELECT page_id FROM elements WHERE id = ?', (element_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
@@ -207,6 +210,7 @@ def delete_set(page_id: int, body: SetDelete, conn=Depends(get_db), user: str = 
     one undo brings the whole set back. A row a person changed since it was loaded
     refuses the whole set. Boxes keep their lines, as a single delete does."""
     require_page_access(conn, page_id, auth)
+    keying.refuse(conn, 'page', page_id, auth)
     element_ids = [r.id for r in body.elements]
     line_ids = [r.id for r in body.lines]
     store.write_lock(conn)
@@ -258,6 +262,7 @@ def split_element(element_id: int, body: ElementSplit, conn=Depends(get_db),
                   user: str = Depends(get_user)):
     """Split an element in two along a horizontal or vertical cut."""
     require_element_access(conn, element_id, auth)
+    keying.refuse(conn, 'element', element_id, auth)
     row = conn.execute('SELECT * FROM elements WHERE id = ? AND deleted = 0', (element_id,)).fetchone()
     if row is None:
         raise HTTPException(404)
@@ -338,6 +343,7 @@ def merge_elements(body: ElementMerge, conn=Depends(get_db), user: str = Depends
     """Merge several elements into one, keeping their lines in reading order."""
     for eid in body.ids:
         require_element_access(conn, eid, auth)
+        keying.refuse(conn, 'element', eid, auth)
     if len(body.ids) < 2:
         raise HTTPException(400, 'merge needs at least two elements')
     rows = [conn.execute('SELECT * FROM elements WHERE id = ? AND deleted = 0', (i,)).fetchone()

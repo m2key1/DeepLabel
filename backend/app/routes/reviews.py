@@ -3,7 +3,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import ingest, page_rows, store
+from app import ingest, keying, page_rows, store, training
 from app.deps import current_user, get_db, job_of, require_page_access, require_role_on
 
 router = APIRouter(tags=['pages'])
@@ -32,12 +32,22 @@ def hand_in(page_id: int, conn=Depends(get_db), user: dict = Depends(current_use
     """The page's assignee says it is done, for a Reviewer to sign off or send back (#36)."""
     require_page_access(conn, page_id, user)
     job_id = _text_page(conn, page_id)
+    # Held from here, so that two hand-ins at once cannot both find themselves the second.
+    store.write_lock(conn)
     if _signed_off(conn, page_id):
         raise HTTPException(409, 'This page is signed off already')
+    if keying.role(conn, page_id, user['username']) == 'keyed':
+        raise HTTPException(409, keying.KEYED)
     _hand_in(conn, page_id, user, handed=True)
     # Handing it in again answers a send-back.
     conn.execute("DELETE FROM page_reviews WHERE page_id = ? AND state = 'sent_back'", (page_id,))
-    return _changed(conn, job_id, page_id)
+    # The second keyer in has the two keyings compared (#37).
+    keyed = keying.role(conn, page_id, user['username']) == 'keyed'
+    compared = keying.compare(conn, page_id, user['username']) if keyed else []
+    review = _changed(conn, job_id, page_id)
+    for line_id in compared:
+        training.enqueue(line_id)
+    return review
 
 
 @router.delete('/api/pages/{page_id}/hand-in')
@@ -45,8 +55,11 @@ def take_hand_in_back(page_id: int, conn=Depends(get_db), user: dict = Depends(c
     """The assignee takes their hand-in back, to go on working on the page."""
     require_page_access(conn, page_id, user)
     job_id = _text_page(conn, page_id)
+    store.write_lock(conn)
     if _signed_off(conn, page_id):
         raise HTTPException(409, 'This page is signed off already')
+    if keying.role(conn, page_id, user['username']) == 'keyed':
+        raise HTTPException(409, keying.KEYED)
     _hand_in(conn, page_id, user, handed=False)
     return _changed(conn, job_id, page_id)
 
@@ -76,11 +89,17 @@ def review_page(page_id: int, body: Review, conn=Depends(get_db), user: dict = D
     require_role_on(conn, 'page', page_id, user, 'reviewer')
     # Held from the count to the sign-off, so no line can lose its check in between.
     store.write_lock(conn)
+    keyed = keying.state(conn, page_id)
     note = None
     if body.verdict == 'signed_off':
+        if keyed and keyed['open']:
+            raise HTTPException(409, 'The page is still being keyed')
         if unchecked := store.unchecked_lines(conn, page_id):
             raise HTTPException(400, f'{unchecked} line{"" if unchecked == 1 else "s"} on this page '
                                      f'{"is" if unchecked == 1 else "are"} not checked yet')
+    elif keyed:
+        raise HTTPException(400, 'A double-keyed page is not sent back: its Reviewer settles what the keyers '
+                                 'disagree on')
     else:
         note = (body.note or '').strip()
         if not note:
