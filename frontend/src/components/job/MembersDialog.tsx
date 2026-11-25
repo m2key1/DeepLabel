@@ -27,16 +27,20 @@ interface MembersDialogProps {
   onChanged: () => void
   /** A dataset in a Sandbox takes no members: it is moved into a workspace instead. */
   onMoveInstead: () => void
+  /** Hand the workspace to someone else (#79), offered to its owner and admins. */
+  onTransfer?: () => void
 }
 
 /** Who belongs to a workspace, or who reaches one dataset, as in Label Studio's Manage
  *  Members: each change is saved as it is made. */
-export function MembersDialog({ target, onClose, onChanged, onMoveInstead }: MembersDialogProps) {
+export function MembersDialog({ target, onClose, onChanged, onMoveInstead, onTransfer }: MembersDialogProps) {
   const { user, isAdmin } = useAuth()
   const job = target.kind === 'dataset' ? target.job : null
   const group = target.group
   const title = `Members of "${job ? job.name : group!.name}"`
   const [accounts, setAccounts] = useState<Map<string, UserName> | null>(null)
+  // Invited and not signed in yet, who can already be members (#134).
+  const [invited, setInvited] = useState<Set<string>>(new Set())
   const [members, setMembers] = useState<string[]>(job ? job.shared_with : group!.shared_with)
   const [roles, setRoles] = useState<Record<string, DatasetRole>>(job?.roles ?? {})
   // Each change is worked out from what the one before it saved, in the order they were made,
@@ -51,7 +55,10 @@ export function MembersDialog({ target, onClose, onChanged, onMoveInstead }: Mem
   useEffect(() => {
     if (sandboxed) return
     getUserNames()
-      .then((r) => setAccounts(new Map(r.users.map((u) => [u.username, u]))))
+      .then((r) => {
+        setAccounts(new Map(r.users.map((u) => [u.username, u])))
+        setInvited(new Set(r.invited ?? []))
+      })
       .catch((e: Error) => setError(e.message))
   }, [sandboxed])
 
@@ -128,7 +135,13 @@ export function MembersDialog({ target, onClose, onChanged, onMoveInstead }: Mem
         </span>
       )
     }
-    if (!account) return <span data-testid="member-role" className="text-xs text-ink-subtle">No active account</span>
+    if (!account) {
+      return (
+        <span data-testid="member-role" className="text-xs text-ink-subtle">
+          {invited.has(username) ? 'Invited, not signed in yet' : 'No active account'}
+        </span>
+      )
+    }
     if (job && (SWAPPABLE as string[]).includes(account.role)) {
       return (
         <Select size="xs" aria-label={`Role of ${username} on this dataset`} disabled={busy}
@@ -199,6 +212,12 @@ export function MembersDialog({ target, onClose, onChanged, onMoveInstead }: Mem
       )}
       <div className="mt-4 flex items-center justify-end gap-3">
         {error && <p role="alert" className="mr-auto text-sm text-danger">{error}</p>}
+        {!job && onTransfer && (
+          <span className={`${error ? '' : 'mr-auto'} flex items-center gap-2 text-xs text-ink-subtle`}>
+            Owned by {group!.owner}
+            <button data-testid="members-transfer" onClick={onTransfer} className={modalBtn}>Transfer ownership…</button>
+          </span>
+        )}
         <button onClick={onClose} className={modalPrimaryBtn}>Done</button>
       </div>
     </Modal>

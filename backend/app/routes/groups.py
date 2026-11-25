@@ -90,6 +90,29 @@ def share_group(group_id: int, body: GroupShare, conn=Depends(get_db),
     return {'id': group_id, 'shared_with': names}
 
 
+class Workspaces(BaseModel):
+    group_ids: list[int]
+
+
+@router.post('/api/people/{username}/workspaces')
+def add_to_workspaces(username: str, body: Workspaces, conn=Depends(get_db),
+                      _admin: dict = Depends(require_role('admin'))):
+    """An admin puts someone into workspaces at once (#134): an account the invitation has just
+    made, before its first sign-in, or one whose sign-up the admin approves. A workspace gone
+    meanwhile, or a Sandbox, is skipped and named back."""
+    added, missing = [], []
+    for group_id in body.group_ids:
+        row = conn.execute('SELECT name FROM groups WHERE id = ? AND sandbox_of IS NULL', (group_id,)).fetchone()
+        if row is None:
+            missing.append(group_id)
+            continue
+        conn.execute('INSERT OR IGNORE INTO group_assignees (group_id, username) VALUES (?, ?)', (group_id, username))
+        added.append(row['name'])
+    conn.commit()
+    page_rows.forget_counts()
+    return {'added': added, 'missing': missing}
+
+
 @router.post('/api/groups')
 def create_group(body: GroupBody, conn=Depends(get_db),
                  user: dict = Depends(require_role('admin', 'manager'))):

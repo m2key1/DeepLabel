@@ -1777,6 +1777,24 @@ export function listGroups(): Promise<Group[]> {
   return request('/api/groups')
 }
 
+/** An admin puts someone into workspaces at once (#134); a workspace gone meanwhile, or a
+ *  Sandbox, comes back among the missing. */
+export function addToWorkspaces(username: string, groupIds: number[])
+  : Promise<{ added: string[]; missing: number[] }> {
+  return request(`/api/people/${encodeURIComponent(username)}/workspaces`, json('POST', { group_ids: groupIds }))
+}
+
+/** Hand a dataset over to someone else, who then owns it (#79). */
+export function transferJob(jobId: string, to: string): Promise<{ id: string; owner: string }> {
+  return request(`/api/jobs/${jobId}/transfer`, json('POST', { to }))
+}
+
+/** Hand a workspace over, and with it the datasets its owner made there unless `datasets` is false. */
+export function transferGroup(groupId: number, to: string, datasets: boolean)
+  : Promise<{ id: number; owner: string; datasets: number }> {
+  return request(`/api/groups/${groupId}/transfer`, json('POST', { to, datasets }))
+}
+
 export function createGroup(name: string): Promise<Group> {
   return request('/api/groups', json('POST', { name }))
 }
@@ -1916,7 +1934,8 @@ export interface UserName {
   role: Role
 }
 
-export function getUserNames(): Promise<{ users: UserName[] }> {
+/** The accounts to pick from, and the names of people invited who have not signed in yet. */
+export function getUserNames(): Promise<{ users: UserName[]; invited?: string[] }> {
   return request('/api/users/names')
 }
 
@@ -3367,6 +3386,8 @@ export interface Invitation extends PasswordLink {
   created: boolean
   /** True when DeepLabel already knows this person: the link then resets their password. */
   known: boolean
+  /** The name they sign in as, by which they are added to workspaces at once (#134). */
+  username: string
 }
 
 export function inviteUser(email: string, name: string, role: Role): Promise<Invitation> {

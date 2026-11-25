@@ -680,6 +680,11 @@ def invite(conn: sqlite3.Connection, email: str, role: str, invited_by: str):
     conn.commit()
 
 
+def invited_emails(conn: sqlite3.Connection) -> list[str]:
+    """Whoever has an invitation they have not used yet, by the name they will sign in as."""
+    return [row[0] for row in conn.execute('SELECT email FROM invitations ORDER BY email')]
+
+
 def take_invitation(conn: sqlite3.Connection, email: str) -> str | None:
     """The role someone was invited with, once: the invitation is spent on first sign-in."""
     row = conn.execute('SELECT role FROM invitations WHERE email = ?', (email.lower(),)).fetchone()

@@ -11,7 +11,8 @@ from app.deps import LEGACY_ROLES
 from app.routes import (assignments, augmentations as augmentation_routes, backend_api, bulk, contributors, conventions,
                         elements,
                         evaluations, exports, groups, lines, llm, maps, models, pages, people, pipeline, presence,
-                        recognize, reference as reference_routes, reviews, runs, search, trainings, transcript)
+                        recognize, reference as reference_routes, reviews, runs, search, trainings, transcript,
+                        transfers)
 from app.routes import jobs as job_routes
 from app.routes import layout_templates as layout_template_routes
 from app.routes import metadata as metadata_routes
@@ -125,6 +126,7 @@ app.include_router(layout_template_routes.router)
 app.include_router(page_type_routes.router)
 app.include_router(assignments.router)
 app.include_router(reviews.router)
+app.include_router(transfers.router)
 app.include_router(metadata_routes.router)
 app.include_router(rights_routes.router)
 app.include_router(conventions.router)

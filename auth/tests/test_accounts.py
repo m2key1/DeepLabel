@@ -88,6 +88,28 @@ class TestInvitations:
         assert client.get('/validate').status_code == 200
         assert fake.by(email='julia@example.org')['password'] == 'julias-password'
 
+    def test_the_answer_names_the_account_they_will_sign_in_as(self, fake):
+        body = self.invite('Julia@Example.org').json()
+        client = browser()
+
+        client.post('/api/set-password', json={'token': token_of(body['link']), 'password': 'julias-password'})
+
+        assert body['username'] == 'julia@example.org'
+        assert client.get('/api/me').json()['user'] == body['username']
+
+    def test_the_people_pickers_name_whoever_is_invited_until_they_sign_in(self, fake):
+        link = self.invite('julia@example.org', role='annotator').json()['link']
+        admin = signed_in('root@example.org')
+
+        before = admin.get('/api/users/names').json()
+        browser().post('/api/set-password', json={'token': token_of(link), 'password': 'julias-password'})
+        after = admin.get('/api/users/names').json()
+
+        assert before['invited'] == ['julia@example.org']
+        assert 'julia@example.org' not in [u['username'] for u in before['users']]
+        assert after['invited'] == []
+        assert 'julia@example.org' in [u['username'] for u in after['users']]
+
     def test_a_link_works_once(self, fake):
         token = token_of(self.invite('julia@example.org').json()['link'])
         browser().post('/api/set-password', json={'token': token, 'password': 'julias-password'})

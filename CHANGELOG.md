@@ -18,6 +18,8 @@ the version in the app's footer opens.
   and an OCR run can train only on signed-off pages (#36).
 - Double-keying: with a dataset's switch on, two people type each page without seeing each other's
   text, the lines they typed alike are checked, and a Reviewer settles the rest from both versions (#37).
+- An admin's invitation, and the approval of a sign-up, put the person into workspaces at once (#134).
+- Transfer ownership of a dataset, or of a workspace with the datasets its owner made in it (#79).
 - IIIF manifests and collections in Presentation API 4, which the IIIF cookbook already publishes,
   are read like version 3 (#153).
 - A second factor at sign-in: an authenticator app and recovery codes, set up on DeepLabel's

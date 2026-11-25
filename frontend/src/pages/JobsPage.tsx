@@ -18,6 +18,8 @@ import { COLUMNS, DEFAULT_COLUMNS, NAME_MIN, columnWidths, columnsForWidth, load
   from '../components/job/columns'
 import { MembersDialog } from '../components/job/MembersDialog'
 import type { MembersTarget } from '../components/job/MembersDialog'
+import { TransferDialog } from '../components/job/TransferDialog'
+import type { TransferTarget } from '../components/job/TransferDialog'
 import { MapSettingsDialog } from '../components/job/MapSettingsDialog'
 import { NewerModelsDialog } from '../components/job/NewerModelsDialog'
 import { GroupSettingsDialog } from '../components/job/GroupSettingsDialog'
@@ -230,6 +232,7 @@ export function JobsPage() {
   const [mapSettingsJob, setMapSettingsJob] = useState<Job | null>(null)
   const [newerFor, setNewerFor] = useState<{ job: Job; offers: NewerModelOffer[] } | null>(null)
   const [membersOf, setMembersOf] = useState<MembersTarget | null>(null)
+  const [transferOf, setTransferOf] = useState<TransferTarget | null>(null)
   const [settingsGroup, setSettingsGroup] = useState<Group | null>(null)
 
   // What is on screen is in the address, so a filtered list can be sent to someone and
@@ -638,6 +641,15 @@ export function JobsPage() {
     return !!group && (!!group.sandbox_of || group.can_manage)
   }
 
+  // Handing over is the owner's or an admin's (#79), outside a Sandbox, and needs the list of
+  // accounts to pick from, which admins and Managers read.
+  const canPickPeople = isAdmin || role === 'manager'
+  const canTransferJob = (job: Job) => {
+    const group = groups.find((g) => g.id === job.group_id)
+    return canPickPeople && (isAdmin || job.owner === user) && !!group && !group.sandbox_of
+  }
+  const canTransferGroup = (group: Group) => canPickPeople && (isAdmin || group.owner === user) && !group.sandbox_of
+
   /** The datasets in a run the caller does not manage. Any one of them refuses the whole
    *  request, so they are named before it is sent rather than skipped like a busy one. */
   const notYoursToRun = (ids: string[]): Job[] =>
@@ -715,6 +727,8 @@ export function JobsPage() {
     onMove: () => setMoveJob(job),
     onMembers: () => setMembersOf({ kind: 'dataset', job, group: groups.find((g) => g.id === job.group_id) }),
     canManageMembers: canManageMembers(job),
+    onTransfer: () => setTransferOf({ kind: 'dataset', id: job.id, name: job.name, owner: job.owner }),
+    canTransfer: canTransferJob(job),
     // A map dataset has only its name and tile size left to change; a text one, everything it was made with.
     onSettings: () => (isTileTask(job.task) ? setMapSettingsJob(job) : navigate(`/jobs/${job.id}/settings`)),
     onCancel: () => void onCancel(job),
@@ -1475,6 +1489,10 @@ export function JobsPage() {
           onError={setError}
         />
       )}
+      {transferOf && (
+        <TransferDialog target={transferOf} onClose={() => setTransferOf(null)}
+                        onDone={() => { setTransferOf(null); refresh() }} />
+      )}
       {membersOf && (
         <MembersDialog
           target={membersOf}
@@ -1484,6 +1502,14 @@ export function JobsPage() {
             if (membersOf.kind === 'dataset') setMoveJob(membersOf.job)
             setMembersOf(null)
           }}
+          onTransfer={membersOf.kind === 'workspace' && canTransferGroup(membersOf.group) ? () => {
+            const { group } = membersOf
+            setMembersOf(null)
+            setTransferOf({
+              kind: 'workspace', id: group.id, name: group.name, owner: group.owner,
+              owned: (jobs ?? []).filter((j) => j.group_id === group.id && j.owner === group.owner).length,
+            })
+          } : undefined}
         />
       )}
     </div>

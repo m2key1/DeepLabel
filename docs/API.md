@@ -58,7 +58,15 @@ A workspace's Managers set its members with `PUT /api/groups/{id}/share`
 its own and the roles set on it: `{"usernames": ["rita"], "roles": {"lena": "reviewer"}}` makes
 Lena, an Annotator, a Reviewer on that dataset alone; leaving `roles` out keeps the roles already
 set. A dataset carries its `roles` in the same shape. `GET /api/users/names` lists the accounts
-to choose from, with their roles.
+to choose from, with their roles, and as `invited` the people invited who have not signed in yet.
+
+An admin adds someone to workspaces at once with `POST /api/people/{username}/workspaces`
+(`{"group_ids": [3, 7]}`), which answers with the workspaces `added` and the ids `missing` (gone,
+or a Sandbox); an invitation's answer names the account it made as `username`. A dataset's owner
+or an admin hands it over with `POST /api/jobs/{id}/transfer` (`{"to": "ben"}`), and a workspace's
+owner or an admin with `POST /api/groups/{id}/transfer` (`{"to": "ben", "datasets": true}`), which
+takes along the datasets the previous owner made in it unless `datasets` is false. Neither is
+offered for a Sandbox.
 
 A dataset's Managers hand its pages out with `PUT /api/jobs/{id}/assignments`:
 `{"assignee": "lena", "numbers": [1, 2, 3]}` gives Lena pages 1 to 3 as the page table numbers

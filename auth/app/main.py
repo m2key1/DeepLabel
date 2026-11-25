@@ -590,12 +590,15 @@ def get_user_names():
     conn = store.connect(config.DB_PATH)
     try:
         rows = store.list_users(conn)
+        invited = store.invited_emails(conn)
     finally:
         conn.close()
     return {'users': [{'id': u['id'], 'username': u['username'] or u['subject'],
                        'display_name': u['display_name'], 'role': u['role'],
                        'avatar': avatars.url_for(u['username'] or u['subject'], u['avatar'])}
-                      for u in rows if u['active']]}
+                      for u in rows if u['active']],
+            # Invited and not signed in yet: already in workspaces under these names (#134).
+            'invited': invited}
 
 
 class Invitation(BaseModel):
@@ -650,7 +653,9 @@ def invite_user(body: Invitation, me: dict = Depends(require_admin_session)):
         link = _password_link(conn, purpose='reset' if known else 'invite', account=account, created_by=_actor(me))
     finally:
         conn.close()
-    return {**link, 'created': found is None, 'known': known is not None}
+    # Whom to add to workspaces at once (#134): the name they will sign in as.
+    return {**link, 'created': found is None, 'known': known is not None,
+            'username': (known['username'] or known['subject']) if known else account['username']}
 
 
 @app.post('/api/users/{user_id}/password-link')

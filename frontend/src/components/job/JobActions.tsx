@@ -30,6 +30,9 @@ interface JobActionsProps {
   onMove: () => void
   onMembers: () => void
   canManageMembers: boolean
+  /** Hand it over to someone else (#79): its owner's or an admin's, outside a Sandbox. */
+  onTransfer: () => void
+  canTransfer: boolean
   /** The dataset's creation settings, to change them. */
   onSettings: () => void
   onCancel: () => void
@@ -145,9 +148,14 @@ export function JobActions(p: JobActionsProps) {
           </Button>
           {p.openMenu && (
             <div ref={menu.ref}
-                 className={`${menu.className} right-0 z-10 w-40 overflow-hidden ${popoverChrome} py-1`}>
+                 className={`${menu.className} right-0 z-10 w-44 overflow-hidden ${popoverChrome} py-1`}>
               <button onClick={p.onMove} className={menuItem}>Move to workspace…</button>
               {p.canManageMembers && <button onClick={p.onMembers} className={menuItem}>Members…</button>}
+              {p.canTransfer && (
+                <button onClick={p.onTransfer} data-testid="transfer-open" className={menuItem}>
+                  Transfer ownership…
+                </button>
+              )}
               <button onClick={p.onSettings} data-testid="settings-open" className={menuItem}>
                 Settings…
               </button>

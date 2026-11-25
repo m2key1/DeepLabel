@@ -60,6 +60,11 @@ under its toolbar and the workspace rail, which stay in place, and ends with the
   dataset, or a Reviewer an Annotator, whether they were given the dataset or belong to the
   workspace; the role lapses once they no longer reach the dataset. A dataset in a Sandbox is
   shared by moving it into a workspace: its **Members…** says so and offers the move.
+- **Transfer ownership…**, in a dataset's menu or at the foot of a workspace's **Members…**, hands
+  it to another account that is not a Viewer: its owner or an admin may, outside a Sandbox.
+  The new owner manages the dataset, whatever their role; the previous owner keeps the access
+  they had. A workspace's new owner joins it, the datasets its previous owner made there go
+  along unless unticked, and managing the workspace still takes a Manager.
 - Admins see everyone else's Sandboxes after the workspaces, under their own heading, each
   marked **Private** and named for whose it is.
 - Tick several datasets, or use a workspace's menu, to act on all of them at once: re-run,
@@ -829,8 +834,10 @@ in Authentik, which nobody has to see or visit.
 - People waiting for approval head the Admin page, and a count beside **Admin** in the top
   bar says someone is waiting. **Approve** lets them in with the role picked there,
   **Reject** switches the account off.
-- Admins can invite people by email with a role: the app creates the account and gives a
-  one-time link, which the admin sends. Opening it sets a password on DeepLabel's own page
+- Admins can invite people by email with a role, and pick **Workspaces** they join at once:
+  the app creates the account, adds it to them, and gives a one-time link, which the admin
+  sends. Until the person first signs in, **Members…** lists them as invited. Approving a
+  sign-up takes the same workspace pick. Opening it sets a password on DeepLabel's own page
   and signs the person in, without waiting for approval. **Reset password** in a person's
   details gives the same kind of link for a forgotten password. Links work once, for 7
   days, and a new one cancels the last. See [AUTHENTIK.md](../AUTHENTIK.md).
