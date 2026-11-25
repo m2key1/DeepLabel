@@ -1,6 +1,8 @@
 import { test, expect } from '../helpers/test'
 import type { Page } from '@playwright/test'
-import { backendFetch, getJob, identity, jobPageIds, seedCompletedJob, shareJob, uniqueName } from '../helpers/api'
+import {
+  backendFetch, getJob, identity, jobPageIds, resetPalette, seedCompletedJob, shareJob, uniqueName,
+} from '../helpers/api'
 import { seedSession, useSession } from '../helpers/session'
 import { openViewer } from '../helpers/viewer'
 import { openDatasetMenu } from '../helpers/dataset'
@@ -217,8 +219,7 @@ test.describe('Scenario: a dialog covers the page it opens over', () => {
 test.describe('Scenario: state that reads out loud', () => {
   test('a palette key and a preset say whether they are on', async ({ page }) => {
     await page.goto('/settings?section=characters')
-    await page.getByTestId('palette-reset').click()
-    await expect.poll(() => palette(page)).toContain('ä')
+    expect(await resetPalette(page)).toContain('ä')
 
     const greek = page.locator('[data-testid="vocab-group"][data-group="Greek"]')
     await greek.getByRole('button', { name: 'Greek', exact: true }).click()

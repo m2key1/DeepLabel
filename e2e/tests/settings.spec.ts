@@ -1,7 +1,7 @@
 import { test, expect } from '../helpers/test'
 import {
-  correctLine, jobPageIds, pageLines, seedCompletedJob, setKeyboardSource, setPageOverlays,
-  uniqueName,
+  correctLine, jobPageIds, pageLines, resetPalette, seedCompletedJob, setKeyboardSource,
+  setPageOverlays, uniqueName,
 } from '../helpers/api'
 import { LANDSCAPE, openViewer } from '../helpers/viewer'
 
@@ -309,9 +309,8 @@ test.describe('Scenario: finding the characters to add', () => {
 
   test('your keyboard comes first, the groups open on a click, and a name finds a key anywhere', async ({ page }) => {
     await page.goto('/settings?section=characters')
-    await page.getByTestId('palette-reset').click()
-    await expect.poll(async () => (await settings(page)).keyboard.slice(0, 3)).toEqual(['ä', 'ö', 'ü'])
-    const start: string[] = (await settings(page)).keyboard
+    const start = await resetPalette(page)
+    expect(start.slice(0, 3)).toEqual(['ä', 'ö', 'ü'])
 
     const board = page.getByTestId('palette-order')
     await expect(board.getByTestId('palette-key')).toHaveCount(start.length)
@@ -454,9 +453,8 @@ test.describe('Scenario: reading the Schematismus printer marks', () => {
     const palette = async () => (await (await page.request.get('/api/settings')).json()).keyboard
 
     await page.goto('/settings?section=characters')
-    await page.getByTestId('palette-reset').click()
-    await expect.poll(palette).toContain('ä')
-    const base = await palette()
+    const base = await resetPalette(page)
+    expect(base).toContain('ä')
 
     const group = page.locator('[data-testid="vocab-group"][data-group="Schematismus"]')
     await group.getByRole('button', { name: 'Schematismus', exact: true }).click()
@@ -749,11 +747,7 @@ test.describe('Scenario: adding a character the palette already holds', () => {
   test('a pasted decomposed umlaut is the same key as the one in the grid', async ({ page }) => {
     const palette = async () => (await (await page.request.get('/api/settings')).json()).keyboard
     await page.goto('/settings?section=characters')
-    const saved = page.waitForResponse((r) => r.url().endsWith('/api/settings')
-                                              && r.request().method() !== 'GET')
-    await page.getByTestId('palette-reset').click()
-    await saved
-    const base = await palette()
+    const base = await resetPalette(page)
     expect(base).toContain('ä')
 
     // Corpus text arrives decomposed: a, then a combining diaeresis.

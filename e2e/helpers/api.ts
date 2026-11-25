@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process'
 import { test } from '@playwright/test'
+import type { Page } from '@playwright/test'
 import { scanPng } from './image'
 
 // Talks to the backend directly, bypassing nginx and the auth service, so tests can
@@ -807,6 +808,16 @@ export async function setKeyboardSource(
   source: 'own' | 'dataset' = 'own',
 ): Promise<void> {
   await page.request.patch('/api/settings', { data: { keyboard_source: source } })
+}
+
+/** Resets the palette from Settings and returns what that save stored. It waits on the save
+ *  itself: the palette before it may already hold the defaults, so a wait on its contents
+ *  can pass before the reset lands. */
+export async function resetPalette(page: Page): Promise<string[]> {
+  const saved = page.waitForResponse((r) => r.url().endsWith('/api/settings')
+    && r.request().method() === 'PATCH' && 'keyboard' in (r.request().postDataJSON() ?? {}))
+  await page.getByTestId('palette-reset').click()
+  return (await (await saved).json()).keyboard
 }
 
 /** Which dataset-list sections are folded. Restored by the specs that change them, for
