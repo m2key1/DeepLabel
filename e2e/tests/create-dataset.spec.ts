@@ -97,7 +97,7 @@ test.describe('Scenario: creating a dataset', () => {
     await card.getByRole('button', { name: 'Members…' }).click()
     await page.getByRole('combobox', { name: 'Add someone' }).fill(colleague)
     await page.getByRole('option', { name: new RegExp(colleague) }).click()
-    await page.getByRole('button', { name: 'Done' }).click()
+    await page.getByRole('dialog', { name: `Members of "${name}"` }).getByRole('button', { name: 'Done' }).click()
     await expect(card.getByText('shared with 1')).toBeVisible()
     await expect.poll(async () => (await getJob(jobId)).shared_with).toEqual([colleague])
   })

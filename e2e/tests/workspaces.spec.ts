@@ -87,7 +87,7 @@ test.describe('Scenario: a Manager decides who belongs to a group (#131)', () =>
     await section.getByTestId('group-members').click()
     await page.getByRole('combobox', { name: 'Add someone' }).fill(ben)
     await page.getByRole('option', { name: new RegExp(ben) }).click()
-    await page.getByRole('button', { name: 'Done' }).click()
+    await page.getByRole('dialog', { name: `Members of "${name}"` }).getByRole('button', { name: 'Done' }).click()
     const members = async () => ((await backendFetch('/api/groups')) as { name: string; shared_with: string[] }[])
       .find((g) => g.name === name)?.shared_with
     await expect.poll(members).toEqual([ben, manager])
