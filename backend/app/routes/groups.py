@@ -61,10 +61,15 @@ def list_groups(conn=Depends(get_db), user: dict = Depends(current_user)):
     newest = conn.execute('SELECT group_id FROM jobs WHERE owner = ? ORDER BY created_at DESC, rowid DESC LIMIT 1',
                           (me,)).fetchone()
     last_used = newest['group_id'] if newest else None
+    folders = {}
+    for row in conn.execute('SELECT id, group_id, name, parent_id FROM folders'):
+        folders.setdefault(row['group_id'], []).append({'id': row['id'], 'name': row['name'],
+                                                        'parent_id': row['parent_id']})
     listed = [{'id': r['id'], 'name': store.workspace_name(r, me), 'owner': r['owner'], 'sandbox_of': r['sandbox_of'],
                'shared_with': members.get(r['id'], []), 'count': counts.get(r['id'], 0),
                'can_manage': r['sandbox_of'] is None and manages_workspace(conn, r['id'], user),
-               'last_used': r['id'] == last_used}
+               'last_used': r['id'] == last_used,
+               'folders': sorted(folders.get(r['id'], []), key=lambda f: f['name'].casefold())}
               for r in rows]
     return sorted(listed, key=lambda g: g['name'].lower())
 
@@ -157,9 +162,123 @@ def delete_group(group_id: int, conn=Depends(get_db), user: dict = Depends(curre
     return {'ok': True}
 
 
-# A group has no one name and is not inside another group, so these two stay on the
-# dataset they belong to.
-NOT_BULK = ('name', 'group_id')
+class FolderBody(BaseModel):
+    name: str
+    parent_id: int | None = None
+
+
+class FolderPatch(BaseModel):
+    name: str | None = None
+    parent_id: int | None = None
+
+
+SANDBOX_HAS_NO_FOLDERS = 'A Sandbox has no folders'
+
+
+def _folder_name(name: str) -> str:
+    name = name.strip()
+    if not name:
+        raise HTTPException(400, 'A folder needs a name')
+    return name
+
+
+def _name_taken(conn, group_id: int, parent_id: int | None, name: str, besides: int) -> bool:
+    """Whether a folder beside the one named `besides` already goes by this name, whatever its case.
+    Compared here rather than in SQL, whose lower() leaves an umlaut as it is."""
+    return any(row['id'] != besides and row['name'].casefold() == name.casefold()
+               for row in conn.execute('SELECT id, name FROM folders WHERE group_id = ? AND parent_id IS ?',
+                                       (group_id, parent_id)))
+
+
+def _require_free_name(conn, group_id: int, parent_id: int | None, name: str, besides: int = 0):
+    if _name_taken(conn, group_id, parent_id, name, besides):
+        raise HTTPException(409, f'A folder named "{name}" is there already')
+
+
+def _folder_or_404(conn, folder_id: int, user: dict):
+    """A folder, and the workspace it is in once the caller is shown to manage it."""
+    folder = conn.execute('SELECT * FROM folders WHERE id = ?', (folder_id,)).fetchone()
+    if folder is None:
+        raise HTTPException(404)
+    group = _group_or_404(conn, folder['group_id'], user)
+    _require_manager(conn, group, user, SANDBOX_HAS_NO_FOLDERS)
+    return folder
+
+
+def _parent_or_404(conn, parent_id: int, user: dict):
+    parent = conn.execute('SELECT id, group_id FROM folders WHERE id = ?', (parent_id,)).fetchone()
+    if parent is None or not can_reach_group(conn, parent['group_id'], user):
+        raise HTTPException(404, 'folder not found')
+    return parent
+
+
+def _itself_and_below(conn, folder_id: int) -> set[int]:
+    return {row[0] for row in conn.execute(
+        'WITH RECURSIVE below(id) AS (SELECT ? UNION ALL '
+        'SELECT f.id FROM folders f JOIN below b ON f.parent_id = b.id) SELECT id FROM below', (folder_id,))}
+
+
+def _folder_payload(conn, folder_id: int) -> dict:
+    row = conn.execute('SELECT id, name, parent_id FROM folders WHERE id = ?', (folder_id,)).fetchone()
+    return {'id': row['id'], 'name': row['name'], 'parent_id': row['parent_id']}
+
+
+@router.post('/api/groups/{group_id}/folders')
+def create_folder(group_id: int, body: FolderBody, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """A folder at the top of a workspace or inside one of its folders (#133). Folders only sort
+    datasets, so making one changes nobody's access."""
+    group = _group_or_404(conn, group_id, user)
+    _require_manager(conn, group, user, SANDBOX_HAS_NO_FOLDERS)
+    if body.parent_id is not None and _parent_or_404(conn, body.parent_id, user)['group_id'] != group_id:
+        raise HTTPException(404, 'folder not found')
+    name = _folder_name(body.name)
+    _require_free_name(conn, group_id, body.parent_id, name)
+    cur = conn.execute('INSERT INTO folders (group_id, parent_id, name) VALUES (?, ?, ?)',
+                       (group_id, body.parent_id, name))
+    conn.commit()
+    return _folder_payload(conn, cur.lastrowid)
+
+
+@router.patch('/api/folders/{folder_id}')
+def change_folder(folder_id: int, body: FolderPatch, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Rename a folder, or move it to the top of its workspace or into another of its folders."""
+    folder = _folder_or_404(conn, folder_id, user)
+    fields = body.model_fields_set
+    if not fields:
+        raise HTTPException(400, 'nothing to change')
+    name = _folder_name(body.name) if 'name' in fields and body.name is not None else folder['name']
+    parent_id = body.parent_id if 'parent_id' in fields else folder['parent_id']
+    if parent_id is not None:
+        if _parent_or_404(conn, parent_id, user)['group_id'] != folder['group_id']:
+            raise HTTPException(409, 'A folder stays in its workspace')
+        if parent_id in _itself_and_below(conn, folder_id):
+            raise HTTPException(409, 'A folder cannot go inside itself')
+    _require_free_name(conn, folder['group_id'], parent_id, name, besides=folder_id)
+    conn.execute('UPDATE folders SET name = ?, parent_id = ? WHERE id = ?', (name, parent_id, folder_id))
+    conn.commit()
+    return _folder_payload(conn, folder_id)
+
+
+@router.delete('/api/folders/{folder_id}')
+def delete_folder(folder_id: int, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """Delete a folder. What it held moves up to the folder that held it, or to the top of the
+    workspace, so deleting one never takes a dataset with it."""
+    folder = _folder_or_404(conn, folder_id, user)
+    above = folder['parent_id']
+    inside = conn.execute('SELECT name FROM folders WHERE parent_id = ?', (folder_id,)).fetchall()
+    for child in inside:
+        if _name_taken(conn, folder['group_id'], above, child['name'], besides=folder_id):
+            raise HTTPException(409, f'A folder named "{child["name"]}" is there already: rename one of them first')
+    datasets = conn.execute('UPDATE jobs SET folder_id = ? WHERE folder_id = ?', (above, folder_id)).rowcount
+    conn.execute('UPDATE folders SET parent_id = ? WHERE parent_id = ?', (above, folder_id))
+    conn.execute('DELETE FROM folders WHERE id = ?', (folder_id,))
+    conn.commit()
+    return {'datasets': datasets, 'folders': len(inside)}
+
+
+# A group has no one name and is not inside another group, and its datasets are filed one
+# by one, so these stay on the dataset they belong to.
+NOT_BULK = ('name', 'group_id', 'folder_id')
 
 
 @router.get('/api/groups/{group_id}/layout-shape-changes')

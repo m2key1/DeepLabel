@@ -99,7 +99,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     -- Two people key each page, blind to each other (#37), from empty lines or from the text
     -- the lines carry.
     double_keying INTEGER NOT NULL DEFAULT 0,
-    keying_from_empty INTEGER NOT NULL DEFAULT 0
+    keying_from_empty INTEGER NOT NULL DEFAULT 0,
+    -- The folder of its workspace it is filed in (#133), or none at the workspace's top.
+    folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL
 );
 CREATE TABLE IF NOT EXISTS pages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -706,6 +708,15 @@ CREATE TABLE IF NOT EXISTS groups (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     sandbox_of TEXT
 );
+-- A folder in a workspace (#133), at its top or inside another folder. It only sorts the
+-- datasets: who sees them is the workspace's business alone.
+CREATE TABLE IF NOT EXISTS folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- Someone given one dataset alone.
 CREATE TABLE IF NOT EXISTS job_assignees (
     job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
@@ -1064,6 +1075,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
     if 'double_keying' not in job_cols:
         conn.execute('ALTER TABLE jobs ADD COLUMN double_keying INTEGER NOT NULL DEFAULT 0')
         conn.execute('ALTER TABLE jobs ADD COLUMN keying_from_empty INTEGER NOT NULL DEFAULT 0')
+    if 'folder_id' not in job_cols:
+        conn.execute('ALTER TABLE jobs ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL')
     for trigger in SIGN_OFF_LAPSES:
         conn.execute(trigger)
     # Every way a text dataset comes to be - upload, import, IIIF - gives it its copy.

@@ -15,9 +15,10 @@ from pydantic import BaseModel, Field
 from app import (blobs, caches, config, consensus, conventions, corpus, data_use, decode, evaluator, geometry,
                  iiif, iiif_transcripts, imports, ingest, ingest_queue, jobs, layout_shapes, layout_templates, llm, map_classes, metadata, model_registry,
                  page_rows, queue_eta, reading_order, recognize, registry, rights, schemas, store, trainer)
-from app.deps import (ROLE_NAMES, SWAPPABLE, VISIBLE_JOB_IDS, WRITERS, belongs_to_workspace, can_access_job, manages_workspace,
-                      current_user, get_db, get_user, require_job_access, require_job_manager, require_job_role,
-                      reachable_group_ids, require_role, role_given, role_on_job, role_reaches, shown_group_id)
+from app.deps import (ROLE_NAMES, SWAPPABLE, VISIBLE_JOB_IDS, WRITERS, belongs_to_workspace, can_access_job,
+                      can_reach_group, manages_workspace, current_user, get_db, get_user, require_job_access,
+                      require_job_manager, require_job_role, reachable_group_ids, require_role, role_given,
+                      role_on_job, role_reaches, shown_group_id)
 from app.routes import rights as rights_routes
 
 
@@ -120,6 +121,7 @@ def _seen_by(job: dict, user: dict, reachable) -> dict:
     learns neither the workspace nor the roles its members have on it (decision 334)."""
     job['group_id'] = shown_group_id(job['group_id'], reachable)
     if job['group_id'] is None:
+        job['folder_id'] = None
         job['roles'] = {name: role for name, role in job['roles'].items() if name == user['username']}
     return job
 
@@ -1034,6 +1036,7 @@ class JobPatch(BaseModel):
     auto_redetect: bool | None = None
     name: str | None = None
     group_id: int | None = None
+    folder_id: int | None = None
     line_width: int | None = None
     # Which text phases the next run performs, and whether line detection works inside the
     # layout boxes or across the whole page. Set at creation until now, so a dataset could
@@ -1135,6 +1138,16 @@ def layout_shape_changes(job_id: str, shape: str, conn=Depends(get_db), user: di
 FIELD_ROLE = {'checked': 'reviewer'}
 
 
+def _require_folder_of_its_workspace(conn, job_id: str, folder_id: int, user: dict) -> None:
+    """Filing never moves a dataset: the folder has to be in the workspace it is in."""
+    folder = conn.execute('SELECT group_id FROM folders WHERE id = ?', (folder_id,)).fetchone()
+    if folder is None or not can_reach_group(conn, folder['group_id'], user):
+        raise HTTPException(404, 'folder not found')
+    group_id = conn.execute('SELECT group_id FROM jobs WHERE id = ?', (job_id,)).fetchone()['group_id']
+    if folder['group_id'] != group_id:
+        raise HTTPException(400, 'That folder is in another workspace')
+
+
 def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict) -> None:
     """Every setting a dataset takes, applied to one, after the caller's role there is
     shown to reach each field asked for."""
@@ -1182,9 +1195,14 @@ def apply_patch(conn, job_id: str, job, body: JobPatch, fields: set, user: dict)
             raise HTTPException(409, 'a Sandbox holds only the datasets of the person it belongs to')
         else:
             target = body.group_id
-        conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (target, job_id))
+        # A folder belongs to its workspace, so the dataset leaves it unless one is named below.
+        conn.execute('UPDATE jobs SET group_id = ?, folder_id = NULL WHERE id = ?', (target, job_id))
         store.forget_unreached(conn)
         page_rows.forget_counts(conn, job_id)
+    if 'folder_id' in fields:
+        if body.folder_id is not None:
+            _require_folder_of_its_workspace(conn, job_id, body.folder_id, user)
+        conn.execute('UPDATE jobs SET folder_id = ? WHERE id = ?', (body.folder_id, job_id))
     for task, column in MODEL_COLUMNS.items():
         if column not in fields:
             continue

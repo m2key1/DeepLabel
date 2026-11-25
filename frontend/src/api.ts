@@ -160,6 +160,8 @@ export interface Job {
   tile_size: number
   line_width: number
   group_id: number | null
+  /** The folder of its workspace it is filed in; null at the workspace's top. */
+  folder_id?: number | null
   shared_with: string[]
   /** Whoever was made Reviewer on this dataset alone, or Annotator. */
   roles: Record<string, DatasetRole>
@@ -190,6 +192,15 @@ export interface Group {
   shared_with: string[]
   /** Datasets in it the caller can see. Absent on an older backend. */
   count?: number
+  /** Its folders (#133), sorted by name; a Sandbox has none. Absent on an older backend. */
+  folders?: Folder[]
+}
+
+/** A folder in a workspace, at its top (no parent) or inside another of its folders. */
+export interface Folder {
+  id: number
+  name: string
+  parent_id: number | null
 }
 
 export interface PageSummary {
@@ -1049,7 +1060,8 @@ export interface AppSettings {
   page_overlays: PageOverlays
   /** Groups folded shut on the dataset list, by id and 'ungrouped'. Kept with the account
    *  rather than the browser, so a list tidied on one machine opens tidy on the next. */
-  collapsed_groups: (number | 'ungrouped')[]
+  /** Folded sections of the dataset list: workspaces by id, folders as `folder:<id>`. */
+  collapsed_groups: (number | 'ungrouped' | `folder:${number}`)[]
   /** How much of the transcript page the scan takes, as a fraction of the pane. Kept with
    *  the account: how wide a scan wants to be is a property of the volume being read, not
    *  of the machine it is read on. */
@@ -1759,8 +1771,9 @@ export function renameJob(jobId: string, name: string): Promise<{ name: string }
   return request(`/api/jobs/${jobId}`, json('PATCH', { name }))
 }
 
-export function setJobGroup(jobId: string, groupId: number | null): Promise<{ group_id: number | null }> {
-  return request(`/api/jobs/${jobId}`, json('PATCH', { group_id: groupId }))
+export function setJobGroup(jobId: string, groupId: number | null, folderId: number | null = null):
+  Promise<{ group_id: number | null }> {
+  return request(`/api/jobs/${jobId}`, json('PATCH', { group_id: groupId, folder_id: folderId }))
 }
 
 /** The people given a dataset alone, and the roles set on it for anyone who reaches it. */
@@ -1915,8 +1928,23 @@ export function bulkSettings(jobIds: string[], patch: GroupJobsPatch): Promise<B
   return request('/api/bulk/settings', json('PATCH', { job_ids: jobIds, patch }))
 }
 
-export function bulkMove(jobIds: string[], groupId: number | null): Promise<BulkOutcome> {
-  return request('/api/bulk/group', json('PATCH', { job_ids: jobIds, group_id: groupId }))
+export function bulkMove(jobIds: string[], groupId: number | null, folderId: number | null = null):
+  Promise<BulkOutcome> {
+  return request('/api/bulk/group', json('PATCH', { job_ids: jobIds, group_id: groupId, folder_id: folderId }))
+}
+
+export function createFolder(groupId: number, name: string, parentId: number | null): Promise<Folder> {
+  return request(`/api/groups/${groupId}/folders`, json('POST', { name, parent_id: parentId }))
+}
+
+export function changeFolder(folderId: number, change: { name?: string; parent_id?: number | null }):
+  Promise<Folder> {
+  return request(`/api/folders/${folderId}`, json('PATCH', change))
+}
+
+/** What the folder held moves up to the folder that held it, or to the top of its workspace. */
+export function deleteFolder(folderId: number): Promise<{ datasets: number; folders: number }> {
+  return request(`/api/folders/${folderId}`, { method: 'DELETE' })
 }
 
 export async function deleteGroup(groupId: number): Promise<void> {

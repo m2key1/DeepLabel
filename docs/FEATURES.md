@@ -65,6 +65,19 @@ under its toolbar and the workspace rail, which stay in place, and ends with the
   The new owner manages the dataset, whatever their role; the previous owner keeps the access
   they had. A workspace's new owner joins it, the datasets its previous owner made there go
   along unless unticked, and managing the workspace still takes a Manager.
+- **Folders** sort a workspace's datasets, nested as deep as needed; a Sandbox has none. They
+  only sort: who sees a dataset is the workspace's business, so filing never changes it. A
+  workspace's Managers make them with the folder button on its heading or **New folder** in a
+  folder's **…** menu, which also renames, moves (within the workspace, or by a drag in the
+  rail) and deletes it; deleting one moves what it held up a level. Whoever may move a dataset
+  files it: drag it onto a folder in
+  the list or the rail, pick the folder under its workspace in the bulk bar's **Move to
+  workspace…**, or in the dataset's own move dialog. A dataset moved to another workspace
+  leaves its folder.
+- In the list, folders are nested sections in each workspace, alphabetical, before its
+  datasets at the top level, and fold like a workspace; a search or filter hides the folders
+  with nothing matching. In the rail, the arrow beside a workspace unfolds its folders, and
+  picking one lists it with everything below it.
 - Admins see everyone else's Sandboxes after the workspaces, under their own heading, each
   marked **Private** and named for whose it is.
 - Tick several datasets, or use a workspace's menu, to act on all of them at once: re-run,

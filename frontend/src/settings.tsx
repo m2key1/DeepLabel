@@ -201,7 +201,7 @@ interface SettingsCtx {
   shareActivity: boolean
   showActivity: boolean
   pageOverlays: PageOverlays
-  collapsedGroups: (number | 'ungrouped')[]
+  collapsedGroups: AppSettings['collapsed_groups']
   transcriptSplit: number
   transcriptFilmstrip: boolean
   save: (patch: Partial<AppSettings>) => Promise<void>

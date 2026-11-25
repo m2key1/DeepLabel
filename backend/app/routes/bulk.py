@@ -146,7 +146,7 @@ def bulk_settings(body: BulkPatch, conn=Depends(get_db), user: dict = Depends(cu
     """Models, decoding, which phases run - the settings the group dialog already writes,
     over an arbitrary selection instead of a whole group."""
     fields = body.patch.model_fields_set
-    beyond = [f for f in ('name', 'group_id') if f in fields]
+    beyond = [f for f in ('name', 'group_id', 'folder_id') if f in fields]
     if beyond:
         raise HTTPException(400, f'{beyond[0]} belongs to one dataset, not to a selection')
     if not fields:
@@ -158,16 +158,17 @@ def bulk_settings(body: BulkPatch, conn=Depends(get_db), user: dict = Depends(cu
 
 class BulkMove(Selection):
     group_id: int | None = None
+    folder_id: int | None = None
 
 
 @router.patch('/api/bulk/group')
 def bulk_move(body: BulkMove, conn=Depends(get_db), user: dict = Depends(current_user)):
-    """Filing a selection under a group, or out of one with a null. Separate from the
-    settings route because group_id is refused there - moving is what a selection is for,
-    while a group has no group of its own."""
+    """Filing a selection under a group and one of its folders, or out of the group with a
+    null. Separate from the settings route because group_id is refused there - moving is what
+    a selection is for, while a group has no group of its own."""
     jobs = _selected(conn, body.job_ids, user)
-    patch = JobPatch(group_id=body.group_id)
-    fields = {'group_id'}
+    patch = JobPatch(group_id=body.group_id, folder_id=body.folder_id)
+    fields = {'group_id', 'folder_id'}
     return _each(conn, jobs, lambda job: apply_patch(
         conn, job['id'], job, patch, fields, user) or None)
 

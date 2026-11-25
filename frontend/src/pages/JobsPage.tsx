@@ -1,17 +1,22 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  bulkMove, bulkPreview, bulkRedetect, bulkReocr, bulkRerun, cancelJob, createGroup, deleteGroup,
+  bulkMove, bulkPreview, bulkRedetect, bulkReocr, bulkRerun, cancelJob, changeFolder, createGroup, deleteGroup,
   deleteJob, downloadMaskSet, getNewerModels, getUserNames, isTileTask, listGroups, listJobs, renameGroup,
   setJobNote,
 } from '../api'
-import type { BulkAction, BulkOutcome, BulkPreview, Group, Job, NewerModelOffer } from '../api'
+import type { BulkAction, BulkOutcome, BulkPreview, Folder, Group, Job, NewerModelOffer } from '../api'
 import { useAuth } from '../auth'
 import { useSettings } from '../settings'
 import { JobActions, menuItem } from '../components/job/JobActions'
 import { DatasetSidebar } from '../components/job/DatasetSidebar'
 import { useIsNarrow } from '../hooks/useMediaQuery'
 import { DROP_LIT, useDatasetDrag } from '../components/job/datasetDrag'
+import type { DropTarget } from '../components/job/datasetDrag'
+import { FolderDialog } from '../components/job/FolderDialogs'
+import type { FolderAction } from '../components/job/FolderDialogs'
+import { ancestry, filedIn, flatten, folderTree, itselfAndBelow } from '../components/job/folders'
+import type { FolderNode } from '../components/job/folders'
 import { AccessStack, reachOf } from '../components/job/AccessStack'
 import { COLUMNS, DEFAULT_COLUMNS, NAME_MIN, columnWidths, columnsForWidth, loadColumns,
   phasesOf, saveColumns }
@@ -35,7 +40,9 @@ import { Button, GroupButton, buttonClass } from '../components/ui/Button'
 import { Check } from '../components/ui/Field'
 import { NoteTag } from '../components/NoteTag'
 import { TestDataChip } from '../components/TestPage'
-import { CaretIcon, CheckIcon, FilterIcon, LockIcon, PlusIcon } from '../components/icons'
+import { CaretIcon, CheckIcon, FilterIcon, FolderIcon, FolderPlusIcon, KebabIcon, LockIcon, PlusIcon }
+  from '../components/icons'
+import { ActionMenu } from '../components/job/ActionMenu'
 import { useDropPlacement } from '../components/ui/dropPlacement'
 import { menuTrigger, useDismiss } from '../components/ui/menu'
 import { Modal } from '../components/Modal'
@@ -234,6 +241,7 @@ export function JobsPage() {
   const [membersOf, setMembersOf] = useState<MembersTarget | null>(null)
   const [transferOf, setTransferOf] = useState<TransferTarget | null>(null)
   const [settingsGroup, setSettingsGroup] = useState<Group | null>(null)
+  const [folderAction, setFolderAction] = useState<FolderAction | null>(null)
 
   // What is on screen is in the address, so a filtered list can be sent to someone and
   // the back button walks back through it. Written with replace, because typing in the
@@ -268,7 +276,15 @@ export function JobsPage() {
   const onlyTest = params.get('test') === '1'
   const completeness = params.get('complete')
   const scope = params.get('group')
-  const setScope = (value: string | null) => param('group', value, '')
+  const folderScope = scope !== null && params.get('folder') ? Number(params.get('folder')) : null
+  const setScope = (value: string | null, folderId?: number) => setParams((prev) => {
+    const next = new URLSearchParams(prev)
+    if (value === null) next.delete('group')
+    else next.set('group', value)
+    if (folderId === undefined) next.delete('folder')
+    else next.set('folder', String(folderId))
+    return next
+  }, { replace: true })
   const sort = (SORTS.some((o) => o.key === params.get('sort'))
     ? params.get('sort') : 'name') as SortKey
   const setSort = (value: SortKey) => param('sort', value, 'name')
@@ -282,7 +298,7 @@ export function JobsPage() {
     window.clearTimeout(queryWrite.current)
     setParams((prev) => {
       const next = new URLSearchParams(prev)
-      for (const key of ['q', 'mine', 'review', 'test', 'complete', 'group', 'as']) next.delete(key)
+      for (const key of ['q', 'mine', 'review', 'test', 'complete', 'group', 'folder', 'as']) next.delete(key)
       return next
     }, { replace: true })
   }
@@ -419,6 +435,11 @@ export function JobsPage() {
     if (scope === 'review') rows = rows.filter((j) => (j.lines_done ?? 0) < (j.lines_total ?? 0))
     else if (scope === 'ungrouped') rows = rows.filter((j) => j.group_id === null)
     else if (scope !== null) rows = rows.filter((j) => j.group_id === Number(scope))
+    const scopedGroup = folderScope !== null ? groups.find((g) => g.id === Number(scope)) : undefined
+    if (scopedGroup) {
+      const within = itselfAndBelow(scopedGroup.folders ?? [], folderScope!)
+      rows = rows.filter((j) => within.has(filedIn(j, scopedGroup) ?? -1))
+    }
     if (onlyMine) rows = rows.filter((j) => j.owner === viewer)
     if (needsReview) rows = rows.filter((j) => (j.lines_done ?? 0) < (j.lines_total ?? 0))
     if (onlyTest) rows = rows.filter((j) => (j.test_pages ?? 0) > 0)
@@ -437,7 +458,10 @@ export function JobsPage() {
         (b.lines_total ? (b.lines_done ?? 0) / b.lines_total : 1),
     }
     return [...rows].sort(by[sort])
-  }, [reached, groups, scope, onlyMine, needsReview, onlyTest, completeness, query, sort, viewer])
+  }, [reached, groups, scope, folderScope, onlyMine, needsReview, onlyTest, completeness, query, sort, viewer])
+
+  const narrowing = query.trim() !== '' || onlyMine || needsReview || onlyTest || completeness !== null
+  const filtering = narrowing || scope !== null
 
   /** The list's sections, whatever it is divided by. A project section carries the group
    *  itself, because renaming, sharing and running belong to the group and not to the
@@ -456,8 +480,6 @@ export function JobsPage() {
       const key = job.group_id ?? null
       byGroup.set(key, [...(byGroup.get(key) ?? []), job])
     }
-    const filtering = query.trim() !== '' || onlyMine || needsReview || onlyTest || completeness !== null
-      || scope !== null
     const placed: ListSection[] = inListOrder(reached.groups, viewer)
       .map((group) => ({ key: group.id as SectionKey, title: group.name,
                          rows: byGroup.get(group.id) ?? [], group }))
@@ -478,8 +500,7 @@ export function JobsPage() {
       out.push({ key: 'unlisted', title: 'Workspaces not loaded', rows: unlisted })
     }
     return [...out, ...others]
-  }, [visible, reached, groupBy, viewerIsAdmin, viewer, query, onlyMine, needsReview, onlyTest, completeness, scope,
-    groupsFailed])
+  }, [visible, reached, groupBy, viewerIsAdmin, viewer, filtering, groupsFailed])
 
   const reviewCount = useMemo(
     () => reached.jobs.filter((j) => (j.lines_done ?? 0) < (j.lines_total ?? 0)).length,
@@ -503,7 +524,8 @@ export function JobsPage() {
       savingFolds.current = window.setTimeout(
         () => void saveSettings(
           { collapsed_groups: [...next].filter(
-            (k): k is number | 'ungrouped' => typeof k === 'number' || k === 'ungrouped') }),
+            (k): k is number | 'ungrouped' | `folder:${number}` =>
+              typeof k === 'number' || k === 'ungrouped' || /^folder:\d+$/.test(k)) }),
         400)
       return next
     })
@@ -674,20 +696,21 @@ export function JobsPage() {
     }
   }
 
-  /** The bulk bar's Move to workspace... and a drag onto a workspace are one request with one
-   *  report, so a drop is refused exactly as the menu would be. */
-  const moveDatasets = async (ids: string[], groupId: number | null) => {
+  /** The bulk bar's Move to workspace... and a drag onto a workspace or a folder are one
+   *  request with one report, so a drop is refused exactly as the menu would be. */
+  const moveDatasets = async (ids: string[], groupId: number | null, folderId: number | null = null) => {
     setMovePicker(false)
     if (!confirmLeavingPeople(ids, groupId)) return
     try {
-      reportSkipped(await bulkMove(ids, groupId), 'moved')
+      reportSkipped(await bulkMove(ids, groupId, folderId), 'moved')
       setSelected((prev) => new Set([...prev].filter((id) => !ids.includes(id))))
       refresh()
     } catch (e) {
       setError((e as Error).message)
     }
   }
-  const moveSelection = (groupId: number | null) => moveDatasets([...selected], groupId)
+  const moveSelection = (groupId: number | null, folderId: number | null = null) =>
+    moveDatasets([...selected], groupId, folderId)
 
   /** A Sandbox is private: a dataset moved into one is taken from the people given it on
    *  its own, so they are named before it happens. */
@@ -702,8 +725,17 @@ export function JobsPage() {
       : `${losing.length} of these datasets were given to people on their own. In a Sandbox they are private, `
         + 'so those people lose them. Move them anyway?')
   }
-  const { dragSource, dropZone } = useDatasetDrag(
-    selected, canEdit, (ids, groupId) => void moveDatasets(ids, groupId))
+  const moveFolder = async (folder: Folder, target: DropTarget) => {
+    try {
+      await changeFolder(folder.id, { parent_id: target.folderId ?? null })
+      refresh()
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+  const { dragSource, folderSource, dropZone } = useDatasetDrag(
+    selected, canEdit, (ids, target) => void moveDatasets(ids, target.groupId, target.folderId ?? null),
+    (folder, target) => void moveFolder(folder, target))
 
   // A card's three buttons stop their click from reaching the page, which is what shuts
   // the others otherwise - so each one shuts the other two itself.
@@ -1047,6 +1079,13 @@ export function JobsPage() {
               )}
             </span>
           )}
+          {group && canManage && renamingGroup !== group.id && (
+            <Button variant="ghost" size="xs" data-testid="folder-new" title={`New folder in ${group.name}`}
+                    aria-label={`New folder in ${group.name}`}
+                    onClick={() => setFolderAction({ kind: 'new', group, parent: null })}>
+              <FolderPlusIcon />
+            </Button>
+          )}
           {group && renamingGroup !== group.id && (
             <>
               {canManage && (
@@ -1293,9 +1332,20 @@ export function JobsPage() {
           <div className={`absolute left-0 top-full z-20 mt-1 max-h-64 w-52 overflow-auto ${popoverChrome} py-1`}
                onClick={(e) => e.stopPropagation()}>
             {moveTargets.map((g) => (
-              <button key={g.id} className={menuItem} onClick={() => void moveSelection(g.id)}>
-                {g.name}
-              </button>
+              <Fragment key={g.id}>
+                <button className={menuItem} onClick={() => void moveSelection(g.id)}>
+                  {g.name}
+                </button>
+                {flatten(folderTree(g.folders ?? [])).map(({ folder, depth }) => (
+                  <button key={folder.id} data-testid="move-folder" title={`${g.name}: ${folder.name}`}
+                          className={`${menuItem} flex items-center gap-1.5`}
+                          style={{ paddingLeft: `${0.75 + (depth + 1) * 0.75}rem` }}
+                          onClick={() => void moveSelection(g.id, folder.id)}>
+                    <span className="shrink-0 text-ink-subtle"><FolderIcon /></span>
+                    <span className="truncate">{folder.name}</span>
+                  </button>
+                ))}
+              </Fragment>
             ))}
             <div className="my-1 border-t border-line" />
             <button className={menuItem} title="Each dataset goes back to the Sandbox of the person who made it"
@@ -1312,21 +1362,95 @@ export function JobsPage() {
     </div>
   )
 
+  const rowsOf = (rows: Job[], prefix: string) => view === 'cards'
+    ? <div className={`${CARD_GRID} px-2`}>{rows.map(jobCard)}</div>
+    : sectionRows(rows, prefix)
+
+  /** A folder inside a workspace's section: its own folders first, then its datasets. With a
+   *  folder picked in the rail, only the way down to it and what is below it show; with a search
+   *  or filter on, a folder with nothing matching below it is left out, the picked one aside. */
+  const renderFolder = (group: Group, node: FolderNode, rowsIn: Map<number | null, Job[]>,
+                        shown: Set<number> | null): React.ReactNode => {
+    const { folder, depth, children } = node
+    const below = flatten([node]).flatMap((n) => rowsIn.get(n.folder.id) ?? [])
+    if (shown && !shown.has(folder.id)) return null
+    if (narrowing && below.length === 0 && folder.id !== folderScope) return null
+    const key: SectionKey = `folder:${folder.id}`
+    const own = rowsIn.get(folder.id) ?? []
+    const zone = dropZone({ groupId: group.id, folderId: folder.id, name: folder.name })
+    const open = !collapsed.has(key)
+    const prefix = sharedPrefix(own.map((j) => j.name))
+    return (
+      <section key={key} data-testid="folder-section" data-title={folder.name}
+               style={{ marginLeft: depth ? '1rem' : '0.5rem' }}
+               className="mt-2 border-l border-line pl-2">
+        <div data-testid="folder-header" {...zone.props}
+             className={`mb-1 flex flex-wrap items-center gap-2 rounded px-2 py-0.5 ${zone.lit ? DROP_LIT : ''}`}>
+          <button onClick={() => toggleSection(key)} aria-expanded={open}
+                  className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-ink hover:text-accent-ink">
+            <span aria-hidden className={`inline-block text-ink-subtle transition-transform ${open ? 'rotate-90' : ''}`}>▸</span>
+            <span className="text-ink-subtle"><FolderIcon /></span>
+            <span className="truncate">{folder.name}</span>
+          </button>
+          <span className="whitespace-nowrap text-xs text-ink-subtle">
+            {below.length} dataset{below.length === 1 ? '' : 's'}
+          </span>
+          {zone.hint && <span data-testid="drop-hint" className="whitespace-nowrap text-xs font-medium">{zone.hint}</span>}
+          <span className="ml-auto flex items-center gap-1">
+            {below.length > 0 && (
+              <Button variant="ghost" size="xs" onClick={() => selectMany(below.map((j) => j.id))}>Select all</Button>
+            )}
+            {group.can_manage && (
+              <ActionMenu trigger={<KebabIcon />} testId="folder-menu" label={`Actions for ${folder.name}`}
+                          title={`What to do with ${folder.name}`} actions={[
+                { label: 'New folder', hint: `Inside ${folder.name}`, testId: 'folder-new',
+                  onSelect: () => setFolderAction({ kind: 'new', group, parent: folder }) },
+                { label: 'Rename…', testId: 'folder-rename',
+                  onSelect: () => setFolderAction({ kind: 'rename', group, folder }) },
+                { label: 'Move…', hint: `Into another folder of ${group.name}, or to its top`, testId: 'folder-move',
+                  onSelect: () => setFolderAction({ kind: 'move', group, folder }) },
+                { label: 'Delete…', hint: 'What it holds moves up a level', testId: 'folder-delete', danger: true,
+                  onSelect: () => setFolderAction({ kind: 'delete', group, folder }) },
+              ]} />
+            )}
+          </span>
+        </div>
+        {open && (
+          <>
+            {children.map((child) => renderFolder(group, child, rowsIn, shown))}
+            {own.length > 0 && <div className="mt-1">{rowsOf(own, prefix)}</div>}
+          </>
+        )}
+      </section>
+    )
+  }
+
   const renderSection = (
     key: SectionKey, title: string, rows: Job[], group?: Group,
   ) => {
-    const prefix = sharedPrefix(rows.map((j) => j.name))
+    const tree = folderTree(group?.folders ?? [])
+    const rowsIn = new Map<number | null, Job[]>()
+    for (const job of rows) {
+      const at = filedIn(job, group)
+      rowsIn.set(at, [...(rowsIn.get(at) ?? []), job])
+    }
+    const top = tree.length ? rowsIn.get(null) ?? [] : rows
+    const shown = group && folderScope !== null && scope === String(group.id)
+      ? new Set([...itselfAndBelow(group.folders ?? [], folderScope),
+                 ...ancestry(group.folders ?? [], folderScope).map((f) => f.id)])
+      : null
+    const prefix = sharedPrefix(top.map((j) => j.name))
     return (
     <section key={key} data-testid="list-section" data-title={title} className="mb-5">
       {sectionHeader(key, title, rows.length, rows, group, prefix)}
       {!collapsed.has(key) && (
-        rows.length ? (
-          view === 'cards'
-            ? <div className={`${CARD_GRID} px-2`}>{rows.map(jobCard)}</div>
-            : sectionRows(rows, prefix)
-        ) : (
-          <p className="px-2 text-xs text-ink-subtle">No datasets in this workspace.</p>
-        )
+        <>
+          {group && tree.map((node) => renderFolder(group, node, rowsIn, shown))}
+          {top.length > 0 && <div className={tree.length ? 'mt-2' : undefined}>{rowsOf(top, prefix)}</div>}
+          {rows.length === 0 && tree.length === 0 && (
+            <p className="px-2 text-xs text-ink-subtle">No datasets in this workspace.</p>
+          )}
+        </>
       )}
     </section>
     )
@@ -1337,12 +1461,14 @@ export function JobsPage() {
       groups={sidebarGroups}
       jobs={reached.jobs}
       scope={scope}
+      folderScope={folderScope}
       needsReview={reviewCount}
       recent={recent}
       collapsed={collapsed}
       onCollapse={onCollapse}
-      onScope={(next) => { setScope(next); setSelected(new Set()); picked?.() }}
+      onScope={(next, folderId) => { setScope(next, folderId); setSelected(new Set()); picked?.() }}
       dropZone={dropZone}
+      folderSource={folderSource}
       viewer={viewer}
     />
   )
@@ -1467,6 +1593,12 @@ export function JobsPage() {
           onMoved={() => { setError(null); refresh() }}
           onError={setError}
         />
+      )}
+      {folderAction && (
+        <FolderDialog action={folderAction}
+                      datasetsIn={(folder) => reached.jobs.filter((j) => j.folder_id === folder.id).length}
+                      onClose={() => setFolderAction(null)}
+                      onDone={() => { setFolderAction(null); setError(null); refresh() }} />
       )}
       {newerFor && (
         <NewerModelsDialog jobId={newerFor.job.id} name={newerFor.job.name} offers={newerFor.offers}

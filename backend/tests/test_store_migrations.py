@@ -220,6 +220,7 @@ class TestMigrations:
         'elements': ['bbox', 'checked', 'class_name', 'conf', 'deleted', 'id', 'kind', 'lines_bbox', 'order_idx', 'page_id', 'raw_class_name'],
         'eval_lines': ['confidence', 'cer', 'decode', 'distance', 'evaluation_id', 'ground_truth', 'job_id', 'length', 'line_id', 'ops', 'page_id', 'prediction'],
         'evaluations': ['cer', 'created_at', 'decode', 'error', 'id', 'line_count', 'model_id', 'owner', 'pid', 'source', 'status', 'training_id', 'wer'],
+        'folders': ['created_at', 'group_id', 'id', 'name', 'parent_id'],
         'group_assignees': ['group_id', 'username'],
         'groups': ['created_at', 'id', 'name', 'owner'],
         'gt_reads': ['completion_tokens', 'created_at', 'error', 'finished_at', 'id', 'job_id', 'label', 'llm_model_id', 'model', 'page_id', 'prompt_hash', 'prompt_tokens', 'raw_text', 'requested_by', 'status'],

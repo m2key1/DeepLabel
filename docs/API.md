@@ -68,6 +68,15 @@ owner or an admin with `POST /api/groups/{id}/transfer` (`{"to": "ben", "dataset
 takes along the datasets the previous owner made in it unless `datasets` is false. Neither is
 offered for a Sandbox.
 
+A workspace's folders come with it in `GET /api/groups` as `folders` (`id`, `name`, `parent_id`).
+Its Managers make one with `POST /api/groups/{id}/folders` (`{"name": "Taufbücher", "parent_id":
+null}`), rename or move it within the workspace with `PATCH /api/folders/{id}` (`name`,
+`parent_id`), and delete it with `DELETE /api/folders/{id}`, which moves what it held up a level
+and answers how many `datasets` and `folders` moved. A dataset carries its `folder_id`; set it
+with `PATCH /api/jobs/{id}` or, for a selection, `PATCH /api/bulk/group` (`{"job_ids": [...],
+"group_id": 3, "folder_id": 12}`). A folder of another workspace is refused, and a dataset moved
+to another workspace leaves its folder unless one there is named in the same request.
+
 A dataset's Managers hand its pages out with `PUT /api/jobs/{id}/assignments`:
 `{"assignee": "lena", "numbers": [1, 2, 3]}` gives Lena pages 1 to 3 as the page table numbers
 them (or name them by `page_ids`), taking them from whoever had them; `"assignee": null` takes

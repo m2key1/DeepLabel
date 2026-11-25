@@ -1,13 +1,16 @@
-import type { ReactNode } from 'react'
+import { useState } from 'react'
+import type { DragEvent, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import type { Group, Job } from '../../api'
 import { useAuth } from '../../auth'
 import { formatRelative } from '../../util'
-import { LockIcon, PlusIcon } from '../icons'
+import { CaretIcon, LockIcon, PlusIcon } from '../icons'
 import { groupSize, inListOrder, newDatasetIn, newDatasetTitle, takesNewDatasets, workspaceKind } from './groups'
 import { DROP_LIT } from './datasetDrag'
-import type { DropTarget, DropZone } from './datasetDrag'
+import type { DraggedFolder, DropTarget, DropZone } from './datasetDrag'
+import { ancestry, datasetsBelow, folderTree, itselfAndBelow } from './folders'
+import type { FolderNode } from './folders'
 
 const ChevronLeft = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -27,19 +30,60 @@ const DropHint = ({ text }: { text: string }) => (
   <span data-testid="drop-hint" className="w-full text-xs font-medium">{text}</span>
 )
 
+// Which workspaces and folders are unfolded is one person's view of the rail, so it stays in
+// this browser rather than in the account's shared settings.
+const UNFOLDED_KEY = 'deeplabel.rail-unfolded'
+
+function loadUnfolded(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(UNFOLDED_KEY) ?? '[]') as string[])
+  } catch {
+    return new Set()
+  }
+}
+
+function useUnfolded() {
+  const [unfolded, setUnfolded] = useState(loadUnfolded)
+  const toggle = (key: string) => setUnfolded((prev) => {
+    const next = new Set(prev)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    try {
+      localStorage.setItem(UNFOLDED_KEY, JSON.stringify([...next]))
+    } catch {
+      // A browser that keeps nothing still folds and unfolds, only not across visits.
+    }
+    return next
+  })
+  return { unfolded, toggle }
+}
+
+/** The disclosure beside a workspace or folder with folders in it; the same room is left
+ *  empty beside one without, so names at one depth line up. */
+const Disclosure = ({ name, open, onToggle }: { name: string; open: boolean; onToggle?: () => void }) => onToggle ? (
+  <button aria-label={`${open ? 'Hide' : 'Show'} the folders of ${name}`} aria-expanded={open} onClick={onToggle}
+          className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded text-ink-subtle hover:bg-raised hover:text-ink">
+    <span className={`transition-transform ${open ? '' : '-rotate-90'}`}><CaretIcon /></span>
+  </button>
+) : <span aria-hidden className="size-5 shrink-0" />
+
 /** A nav, deliberately not a section: the dataset list is made of sections, and a spec
  *  that looks for "the section about this group" must not find this one too. */
 interface DatasetSidebarProps {
   groups: Group[]
   jobs: Job[]
   scope: string | null
+  /** The folder picked in the workspace `scope` names, if one is. */
+  folderScope: number | null
   needsReview: number
   /** Most recently worked on, newest first - what somebody is likely to want back. */
   recent: Job[]
   collapsed: boolean
   onCollapse: (collapsed: boolean) => void
-  onScope: (groupId: string | null) => void
+  onScope: (groupId: string | null, folderId?: number) => void
   dropZone: (target: DropTarget) => DropZone
+  folderSource: (dragged: DraggedFolder) => { draggable: boolean; onDragStart: (e: DragEvent) => void;
+                                              onDragEnd: () => void }
   /** Whose list this is: the signed-in person, or the one an admin's lens shows. */
   viewer: string
 }
@@ -50,9 +94,10 @@ const item =
   'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-ink-muted hover:bg-raised hover:text-ink'
 const active = 'bg-accent-wash text-ink font-medium'
 
-export function DatasetSidebar({ groups, jobs, scope, needsReview, recent, collapsed,
-                                 onCollapse, onScope, dropZone, viewer }: DatasetSidebarProps) {
+export function DatasetSidebar({ groups, jobs, scope, folderScope, needsReview, recent, collapsed,
+                                 onCollapse, onScope, dropZone, folderSource, viewer }: DatasetSidebarProps) {
   const { user, isAdmin, canEdit } = useAuth()
+  const { unfolded, toggle } = useUnfolded()
   const sharedWithYou = jobs.filter((j) => j.group_id === null).length
   const ordered = inListOrder(groups, viewer)
   const ownSandbox = ordered.filter((g) => workspaceKind(g, viewer) === 'own-sandbox')
@@ -60,27 +105,74 @@ export function DatasetSidebar({ groups, jobs, scope, needsReview, recent, colla
   // Someone else's empty Sandbox holds nothing to look into.
   const otherSandboxes = ordered.filter((g) => workspaceKind(g, viewer) === 'other-sandbox' && groupSize(g, jobs) > 0)
 
-  const entry = (group: Group, label: ReactNode) => {
-    const zone = dropZone({ groupId: group.id, name: group.name })
+  // The way down to a folder picked by link stays open, whatever was folded here.
+  const picked = scope !== null && folderScope !== null
+    ? groups.find((g) => String(g.id) === scope) : undefined
+  const forcedOpen = new Set(picked ? [`g:${picked.id}`, ...ancestry(picked.folders ?? [], folderScope!)
+    .filter((f) => f.id !== folderScope).map((f) => `f:${f.id}`)] : [])
+  const isOpen = (key: string) => unfolded.has(key) || forcedOpen.has(key)
+
+  const folderRows = (group: Group, nodes: FolderNode[]): ReactNode => nodes.map(({ folder, depth, children }) => {
+    const key = `f:${folder.id}`
+    const zone = dropZone({ groupId: group.id, folderId: folder.id, name: folder.name })
+    const current = scope === String(group.id) && folderScope === folder.id
+    const drag = group.can_manage
+      ? folderSource({ folder, groupId: group.id, within: itselfAndBelow(group.folders ?? [], folder.id) }) : {}
     return (
-      <div key={group.id} className="flex items-start gap-0.5">
-        <button
-          {...zone.props}
-          className={`${item} flex-wrap ${zone.lit ? DROP_LIT : scope === String(group.id) ? active : ''}`}
-          aria-current={scope === String(group.id)}
-          onClick={() => onScope(String(group.id))}
-        >
-          {label}
-          <span className="font-mono text-xs tabular-nums text-ink-subtle">{groupSize(group, jobs)}</span>
-          {zone.hint && <DropHint text={zone.hint} />}
-        </button>
-        {canEdit && takesNewDatasets(group, user, isAdmin) && (
-          <Link to={newDatasetIn(group)} data-testid="new-dataset-in" title={newDatasetTitle(group, user)}
-                aria-label={newDatasetTitle(group, user)}
-                className="mt-0.5 shrink-0 rounded p-1 text-ink-subtle hover:bg-raised hover:text-ink">
-            <PlusIcon />
-          </Link>
-        )}
+      <div key={folder.id}>
+        <div className="flex items-start gap-0.5" style={{ paddingLeft: `${(depth + 1) * 0.75}rem` }}>
+          <Disclosure name={folder.name} open={isOpen(key)}
+                      onToggle={children.length ? () => toggle(key) : undefined} />
+          <button
+            {...zone.props}
+            {...drag}
+            data-testid="rail-folder"
+            title={folder.name}
+            className={`${item} min-w-0 flex-wrap ${zone.lit ? DROP_LIT : current ? active : ''}`}
+            aria-current={current}
+            onClick={() => onScope(String(group.id), folder.id)}
+          >
+            <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+            <span className="font-mono text-xs tabular-nums text-ink-subtle">
+              {datasetsBelow(jobs, group, folder.id).length}
+            </span>
+            {zone.hint && <DropHint text={zone.hint} />}
+          </button>
+        </div>
+        {isOpen(key) && folderRows(group, children)}
+      </div>
+    )
+  })
+
+  const entry = (group: Group, label: ReactNode, disclosure = false) => {
+    const zone = dropZone({ groupId: group.id, name: group.name })
+    const key = `g:${group.id}`
+    const tree = folderTree(group.folders ?? [])
+    const current = scope === String(group.id) && folderScope === null
+    return (
+      <div key={group.id}>
+        <div className="flex items-start gap-0.5">
+          {disclosure && <Disclosure name={group.name} open={isOpen(key)}
+                                     onToggle={tree.length ? () => toggle(key) : undefined} />}
+          <button
+            {...zone.props}
+            className={`${item} min-w-0 flex-wrap ${zone.lit ? DROP_LIT : current ? active : ''}`}
+            aria-current={current}
+            onClick={() => onScope(String(group.id))}
+          >
+            {label}
+            <span className="font-mono text-xs tabular-nums text-ink-subtle">{groupSize(group, jobs)}</span>
+            {zone.hint && <DropHint text={zone.hint} />}
+          </button>
+          {canEdit && takesNewDatasets(group, user, isAdmin) && (
+            <Link to={newDatasetIn(group)} data-testid="new-dataset-in" title={newDatasetTitle(group, user)}
+                  aria-label={newDatasetTitle(group, user)}
+                  className="mt-0.5 shrink-0 rounded p-1 text-ink-subtle hover:bg-raised hover:text-ink">
+              <PlusIcon />
+            </Link>
+          )}
+        </div>
+        {disclosure && isOpen(key) && folderRows(group, tree)}
       </div>
     )
   }
@@ -170,7 +262,7 @@ export function DatasetSidebar({ groups, jobs, scope, needsReview, recent, colla
         </div>
       )}
       {workspaces.length > 0 && <div className={heading}>Workspaces</div>}
-      {workspaces.map((g) => entry(g, <span className="flex-1 truncate" title={g.name}>{g.name}</span>))}
+      {workspaces.map((g) => entry(g, <span className="flex-1 truncate" title={g.name}>{g.name}</span>, true))}
       {sharedWithYou > 0 && (
         <button
           className={`${item} mt-4 ${scope === 'ungrouped' ? active : ''}`}
