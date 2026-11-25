@@ -68,6 +68,15 @@ them back. Deleted, duplicate and unreadable pages in a range are passed by. The
 and the pages nobody has. Each page in `/page-rows` and in the dataset's page list carries its
 `assignee`, and `/page-rows` filters on `mine`, `unassigned` and `assigned:<username>`.
 
+A page's assignee hands it in with `POST /api/pages/{id}/hand-in` and takes that back with
+`DELETE`. A Reviewer answers with `PUT /api/pages/{id}/review`: `{"verdict": "signed_off"}`, which
+needs every line on the page checked, or `{"verdict": "sent_back", "note": "..."}` for a page
+someone has; `DELETE /api/pages/{id}/review` takes either back. Each answers with the page's
+`review` - `state` (`handed_in`, `signed_off`, `sent_back` or null), `by`, `at` and a send-back's
+`note` - which the page itself carries too. A line losing its check takes a sign-off back.
+`/page-rows` carries each page's `review` and `review_note` and filters on `handed-in`,
+`sent-back` and `signed-off`. A training's `signed_off_only` keeps an OCR run to signed-off pages.
+
 `POST /api/lines/texts` corrects many lines in one request (up to 5000), each as a single
 edit would; the lines it could not write come back with the reason:
 

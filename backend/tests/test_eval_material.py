@@ -143,3 +143,13 @@ class TestALiveDataset:
 
         assert seen == [('corrected', 'j1')]
         assert everything == ['read', 'corrected']
+
+    def test_a_signed_off_only_run_scores_only_signed_off_pages(self, conn):
+        unsigned = list(eval_material.job_batches(conn, ['j1'], signed_off_only=True))
+        conn.execute("INSERT INTO page_reviews (page_id, state, by_user, at) VALUES (1, 'signed_off', 'rita', 'now')")
+        conn.commit()
+
+        signed = [text for batch in eval_material.job_batches(conn, ['j1'], signed_off_only=True)
+                  for _, text, *_ in batch]
+
+        assert (unsigned, signed) == ([], ['read', 'corrected'])

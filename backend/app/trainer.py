@@ -151,7 +151,8 @@ def lm_build_outcome(training: dict) -> str | None:
 
 
 def eligible_counts(conn, task: str, job_ids: list[str],
-                    human_checked_only: bool = False, pages: str = 'train') -> dict[str, int]:
+                    human_checked_only: bool = False, pages: str = 'train',
+                    signed_off_only: bool = False) -> dict[str, int]:
     """How much checked material each dataset would contribute to a snapshot's training
     and validation, or on its 'test' pages, or on 'all' of them."""
     queries = {
@@ -160,7 +161,7 @@ def eligible_counts(conn, task: str, job_ids: list[str],
                 f"WHERE p.job_id = ? AND {caches.counted_page('p')} "
                 f"AND {train_snapshot.page_filter('p', pages)} "
                 'AND l.checked = 1 AND l.deleted = 0 AND e.deleted = 0 '
-                + train_snapshot.checked_by(human_checked_only)),
+                + train_snapshot.checked_by(human_checked_only, signed_off_only)),
         'layout': f'SELECT COUNT(*) n FROM pages WHERE job_id = ? AND layout_checked = 1 '
                   f'AND {caches.counted_page()} AND {train_snapshot.page_filter(pages=pages)}',
         'lines': f'SELECT COUNT(*) n FROM pages WHERE job_id = ? AND lines_checked = 1 '
@@ -173,13 +174,17 @@ PREVIEW_CHUNK = 500
 
 
 def _preview_sql(task: str, marks: str, pages: str = 'train') -> str:
-    """Per dataset: checked items and pages, and of each what a person checked. The pages
-    are the ones the split would divide, so they follow train_snapshot._task_keys."""
+    """Per dataset: checked items and pages, and of each what a person checked - for OCR
+    also on the pages a Reviewer signed off. The pages are the ones the split would divide,
+    so they follow train_snapshot._task_keys."""
     if task == 'ocr':
-        human = train_snapshot.HUMAN_CHECK
+        human, signed = train_snapshot.HUMAN_CHECK, train_snapshot.SIGNED_OFF
         return (f'SELECT p.job_id, COUNT(*) items, SUM({human}) human_items, '
                 'COUNT(DISTINCT p.id) pages, '
-                f'COUNT(DISTINCT CASE WHEN {human} THEN p.id END) human_pages '
+                f'COUNT(DISTINCT CASE WHEN {human} THEN p.id END) human_pages, '
+                f'SUM({signed}) signed_items, SUM({signed} AND {human}) signed_human_items, '
+                f'COUNT(DISTINCT CASE WHEN {signed} THEN p.id END) signed_pages, '
+                f'COUNT(DISTINCT CASE WHEN {signed} AND {human} THEN p.id END) signed_human_pages '
                 'FROM lines l JOIN elements e ON l.element_id = e.id '
                 'JOIN pages p ON e.page_id = p.id '
                 f"WHERE p.job_id IN ({marks}) AND {caches.counted_page('p')} "
@@ -196,7 +201,7 @@ def _preview_sql(task: str, marks: str, pages: str = 'train') -> str:
             f'AND {train_snapshot.page_filter(pages=pages)} GROUP BY job_id')
 
 
-def preview_counts(conn, task: str, job_ids: list[str], pages: str = 'train') -> dict[str, dict[str, int]]:
+def preview_counts(conn, task: str, job_ids: list[str], pages: str = 'train') -> dict:
     """How much checked material each dataset would contribute, how many pages it spans -
     the split is cut per page, so that is what a fraction divides - and of both what a
     person rather than agreeing language models checked. One grouped query per chunk of
@@ -209,10 +214,14 @@ def preview_counts(conn, task: str, job_ids: list[str], pages: str = 'train') ->
 
     def column(name):
         return {job_id: found[job_id][name] if job_id in found else 0 for job_id in job_ids}
-    items, human_items = column('items'), column('human_items')
-    return {'counts': items, 'pages': column('pages'),
-            'machine_settled': {job_id: items[job_id] - human_items[job_id] for job_id in job_ids},
-            'human_checked_pages': column('human_pages')}
+
+    def material(prefix=''):
+        items, human_items = column(f'{prefix}items'), column(f'{prefix}human_items')
+        return {'counts': items, 'pages': column(f'{prefix}pages'),
+                'machine_settled': {job_id: items[job_id] - human_items[job_id] for job_id in job_ids},
+                'human_checked_pages': column(f'{prefix}human_pages')}
+    # A run may train on signed-off pages alone (#36), which only OCR offers.
+    return {**material(), 'signed_off': material('signed_')} if task == 'ocr' else material()
 
 
 def set_state_for_attempt(conn, training_id: int, attempt: int, **fields) -> bool:
@@ -346,6 +355,8 @@ def _schedule_scores(conn, training: dict, model_id: int) -> None:
     test_source = {'jobs': test_ids, 'test_pages': True}
     if reads_text and training.get('human_checked_only'):
         test_source['human_checked_only'] = True
+    if reads_text and training.get('signed_off_only'):
+        test_source['signed_off_only'] = True
     scored = [model_id]
     if training['base_model_id'] and registry.get_model(conn, training['base_model_id']):
         scored.append(training['base_model_id'])
@@ -372,6 +383,7 @@ def training_payload(row) -> dict:
     t['batch_fallback'] = json.loads(t['batch_fallback']) if t.get('batch_fallback') else None
     t['metric_info'] = json.loads(t['metric_info']) if t.get('metric_info') else None
     t['build_lm'] = bool(t.get('build_lm'))
+    t['signed_off_only'] = bool(t.get('signed_off_only'))
     t['lm_build'] = lm_build_outcome(t)
     t['snapshot_progress'] = (json.loads(t['snapshot_progress'])
                               if t.get('snapshot_progress') else None)
@@ -438,6 +450,7 @@ def prepare_snapshot(conn, training: dict) -> dict:
                                   on_progress=_progress_writer(conn, training['id']),
                                   should_stop=lambda: is_cancelled(conn, training['id']),
                                   human_checked_only=bool(training.get('human_checked_only')),
+                                  signed_off_only=bool(training.get('signed_off_only')),
                                   test_job_ids=json.loads(training.get('test_job_ids') or '[]'),
                                   line_shape=training.get('line_shape') or 'polygon')
     _write_conventions(conn, training)

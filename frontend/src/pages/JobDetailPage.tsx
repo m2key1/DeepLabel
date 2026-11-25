@@ -40,7 +40,7 @@ import {
 } from '../api'
 import type {
   JobEvent, NewerModelOffer, JobWithoutPages, LlmReadStatus, MapClass, PageDetail,
-  PageFilter as PageFilterKey, PagePhase, PageRows, PageSort, PageSummary, PageType, PurgeManifest, Region,
+  PageFilter as PageFilterKey, PagePhase, PageRows, PageSort, PageSummary, PageType, PurgeManifest, Region, ReviewState,
   ReviewQueue, StaleLines, StepsNotRun, UnreadablePage, IiifSource,
 } from '../api'
 import { useAuth } from '../auth'
@@ -53,6 +53,7 @@ import { NoteTag } from '../components/NoteTag'
 import { CaretIcon, CheckIcon, DownloadIcon, FlaskIcon, KebabIcon, PlayIcon } from '../components/icons'
 import { TEST_PAGE_MEANING, TestDataChip, TestPageSwitch } from '../components/TestPage'
 import { Badge, ChipButton } from '../components/ui/Badge'
+import type { Tone } from '../components/ui/Badge'
 import { DatasetViews } from '../components/job/DatasetViews'
 import { PhaseStrip } from '../components/job/PhaseStrip'
 import { Avatar } from '../components/ui/Avatar'
@@ -127,7 +128,7 @@ const PHASE_LABELS: Record<PagePhase, string> = {
   ocr: 'A re-read',
 }
 
-type SortKey = 'idx' | 'filename' | 'assignee' | 'dimensions' | 'status' | 'type' | 'layout' | 'lines' | 'checked' | 'confidence'
+type SortKey = 'idx' | 'filename' | 'assignee' | 'review' | 'dimensions' | 'status' | 'type' | 'layout' | 'lines' | 'checked' | 'confidence'
   | 'llm' | 'regions' | 'test'
 
 // Why a page is left out of the work, on hover over its status.
@@ -151,7 +152,15 @@ type PageFilterDef = { key: PageFilter; label: string; editorsOnly?: boolean; pe
 // The bulk bar's choice for taking pages back; no username is written this way.
 const NOBODY_OPTION = '(nobody)'
 
-const HIDDEN_WHEN_EMPTY = new Set<string>(['deleted', 'no-layout', 'test-pages', 'found-nothing', 'mine'])
+const HIDDEN_WHEN_EMPTY = new Set<string>(['deleted', 'no-layout', 'test-pages', 'found-nothing', 'mine',
+  'handed-in', 'sent-back', 'signed-off'])
+
+// Where a page stands in review (#36), as its chip in the table says it.
+const REVIEW_SHOWN: Record<Exclude<ReviewState, null>, { label: string; tone: Tone }> = {
+  handed_in: { label: 'Handed in', tone: 'accent' },
+  sent_back: { label: 'Sent back', tone: 'warn' },
+  signed_off: { label: 'Signed off', tone: 'ok' },
+}
 
 // What each chip matches, and how many, is the backend's (page_rows.FILTERS): one rule in
 // one place, so a chip's count and its rows cannot disagree. This only says which chips a
@@ -171,6 +180,9 @@ const pageFilters = (isMap: boolean, noLayout: boolean, withDocuments: boolean, 
     { key: 'mine' as PageFilter, label: 'Assigned to me' },
     { key: 'unassigned' as PageFilter, label: 'Unassigned' },
     ...assignees.map((name) => ({ key: `assigned:${name}` as PageFilter, label: name, person: name })),
+    // Where pages stand in review (#36): handed in, sent back, signed off.
+    ...Object.entries(REVIEW_SHOWN).map(([state, { label }]) =>
+      ({ key: state.replace('_', '-') as PageFilter, label })),
   ]),
   ...(isMap ? [
     { key: 'reviewed' as PageFilter, label: 'Reviewed' },
@@ -202,6 +214,7 @@ const TEXT_COLUMNS: Column[] = [
   { key: 'idx', label: '#' },
   { key: 'filename', label: 'Filename' },
   { key: 'assignee', label: 'Assigned to', title: 'Whom a Manager handed the page to' },
+  { key: 'review', label: 'Review', title: 'Handed in by its assignee, then signed off or sent back by a Reviewer' },
   { key: 'dimensions', label: 'Dimensions' },
   { key: 'status', label: 'Status' },
   { key: 'type', label: 'Type', title: 'Cover, blank and the rest: which steps a run takes on the page' },
@@ -455,8 +468,9 @@ export function JobDetailPage() {
   // Whose pages they are says something once some are handed out, which leaves some unassigned
   // fewer than all - for an annotator too, whose view holds their own and nobody's.
   const assignmentsInUse = 'unassigned' in chipCounts && chipCounts.unassigned < (chipCounts.all ?? 0)
+  const reviewsInUse = ['handed-in', 'sent-back', 'signed-off'].some((key) => (chipCounts[key as PageFilter] ?? 0) > 0)
   const columns = available.filter((c) => !hiddenColumns.includes(c.key) && (c.key !== 'type' || typesInUse)
-    && (c.key !== 'assignee' || assignmentsInUse))
+    && (c.key !== 'assignee' || assignmentsInUse) && (c.key !== 'review' || reviewsInUse))
 
   const startReview = () =>
     review?.total && navigate(`/jobs/${jobId}/pages/${review.lines[0].page_id}?review=${maxConf}`)
@@ -938,6 +952,13 @@ export function JobDetailPage() {
             <Avatar name={page.assignee} size="xs" />
             <span data-testid="page-assignee" className="truncate">{page.assignee === user ? 'You' : page.assignee}</span>
           </span>
+        ) : null
+      case 'review':
+        return page.review ? (
+          <Badge tone={REVIEW_SHOWN[page.review].tone} data-testid="page-review" data-state={page.review}
+                 title={page.review_note ?? undefined}>
+            {REVIEW_SHOWN[page.review].label}
+          </Badge>
         ) : null
       case 'filename':
         return (

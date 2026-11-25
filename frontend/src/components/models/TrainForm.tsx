@@ -5,7 +5,7 @@ import {
 } from '../../api'
 import type {
   AugmentPipeline, AugmentSpec, ClusterSession, Group, Job, LineShape, ModelTask, RegistryModel,
-  LeftOut, SplitStrategy, Training, TrainingOptions, TrainingTargets, Tunable, TunableValue,
+  LeftOut, SplitStrategy, Training, TrainingMaterial, TrainingOptions, TrainingTargets, Tunable, TunableValue,
 } from '../../api'
 import { modalBtn, modalPrimaryBtn } from '../Modal'
 import { DatasetPicker } from './DatasetPicker'
@@ -60,6 +60,7 @@ const DEFAULT_PATIENCE = 10
 
 const VAL_PERCENTS = ['5', '10', '15', '20', '30']
 const LEFT_OUT_DEBOUNCE_MS = 300
+const NO_MATERIAL: TrainingMaterial = { counts: {}, pages: {}, machine_settled: {}, human_checked_pages: {} }
 
 /** The placeholder a blank field shows: the value the trainer will use, when declared. */
 function formatDefault(value: TunableValue | null | undefined): string {
@@ -169,11 +170,12 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
   const [description, setDescription] = useState(from?.description ?? '')
   const [jobs, setJobs] = useState<Job[] | null>(null)
   const [groups, setGroups] = useState<Group[]>([])
-  const [counts, setCounts] = useState<Record<string, number>>({})
-  const [machineSettled, setMachineSettled] = useState<Record<string, number>>({})
+  const [material, setMaterial] = useState<TrainingMaterial & { signed_off?: TrainingMaterial } | null>(null)
   const [humanOnly, setHumanOnly] = useState(from?.human_checked_only ?? false)
-  const [pages, setPages] = useState<Record<string, number>>({})
-  const [humanCheckedPages, setHumanCheckedPages] = useState<Record<string, number>>({})
+  const [signedOnly, setSignedOnly] = useState(from?.signed_off_only ?? false)
+  // What each dataset offers: every checked line, or only those on pages a Reviewer signed off (#36).
+  const { counts, machine_settled: machineSettled, pages, human_checked_pages: humanCheckedPages } =
+    (signedOnly ? material?.signed_off : material) ?? NO_MATERIAL
   const [leftOut, setLeftOut] = useState<LeftOut[]>([])
   const [chosen, setChosen] = useState<Set<string>>(() => new Set(from?.dataset_job_ids ?? []))
   // Datasets the run trained on that this account cannot open, or that are gone.
@@ -307,11 +309,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
           setTestIds(from.test_job_ids.filter((id) => rows.some((j) => j.id === id && j.test_pages && j.data_use.test)))
         }
         if (rows.length) {
-          const res = await trainingPreview(task, rows.map((j) => j.id))
-          setCounts(res.counts)
-          setMachineSettled(res.machine_settled ?? {})
-          setPages(res.pages)
-          setHumanCheckedPages(res.human_checked_pages)
+          setMaterial(await trainingPreview(task, rows.map((j) => j.id)))
         }
       })
       .catch((e: Error) => setError(e.message))
@@ -365,6 +363,8 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
   // Of those, what language models settled between themselves rather than a person.
   const settledInChosen = [...chosen].reduce((sum, id) => sum + (machineSettled[id] ?? 0), 0)
   const totalItems = humanOnly ? checkedInChosen - settledInChosen : checkedInChosen
+  const allCheckedInChosen = [...chosen].reduce((sum, id) => sum + (material?.counts[id] ?? 0), 0)
+  const signedOffInChosen = [...chosen].reduce((sum, id) => sum + (material?.signed_off?.counts[id] ?? 0), 0)
   const trainPages = humanOnly ? humanCheckedPages : pages
   const epochsDefault = formatDefault(options?.columns.epochs)
   const offersEarlyStop = !!options?.tunables.some((t) => t.key === 'patience')
@@ -451,6 +451,7 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
       test_job_ids: testIds,
       build_lm: lmOffered && buildLm,
       human_checked_only: humanOnly,
+      ...(task === 'ocr' ? { signed_off_only: signedOnly } : {}),
       ...(task === 'lines' ? { line_shape: lineShape || null } : {}),
       augmentation_pipeline_id: chosenPipeline ? chosenPipeline.id : null,
       augmentation: augmentChoice === 'custom' ? customStack
@@ -588,6 +589,23 @@ export function TrainForm({ task, models, targets, gpuTypes, from, takenNames, o
             on ? [...new Set([...current, ...ids])] : current.filter((id) => !ids.includes(id)))}
         />
         </div>
+        {task === 'ocr' && (signedOffInChosen > 0 || signedOnly) && (
+          <label className="mb-3 flex items-start gap-1.5 text-xs text-ink-muted">
+            <input
+              type="checkbox"
+              data-testid="signed-off-only"
+              checked={signedOnly}
+              onChange={(e) => setSignedOnly(e.target.checked)}
+              className="mt-0.5 cursor-pointer accent-accent"
+            />
+            <span>
+              Train only on pages a Reviewer signed off
+              <span className="block text-[11px] text-ink-muted" data-testid="signed-off-count">
+                {signedOffInChosen} of {allCheckedInChosen} checked lines are on signed-off pages.
+              </span>
+            </span>
+          </label>
+        )}
         {settledInChosen > 0 && (
           <label className="mb-3 flex items-start gap-1.5 text-xs text-ink-muted">
             <input

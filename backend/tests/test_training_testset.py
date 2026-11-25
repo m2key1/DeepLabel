@@ -40,6 +40,12 @@ def seed_checked_lines(conn, job_id: str, count: int, content_hash: str | None =
     conn.commit()
 
 
+def nothing_signed_off(*job_ids) -> dict:
+    """What an OCR preview says of pages a Reviewer signed off (#36), where none was."""
+    zero = dict.fromkeys(job_ids, 0)
+    return {'signed_off': {'counts': zero, 'pages': zero, 'machine_settled': zero, 'human_checked_pages': zero}}
+
+
 def create(api, **overrides):
     body = {'task': 'ocr', 'name': 'run', 'dataset_job_ids': ['j-train'], **overrides}
     return api.post('/api/trainings', json=body, headers=ADMIN)
@@ -102,7 +108,8 @@ def test_preview_counts_only_what_can_train_and_says_what_is_left_out(client):
     assert res.status_code == 200
     assert res.json() == {'counts': {'j-train': 4}, 'pages': {'j-train': 1},
                           'machine_settled': {'j-train': 0}, 'human_checked_pages': {'j-train': 1},
-                          'left_out': [{'job_id': 'j-test', 'name': 'Set j-test', 'pages': 1}]}
+                          'left_out': [{'job_id': 'j-test', 'name': 'Set j-test', 'pages': 1}],
+                          **nothing_signed_off('j-train')}
 
 
 def test_preview_takes_its_datasets_in_the_body(client):
@@ -117,7 +124,7 @@ def test_preview_takes_its_datasets_in_the_body(client):
     assert res.status_code == 200, res.text
     assert res.json() == {'counts': {'j-train': 3}, 'pages': {'j-train': 1},
                           'machine_settled': {'j-train': 0}, 'human_checked_pages': {'j-train': 1},
-                          'left_out': []}
+                          'left_out': [], **nothing_signed_off('j-train')}
     assert api.get('/api/trainings/preview?task=ocr&job_ids=j-train',
                    headers=ADMIN).status_code == 405
 
@@ -142,7 +149,8 @@ def test_preview_says_what_a_person_only_run_would_keep(client):
     assert res.json() == {'counts': {'j-train': 3, 'j-settled': 2},
                           'pages': {'j-train': 1, 'j-settled': 1},
                           'machine_settled': {'j-train': 1, 'j-settled': 2},
-                          'human_checked_pages': {'j-train': 1, 'j-settled': 0}, 'left_out': []}
+                          'human_checked_pages': {'j-train': 1, 'j-settled': 0}, 'left_out': [],
+                          **nothing_signed_off('j-train', 'j-settled')}
 
 
 def test_eval_breakdown_is_labeled_and_redacted(client):
@@ -240,6 +248,55 @@ def test_a_person_only_run_scores_its_test_set_on_person_verified_lines_only(cli
                           (7, {'jobs': ['j-test'], 'test_pages': True, 'human_checked_only': True})]
 
 
+def test_a_signed_off_only_run_is_stored_and_scores_its_test_set_on_signed_off_pages(client, tmp_path):
+    """#36: what the run trains on is what its test set is scored on, as for person-only."""
+    api, conn = client
+    seed_checked_lines(conn, 'j-train', 3)
+    seed_checked_lines(conn, 'j-test', 2, is_test=True)
+    conn.execute("INSERT INTO page_reviews (page_id, state, by_user, at) "
+                 "SELECT id, 'signed_off', 'rita', 'now' FROM pages")
+    conn.execute("INSERT INTO models (id, task, name, checkpoint) VALUES (7, 'ocr', 'Base', '/b.ckpt')")
+    conn.commit()
+    res = create(api, test_job_ids=['j-test'], signed_off_only=True)
+    assert res.status_code == 200, res.text
+    assert res.json()['signed_off_only'] is True
+    conn.execute('UPDATE trainings SET base_model_id = 7')
+    conn.commit()
+    out = tmp_path / 'output'
+    out.mkdir()
+    (out / 'model.ckpt').write_bytes(b'ckpt')
+    (out / 'metrics.json').write_text('{"cer": 0.1}')
+
+    model_id = trainer.register_result(conn, trainer.get_training(conn, res.json()['id']), out)
+
+    test_evals = [(e['model_id'], json.loads(e['source'])) for e in conn.execute(
+        "SELECT model_id, source FROM evaluations WHERE source LIKE '%jobs%' ORDER BY id")]
+    assert test_evals == [(model_id, {'jobs': ['j-test'], 'test_pages': True, 'signed_off_only': True}),
+                          (7, {'jobs': ['j-test'], 'test_pages': True, 'signed_off_only': True})]
+
+
+def test_only_an_ocr_run_trains_on_signed_off_pages(client):
+    api, conn = client
+    seed_checked_lines(conn, 'j-train', 3)
+    conn.execute('UPDATE pages SET layout_checked = 1, width = 10, height = 10')
+    conn.commit()
+
+    res = create(api, task='layout', signed_off_only=True)
+
+    assert res.status_code == 400
+    assert res.json()['detail'] == 'Only an OCR run trains on signed-off pages alone'
+
+
+def test_a_signed_off_only_run_refuses_datasets_nobody_signed_off(client):
+    api, conn = client
+    seed_checked_lines(conn, 'j-train', 3)
+
+    res = create(api, name='signed', signed_off_only=True)
+
+    assert res.status_code == 400
+    assert res.json()['detail'] == 'the selected datasets contain no checked material for this task'
+
+
 def test_a_person_only_run_refuses_a_test_set_only_models_settled(client):
     api, conn = client
     seed_checked_lines(conn, 'j-train', 3)
@@ -322,7 +379,8 @@ def test_preview_counts_match_what_a_run_would_check(client):
 
     assert preview('ocr') == {'counts': {'j-a': 3, 'j-b': 2}, 'pages': {'j-a': 1, 'j-b': 1},
                               'machine_settled': {'j-a': 0, 'j-b': 1},
-                              'human_checked_pages': {'j-a': 1, 'j-b': 1}, 'left_out': []}
+                              'human_checked_pages': {'j-a': 1, 'j-b': 1}, 'left_out': [],
+                              **nothing_signed_off('j-a', 'j-b')}
     assert preview('layout') == {'counts': {'j-a': 1, 'j-b': 1}, 'pages': {'j-a': 1, 'j-b': 0},
                                  'machine_settled': {'j-a': 0, 'j-b': 0},
                                  'human_checked_pages': {'j-a': 1, 'j-b': 0}, 'left_out': []}

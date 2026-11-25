@@ -430,6 +430,8 @@ CREATE TABLE IF NOT EXISTS trainings (
     -- among themselves. Off by default: the agreement is usually the point of running
     -- them, and a run that wants a clean corpus says so.
     human_checked_only INTEGER NOT NULL DEFAULT 0,
+    -- Train only on pages a Reviewer signed off (#36). Off by default, like the above.
+    signed_off_only INTEGER NOT NULL DEFAULT 0,
     -- Fit a KenLM to this run's own ground truth and give it to the model it produces,
     -- instead of inheriting a general one built for other material.
     build_lm INTEGER NOT NULL DEFAULT 0,
@@ -718,7 +720,18 @@ CREATE TABLE IF NOT EXISTS job_roles (
 CREATE TABLE IF NOT EXISTS page_assignees (
     page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
     username TEXT NOT NULL,
+    -- When they handed the page in as done (#36); it goes with the assignment.
+    handed_in_at TEXT,
     PRIMARY KEY (page_id, username)
+);
+-- A Reviewer's word on a page (#36): 'signed_off', or 'sent_back' to its assignee with a note.
+-- A sign-off holds only while every line is checked: see SIGN_OFF_LAPSES.
+CREATE TABLE IF NOT EXISTS page_reviews (
+    page_id INTEGER PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+    state TEXT NOT NULL,
+    by_user TEXT NOT NULL,
+    at TEXT NOT NULL,
+    note TEXT
 );
 CREATE TABLE IF NOT EXISTS group_assignees (
     group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -1033,6 +1046,10 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute('ALTER TABLE pages ADD COLUMN page_type INTEGER')
         conn.execute(f'INSERT OR IGNORE INTO job_page_types ({page_types.COLUMNS}) '
                      f"SELECT jobs.id, d.* FROM jobs, (VALUES {page_types.DEFAULT_ROWS}) d WHERE jobs.task = 'text'")
+    if 'handed_in_at' not in {row[1] for row in conn.execute('PRAGMA table_info(page_assignees)')}:
+        conn.execute('ALTER TABLE page_assignees ADD COLUMN handed_in_at TEXT')
+    for trigger in SIGN_OFF_LAPSES:
+        conn.execute(trigger)
     # Every way a text dataset comes to be - upload, import, IIIF - gives it its copy.
     conn.execute("CREATE TRIGGER IF NOT EXISTS jobs_page_types AFTER INSERT ON jobs WHEN NEW.task = 'text' "
                  f'BEGIN INSERT OR IGNORE INTO job_page_types ({page_types.COLUMNS}) '
@@ -1140,6 +1157,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute("ALTER TABLE trainings ADD COLUMN hyperparams TEXT NOT NULL DEFAULT '{}'")
     if 'human_checked_only' not in training_cols:
         conn.execute('ALTER TABLE trainings ADD COLUMN human_checked_only INTEGER NOT NULL DEFAULT 0')
+    if 'signed_off_only' not in training_cols:
+        conn.execute('ALTER TABLE trainings ADD COLUMN signed_off_only INTEGER NOT NULL DEFAULT 0')
     if 'snapshot_progress' not in training_cols:
         conn.execute('ALTER TABLE trainings ADD COLUMN snapshot_progress TEXT')
     if 'test_job_ids' not in training_cols:
@@ -1465,6 +1484,9 @@ def forget_unreached(conn) -> None:
     conn.execute(
         'DELETE FROM page_assignees WHERE username NOT IN ('
         f'  {_PEOPLE_OF_JOB.format(job="(SELECT job_id FROM pages WHERE id = page_assignees.page_id)")})')
+    # A send-back was said to the person who had the page (#36).
+    conn.execute("DELETE FROM page_reviews WHERE state = 'sent_back' AND NOT EXISTS ("
+                 '  SELECT 1 FROM page_assignees a WHERE a.page_id = page_reviews.page_id)')
 
 
 # The people a dataset belongs to: its creator, its workspace's members and whoever was given
@@ -1495,6 +1517,59 @@ def assignments(conn, job_id: str) -> dict:
             people.setdefault(row['username'], []).append(number)
     return {'people': [{'username': name, 'pages': pages} for name, pages in sorted(people.items())],
             'unassigned': unassigned}
+
+
+# Where a page stands in review (#36), over a page id: signed off, else handed in, else sent
+# back, else NULL. A sign-off outranks the hand-in it answered, which is kept for when it lapses.
+REVIEW_STATE = (
+    "CASE WHEN EXISTS (SELECT 1 FROM page_reviews r WHERE r.page_id = {page} AND r.state = 'signed_off') "
+    "THEN 'signed_off' "
+    "WHEN EXISTS (SELECT 1 FROM page_assignees a WHERE a.page_id = {page} AND a.handed_in_at IS NOT NULL) "
+    "THEN 'handed_in' "
+    "WHEN EXISTS (SELECT 1 FROM page_reviews r WHERE r.page_id = {page} AND r.state = 'sent_back') "
+    "THEN 'sent_back' END")
+
+
+def page_review(conn, page_id: int) -> dict:
+    """Where the page stands in review, who put it there and when, and a send-back's note."""
+    state = conn.execute(f'SELECT {REVIEW_STATE.format(page=":page")}', {'page': page_id}).fetchone()[0]
+    if state == 'handed_in':
+        row = conn.execute('SELECT username by_user, handed_in_at at, NULL note FROM page_assignees '
+                           'WHERE page_id = ? AND handed_in_at IS NOT NULL ORDER BY username', (page_id,)).fetchone()
+    elif state is not None:
+        row = conn.execute('SELECT by_user, at, note FROM page_reviews WHERE page_id = ?', (page_id,)).fetchone()
+    else:
+        row = None
+    return {'state': state, 'by': row['by_user'] if row else None, 'at': row['at'] if row else None,
+            'note': row['note'] if row else None}
+
+
+def unchecked_lines(conn, page_id: int) -> int:
+    """The page's lines still waiting for a check, as its table counts them: a container's own
+    lines and anything deleted are not the page's text."""
+    return conn.execute(
+        'SELECT COUNT(*) FROM lines l JOIN elements e ON l.element_id = e.id '
+        "WHERE e.page_id = ? AND e.deleted = 0 AND e.kind != 'container' AND l.deleted = 0 AND l.checked = 0",
+        (page_id,)).fetchone()[0]
+
+
+# A signed-off page whose line loses its check - typed over by an Annotator, read again, newly
+# drawn, restored - waits for a Reviewer again (#36). Triggers, so that no path writing lines
+# can leave a page signed off with an unchecked line on it.
+_LAPSE = ("DELETE FROM page_reviews WHERE state = 'signed_off' AND page_id = (SELECT page_id FROM elements "
+          "WHERE id = NEW.element_id AND deleted = 0 AND kind != 'container')")
+SIGN_OFF_LAPSES = (
+    'CREATE TRIGGER IF NOT EXISTS sign_off_lapses_on_a_new_line AFTER INSERT ON lines '
+    f'WHEN NEW.checked = 0 AND NEW.deleted = 0 BEGIN {_LAPSE}; END',
+    'CREATE TRIGGER IF NOT EXISTS sign_off_lapses_on_a_line AFTER UPDATE OF checked, deleted, element_id ON lines '
+    'WHEN NEW.checked = 0 AND NEW.deleted = 0 '
+    'AND (OLD.checked = 1 OR OLD.deleted = 1 OR OLD.element_id != NEW.element_id) '
+    f'BEGIN {_LAPSE}; END',
+    'CREATE TRIGGER IF NOT EXISTS sign_off_lapses_on_a_box AFTER UPDATE OF deleted, kind ON elements '
+    "WHEN NEW.deleted = 0 AND NEW.kind != 'container' AND (OLD.deleted = 1 OR OLD.kind = 'container') "
+    'AND EXISTS (SELECT 1 FROM lines WHERE element_id = NEW.id AND deleted = 0 AND checked = 0) '
+    "BEGIN DELETE FROM page_reviews WHERE state = 'signed_off' AND page_id = NEW.page_id; END",
+)
 
 
 def sandbox_id(conn, username: str) -> int:

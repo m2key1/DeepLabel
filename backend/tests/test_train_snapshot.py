@@ -286,6 +286,31 @@ class TestMachineSettledLines:
         assert counts == {'train': 0, 'val': 0}
 
 
+class TestSignedOffPages:
+    """A run may train only on pages a Reviewer signed off (#36): their checked lines, and no
+    checked line of a page nobody signed off."""
+
+    def test_a_run_may_train_only_on_signed_off_pages(self, tmp_path, monkeypatch):
+        monkeypatch.setattr('app.config.TRAININGS_DIR', tmp_path / 'trainings')
+        conn = store.connect(tmp_path / 'app.db')
+        scan = tmp_path / 'scan.png'
+        Image.new('RGB', (400, 300), 'white').save(scan)
+        seed_ocr_job(conn, 'signed', 1, scan, 2)
+        seed_ocr_job(conn, 'open', 2, scan, 3)
+        conn.execute("INSERT INTO page_reviews (page_id, state, by_user, at) VALUES (1, 'signed_off', 'rita', 'now')")
+        conn.commit()
+
+        everything = train_snapshot.build(conn, 1, 'ocr', ['signed', 'open'], val_fraction=0.0)
+        signed_off = train_snapshot.build(conn, 2, 'ocr', ['signed', 'open'], val_fraction=0.0,
+                                          signed_off_only=True)
+
+        assert (everything, signed_off) == ({'train': 5, 'val': 0}, {'train': 2, 'val': 0})
+        texts = sorted(p.read_text(encoding='utf-8')
+                       for p in (tmp_path / 'trainings' / '2' / 'snapshot' / 'train').glob('*.txt'))
+        assert texts == ['text 0', 'text 1']
+        conn.close()
+
+
 class TestDiplomaticMarkup:
     def test_a_marked_line_trains_on_the_line_as_it_now_reads(self, seeded, tmp_path):
         seeded.execute("UPDATE lines SET corrected_text = 'der <del>alte</del> Herr <add>Graf</add>' "

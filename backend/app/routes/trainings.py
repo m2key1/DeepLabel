@@ -190,6 +190,8 @@ class TrainingCreate(BaseModel):
     # Leave out lines that language models settled among themselves, training only on what
     # a person verified.
     human_checked_only: bool = False
+    # Train, for OCR, only on the pages a Reviewer signed off (#36).
+    signed_off_only: bool = False
     # The augmentation stack to train with, either by naming a pipeline the caller can
     # see or as a spec built for this run. Neither leaves the train module on its own
     # stack; a spec with no steps trains on clean crops.
@@ -313,6 +315,8 @@ def _validate_settings(conn, body: TrainingCreate, user: dict) -> dict:
     if body.task not in trainer.TRAINABLE_TASKS:
         raise HTTPException(400, f'{body.task} training is coming soon - only '
                                  f'{", ".join(trainer.TRAINABLE_TASKS)} can be trained for now')
+    if body.signed_off_only and body.task != 'ocr':
+        raise HTTPException(400, 'Only an OCR run trains on signed-off pages alone')
     if not body.dataset_job_ids:
         raise HTTPException(400, 'select at least one dataset')
     for job_id in body.dataset_job_ids:
@@ -375,7 +379,7 @@ def _validate_settings(conn, body: TrainingCreate, user: dict) -> dict:
                 raise HTTPException(404, f'dataset {job_id} not found')
         data_use.require(conn, body.valid_job_ids, 'training')
         valid_counts = trainer.eligible_counts(conn, body.task, body.valid_job_ids,
-                                               body.human_checked_only)
+                                               body.human_checked_only, signed_off_only=body.signed_off_only)
         if sum(valid_counts.values()) == 0:
             raise HTTPException(400, 'the validation datasets contain no checked material for this task')
     else:
@@ -394,11 +398,12 @@ def _validate_settings(conn, body: TrainingCreate, user: dict) -> dict:
     data_use.require(conn, body.test_job_ids, 'test')
     if body.test_job_ids:
         test_counts = trainer.eligible_counts(conn, body.task, body.test_job_ids,
-                                              body.human_checked_only, pages='test')
+                                              body.human_checked_only, pages='test',
+                                              signed_off_only=body.signed_off_only)
         if sum(test_counts.values()) == 0:
             raise HTTPException(400, 'the test pages contain no checked material for this task')
     counts = trainer.eligible_counts(conn, body.task, body.dataset_job_ids,
-                                     body.human_checked_only)
+                                     body.human_checked_only, signed_off_only=body.signed_off_only)
     if sum(counts.values()) == 0:
         raise HTTPException(400, 'the selected datasets contain no checked material for this task')
     return hyperparams
@@ -434,16 +439,17 @@ def create_training(body: TrainingCreate, conn=Depends(get_db),
     cur = conn.execute(
         'INSERT INTO trainings (task, name, owner, base_model_id, target, dataset_job_ids, '
         'description, epochs, batch_size, gpu_type, gpu_count, hyperparams, val_fraction, '
-        'split_strategy, valid_job_ids, test_job_ids, build_lm, human_checked_only, '
+        'split_strategy, valid_job_ids, test_job_ids, build_lm, human_checked_only, signed_off_only, '
         'slurm_account, augmentation, augmentation_name, preflight_id, grad_accum_steps, lr_scale, line_shape, '
         'default_epochs) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         (body.task, name, user['username'], body.base_model_id, body.target,
          json.dumps(body.dataset_job_ids), (body.description or '').strip() or None,
          body.epochs, scaling['batch_size'], body.gpu_type, body.gpu_count,
          json.dumps(hyperparams), body.val_fraction,
          body.split_strategy, json.dumps(body.valid_job_ids), json.dumps(body.test_job_ids),
-         int(body.build_lm), int(body.human_checked_only), user.get('slurm_account') or '',
+         int(body.build_lm), int(body.human_checked_only), int(body.signed_off_only),
+         user.get('slurm_account') or '',
          json.dumps(augmentation) if augmentation is not None else None, augmentation_name,
          preflight_id, scaling['grad_accum_steps'], scaling['lr_scale'],
          trainer.line_shape_for(conn, body.task, body.base_model_id, body.line_shape),

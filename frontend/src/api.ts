@@ -226,6 +226,21 @@ export interface PageSummary {
   regions_checked?: number
   /** Whom a Manager handed the page to, or null while nobody has it. */
   assignee?: string | null
+  /** Where the page stands in review, in the page table; a send-back's note beside it. */
+  review?: ReviewState
+  review_note?: string | null
+}
+
+/** Handed in by its assignee, then signed off by a Reviewer or sent back to them (#36). */
+export type ReviewState = 'handed_in' | 'signed_off' | 'sent_back' | null
+
+export interface PageReview {
+  state: ReviewState
+  /** Who handed the page in, signed it off or sent it back, and when. */
+  by: string | null
+  at: string | null
+  /** What the assignee is to do on a page sent back. */
+  note: string | null
 }
 
 /** A duplicate or an unreadable scan: never rendered, nothing to review, counted nowhere. */
@@ -397,6 +412,7 @@ export interface PageDetail {
   /** Test data: never trained on, nor any page with the same scan. */
   is_test: boolean
   note: Note | null
+  review: PageReview
   /** How far the scan has been turned, 0/90/180/270. */
   rotation: number
   elements: PageElement[]
@@ -770,6 +786,8 @@ export interface Training {
   /** How this run's own language model build went, once it has. */
   lm_build: 'built' | 'failed' | null
   human_checked_only: boolean
+  /** Whether this OCR run trained only on pages a Reviewer signed off. */
+  signed_off_only: boolean
   /** What a lines run trains each line as; null for the other tasks. */
   line_shape: LineShape | null
   /** The augmentation stack this run froze at submit; null left the trainer's own. */
@@ -1806,10 +1824,11 @@ export type PageFilter =
   | `type:${number}`
   /** The pages handed to oneself, to nobody, or to one person. */
   | 'mine' | 'unassigned' | `assigned:${string}`
+  | 'handed-in' | 'sent-back' | 'signed-off'
 
 export type PageSort =
   'idx' | 'filename' | 'dimensions' | 'status' | 'type' | 'layout' | 'lines' | 'checked' | 'confidence' | 'llm' | 'test'
-  | 'assignee'
+  | 'assignee' | 'review'
 
 export interface PageRowsQuery {
   filter?: PageFilter
@@ -2233,17 +2252,22 @@ export interface LeftOut {
 
 /** What the datasets would contribute to a run: by default what it may train on, or the
  *  checked material on their 'test' pages, or on 'all' of them. */
-export function trainingPreview(
-  task: ModelTask,
-  jobIds: string[],
-  pages: 'train' | 'test' | 'all' = 'train',
-): Promise<{
+export interface TrainingMaterial {
   counts: Record<string, number>
   pages: Record<string, number>
   /** Of the checked material, what language models settled among themselves. */
   machine_settled: Record<string, number>
   /** The pages left once that is set aside, which is what a person-only split divides. */
   human_checked_pages: Record<string, number>
+}
+
+export function trainingPreview(
+  task: ModelTask,
+  jobIds: string[],
+  pages: 'train' | 'test' | 'all' = 'train',
+): Promise<TrainingMaterial & {
+  /** The same of the pages a Reviewer signed off; OCR only. */
+  signed_off?: TrainingMaterial
   left_out: LeftOut[]
 }> {
   return request('/api/trainings/preview', json('POST', { task, job_ids: jobIds, pages }))
@@ -2285,6 +2309,21 @@ export function patchPageType(
 /** Give pages a type; null makes them text again. */
 export function setPagesType(jobId: string, pageIds: number[], typeId: number | null): Promise<{ pages: number }> {
   return request(`/api/jobs/${jobId}/pages/type`, json('POST', { page_ids: pageIds, type_id: typeId }))
+}
+
+/** The assignee hands their page in as done, or takes that back to go on working on it. */
+export function handInPage(pageId: number, handIn: boolean): Promise<PageReview> {
+  return request(`/api/pages/${pageId}/hand-in`, { method: handIn ? 'POST' : 'DELETE' })
+}
+
+/** A Reviewer signs the page off, or sends it back to its assignee with what is to be done. */
+export function reviewPage(pageId: number, verdict: 'signed_off' | 'sent_back', note?: string): Promise<PageReview> {
+  return request(`/api/pages/${pageId}/review`, json('PUT', { verdict, note }))
+}
+
+/** A Reviewer takes their sign-off or send-back back. */
+export function takeReviewBack(pageId: number): Promise<PageReview> {
+  return request(`/api/pages/${pageId}/review`, { method: 'DELETE' })
 }
 
 /** Who has which of a dataset's pages, by the numbers its page table shows: everyone the
@@ -2575,6 +2614,8 @@ export interface TrainingRequest {
   build_lm?: boolean
   /** Train only on lines a person verified, leaving out those models settled between them. */
   human_checked_only?: boolean
+  /** Train only on pages a Reviewer signed off; OCR only. */
+  signed_off_only?: boolean
   augmentation_pipeline_id?: number | null
   augmentation?: AugmentSpec | null
   /** The pre-flight the form showed, kept with the run when its settings still match. */
@@ -2706,6 +2747,8 @@ export interface PreflightResult {
     validation: string
     test_datasets: number
     human_checked_only: boolean
+    /** Absent from a pre-flight stored before signed-off pages could be chosen. */
+    signed_off_only?: boolean
     build_lm: boolean
     /** Absent from a pre-flight stored before lines runs chose one. */
     line_shape?: LineShape | null

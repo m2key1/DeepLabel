@@ -596,7 +596,8 @@ function Settings({ result }: { result: PreflightResult }) {
     ['validation', s.validation],
     ['test sets', String(s.test_datasets)],
     ...(result.task === 'ocr'
-      ? [['person-verified only', s.human_checked_only ? 'yes' : 'no'] as [string, string]] : []),
+      ? [['person-verified only', s.human_checked_only ? 'yes' : 'no'] as [string, string],
+         ['signed-off pages only', s.signed_off_only ? 'yes' : 'no'] as [string, string]] : []),
     ...(s.line_shape ? [['line shape', lineShapeLabel(s.line_shape)] as [string, string]] : []),
     ['augmentation', s.augmentation],
     ...(s.tuned.length ? [['tuned', s.tuned.join(', ').replace(/_/g, ' ')] as [string, string]] : []),

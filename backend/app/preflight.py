@@ -234,7 +234,8 @@ def _material(conn, request: dict, reader):
     split, job_ids = train_snapshot.splitter(
         conn, request['task'], list(request['dataset_job_ids']), request.get('val_fraction', 0.1),
         request.get('split_strategy', 'uniform'), request.get('valid_job_ids') or [],
-        bool(request.get('human_checked_only')), request.get('test_job_ids') or [])
+        bool(request.get('human_checked_only')), request.get('test_job_ids') or [],
+        bool(request.get('signed_off_only')))
     yield from reader(conn, job_ids, split)
 
 
@@ -245,7 +246,8 @@ def trained_from(request: dict) -> list[str]:
 
 def _ocr_sections(conn, request: dict, tally: Tally) -> tuple[dict, dict, dict, list]:
     target_height, max_width = input_size(conn, request)
-    reader = partial(train_snapshot.ocr_pages, human_checked_only=bool(request.get('human_checked_only')))
+    reader = partial(train_snapshot.ocr_pages, human_checked_only=bool(request.get('human_checked_only')),
+                     signed_off_only=bool(request.get('signed_off_only')))
     binned = Binned(LINE_EDGES)
     densities: list[tuple[float, dict]] = []
     tiny, degenerate, too_wide, empty, run_on = Flagged(), Flagged(), Flagged(), Flagged(), Flagged()
@@ -528,6 +530,7 @@ def _settings(conn, request: dict, train_samples: int) -> dict:
             'steps_per_epoch': steps, 'total_steps': steps * epochs if epochs else None,
             'validation': validation, 'test_datasets': len(request.get('test_job_ids') or []),
             'human_checked_only': bool(request.get('human_checked_only')),
+            'signed_off_only': bool(request.get('signed_off_only')),
             'build_lm': bool(request.get('build_lm')),
             'line_shape': trainer.line_shape_for(conn, task, request.get('base_model_id'), request.get('line_shape')),
             'augmentation': _augmentation_label(conn, request),

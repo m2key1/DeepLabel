@@ -70,7 +70,7 @@ def snapshot_batches(snapshot: Path, held: int = HELD_AT_ONCE, conn=None):
 
 
 def job_batches(conn, job_ids: list[str], held: int = HELD_AT_ONCE,
-                human_checked_only: bool = False, test_pages_only: bool = False):
+                human_checked_only: bool = False, test_pages_only: bool = False, signed_off_only: bool = False):
     """Checked lines of live datasets, cut from their pages as they are reached. The page
     is opened once for all of its lines and closed before the next one. A run trained only
     on what a person verified is scored only on that too, and a test set only on its test
@@ -87,7 +87,7 @@ def job_batches(conn, job_ids: list[str], held: int = HELD_AT_ONCE,
                 'FROM lines l '
                 'JOIN elements e ON l.element_id = e.id '
                 'WHERE e.page_id = ? AND l.checked = 1 AND l.deleted = 0 AND e.deleted = 0 '
-                f'{checked_by(human_checked_only)} ORDER BY l.id',
+                f'{checked_by(human_checked_only, signed_off_only)} ORDER BY l.id',
                 (page['id'],)).fetchall()
             if not lines:
                 continue

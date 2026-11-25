@@ -54,6 +54,7 @@ import { boxChrome } from '../components/chrome'
 import { Splitter } from '../components/ui/Splitter'
 import { LineLoupe } from '../components/viewer/LineLoupe'
 import { stepPage } from '../components/viewer/pageSteps'
+import { PageReview } from '../components/viewer/PageReview'
 import { LineCandidates, MACHINE_ID, offeredReadings } from '../components/viewer/LineCandidates'
 import { LineReadings } from '../components/viewer/LineReadings'
 import { UnmatchedReadings } from '../components/viewer/UnmatchedReadings'
@@ -266,6 +267,12 @@ export function PageViewerPage() {
   useEffect(() => edits.subscribe(() => setQueueVersion((v) => v + 1)), [edits])
   const page = useMemo(() => (basePage ? edits.view(basePage, basePage.id) : null),
     [basePage, edits, queueVersion])
+  const pageAssignee = job?.pages.find((p) => p.id === page?.id)?.assignee ?? null
+  // What a sign-off waits for: the page's lines still unchecked, a container's own aside (#36).
+  const uncheckedLines = useMemo(
+    () => (page?.elements ?? []).filter((e) => e.kind !== 'container')
+      .reduce((n, e) => n + e.lines.filter((l) => !l.checked).length, 0),
+    [page])
   const [book] = useState(() => new RevisionBook())
   const [candidates, setCandidates] = useState<LineCandidate[]>([])
   // Which of the active line's readings the arrows are on, if any.
@@ -981,6 +988,13 @@ export function PageViewerPage() {
       if (seq === reloadSeq.current) setError((e as Error).message)
     }
   }, [jobId, pageId, showPage, edits])
+
+  // A signed-off page never has an unchecked line on the server: one losing its check took the
+  // sign-off back there (#36), so the page is read again rather than go on showing it signed off.
+  const shownSignedOff = basePage?.review.state === 'signed_off'
+  useEffect(() => {
+    if (shownSignedOff && uncheckedLines > 0) void reloadPage()
+  }, [shownSignedOff, uncheckedLines, reloadPage])
 
   // Turning is done to the scan rather than to the view of it, so everything on the page
   // moved and the whole page is read again.
@@ -4177,6 +4191,11 @@ export function PageViewerPage() {
                    className={`h-full shrink-0 ${textOnly ? '' : 'pl-1.5'}`}>
             {!inElement ? (
               <div className={`flex h-full flex-col overflow-hidden p-3 ${boxChrome}`}>
+                {page && job && (
+                  <PageReview pageId={page.id} review={page.review} mine={pageAssignee !== null && pageAssignee === user}
+                              assigned={pageAssignee !== null} canReview={canCheck} unchecked={uncheckedLines}
+                              onChange={(review) => setPage((p) => (p ? { ...p, review } : p))} onError={setError} />
+                )}
                 <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2">
                   <span className="text-[11px] font-medium text-ink-muted">
                     {reviewMode ? `Flagged here (${reviewLines.length})` : `All lines (${pageLines.length})`}

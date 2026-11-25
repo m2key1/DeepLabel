@@ -583,7 +583,8 @@ local GPU or on a Slurm cluster (marked *highly experimental*).
   base and the new model once the run is trained. Datasets and test sets each have a search, and
   **Select all** takes everything the search shows.
 - Train only on lines a person verified, or include lines settled by language-model
-  agreement.
+  agreement. An OCR run can also train only on pages a Reviewer signed off; its test set is
+  then scored on signed-off pages too.
 - Tune epochs, batch size, learning rate, early stopping and every other setting the
   trainer offers; empty fields use the trainer's defaults, which are shown.
 - A run from a trained model stops early by default: after 10 validations without a better
@@ -734,6 +735,15 @@ polygons) and *line tracing* (boundary lines, open or closed).
   from a link or Search. In the page viewer, Next and Previous keep to the pages handed to
   you, whenever you have any. Someone taken out of the workspace, or off the dataset, gives
   their pages back.
+- **Handing in and signing off:** in the page viewer, the person a page is assigned to presses
+  **Hand in** once it is done, and can take it back until it is reviewed. A Reviewer, Manager
+  or admin presses **Sign off** on any page whose lines are all checked, handed in or not; with
+  lines still unchecked the header says how many, and Sign off says so instead. **Send back…**
+  returns a handed-in page to its assignee with a note they see on the page; every edit and
+  check made on it stays, and they hand it in again; given to someone else, the page starts
+  afresh. A line that loses its check afterwards - an Annotator's correction, a new unchecked
+  line, a re-read - takes the sign-off back, and the page waits for a Reviewer again. Once any page has been handed in, the page table gains a
+  **Review** column and the filters **Handed in**, **Sent back** and **Signed off**.
 - **Notes:** a dataset and each of its pages can carry one note everyone with access can read,
   such as how far a volume has been checked. Anyone who can edit adds it with **+ Note** in
   the dataset's title or the page viewer's toolbar; a **Note** tag then marks it there, on the

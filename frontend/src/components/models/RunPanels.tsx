@@ -27,6 +27,7 @@ function RunSettings({ run }: { run: Training }) {
     ...(run.line_shape ? [['line shape', lineShapeLabel(run.line_shape)] as const] : []),
     ...(run.task === 'ocr' ? [
       ['human-checked only', run.human_checked_only ? 'yes' : 'no'] as const,
+      ['signed-off pages only', run.signed_off_only ? 'yes' : 'no'] as const,
       ['language model', languageModelLabel(run)] as const,
     ] : []),
     ...Object.entries(run.hyperparams).map(([k, v]) =>

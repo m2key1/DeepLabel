@@ -16,6 +16,9 @@ def cols(conn, table: str) -> set:
 def strip_column(db_path, table: str, keep: list[str]):
     """Rebuild `table` with only `keep`, simulating a database from before a migration."""
     raw = sqlite3.connect(db_path)
+    # A database from before has none of the triggers a fresh one has; leave them unread while
+    # the table they name is briefly gone.
+    raw.execute('PRAGMA legacy_alter_table = ON')
     raw.execute(f"CREATE TABLE _old AS SELECT {', '.join(keep)} FROM {table}")
     raw.execute(f'DROP TABLE {table}')
     raw.execute(f'ALTER TABLE _old RENAME TO {table}')
@@ -59,7 +62,24 @@ class TestMigrations:
         raw.close()
 
         conn = store.connect(db)
-        assert cols(conn, 'page_assignees') == {'page_id', 'username'}
+        assert cols(conn, 'page_assignees') == {'page_id', 'username', 'handed_in_at'}
+        conn.close()
+
+    def test_a_database_from_before_sign_off_gains_its_table_and_hand_ins(self, tmp_path):
+        db = tmp_path / 'app.db'
+        store.connect(db).close()
+        raw = sqlite3.connect(db)
+        raw.execute('DROP TABLE page_reviews')
+        raw.commit()
+        raw.close()
+        strip_column(db, 'page_assignees', ['page_id', 'username'])
+
+        conn = store.connect(db)
+        assert cols(conn, 'page_reviews') == {'page_id', 'state', 'by_user', 'at', 'note'}
+        assert 'handed_in_at' in cols(conn, 'page_assignees')
+        assert {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'trigger' "
+                                               "AND name LIKE 'sign_off_lapses_%'")} == {
+            'sign_off_lapses_on_a_new_line', 'sign_off_lapses_on_a_line', 'sign_off_lapses_on_a_box'}
         conn.close()
 
     def test_pages_carry_the_reference_columns(self, tmp_path):
@@ -192,6 +212,7 @@ class TestMigrations:
         'job_assignees': ['job_id', 'username'],
         'job_roles': ['job_id', 'username', 'role'],
         'page_assignees': ['page_id', 'username'],
+        'page_reviews': ['at', 'by_user', 'note', 'page_id', 'state'],
         'recognition_caps': ['account', 'monthly_lines'],
         'recognition_requests': ['account', 'batches_done', 'created_at', 'error', 'fields', 'files', 'files_done',
                                  'finished_at', 'id', 'names', 'queued_at', 'route', 'started_at', 'status'],

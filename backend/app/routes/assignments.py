@@ -36,6 +36,9 @@ def assign_pages(job_id: str, body: Assignment, conn=Depends(get_db), user: dict
         raise HTTPException(400, f'{body.assignee} cannot open this dataset')
     pages = _pages_named(conn, job_id, body, work_only=body.assignee is not None)
     conn.executemany('DELETE FROM page_assignees WHERE page_id = ?', [(page_id,) for page_id in pages])
+    # A send-back was said to whoever had the page (#36).
+    conn.executemany("DELETE FROM page_reviews WHERE page_id = ? AND state = 'sent_back'",
+                     [(page_id,) for page_id in pages])
     if body.assignee is not None:
         conn.executemany('INSERT INTO page_assignees (page_id, username) VALUES (?, ?)',
                          [(page_id, body.assignee) for page_id in pages])

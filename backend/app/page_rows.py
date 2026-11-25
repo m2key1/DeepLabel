@@ -45,9 +45,11 @@ SELECT p.id, p.idx, p.filename, p.width, p.height, p.status,
        (SELECT COUNT(*) FROM regions r
          WHERE r.page_id = p.id AND r.deleted = 0 AND r.checked = 1) regions_checked,
        (SELECT MIN(a.username) FROM page_assignees a WHERE a.page_id = p.id) assignee,
-       EXISTS (SELECT 1 FROM page_assignees a WHERE a.page_id = p.id AND a.username = :me) assigned_to_me
+       EXISTS (SELECT 1 FROM page_assignees a WHERE a.page_id = p.id AND a.username = :me) assigned_to_me,
+       {review} review,
+       (SELECT r.note FROM page_reviews r WHERE r.page_id = p.id AND r.state = 'sent_back') review_note
 FROM pages p WHERE p.job_id = :job_id
-"""
+""".replace('{review}', store.REVIEW_STATE.format(page='p.id'))
 
 # What each chip on the table means, as a condition over the row above. 'all' lists every
 # live page, a duplicate upload among them so it can be seen flagged; every other chip is
@@ -74,6 +76,9 @@ FILTERS = {
     'found-nothing': f'{_WORK} AND {_FOUND_NOTHING}',
     'mine': f'{_WORK} AND assigned_to_me',
     'unassigned': f'{_WORK} AND assignee IS NULL',
+    'handed-in': f"{_WORK} AND review = 'handed_in'",
+    'sent-back': f"{_WORK} AND review = 'sent_back'",
+    'signed-off': f"{_WORK} AND review = 'signed_off'",
     'deleted': 'deleted = 1',
 }
 
@@ -110,6 +115,7 @@ SORTS = {
     # A line job's ratio is always 1, so its column sorts by how many were traced.
     'regions-total': 'regions_total',
     'assignee': 'assignee',
+    'review': 'review',
 }
 
 MAX_LIMIT = 500

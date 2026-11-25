@@ -32,10 +32,13 @@ POOL_CONTEXT = multiprocessing.get_context('forkserver')
 # other check was made by a person, or by matching a transcription they supplied.
 HUMAN_CHECK = "(l.check_source IS NULL OR l.check_source != 'llm')"
 HUMAN_CHECKED = f'AND {HUMAN_CHECK}'
+# A line on a page a Reviewer signed off (#36), over the element `e` it hangs from.
+SIGNED_OFF = "EXISTS (SELECT 1 FROM page_reviews r WHERE r.page_id = e.page_id AND r.state = 'signed_off')"
 
 
-def checked_by(human_checked_only: bool) -> str:
-    return HUMAN_CHECKED if human_checked_only else ''
+def checked_by(human_checked_only: bool, signed_off_only: bool = False) -> str:
+    """Narrows checked lines to what a person verified, and to pages a Reviewer signed off."""
+    return (HUMAN_CHECKED if human_checked_only else '') + (f' AND {SIGNED_OFF}' if signed_off_only else '')
 
 
 def _hash(key: str) -> bytes:
@@ -104,14 +107,16 @@ def _holdout_splitter(valid_job_ids: list[str]):
     return split
 
 
-def _task_keys(conn, task: str, job_id: str, human_checked_only: bool = False) -> list[str]:
+def _task_keys(conn, task: str, job_id: str, human_checked_only: bool = False,
+               signed_off_only: bool = False) -> list[str]:
     """The split keys the task's builder will ask about, mirroring its selection."""
     if task == 'ocr':
         rows = conn.execute(
             'SELECT DISTINCT p.id, p.content_hash, p.is_test FROM pages p '
             'JOIN elements e ON e.page_id = p.id JOIN lines l ON l.element_id = e.id '
             f"WHERE p.job_id = ? AND {counted_page('p')} "
-            f'AND l.checked = 1 AND l.deleted = 0 AND e.deleted = 0 {checked_by(human_checked_only)}',
+            f'AND l.checked = 1 AND l.deleted = 0 AND e.deleted = 0 '
+            f'{checked_by(human_checked_only, signed_off_only)}',
             (job_id,)).fetchall()
     elif task == 'layout':
         rows = conn.execute(
@@ -138,15 +143,18 @@ def _rank_split(keys: set[str], val_fraction: float, at_least_one: bool = False)
     return set(ranked[:min(picked, max(len(ranked) - 1, 0))])
 
 
-def _trainable_keys(conn, task: str, job_id: str, human_checked_only: bool, scans: set[str]) -> set[str]:
-    return {key for key in _task_keys(conn, task, job_id, human_checked_only) if not _kept_out(key, scans)}
+def _trainable_keys(conn, task: str, job_id: str, human_checked_only: bool, scans: set[str],
+                    signed_off_only: bool = False) -> set[str]:
+    return {key for key in _task_keys(conn, task, job_id, human_checked_only, signed_off_only)
+            if not _kept_out(key, scans)}
 
 
 def _uniform_splitter(conn, task: str, job_ids: list[str], val_fraction: float,
-                      human_checked_only: bool = False, scans: frozenset = frozenset()):
+                      human_checked_only: bool = False, scans: frozenset = frozenset(),
+                      signed_off_only: bool = False):
     """val_fraction of all distinct trainable pages lands in valid, picked by hash rank."""
     keys = {key for job_id in job_ids
-            for key in _trainable_keys(conn, task, job_id, human_checked_only, scans)}
+            for key in _trainable_keys(conn, task, job_id, human_checked_only, scans, signed_off_only)}
     val_keys = _rank_split(keys, val_fraction)
 
     def split(job_id: str, key: str) -> str:
@@ -155,13 +163,14 @@ def _uniform_splitter(conn, task: str, job_ids: list[str], val_fraction: float,
 
 
 def _stratified_splitter(conn, task: str, job_ids: list[str], val_fraction: float,
-                         human_checked_only: bool = False, scans: frozenset = frozenset()):
+                         human_checked_only: bool = False, scans: frozenset = frozenset(),
+                         signed_off_only: bool = False):
     """Exactly val_fraction of every dataset's pages lands in valid, and at least one page
     of every dataset that has two. Keys are ranked by hash so the picks are deterministic
     yet uncorrelated with insertion order."""
     val_keys: set[str] = set()
     for job_id in job_ids:
-        val_keys |= _rank_split(_trainable_keys(conn, task, job_id, human_checked_only, scans),
+        val_keys |= _rank_split(_trainable_keys(conn, task, job_id, human_checked_only, scans, signed_off_only),
                                 val_fraction, at_least_one=True)
 
     def split(job_id: str, key: str) -> str:
@@ -173,7 +182,8 @@ def _page_image(page_row) -> Image.Image:
     return Image.open(page_row['source_file']).convert('RGB')
 
 
-def ocr_pages(conn, job_ids: list[str], split, human_checked_only: bool = False):
+def ocr_pages(conn, job_ids: list[str], split, human_checked_only: bool = False,
+              signed_off_only: bool = False):
     """Every page the OCR cut reads, as (job_id, page, part, lines): the checked lines on
     it, each with the target it would train on. A line whose target comes out empty, or
     only whitespace, is still listed - the cut leaves it out, and the pre-flight reports it."""
@@ -187,7 +197,7 @@ def ocr_pages(conn, job_ids: list[str], split, human_checked_only: bool = False)
                     'SELECT l.id, l.polygon, l.orientation, l.text, l.corrected_text, '
                     'l.check_source FROM lines l JOIN elements e ON l.element_id = e.id '
                     f'WHERE e.page_id = ? AND l.checked = 1 AND l.deleted = 0 AND e.deleted = 0 '
-                    f'{checked_by(human_checked_only)}',
+                    f'{checked_by(human_checked_only, signed_off_only)}',
                     (page['id'],)):
                 stored = row['corrected_text'] if row['corrected_text'] is not None else row['text']
                 target = characters.training_target(stored or '')
@@ -199,12 +209,12 @@ def ocr_pages(conn, job_ids: list[str], split, human_checked_only: bool = False)
 
 
 def _ocr_work(conn, job_ids: list[str], dirs: dict, split,
-              human_checked_only: bool = False) -> list[tuple]:
+              human_checked_only: bool = False, signed_off_only: bool = False) -> list[tuple]:
     """The whole cut, resolved to plain data: one entry per page, holding everything a
     worker needs. Every database read happens here, in this process."""
     work = []
     manifest = {}
-    for job_id, page, part, lines in ocr_pages(conn, job_ids, split, human_checked_only):
+    for job_id, page, part, lines in ocr_pages(conn, job_ids, split, human_checked_only, signed_off_only):
         items = []
         for line in lines:
             if not line['target']:
@@ -235,7 +245,7 @@ def _cut_page(entry: tuple) -> list[str]:
 
 
 def _build_ocr(conn, job_ids: list[str], dest: Path, split, on_progress=None,
-               should_stop=None, human_checked_only: bool = False) -> dict:
+               should_stop=None, human_checked_only: bool = False, signed_off_only: bool = False) -> dict:
     """Checked lines only, in DeepOCR's native layout: train/ and valid/ dirs of
     crop images with sibling .txt ground-truth files.
 
@@ -244,7 +254,7 @@ def _build_ocr(conn, job_ids: list[str], dest: Path, split, on_progress=None,
     dirs = {'train': dest / 'train', 'val': dest / 'valid'}
     for d in dirs.values():
         d.mkdir(parents=True, exist_ok=True)
-    work, manifest = _ocr_work(conn, job_ids, dirs, split, human_checked_only)
+    work, manifest = _ocr_work(conn, job_ids, dirs, split, human_checked_only, signed_off_only)
     # Which dataset each crop came from, so an evaluation over the frozen split can
     # report per-dataset scores.
     (dest / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
@@ -400,7 +410,8 @@ def _without_empty_test(counts: dict) -> dict:
 
 def splitter(conn, task: str, job_ids: list[str], val_fraction: float = 0.1,
              split_strategy: str = 'uniform', valid_job_ids: list[str] | None = None,
-             human_checked_only: bool = False, test_job_ids: list[str] | None = None):
+             human_checked_only: bool = False, test_job_ids: list[str] | None = None,
+             signed_off_only: bool = False):
     """The split a run cuts with, as (split, every dataset it reads): a holdout run reads
     its validation datasets beside the training ones, and a run with a test set the
     test pages of its test datasets. Test data never trains or validates."""
@@ -409,9 +420,11 @@ def splitter(conn, task: str, job_ids: list[str], val_fraction: float = 0.1,
         split = _holdout_splitter(valid_job_ids or [])
         read = job_ids + [j for j in valid_job_ids or [] if j not in job_ids]
     elif split_strategy == 'stratified':
-        split, read = _stratified_splitter(conn, task, job_ids, val_fraction, human_checked_only, scans), job_ids
+        split, read = _stratified_splitter(conn, task, job_ids, val_fraction, human_checked_only, scans,
+                                           signed_off_only), job_ids
     else:
-        split, read = _uniform_splitter(conn, task, job_ids, val_fraction, human_checked_only, scans), job_ids
+        split, read = _uniform_splitter(conn, task, job_ids, val_fraction, human_checked_only, scans,
+                                        signed_off_only), job_ids
     tests = test_job_ids or []
     return (_keeping_tests_out(split, read, tests, scans),
             read + [j for j in tests if j not in read])
@@ -438,7 +451,8 @@ BUILDERS = {'ocr': _build_ocr, 'layout': _build_page_boxes, 'lines': _build_page
 def build(conn, training_id: int, task: str, job_ids: list[str], val_fraction: float = 0.1,
           split_strategy: str = 'uniform', valid_job_ids: list[str] | None = None,
           on_progress=None, should_stop=None, human_checked_only: bool = False,
-          test_job_ids: list[str] | None = None, line_shape: str = 'polygon') -> dict:
+          test_job_ids: list[str] | None = None, line_shape: str = 'polygon',
+          signed_off_only: bool = False) -> dict:
     """Freeze the checked material of the given datasets under the training's dir.
     The snapshot is what the model sees; later edits to the datasets do not touch it. A
     layout or lines run carries its test datasets as a test split, which its backend
@@ -448,11 +462,11 @@ def build(conn, training_id: int, task: str, job_ids: list[str], val_fraction: f
     dest.mkdir(parents=True, exist_ok=True)
     # An OCR run scores its test set itself, from the datasets, once it is trained.
     split, job_ids = splitter(conn, task, job_ids, val_fraction, split_strategy, valid_job_ids,
-                              human_checked_only, test_job_ids if task != 'ocr' else [])
+                              human_checked_only, test_job_ids if task != 'ocr' else [], signed_off_only)
     builder = BUILDERS[task]
     # Only the OCR cut is long enough to need reporting or interrupting.
     extra = ({'on_progress': on_progress, 'should_stop': should_stop,
-              'human_checked_only': human_checked_only} if task == 'ocr'
+              'human_checked_only': human_checked_only, 'signed_off_only': signed_off_only} if task == 'ocr'
              else {'line_shape': line_shape} if task == 'lines' else {})
     counts = builder(conn, job_ids, dest, split, **extra)
     (dest / 'counts.json').write_text(json.dumps(counts), encoding='utf-8')
