@@ -1,7 +1,11 @@
-import { useMemo } from 'react'
-import { lineShapeLabel } from '../../api'
-import type { FinalEvaluation, ProgressPoint, TestEvaluation, Training } from '../../api'
+import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { NOT_EVALUATED, lineShapeLabel, trainingRights } from '../../api'
+import type { FinalEvaluation, ProgressPoint, RunMaterialRights, TestEvaluation, Training } from '../../api'
+import { formatDate, plural } from '../../util'
 import { trainedAugmentationLabel } from '../augment/pipeline'
+import { useStatements } from '../job/rightsStatements'
+import { Badge } from '../ui/Badge'
 import { cardChrome } from '../ui/Card'
 import { EmptyState } from '../ui/EmptyState'
 import { Section } from '../ui/Section'
@@ -90,14 +94,59 @@ export function TrainingPanel({ run, points, datasets, preflight, log }: {
 
 /** What the material looked like when the run was submitted. */
 export function DataPanel({ run, preflight }: { run: Training; preflight: ShownPreflight | null }) {
-  if (run.preflight_id === null) {
-    return <EmptyState>This run was started without a pre-flight, so there is no record of its material.</EmptyState>
-  }
   return (
-    <Section title="Pre-flight" description={run.task === 'ocr'
-      ? 'What the material looked like when the run was submitted: the split, the crops and the characters it was cut from.'
-      : 'What the material looked like when the run was submitted: the split and the pages it was cut from.'}>
-      <PreflightPanel preflight={preflight} pending={false} />
+    <>
+      <RunRights runId={run.id} />
+      {run.preflight_id === null ? (
+        <EmptyState>This run was started without a pre-flight, so there is no record of its material.</EmptyState>
+      ) : (
+        <Section title="Pre-flight" description={run.task === 'ocr'
+          ? 'What the material looked like when the run was submitted: the split, the crops and the characters it was cut from.'
+          : 'What the material looked like when the run was submitted: the split and the pages it was cut from.'}>
+          <PreflightPanel preflight={preflight} pending={false} />
+        </Section>
+      )}
+    </>
+  )
+}
+
+/** The rights of what a run trained and validated on, as its datasets hold them now: the
+ *  question a model's reuse starts with. */
+function RunRights({ runId }: { runId: number }) {
+  const statements = useStatements()
+  const [datasets, setDatasets] = useState<RunMaterialRights[] | null>(null)
+  useEffect(() => {
+    trainingRights(runId).then((found) => setDatasets(found.datasets)).catch(() => setDatasets([]))
+  }, [runId])
+  if (!datasets?.length) return null
+  const label = (uri: string | null) => statements.find((s) => s.uri === (uri ?? NOT_EVALUATED))?.label ?? uri ?? ''
+  return (
+    <Section title="Rights" data-testid="run-rights"
+             description="The rights of the material this run trained and validated on, as its datasets hold them now.">
+      <ul className={`${cardChrome} divide-y divide-line text-sm`}>
+        {datasets.map((d) => (
+          <li key={`${d.role}-${d.job_id}`} data-testid="run-rights-dataset" data-job={d.job_id}
+              className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2">
+            {d.name === 'another dataset'
+              ? <span className="text-ink-muted">Another dataset</span>
+              : <Link to={`/jobs/${d.job_id}`} className="text-accent-ink hover:underline">{d.name}</Link>}
+            <span className="text-xs text-ink-subtle">{d.role === 'train' ? 'trained on' : 'validated on'}</span>
+            <Badge data-testid="run-rights-status" tone={d.status === null || d.status === NOT_EVALUATED ? 'warn' : 'neutral'}>
+              {label(d.status)}
+            </Badge>
+            {d.pages.length > 0 && (
+              <span data-testid="run-rights-pages" className="text-xs text-ink-muted">
+                {d.pages.map((p) => `${plural(p.count, 'page')} under ${label(p.status)}`).join(', ')}
+              </span>
+            )}
+            {d.permitted && (
+              <span data-testid="run-rights-permitted" className="text-xs text-ink-muted" title={formatDate(d.permitted.at)}>
+                Training permitted, confirmed by {d.permitted.by ?? 'its owner'}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
     </Section>
   )
 }

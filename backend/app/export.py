@@ -71,6 +71,8 @@ def page_entry(conn, page, outlines: bool, checked_only: bool = False) -> dict:
             # Which pages were reviewed whole, so an import elsewhere keeps them ground truth.
             'layout_checked': bool(page['layout_checked']), 'lines_checked': bool(page['lines_checked']),
             'metadata': metadata.of(page['metadata']),
+            # Its own rights, where it does not follow the dataset's.
+            'rights': rights.of_page(page['rights']),
             'elements': elements,
             **({'iiif': {k: v for k, v in json.loads(page['iiif']).items() if k != 'image'}}
                if page['iiif'] else {})}
@@ -105,7 +107,7 @@ def write_archive(conn, data: dict, files: dict[str, str], out, scans: bool = Tr
     path or a file object) so a volume's worth of scans never has to fit in memory. The
     scans are stored as they are - they are compressed already."""
     source = data['job'].get('iiif_source')
-    files = {**files, 'RIGHTS.txt': rights.notice(data['job'])}
+    files = {**files, 'RIGHTS.txt': rights.notice(data['job'], data['pages'])}
     if source:
         files = {**files, 'SOURCE.txt': source_note(source)}
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zf:

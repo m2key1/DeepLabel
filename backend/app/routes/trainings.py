@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app import (augmentations, backend_client, config, data_use, layout_comparison, line_shapes, preflight, registry,
-                 remote_training, slurm_session, store, train_snapshot, trainer, tunables)
+                 remote_training, rights, slurm_session, store, train_snapshot, trainer, tunables)
 from app.deps import WRITERS, can_access_job, current_user, get_db, require_job_access, require_job_manager, require_role
 
 router = APIRouter(tags=['training'])
@@ -493,6 +493,34 @@ def training_progress(training_id: int, conn=Depends(get_db), user: dict = Depen
     return {'points': points, 'log_tail': trainer.read_log_tail(training) if mine else '',
             'updated_at': updated_at, 'datasets': datasets,
             'can_finish': mine and training['status'] == 'running' and trainer.can_finish(conn, training)}
+
+
+@router.get('/api/trainings/{training_id}/rights')
+def training_rights(training_id: int, conn=Depends(get_db), user: dict = Depends(current_user)):
+    """The rights of the material a run trained and validated on: each dataset's statement,
+    the statements its pages carry of their own and how many, and the owner's confirmation
+    that training is permitted. A dataset its reader cannot open is not named, nor who confirmed it."""
+    training = trainer.get_training(conn, training_id)
+    if training is None:
+        raise HTTPException(404)
+    used = [(job_id, role) for role, field in (('train', 'dataset_job_ids'), ('valid', 'valid_job_ids'))
+            for job_id in json.loads(training.get(field) or '[]')]
+    names, hidden = _dataset_names(conn, [job_id for job_id, _ in used], user)
+    datasets = []
+    for job_id, role in used:
+        job = conn.execute('SELECT rights FROM jobs WHERE id = ?', (job_id,)).fetchone()
+        if job is None:
+            continue
+        counts = dict(conn.execute("SELECT json_extract(rights, '$.status'), COUNT(*) FROM pages "
+                                   'WHERE job_id = ? AND rights IS NOT NULL AND deleted = 0 GROUP BY 1', (job_id,)))
+        permitted = rights.training_permitted(conn, job_id)
+        if permitted and job_id in hidden:
+            permitted = {**permitted, 'by': None}
+        datasets.append({'job_id': job_id, 'name': names[job_id], 'role': role,
+                         'status': json.loads(job['rights'] or '{}').get('status'),
+                         'pages': [{'status': status, 'count': counts[status]} for status in rights.in_order(counts)],
+                         'permitted': permitted})
+    return {'datasets': datasets}
 
 
 @router.delete('/api/trainings/{training_id}')

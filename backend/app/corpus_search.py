@@ -1,7 +1,7 @@
 import unicodedata
 from collections import defaultdict
 
-from app import caches, store
+from app import caches, rights, store
 from app.caches import counted_page
 from app.folding import search_form
 from app.text_search import matcher
@@ -35,7 +35,7 @@ def index_query(query: str, mode: str) -> str | None:
 
 
 def search(conn, user: dict, visible_jobs: str, query: str, mode: str, checked_only: bool,
-           group_id: int | None, job_id: str | None, offset: int, limit: int) -> dict:
+           group_id: int | None, job_id: str | None, offset: int, limit: int, statement: str | None = None) -> dict:
     """The lines of every dataset `visible_jobs` names that answer the query, grouped by
     dataset - the dataset whose lines answer best and most first - and a screenful of them."""
     empty = {'usable': True, 'too_short': False, 'total': 0, 'datasets': [], 'hits': []}
@@ -58,6 +58,11 @@ def search(conn, user: dict, visible_jobs: str, query: str, mode: str, checked_o
         params['job'] = job_id
     if checked_only:
         where.append('l.checked = 1')
+    if statement is not None:
+        # A page's own rights, else its dataset's, else nobody has evaluated them.
+        where.append("COALESCE(json_extract(p.rights, '$.status'), json_extract(j.rights, '$.status'), "
+                     ':not_evaluated) = :statement')
+        params.update(statement=statement, not_evaluated=rights.NOT_EVALUATED)
     if lookup is not None:
         where.append('line_search MATCH :lookup')
         params['lookup'] = lookup

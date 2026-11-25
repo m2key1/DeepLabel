@@ -11,8 +11,8 @@ from PIL import Image
 from pydantic import BaseModel
 
 from app import (blobs, caches, candidates, config, dataset_sync, geometry, keying, layout_templates, llm_ocr,
-                 metadata, page_rows, provenance, reading_order, renditions, revert, rotation, serializers, store,
-                 training)
+                 metadata, page_rows, provenance, reading_order, renditions, revert, rights, rotation, serializers,
+                 store, training)
 from app.deps import (IMMUTABLE_CACHE, WRITERS, current_user, get_db, get_user, require_job_access,
                       require_job_manager, require_page_access, require_role, require_role_on, require_unchanged,
                       role_on_job)
@@ -135,6 +135,8 @@ def page_results(job_id: str, page_id: int, conn=Depends(get_db), user: dict = D
             # Two people keying the page blind (#37), or None where it is keyed once.
             'keying': keying.state(conn, page_id),
             'metadata': metadata.of(page['metadata']), 'page_type': page['page_type'],
+            # The page's own rights statement; None where it follows its dataset's.
+            'rights_status': (rights.of_page(page['rights']) or {}).get('status'),
             'elements': elements, 'regions': regions,
             # What the lines of a page with no layout are ordered by: this page's own
             # answer if it has one, and the dataset's, which is what it falls back to.

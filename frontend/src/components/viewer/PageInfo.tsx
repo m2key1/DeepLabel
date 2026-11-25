@@ -49,7 +49,7 @@ export function PageInfo({ jobId, pageId, filename, pageType, metadata, canEdit,
 
   // The icon leads, so a narrowing header takes the name first; the type is set from the page table too.
   return (
-    <div ref={anchor} className="min-w-0">
+    <div ref={anchor} className="min-w-0 shrink-[8]">
       <button type="button" data-testid="page-info" title={`${filename}: its type and metadata`}
               aria-label={`Page info: ${filename}`} aria-haspopup="dialog" aria-expanded={open}
               onClick={(e) => { e.stopPropagation(); setOpen(!open) }}

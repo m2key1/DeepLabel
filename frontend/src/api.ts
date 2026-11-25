@@ -116,6 +116,8 @@ export interface Job {
   iiif_source?: IiifSource | null
   /** The scans' rights statement, null until somebody says; see getJobRights for the rest. */
   rights_status?: string | null
+  /** Every statement its material is under, its own and its pages', for the list's filter. */
+  rights_statuses?: string[]
   transcription_licence?: string | null
   /** What its owner allows its data to be used for. */
   data_use: DataUse
@@ -432,6 +434,8 @@ export interface PageDetail {
   metadata: MetadataEntry[]
   /** The dataset's page type it was given; null is text. */
   page_type: number | null
+  /** Its own rights statement; null where it follows its dataset's. */
+  rights_status: string | null
   width: number
   height: number
   layout_checked: boolean
@@ -2434,7 +2438,34 @@ export interface JobRights {
   /** The fields an import filled that nobody has changed by hand since. */
   imported: RightsField[]
   /** Every change, newest first. */
-  history: { field: RightsField; old: string | null; new: string | null; author: string; at: string }[]
+  history: RightsChange[]
+  /** Whether training on its material waits for its owner's word, and who gave it. */
+  training: { restrictive: boolean; permitted: RightsPermission | null }
+}
+
+export interface RightsChange {
+  field: RightsField | 'training'
+  old: string | null
+  new: string | null
+  author: string
+  at: string
+}
+
+export interface RightsPermission {
+  by: string
+  at: string
+}
+
+/** What a page may carry of its own: everything but the transcriptions' licence. */
+export type PageRightsField = 'status' | 'credit' | 'holder' | 'source' | 'note'
+export type PageRightsFields = Record<PageRightsField, string>
+
+export interface PageRights {
+  /** Null where the page follows its dataset's. */
+  own: PageRightsFields | null
+  imported: PageRightsField[]
+  dataset: Record<PageRightsField, string | null>
+  history: RightsChange[]
 }
 
 export const NOT_EVALUATED = 'http://rightsstatements.org/vocab/CNE/1.0/'
@@ -2451,6 +2482,43 @@ export function putJobRights(
   jobId: string, changes: Partial<Record<RightsField, string>>,
 ): Promise<JobRights> {
   return request(`/api/jobs/${jobId}/rights`, json('PUT', changes))
+}
+
+/** What the dataset's IIIF manifest says now fills the fields still empty. */
+export function refreshJobRights(jobId: string): Promise<JobRights> {
+  return request(`/api/jobs/${jobId}/rights/refresh`, { method: 'POST' })
+}
+
+/** The owner's word, once and logged, that training on the restricted material is permitted. */
+export function permitTraining(jobId: string): Promise<JobRights> {
+  return request(`/api/jobs/${jobId}/rights/training-permitted`, { method: 'POST' })
+}
+
+export function getPageRights(jobId: string, pageId: number): Promise<PageRights> {
+  return request(`/api/jobs/${jobId}/pages/${pageId}/rights`)
+}
+
+/** Pages take rights of their own, or with null go back to their dataset's. */
+export function putPagesRights(
+  jobId: string, pageIds: number[], rights: PageRightsFields | null,
+): Promise<{ pages: number }> {
+  return request(`/api/jobs/${jobId}/page-rights`, json('PUT', { page_ids: pageIds, rights }))
+}
+
+export interface RunMaterialRights {
+  job_id: string
+  /** 'another dataset' for one the reader cannot open. */
+  name: string
+  role: 'train' | 'valid'
+  status: string | null
+  /** The statements its pages carry of their own, and on how many. */
+  pages: { status: string; count: number }[]
+  /** Who confirmed is left out for a dataset the reader cannot open. */
+  permitted: { by: string | null; at: string } | null
+}
+
+export function trainingRights(trainingId: number): Promise<{ datasets: RunMaterialRights[] }> {
+  return request(`/api/trainings/${trainingId}/rights`)
 }
 
 export interface ClusterSession {
@@ -3635,14 +3703,16 @@ export interface CorpusSearch {
   hits: CorpusHit[]
 }
 
-/** Every dataset the caller can open, narrowed to a workspace, a dataset or checked lines. */
+/** Every dataset the caller can open, narrowed to a workspace, a dataset, checked lines or
+ *  the pages under one rights statement. */
 export function searchCorpus(
-  ask: { q: string; mode: string; group: string | null; job: string | null; checked: boolean },
+  ask: { q: string; mode: string; group: string | null; job: string | null; checked: boolean; rights: string | null },
   offset: number, signal?: AbortSignal,
 ): Promise<CorpusSearch> {
   const params = new URLSearchParams({ q: ask.q, mode: ask.mode, checked: String(ask.checked), offset: String(offset) })
   if (ask.group) params.set('group_id', ask.group)
   if (ask.job) params.set('job_id', ask.job)
+  if (ask.rights) params.set('rights', ask.rights)
   return request(`/api/search?${params}`, { signal })
 }
 

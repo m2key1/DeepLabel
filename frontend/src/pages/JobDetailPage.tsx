@@ -103,7 +103,7 @@ import { PageTypesDialog } from '../components/job/PageTypesDialog'
 import { AssignPagesDialog } from '../components/job/AssignPagesDialog'
 import { formatRanges } from '../components/job/PagePicker'
 import { useAssignments } from '../components/job/assignments'
-import { RightsChip } from '../components/job/RightsDialog'
+import { PageRightsDialog, RightsChip } from '../components/job/RightsDialog'
 import { RemoveReadingsDialog } from '../components/job/RemoveReadingsDialog'
 import { SettleAgainDialog } from '../components/job/SettleAgainDialog'
 import { RepredictDialog } from '../components/job/RepredictDialog'
@@ -311,6 +311,7 @@ export function JobDetailPage() {
   const [pageTypesOpen, setPageTypesOpen] = useState(false)
   // The pages the dialog opens on, as ranges; null while it is closed.
   const [assigning, setAssigning] = useState<string | null>(null)
+  const [rightsOf, setRightsOf] = useState<number[] | null>(null)
   const [pageTypes, setPageTypes] = useState<PageType[]>([])
   // The pages a read is scoped to, or undefined for the whole dataset. Held apart from the
   // table's selection, which the dialog must not follow while it is open.
@@ -1396,6 +1397,7 @@ export function JobDetailPage() {
           <ReviewProgress done={job.pages_checked ?? 0} total={(isMap ? job.tiles_total : job.pages_live) ?? 0}
                           unit={isMap ? 'tiles reviewed' : 'pages with every line checked'} />
           <RightsChip jobId={jobId} status={job.rights_status ?? null} canEdit={canEdit}
+                      isOwner={job.owner === user} fromIiif={!!job.iiif_source}
                       onChanged={(status) => setJob((p) => (p ? { ...p, rights_status: status } : p))} />
           {!isMap && (
             <TestDataControls
@@ -1509,6 +1511,10 @@ export function JobDetailPage() {
       {classesOpen && (
         <LayoutClassesDialog jobId={jobId} canEdit={canManage} onClose={() => setClassesOpen(false)} onChanged={refetch} />
       )}
+      {rightsOf && (
+        <PageRightsDialog jobId={jobId} pageIds={rightsOf} selection canEdit={canEdit} onClose={() => setRightsOf(null)}
+                          onSaved={() => setRightsOf(null)} />
+      )}
       {assigning !== null && job && (
         <AssignPagesDialog job={job} pages={assigning} onClose={() => setAssigning(null)} onChanged={refetch}
                            onKeying={(keying) => setJob((p) => (p ? { ...p, ...keying } : p))} />
@@ -1598,6 +1604,12 @@ export function JobDetailPage() {
             <button data-testid="bulk-test-pages" className={actionClass}
                     onClick={() => markTest(selectedPages.map((p) => p.id), !allTest)}>
               {allTest ? 'Unmark test pages' : 'Mark as test pages'}
+            </button>
+          )}
+          {canEdit && !isMap && selectedLive > 0 && (
+            <button data-testid="bulk-rights" className={actionClass}
+                    onClick={() => setRightsOf(selectedPages.filter((p) => !p.deleted).map((p) => p.id))}>
+              Rights…
             </button>
           )}
           {canCheck && selectedLive > 0 && (

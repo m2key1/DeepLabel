@@ -77,6 +77,17 @@ with `PATCH /api/jobs/{id}` or, for a selection, `PATCH /api/bulk/group` (`{"job
 "group_id": 3, "folder_id": 12}`). A folder of another workspace is refused, and a dataset moved
 to another workspace leaves its folder unless one there is named in the same request.
 
+A dataset's rights are `GET`/`PUT /api/jobs/{id}/rights` (`status`, `credit`, `holder`, `source`,
+`note`, `transcription_licence`; statements from `GET /api/rights/statements`), and a page's own
+are `GET /api/jobs/{id}/pages/{page_id}/rights`. `PUT /api/jobs/{id}/page-rights`
+(`{"page_ids": [...], "rights": {"status": "http://rightsstatements.org/vocab/InC/1.0/"}}`) gives
+pages rights of their own, every field at once; `"rights": null` puts them back to the dataset's.
+`GET /api/jobs` gives each dataset's `rights_statuses`, and `GET /api/search` takes `rights` to
+keep to the pages under one statement. A run that trains or validates on material In Copyright
+or under contractual or other legal restrictions is refused until the dataset's owner sends
+`POST /api/jobs/{id}/rights/training-permitted`; `GET /api/trainings/{id}/rights` lists the
+rights of what a run trained and validated on.
+
 A dataset's Managers hand its pages out with `PUT /api/jobs/{id}/assignments`:
 `{"assignee": "lena", "numbers": [1, 2, 3]}` gives Lena pages 1 to 3 as the page table numbers
 them (or name them by `page_ids`), taking them from whoever had them; `"assignee": null` takes

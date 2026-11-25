@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree
 
-from app import ingest, store
+from app import ingest, rights, store
 
 
 class ImportError_(Exception):
@@ -562,6 +562,7 @@ def _deeplabel_pages(archive: zipfile.ZipFile, members: list[str], manifest: str
             'format': 'deeplabel', 'image': page['filename'], 'image_member': member, 'image_name': page['filename'],
             'width': page['width'], 'height': page['height'],
             'layout_checked': bool(page.get('layout_checked')), 'lines_checked': bool(page.get('lines_checked')),
+            'rights': _page_rights(page.get('rights')),
             'regions': [{'class_name': element['class_name'], 'raw_type': element['class_name'],
                          'kind': element.get('kind') or 'content', 'bbox': element['bbox'],
                          'polygon': element.get('polygon'), 'conf': element.get('conf'),
@@ -573,6 +574,37 @@ def _deeplabel_pages(archive: zipfile.ZipFile, members: list[str], manifest: str
     if not pages:
         raise ImportError_(f'{manifest} lists no pages')
     return pages
+
+
+def _text_fields(held: dict) -> dict:
+    return {field: value.strip()[:rights.MAX_TEXT] if isinstance(value := held.get(field), str) else ''
+            for field, _ in rights.TEXT_FIELDS}
+
+
+def _page_rights(held) -> dict | None:
+    """A page's own rights as an export gave them, kept only under a statement on offer."""
+    status = rights.canonical(held.get('status')) if isinstance(held, dict) else None
+    return {'status': status, **_text_fields(held)} if status else None
+
+
+def rights_of_export(fileobj) -> dict:
+    """The rights a DeepLabel export's job.json gives its dataset, as fields to fill: statements
+    only when they are on offer, the free fields as they are."""
+    try:
+        archive = zipfile.ZipFile(fileobj)
+        manifests = sorted((n for n in archive.namelist() if PurePosixPath(n).name == 'job.json'),
+                           key=lambda n: n.count('/'))
+        exported = json.loads(archive.read(manifests[0])) if manifests else {}
+    except (zipfile.BadZipFile, ValueError):
+        exported = {}
+    finally:
+        fileobj.seek(0)
+    job = exported.get('job') if isinstance(exported, dict) else None
+    job = job if isinstance(job, dict) else {}
+    held = job.get('rights') if isinstance(job.get('rights'), dict) else {}
+    fields = {'status': rights.canonical(held.get('status')),
+              'transcription_licence': rights.canonical(job.get('transcription_licence')), **_text_fields(held)}
+    return {field: value for field, value in fields.items() if value}
 
 
 def read_export_zip(fileobj) -> list[dict]:

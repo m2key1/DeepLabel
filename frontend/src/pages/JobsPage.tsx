@@ -54,6 +54,7 @@ import { useAutoClear } from '../messages'
 import { usePolling } from '../hooks/usePolling'
 import { reaches } from '../lib/roles'
 import { cardChrome, popoverChrome } from '../components/ui/Card'
+import { useStatements } from '../components/job/rightsStatements'
 
 const RAIL_KEY = 'deeplabel.rail-collapsed'
 
@@ -275,6 +276,7 @@ export function JobsPage() {
   const needsReview = params.get('review') === '1'
   const onlyTest = params.get('test') === '1'
   const completeness = params.get('complete')
+  const rightsFilter = params.get('rights')
   const scope = params.get('group')
   const folderScope = scope !== null && params.get('folder') ? Number(params.get('folder')) : null
   const setScope = (value: string | null, folderId?: number) => setParams((prev) => {
@@ -298,7 +300,7 @@ export function JobsPage() {
     window.clearTimeout(queryWrite.current)
     setParams((prev) => {
       const next = new URLSearchParams(prev)
-      for (const key of ['q', 'mine', 'review', 'test', 'complete', 'group', 'folder', 'as']) next.delete(key)
+      for (const key of ['q', 'mine', 'review', 'test', 'complete', 'rights', 'group', 'folder', 'as']) next.delete(key)
       return next
     }, { replace: true })
   }
@@ -444,6 +446,7 @@ export function JobsPage() {
     if (needsReview) rows = rows.filter((j) => (j.lines_done ?? 0) < (j.lines_total ?? 0))
     if (onlyTest) rows = rows.filter((j) => (j.test_pages ?? 0) > 0)
     if (completeness !== null) rows = rows.filter((j) => j.checked === (completeness === '1'))
+    if (rightsFilter !== null) rows = rows.filter((j) => (j.rights_statuses ?? []).includes(rightsFilter))
     const terms = fold(query).split(/\s+/).filter(Boolean)
     if (terms.length) {
       const named = (j: Job) => fold(`${j.name} ${groups.find((g) => g.id === j.group_id)?.name ?? ''}`)
@@ -458,9 +461,16 @@ export function JobsPage() {
         (b.lines_total ? (b.lines_done ?? 0) / b.lines_total : 1),
     }
     return [...rows].sort(by[sort])
-  }, [reached, groups, scope, folderScope, onlyMine, needsReview, onlyTest, completeness, query, sort, viewer])
+  }, [reached, groups, scope, folderScope, onlyMine, needsReview, onlyTest, completeness, rightsFilter, query, sort, viewer])
 
   const narrowing = query.trim() !== '' || onlyMine || needsReview || onlyTest || completeness !== null
+    || rightsFilter !== null
+  const statements = useStatements()
+  // Only what some dataset's material is under, in the order the rights dialog lists them.
+  const statementsInUse = useMemo(() => {
+    const held = new Set((jobs ?? []).flatMap((j) => j.rights_statuses ?? []))
+    return statements.filter((s) => held.has(s.uri))
+  }, [jobs, statements])
   const filtering = narrowing || scope !== null
 
   /** The list's sections, whatever it is divided by. A project section carries the group
@@ -1130,6 +1140,10 @@ export function JobsPage() {
       key: 'complete', label: completeness === '1' ? 'Complete' : 'In progress',
       clear: () => param('complete', '', ''),
     },
+    rightsFilter !== null && {
+      key: 'rights', label: `Rights: ${statements.find((s) => s.uri === rightsFilter)?.label ?? rightsFilter}`,
+      clear: () => param('rights', '', ''),
+    },
     asUser !== '' && { key: 'as', label: `Visible to ${asUser}`, clear: () => setAsUser('') },
   ].filter((f): f is { key: string; label: string; clear: () => void } => !!f)
 
@@ -1204,6 +1218,15 @@ export function JobsPage() {
               <Check data-testid="filter-test" checked={onlyTest}
                      onChange={() => param('test', onlyTest ? '0' : '1', '0')} />
               Has test data
+            </label>
+            <label className={`${filterRow} cursor-default hover:bg-transparent`}>
+              <span className="shrink-0">Rights</span>
+              <select data-testid="filter-rights" aria-label="Rights" value={rightsFilter ?? ''}
+                      onChange={(e) => param('rights', e.target.value, '')}
+                      className="min-w-0 flex-1 rounded border border-line bg-ground px-1 py-0.5 text-xs">
+                <option value="">any</option>
+                {statementsInUse.map((s) => <option key={s.uri} value={s.uri}>{s.label}</option>)}
+              </select>
             </label>
           </div>
         )}

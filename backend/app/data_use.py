@@ -2,6 +2,7 @@ import json
 
 from fastapi import HTTPException
 
+from app import rights
 from app.store import DATA_USE_COLUMNS
 
 PURPOSES = {'training': 'training or validating a model', 'test': 'scoring models',
@@ -14,12 +15,13 @@ def allowed(conn, job_id: str, use: str) -> bool:
 
 
 def refusal(conn, job_ids, use: str) -> str | None:
-    """Why these datasets may not be used this way, or None when all of them may."""
+    """Why these datasets may not be used this way, or None when all of them may. Training
+    also waits for the owner's word where the rights restrict it."""
     names = [row['name'] for row in conn.execute(
         f'SELECT name FROM jobs WHERE id IN ({",".join("?" * len(job_ids))}) AND {DATA_USE_COLUMNS[use]} = 0 '
         'ORDER BY name', list(job_ids))] if job_ids else []
     if not names:
-        return None
+        return rights.training_refusal(conn, job_ids) if use == 'training' and job_ids else None
     quoted = ', '.join(f'"{name}"' for name in names)
     return f'{quoted} may not be used for {PURPOSES[use]} - its owner has switched that off'
 

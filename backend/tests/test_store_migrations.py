@@ -1872,3 +1872,18 @@ def test_a_iiif_source_that_is_not_json_does_not_stop_the_database_opening(tmp_p
     conn = store.connect(db)
     assert conn.execute("SELECT rights FROM jobs WHERE id = 'i'").fetchone()[0] == '{}'
     conn.close()
+
+
+def test_a_database_from_before_page_rights_gains_them(tmp_path):
+    """A page's own rights, and the log of their changes beside the dataset's (#42)."""
+    db = tmp_path / 'app.db'
+    conn = store.connect(db)
+    keep_pages = sorted(cols(conn, 'pages') - {'rights'})
+    keep_log = sorted(cols(conn, 'rights_log') - {'page_id'})
+    conn.close()
+    strip_column(db, 'pages', keep_pages)
+    strip_column(db, 'rights_log', keep_log)
+
+    conn = store.connect(db)
+    assert ('rights' in cols(conn, 'pages'), 'page_id' in cols(conn, 'rights_log')) == (True, True)
+    conn.close()

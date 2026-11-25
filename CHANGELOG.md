@@ -21,6 +21,9 @@ the version in the app's footer opens.
 - An admin's invitation, and the approval of a sign-up, put the person into workspaces at once (#134).
 - Transfer ownership of a dataset, or of a workspace with the datasets its owner made in it (#79).
 - Nested folders sort a workspace's datasets, in the list and the rail, without changing who sees them (#133).
+- Rights for single pages of mixed material, a rights filter in the dataset list and Search, rights
+  read from METS, Dublin Core and TEI imports, and training on material in copyright only once
+  its owner confirms it is permitted (#42).
 - IIIF manifests and collections in Presentation API 4, which the IIIF cookbook already publishes,
   are read like version 3 (#153).
 - A second factor at sign-in: an authenticator app and recovery codes, set up on DeepLabel's

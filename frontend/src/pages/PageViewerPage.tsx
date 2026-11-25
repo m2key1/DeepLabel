@@ -78,6 +78,7 @@ import { ShortcutSheet } from '../editor/ShortcutSheet'
 import { StatusBar } from '../editor/StatusBar'
 import { ModelProvenance } from '../components/viewer/ModelProvenance'
 import { PageInfo } from '../components/viewer/PageInfo'
+import { PageRightsChip } from '../components/job/RightsDialog'
 import type { Notice } from '../editor/StatusBar'
 import { useZoomReadout } from '../editor/useZoomReadout'
 import { useImageSurface } from '../hooks/useImageSurface'
@@ -3812,6 +3813,11 @@ export function PageViewerPage() {
             <PageInfo jobId={jobId} pageId={page.id} filename={page.filename} pageType={page.page_type} metadata={page.metadata}
                       canEdit={canEdit} canManage={canManage}
                       onChange={(next) => setPage((p) => (p ? { ...p, ...next } : p))} />
+          )}
+          {page && job && (
+            <PageRightsChip jobId={jobId} pageId={page.id} own={page.rights_status ?? null}
+                            datasetStatus={job.rights_status ?? null} canEdit={canEdit}
+                            onChanged={(own) => setPage((p) => (p ? { ...p, rights_status: own } : p))} />
           )}
           {page && (
             <NoteTag note={page.note} title={page.filename} canEdit={canEdit} addable onSave={async (text) => {

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { listGroups, searchCorpus } from '../api'
+import { listGroups, listJobs, searchCorpus } from '../api'
 import type { CorpusSearch, Group } from '../api'
 import { useCrumb } from '../components/NavBar'
+import { useStatements } from '../components/job/rightsStatements'
 import { SEARCH_MODES, marked } from '../components/search/searchControls'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -28,8 +29,11 @@ export function SearchPage() {
   const group = params.get('group')
   const job = params.get('job')
   const checked = params.get('checked') === '1'
+  const rights = params.get('rights')
   const [query, setQuery] = useState(needle)
   const [groups, setGroups] = useState<Group[]>([])
+  const statements = useStatements()
+  const [inUse, setInUse] = useState<Set<string>>(new Set())
   const [answer, setAnswer] = useState<Answer | null>(null)
   // The datasets the search found before one of them was picked, so the others stay on
   // offer while it is narrowed to one.
@@ -47,6 +51,7 @@ export function SearchPage() {
 
   useEffect(() => {
     listGroups().then(setGroups).catch(() => setGroups([]))
+    listJobs().then((jobs) => setInUse(new Set(jobs.flatMap((j) => j.rights_statuses ?? [])))).catch(() => {})
   }, [])
 
   // Back and forward change what is asked under the box; the box follows.
@@ -60,11 +65,11 @@ export function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
 
-  const asking = [needle, mode, group, job, checked].join('\u0000')
+  const asking = [needle, mode, group, job, checked, rights].join('\u0000')
   useEffect(() => {
     if (!needle) return
     const abort = new AbortController()
-    searchCorpus({ q: needle, mode, group, job, checked }, 0, abort.signal)
+    searchCorpus({ q: needle, mode, group, job, checked, rights }, 0, abort.signal)
       .then((result) => {
         setAnswer({ ...result, asking })
         if (!job) setFound(result.datasets)
@@ -75,13 +80,13 @@ export function SearchPage() {
         }
       })
     return () => abort.abort()
-  }, [needle, mode, group, job, checked, asking])
+  }, [needle, mode, group, job, checked, rights, asking])
 
   const current = needle && answer?.asking === asking ? answer : null
   const showMore = () => {
     if (!current) return
     setMore(true)
-    searchCorpus({ q: needle, mode, group, job, checked }, current.hits.length)
+    searchCorpus({ q: needle, mode, group, job, checked, rights }, current.hits.length)
       .then((next) => setAnswer((a) => a && a.asking === asking ? { ...a, hits: [...a.hits, ...next.hits] } : a))
       .catch((e: Error) => setAnswer((a) => a && { ...a, error: e.message }))
       .finally(() => setMore(false))
@@ -115,6 +120,13 @@ export function SearchPage() {
           <option value="">Every workspace</option>
           {workspaces.map((g) => (
             <option key={g.id} value={g.id}>{g.sandbox_of ? 'My Sandbox' : g.name}</option>
+          ))}
+        </Select>
+        <Select data-testid="search-rights" aria-label="Rights" value={rights ?? ''}
+                onChange={(e) => change({ rights: e.target.value || null, job: null })} className="w-full sm:w-56">
+          <option value="">Any rights</option>
+          {statements.filter((s) => inUse.has(s.uri) || s.uri === rights).map((s) => (
+            <option key={s.uri} value={s.uri}>{s.label}</option>
           ))}
         </Select>
         <CheckField data-testid="search-checked" label="Checked lines only" checked={checked}

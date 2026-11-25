@@ -78,7 +78,8 @@ class TestTheList:
 class TestADataset:
     def test_it_starts_not_evaluated(self, api):
         assert held(api) == {'status': None, 'credit': '', 'holder': '', 'source': '', 'note': '',
-                             'transcription_licence': None, 'imported': [], 'history': []}
+                             'transcription_licence': None, 'imported': [], 'history': [],
+                             'training': {'restrictive': False, 'permitted': None}}
         assert api.get('/api/jobs/j1', params={'pages': 'false'}, headers=ALICE).json()['rights_status'] is None
 
     def test_what_is_set_is_kept_and_each_change_logged(self, api):
@@ -168,6 +169,34 @@ class TestFromAManifest:
 
         assert fields == {'source': 'https://archive.example/m',
                           'note': 'Rights as the source gives them: https://archive.example/terms'}
+
+
+class TestReadingTheSourceAgain:
+    MANIFEST = 'https://archive.example/m'
+
+    def test_what_the_manifest_says_now_fills_only_what_is_empty(self, api, conn, monkeypatch):
+        conn.execute('UPDATE jobs SET iiif_source = ? WHERE id = ?', (json.dumps({'manifest': self.MANIFEST}), 'j1'))
+        conn.commit()
+        put(api, {'credit': 'Corrected by hand'})
+        read = []
+        monkeypatch.setattr('app.iiif.read', lambda url: read.append(url) or {
+            'url': url, 'label': 'Ratsprotokolle', 'attribution': 'Town archive', 'rights': CC_BY})
+
+        response = api.post('/api/jobs/j1/rights/refresh', headers=ALICE)
+
+        assert response.status_code == 200, response.text
+        answer = response.json()
+        assert read == [self.MANIFEST]
+        assert (answer['status'], answer['credit'], answer['source'], answer['imported']) == (
+            CC_BY, 'Corrected by hand', f'Ratsprotokolle - {self.MANIFEST}', ['source', 'status'])
+
+    def test_a_dataset_not_made_from_a_manifest_has_none_to_read(self, api):
+        response = api.post('/api/jobs/j1/rights/refresh', headers=ALICE)
+
+        assert (response.status_code, response.json()['detail']) == (400, 'This dataset was not made from a IIIF manifest')
+
+    def test_a_viewer_may_not(self, api):
+        assert api.post('/api/jobs/j1/rights/refresh', headers=VERA).status_code == 403
 
 
 class TestExported:

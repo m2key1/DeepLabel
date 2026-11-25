@@ -147,7 +147,9 @@ CREATE TABLE IF NOT EXISTS pages (
     metadata TEXT NOT NULL DEFAULT '[]',
     -- A page imported from IIIF (JSON): its canvas, label and size, and the image URL it
     -- is downloaded from at ingest. NULL for every other page.
-    iiif TEXT
+    iiif TEXT,
+    -- The page's own rights (app/rights.py), as the dataset keeps its own; NULL follows the dataset's.
+    rights TEXT
 );
 -- Full map scans awaiting/after tiling (run_tile map jobs). A map is the source of
 -- tiles, never annotated itself; its tiles are ordinary pages referencing it via
@@ -271,10 +273,12 @@ CREATE TABLE IF NOT EXISTS job_layout_classes (
     position INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (job_id, class_id)
 );
--- Every change to a dataset's rights fields: who changed which, from what to what, and when.
+-- Every change to a dataset's rights fields, or a page's: who changed which, from what to what, and when.
 CREATE TABLE IF NOT EXISTS rights_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    -- NULL for the dataset's own fields.
+    page_id INTEGER REFERENCES pages(id) ON DELETE CASCADE,
     field TEXT NOT NULL,
     old_value TEXT,
     new_value TEXT,
@@ -1224,6 +1228,10 @@ def connect(db_path: Path) -> sqlite3.Connection:
                 continue
             rights.write(conn, job['id'], rights.from_iiif({**source, 'url': source.get('manifest')}), 'import',
                          imported=True)
+    if 'rights' not in page_cols:
+        conn.execute('ALTER TABLE pages ADD COLUMN rights TEXT')
+    if 'page_id' not in {row[1] for row in conn.execute('PRAGMA table_info(rights_log)')}:
+        conn.execute('ALTER TABLE rights_log ADD COLUMN page_id INTEGER REFERENCES pages(id) ON DELETE CASCADE')
     if 'grad_accum_steps' not in training_cols:
         conn.execute('ALTER TABLE trainings ADD COLUMN grad_accum_steps INTEGER')
         conn.execute('ALTER TABLE trainings ADD COLUMN lr_scale REAL')

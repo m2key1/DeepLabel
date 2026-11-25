@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field
 
 from app import (blobs, caches, config, consensus, conventions, corpus, data_use, decode, evaluator, geometry,
                  iiif, iiif_transcripts, imports, ingest, ingest_queue, jobs, layout_shapes, layout_templates, llm, map_classes, metadata, model_registry,
-                 page_rows, queue_eta, reading_order, recognize, registry, rights, schemas, store, trainer)
+                 page_rows, queue_eta, reading_order, recognize, registry, rights, rights_import, schemas, store,
+                 trainer)
 from app.deps import (ROLE_NAMES, SWAPPABLE, VISIBLE_JOB_IDS, WRITERS, belongs_to_workspace, can_access_job,
                       can_reach_group, manages_workspace, current_user, get_db, get_user, require_job_access,
                       require_job_manager, require_job_role, reachable_group_ids, require_role, role_given,
@@ -342,6 +343,10 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str
         conn.execute('UPDATE jobs SET group_id = ? WHERE id = ?', (workspace, job_id))
         if licence:
             rights.write(conn, job_id, {'transcription_licence': licence}, user)
+        # What the export says of its rights fills what the form left empty: a DeepLabel
+        # export's own record first, else its METS, Dublin Core or TEI.
+        rights.write(conn, job_id, {**rights_import.from_zip(file.file), **imports.rights_of_export(file.file)},
+                     'import', imported=True)
         _set_data_use(conn, job_id, uses)
         layout_templates.copy_into(conn, job_id)
         # An import may bring classes this instance's template lacks; they join the
@@ -354,8 +359,11 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str
             layout_templates.add_class(conn, job_id, name, 'container' if brought[name] == 'container' else 'content',
                                        'down' if brought[name] == 'container' else None)
         # Image name order, as an import has always been laid out.
-        ingest.insert_pages(conn, job_id, sorted(entries))
+        page_ids = ingest.insert_pages(conn, job_id, sorted(entries))
         counts = imports.ingest_pages(conn, job_id, pages, f'import:{user}', reviewed)
+        for parsed, (_, source) in zip(pages, entries):
+            if parsed.get('rights'):
+                rights.write_pages(conn, job_id, [page_ids[source]], parsed['rights'], 'import', imported=True)
     except Exception:
         # Nothing of a failed import stays: neither its unpacked images nor a half-made dataset.
         conn.rollback()
@@ -736,10 +744,17 @@ def list_jobs(conn=Depends(get_db), user: dict = Depends(current_user)):
         roles.setdefault(r['job_id'], {})[r['username']] = r['role']
     empty = {'pages_total': 0, 'layout_checked_pages': 0, 'test_pages': 0, 'lines_total': 0, 'lines_done': 0}
     reachable = reachable_group_ids(conn, user)
+    page_statuses: dict[str, set[str]] = {}
+    for r in conn.execute("SELECT DISTINCT job_id, json_extract(rights, '$.status') status FROM pages "
+                          'WHERE rights IS NOT NULL AND deleted = 0'):
+        page_statuses.setdefault(r['job_id'], set()).add(r['status'])
     payloads = []
     for row in rows:
         job = _seen_by(_job_payload(conn, row, shared.get(row['id'], []), roles.get(row['id'], {})), user, reachable)
         job.update(progress.get(job['id'], empty))
+        # Every statement its material is under, the dataset's and its pages' own, to filter by.
+        job['rights_statuses'] = rights.in_order({job['rights_status'] or rights.NOT_EVALUATED}
+                                                 | page_statuses.get(job['id'], set()))
         job['my_role'] = role_given(row['owner'], user, job['roles'].get(user['username']))
         payloads.append(job)
     return payloads

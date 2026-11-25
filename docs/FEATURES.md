@@ -212,11 +212,27 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
   somebody chooses one. It opens the fields and every change made to them, with who and when;
   anyone who can edit the dataset changes them.
 - A new dataset asks for the licence of its transcriptions, with nothing chosen.
+- A page can carry rights of its own for mixed material: everything but the licence of the
+  transcriptions, which stays the dataset's. The rights chip in the page viewer's bar shows the
+  page's own or its dataset's and opens them; Rights… in the page table's bar sets them for the
+  selected pages at once, or puts them back to the dataset's. Every change is logged.
 - A dataset made from a IIIF manifest takes its rights into the fields (v3 `rights` and
-  `requiredStatement`, v2 `license` and `attribution`), marked "from the import" until somebody
-  changes them. A rights address that is not on the list is kept in the note.
-- Every export archive carries a `RIGHTS.txt`. The TEI header licenses the transcriptions in
-  `publicationStmt` and gives the scans' rights and credit line in `sourceDesc`.
+  `requiredStatement`, v2 `license` and `attribution`), and Read the manifest again in its rights
+  fills what is still empty. An import zip fills them the same way from its METS (METSRights,
+  MODS `accessCondition`), Dublin Core `dc:rights` or TEI `availability/licence`; a DeepLabel
+  export brings back its dataset's rights and its pages' own.
+- What an import fills is marked "from the import" until somebody changes it; a rights address
+  that is not on the list is kept in the note.
+- The dataset list's Filter and the Search page keep to material under one statement - each
+  statement some dataset's material is under. Search goes by a page's own rights, else its
+  dataset's.
+- Training on material In Copyright, or under contractual or other legal restrictions, waits for
+  its owner: until they confirm in the rights dialog that a research exception or a contract
+  permits it, no run trains or validates on that dataset. The confirmation is given once and
+  logged, and switches nothing. A run's Data tab lists the rights of what it trained on.
+- Every export archive carries a `RIGHTS.txt`, naming the pages with rights of their own. The TEI
+  header licenses the transcriptions in `publicationStmt` and gives the scans' rights and credit
+  line in `sourceDesc`.
 
 ## Test data
 
