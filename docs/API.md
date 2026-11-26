@@ -66,7 +66,9 @@ or a Sandbox); an invitation's answer names the account it made as `username`. A
 or an admin hands it over with `POST /api/jobs/{id}/transfer` (`{"to": "ben"}`), and a workspace's
 owner or an admin with `POST /api/groups/{id}/transfer` (`{"to": "ben", "datasets": true}`), which
 takes along the datasets the previous owner made in it unless `datasets` is false. Neither is
-offered for a Sandbox.
+offered for a Sandbox. The backend does not know the accounts, so neither checks that `to` names
+an active account that may own anything: take it from `GET /api/users/names`, which lists the
+active accounts, leaving out Viewers as the dialog does.
 
 A workspace's folders come with it in `GET /api/groups` as `folders` (`id`, `name`, `parent_id`).
 Its Managers make one with `POST /api/groups/{id}/folders` (`{"name": "Taufbücher", "parent_id":
