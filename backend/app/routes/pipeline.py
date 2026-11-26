@@ -281,9 +281,10 @@ def kept_by_type(from_phase: str | None) -> str:
     return page_types.runs(from_phase) if from_phase in page_types.STEPS else '1'
 
 
-def rerun_discards(conn, job_id: str, from_phase: str) -> dict:
-    """What re-running from this phase throws away, in the re-run preview's terms."""
-    counts = _rerun_counts(conn, job_id, kept_by_type(from_phase))
+def rerun_discards(conn, job_id: str, from_phase: str, only_missing: bool = False) -> dict:
+    """What re-running from this phase throws away, in the re-run preview's terms: over the
+    pages the step has not run on, where the re-run is of those alone."""
+    counts = _rerun_counts(conn, job_id, _missing(from_phase) if only_missing else kept_by_type(from_phase))
     if from_phase in REMATCH_PHASES:
         return {**counts, 'corrected': 0, 'layout_checked': 0, 'elements_edited': 0}
     return counts
@@ -398,7 +399,7 @@ def rerun_one(conn, job_id: str, from_phase: str, force: bool, user: str,
     require_rerun(conn, job, body.from_phase, body.force, match)
     since = store.begin_span(conn)
 
-    discarded = rerun_discards(conn, job_id, body.from_phase)
+    discarded = rerun_discards(conn, job_id, body.from_phase, only_missing)
     # Deleted pages must never be handed back to the runner.
     pages = f"SELECT id FROM pages WHERE job_id = ? AND deleted = 0 AND {match}"
     realign = body.from_phase in ('align', 'reference')
@@ -452,8 +453,14 @@ def rerun_one(conn, job_id: str, from_phase: str, force: bool, user: str,
         conn.execute(f'UPDATE elements SET deleted = 1 WHERE page_id IN ({pages})', (job_id,))
         for element_id in stale:
             store.log_element(conn, element_id, f'system:rerun@{user}', 'delete')
+        marked = [row['id'] for row in conn.execute(
+            f'SELECT id FROM pages WHERE job_id = ? AND deleted = 0 AND layout_checked = 1 AND {match}', (job_id,))]
         conn.execute(f'UPDATE pages SET layout_checked = 0 WHERE job_id = ? AND deleted = 0 AND {match}',
                      (job_id,))
+        # Logged as the run's, so taking the run back marks them complete again (#159).
+        for page_id in marked:
+            store.log_revision(conn, 'page', page_id, job_id, f'system:rerun@{user}', 'update',
+                               {'id': page_id, 'layout_checked': False})
         # Element ids change, so every cached crop becomes garbage.
         shutil.rmtree(config.job_dir(job_id) / 'crops', ignore_errors=True)
     conn.execute(f'UPDATE pages SET status = ? WHERE job_id = ? AND deleted = 0 AND {match}',

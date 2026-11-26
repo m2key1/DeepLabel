@@ -2,7 +2,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from app import formats, iiif, layout_shapes, metadata, rights
+from app import formats, iiif, layout_shapes, metadata, page_types, rights
 from app.caches import counted_page
 
 
@@ -36,7 +36,8 @@ def collect_job(conn, job_id: str, checked_only: bool = False) -> dict:
     described = {**{k: job[k] for k in ('id', 'name', 'owner', 'created_at')},
                  'metadata': metadata.of(job['metadata']),
                  'rights': {field: held[field] for field in ('status', *(f for f, _ in rights.TEXT_FIELDS))},
-                 'transcription_licence': held['transcription_licence']} if job else {}
+                 'transcription_licence': held['transcription_licence'],
+                 'page_types': page_types.listed(conn, job_id)} if job else {}
     if job and job['iiif_source']:
         described['iiif_source'] = json.loads(job['iiif_source'])
     return {'job': described, 'pages': pages}
@@ -71,6 +72,8 @@ def page_entry(conn, page, outlines: bool, checked_only: bool = False) -> dict:
             # Which pages were reviewed whole, so an import elsewhere keeps them ground truth.
             'layout_checked': bool(page['layout_checked']), 'lines_checked': bool(page['lines_checked']),
             'metadata': metadata.of(page['metadata']),
+            # NULL is Text, a page type of its own when the dataset gave it one.
+            'page_type': page['page_type'],
             # Its own rights, where it does not follow the dataset's.
             'rights': rights.of_page(page['rights']),
             'elements': elements,

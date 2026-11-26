@@ -84,6 +84,31 @@ class TestTheDatasets:
         assert api.get('/api/jobs/j1/info', headers=vera).json()['metadata'] == SHELFMARK
 
 
+class TestTwoPeopleAtOnce:
+    """A save carries the fields as they were opened: the later of two saves would otherwise
+    drop the fields the earlier one wrote, unseen (#169)."""
+
+    def test_a_save_over_fields_changed_since_is_refused_with_what_they_hold(self, api):
+        put_job(api, SHELFMARK)
+        assert put_job(api, [*SHELFMARK, *FOLIO]).status_code == 200, 'another tab, or another person'
+
+        response = api.put('/api/jobs/j1/metadata', headers=ALICE,
+                           json={'metadata': [SHELFMARK[0]], 'base': SHELFMARK})
+
+        assert response.status_code == 409
+        assert response.json()['detail'] == {
+            'code': 'conflict', 'message': 'Somebody changed these fields since you opened them',
+            'current': [*SHELFMARK, *FOLIO]}
+        assert api.get('/api/jobs/j1/info', headers=ALICE).json()['metadata'] == [*SHELFMARK, *FOLIO]
+
+    def test_a_save_over_the_fields_as_opened_goes_through(self, api):
+        put_page(api, FOLIO)
+
+        response = api.put('/api/pages/1/metadata', headers=ALICE, json={'metadata': SHELFMARK, 'base': FOLIO})
+
+        assert (response.status_code, response.json()) == (200, {'metadata': SHELFMARK})
+
+
 class TestAPages:
     def test_it_is_kept_and_comes_with_the_page(self, api):
         assert put_page(api, FOLIO).json() == {'metadata': FOLIO}

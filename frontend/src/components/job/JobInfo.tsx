@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { datasetInfo, isTileTask, putJobMetadata } from '../../api'
-import type { DatasetInfo, Job } from '../../api'
+import { conflictOf, datasetInfo, isTileTask, putJobMetadata } from '../../api'
+import type { DatasetInfo, Job, MetadataEntry } from '../../api'
 import { useAuth } from '../../auth'
 import { MetadataEditor } from '../MetadataEditor'
 import { formatDate, formatRelative, humanBytes, plural } from '../../util'
@@ -126,9 +126,14 @@ export function JobInfo({ job }: { job: Job }) {
         <section className="mt-3 border-t border-line pt-2">
           <h3 className="mb-1 font-medium text-ink">Metadata</h3>
           <MetadataEditor entries={info.metadata} canEdit={canEdit} testId="job-metadata"
-                          onSave={(entries) => putJobMetadata(job.id, entries).then(({ metadata }) => {
+                          onSave={(entries) => putJobMetadata(job.id, entries, info.metadata).then(({ metadata }) => {
                             setInfo({ ...info, metadata })
                             return metadata
+                          }, (e: unknown) => {
+                            // Shows what they hold now beside the message, as a Cancel will.
+                            const conflict = conflictOf<MetadataEntry[]>(e)
+                            if (conflict) setInfo({ ...info, metadata: conflict.current })
+                            throw e
                           })} />
         </section>
       )}

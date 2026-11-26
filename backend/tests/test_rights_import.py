@@ -1,7 +1,7 @@
 import io
 import zipfile
 
-from app import rights_import
+from app import imports, rights_import
 
 
 def _zip_with(files: dict[str, str | bytes]) -> io.BytesIO:
@@ -170,3 +170,13 @@ def test_unreadable_zip_says_nothing_and_leaves_the_file_at_its_start():
 
 def test_unparseable_xml_says_nothing():
     assert rights_import.from_metadata(b'<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader>') == {}
+
+
+def test_a_member_over_the_size_limit_is_skipped_as_unreadable(monkeypatch):
+    """A small zip whose METS unpacks to gigabytes is read a member at a time, so an
+    oversized one counts as unreadable like the rest: it says nothing, it is not fatal."""
+    monkeypatch.setattr(imports, 'TEXT_MEMBER_LIMIT', 100)
+
+    assert rights_import.from_zip(_zip_with({'mets.xml': METS_METSRIGHTS,
+                                             'letters/tei_1.xml': TEI_EXPORT,
+                                             'images/page_1.tif': b'image'})) == {}

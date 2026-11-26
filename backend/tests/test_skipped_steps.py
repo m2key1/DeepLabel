@@ -80,6 +80,18 @@ class TestRunningOnlyWhatIsMissing:
         assert dict(conn.execute('SELECT id, deleted FROM elements ORDER BY id').fetchall()) == {1: 0, 2: 1, 4: 0}
         assert store.get_job(conn, 'j1')['status'] == 'queued'
 
+    def test_it_reports_what_it_discarded_on_those_pages_alone(self, client):
+        """As its preview said, not what re-running every page would have discarded (#169)."""
+        api, conn = client
+        conn.execute("UPDATE jobs SET run_layout = 1 WHERE id = 'j1'")
+        conn.commit()
+        preview = api.get('/api/jobs/j1/rerun', headers=MANAGER, params={'from_phase': 'layout', 'only_missing': True})
+
+        res = api.post('/api/jobs/j1/rerun', headers=MANAGER, json={'from_phase': 'layout', 'only_missing': True})
+
+        assert res.json()['discarded']['lines'] == 1
+        assert res.json()['discarded'] == preview.json()
+
     def test_lines_and_reading_left_out_are_picked_up_without_redoing_anything(self, client):
         api, conn = client
         res = api.post('/api/jobs/j1/rerun', headers=MANAGER, json={'from_phase': 'lines', 'only_missing': True})

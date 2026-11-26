@@ -12,7 +12,7 @@ const pagesOfType = async (jobId: string, typeId: number): Promise<number[]> =>
 
 const pageTypes = async (jobId: string) =>
   (await backendFetch(`/api/jobs/${jobId}/page-types`)).types as
-    { id: number; name: string; run_ocr: boolean; pages: number }[]
+    { id: number; name: string; run_lines: boolean; run_ocr: boolean; pages: number }[]
 
 const texts = async (jobId: string, pageId: number) => (await pageLines(jobId, pageId)).map((l) => l.text)
 
@@ -87,6 +87,16 @@ test.describe('Scenario: page types', () => {
     await cover.getByRole('checkbox', { name: 'Read text on Einband pages' }).check()
     await expect.poll(async () => (await pageTypes(jobId)).find((t) => t.id === COVER)?.run_ocr).toBe(true)
     await expect(cover.getByRole('checkbox', { name: 'Read text on Einband pages' })).toBeChecked()
+
+    // Reading reads the lines found, so line detection off takes reading with it (#169).
+    await cover.getByRole('checkbox', { name: 'Find lines on Einband pages' }).uncheck()
+    await expect.poll(async () => {
+      const type = (await pageTypes(jobId)).find((t) => t.id === COVER)
+      return [type?.run_lines, type?.run_ocr]
+    }).toEqual([false, false])
+    await expect(cover.getByRole('checkbox', { name: 'Read text on Einband pages' })).not.toBeChecked()
+    await expect(cover.getByRole('checkbox', { name: 'Read text on Einband pages' })).toBeDisabled()
+    await expect(cover.getByRole('checkbox', { name: 'Find lines on Einband pages' })).toBeEnabled()
   })
 })
 

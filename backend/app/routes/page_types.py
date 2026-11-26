@@ -43,6 +43,9 @@ def patch_page_type(job_id: str, type_id: int, body: PageTypePatch, conn=Depends
         if switched is not None:
             conn.execute(f'UPDATE job_page_types SET run_{step} = ? WHERE job_id = ? AND type_id = ?',
                          (int(switched), job_id, type_id))
+    # Reading reads the lines found, as a dataset's own switches have it (ingest.coherent_phases).
+    conn.execute('UPDATE job_page_types SET run_ocr = 0 WHERE job_id = ? AND type_id = ? AND run_lines = 0',
+                 (job_id, type_id))
     conn.commit()
     return next(kind for kind in page_types.listed(conn, job_id) if kind['id'] == type_id)
 

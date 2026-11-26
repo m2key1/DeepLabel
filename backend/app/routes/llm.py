@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from app import config, consensus, data_use, llm, llm_client, llm_ocr, store
+from app import config, consensus, data_use, keying, llm, llm_client, llm_ocr, store
 from app.deps import current_user, get_db, require_job_access, require_job_manager, require_page_access
 from app.routes.selection import selected_pages
 
@@ -518,6 +518,7 @@ def remove_page_readings(page_id: int, model_id: int | None = None, conn=Depends
     """Delete this page's readings - every model's, or `model_id`'s - by the dataset's rules.
     Anyone who may edit the page may, as they may remove one line's reading."""
     require_page_access(conn, page_id, user)
+    keying.refuse(conn, 'page', page_id, user)
     page = _live_page(conn, page_id)
     return llm_ocr.remove(conn, page['job_id'], model_id, page_id)
 

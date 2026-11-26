@@ -82,10 +82,13 @@ class GroupShare(BaseModel):
 def share_group(group_id: int, body: GroupShare, conn=Depends(get_db),
                 user: dict = Depends(current_user)):
     """Everyone listed here belongs to the workspace and reaches every dataset in it,
-    including ones moved into it later."""
+    including ones moved into it later. Its owner stays: they reach it only as a member."""
     row = _group_or_404(conn, group_id, user)
     _require_manager(conn, row, user, 'nobody is added to a Sandbox: move a dataset into a workspace to share it')
     names = sorted({n.strip() for n in body.usernames if n.strip()})
+    if row['owner'] not in names:
+        raise HTTPException(409, f'{row["owner"]} owns "{row["name"]}" and stays in it - '
+                                 'transfer it to someone else first')
     conn.execute('DELETE FROM group_assignees WHERE group_id = ?', (group_id,))
     conn.executemany('INSERT INTO group_assignees (group_id, username) VALUES (?, ?)',
                      [(group_id, n) for n in names])
@@ -191,6 +194,8 @@ def _name_taken(conn, group_id: int, parent_id: int | None, name: str, besides: 
 
 
 def _require_free_name(conn, group_id: int, parent_id: int | None, name: str, besides: int = 0):
+    # Held until the folder is written, so two folders cannot both take the name at once.
+    store.write_lock(conn)
     if _name_taken(conn, group_id, parent_id, name, besides):
         raise HTTPException(409, f'A folder named "{name}" is there already')
 
@@ -264,6 +269,7 @@ def delete_folder(folder_id: int, conn=Depends(get_db), user: dict = Depends(cur
     """Delete a folder. What it held moves up to the folder that held it, or to the top of the
     workspace, so deleting one never takes a dataset with it."""
     folder = _folder_or_404(conn, folder_id, user)
+    store.write_lock(conn)
     above = folder['parent_id']
     inside = conn.execute('SELECT name FROM folders WHERE parent_id = ?', (folder_id,)).fetchall()
     for child in inside:

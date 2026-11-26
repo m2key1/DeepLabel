@@ -255,6 +255,27 @@ def test_deleting_a_training_takes_its_model_files_and_only_unshared_blobs(conn,
     assert weights.blob_path(sha(contents['ocr.ckpt'])).is_file(), 'model 1 still uses it'
 
 
+def test_a_delete_that_is_not_committed_leaves_the_files(conn, files):
+    """The rows go before the files, so a delete that fails leaves no model without its
+    checkpoint (#169)."""
+    folder, _ = files
+    (folder / 'run.ckpt').write_bytes(b'trained once')
+    conn.execute("INSERT INTO models (id, task, name, checkpoint) VALUES (5, 'ocr', 'Run model', ?)",
+                 (str(folder / 'run.ckpt'),))
+    conn.commit()
+    weights.import_existing(conn)
+
+    unused = weights.delete_model(conn, 5)
+    conn.rollback()
+
+    assert weights.blob_path(sha(b'trained once')).is_file()
+    assert conn.execute('SELECT COUNT(*) FROM model_files WHERE model_id = 5').fetchone()[0] == 1
+    weights.delete_model(conn, 5)
+    conn.commit()
+    weights.remove_unused(conn, unused)
+    assert not weights.blob_path(sha(b'trained once')).exists()
+
+
 def test_one_server_under_two_names_is_both_of_them(monkeypatch):
     monkeypatch.setattr('app.config.MODEL_BACKENDS', {
         'stub': config.ModelBackend('stub', 'http://stub:9100', 'shared', 'default'),

@@ -391,7 +391,7 @@ def plan_run_revert(conn, run_id: int, user: str) -> tuple[dict, list]:
         for person in by_others:
             others.setdefault(person, _no_rows())[noun] += 1
         current = conn.execute(f'SELECT * FROM {TABLES[kind]} WHERE id = ?', (target['id'],)).fetchone()
-        if by_others or current is None:
+        if by_others or current is None or _on_a_deleted_page(conn, kind, target['id']):
             continue
         now = SNAPSHOTS[kind](current)
         before = _whole(kind, _snapshot_at(conn, kind, target['id'], target['first'] - 1))
@@ -411,11 +411,14 @@ def plan_run_revert(conn, run_id: int, user: str) -> tuple[dict, list]:
             preview['restore'][noun] += 1
             goals.append((kind, target['id'], goal))
     # A box the revert would take off keeps standing while a line it holds stays: the line
-    # would otherwise live on under a box nothing shows.
-    removed = {target_id for kind, target_id, goal in goals if kind == 'line' and goal is None}
+    # would otherwise live on under a box nothing shows. A line the revert takes off, or puts
+    # back in another box, does not hold it.
+    line_goals = {target_id: goal for kind, target_id, goal in goals if kind == 'line'}
+    stays_in = lambda line_id, box: line_id not in line_goals or (
+        line_goals[line_id] is not None and line_goals[line_id]['element_id'] == box)
     for kind, target_id, goal in list(goals):
         if kind == 'element' and goal is None and any(
-                row['id'] not in removed for row in conn.execute(
+                stays_in(row['id'], target_id) for row in conn.execute(
                     'SELECT id FROM lines WHERE element_id = ? AND deleted = 0', (target_id,))):
             goals.remove((kind, target_id, goal))
             preview['remove']['boxes'] -= 1
@@ -454,6 +457,9 @@ def revert_run(conn, job_id: str, run_id: int, user: str) -> dict:
     preview, goals = plan_run_revert(conn, run_id, user)
     if preview['refused']:
         raise Conflict({'message': preview['refused']})
+    if not goals and not _layout_marks_taken(conn, run_id):
+        # Marked reverted, it could never be taken back once something of it showed again.
+        raise Conflict({'message': 'Nothing this run changed is left to put back'})
     _refuse_missing_classes(conn, job_id, goals)
     touched = _apply(conn, goals, f'system:revert@{user}')
     for element_id in touched['elements']:
@@ -464,6 +470,11 @@ def revert_run(conn, job_id: str, run_id: int, user: str) -> dict:
     for page_id in pages:
         geometry.resequence_page(conn, page_id)
         _settle_status(conn, page_id)
+    marked = _layout_marks_taken(conn, run_id)
+    for page_id in marked:
+        conn.execute('UPDATE pages SET layout_checked = 1 WHERE id = ?', (page_id,))
+        store.log_revision(conn, 'page', page_id, job_id, f'system:revert@{user}', 'revert',
+                           {'id': page_id, 'layout_checked': True})
     store.recount_pages(conn, job_id, commit=False)
     conn.execute("UPDATE runs SET reverted_at = datetime('now'), reverted_by = ? WHERE id = ?", (user, run_id))
     conn.commit()
@@ -472,6 +483,27 @@ def revert_run(conn, job_id: str, run_id: int, user: str) -> dict:
         candidates.rematch_page(conn, page_id)
     for line_id in touched['lines']:
         training.enqueue(line_id)
-    if touched['reverted_elements']:
+    if touched['reverted_elements'] or marked:
         dataset_sync.enqueue(job_id)
     return preview
+
+
+def _on_a_deleted_page(conn, kind: str, target_id: int) -> bool:
+    """Whether the row sits on a page deleted since: a page restored later comes back as it
+    was when it went, so a revert leaves its rows alone."""
+    page = ('SELECT p.deleted FROM lines l JOIN elements e ON e.id = l.element_id JOIN pages p ON p.id = e.page_id '
+            'WHERE l.id = ?') if kind == 'line' else \
+        'SELECT p.deleted FROM elements e JOIN pages p ON p.id = e.page_id WHERE e.id = ?'
+    row = conn.execute(page, (target_id,)).fetchone()
+    return bool(row and row['deleted'])
+
+
+def _layout_marks_taken(conn, run_id: int) -> list[int]:
+    """The live pages the run took "layout complete" off, which nobody has marked or unmarked
+    since: their mark comes back with the boxes it was given for."""
+    return [row['target_id'] for row in conn.execute(
+        "SELECT r.target_id FROM revisions r JOIN pages p ON p.id = r.target_id "
+        "WHERE r.run_id = ? AND r.target_type = 'page' AND json_extract(r.snapshot, '$.layout_checked') = 0 "
+        'AND p.deleted = 0 AND p.layout_checked = 0 AND NOT EXISTS ('
+        "  SELECT 1 FROM revisions later WHERE later.target_type = 'page' AND later.target_id = r.target_id "
+        "  AND later.id > r.id AND json_type(later.snapshot, '$.layout_checked') IS NOT NULL)", (run_id,))]

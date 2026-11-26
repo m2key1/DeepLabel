@@ -73,6 +73,8 @@ def assign_pages(job_id: str, body: Assignment, conn=Depends(get_db), user: dict
     for name in people:
         if name not in store.people_of_job(conn, job_id):
             raise HTTPException(400, f'{name} cannot open this dataset')
+    # Read and rewritten under one lock, so two assignments at once cannot leave a page two people.
+    store.write_lock(conn)
     pages = _pages_named(conn, job_id, body, work_only=bool(people))
     for page_id in pages:
         leaving = [row[0] for row in conn.execute('SELECT username FROM page_assignees WHERE page_id = ?', (page_id,))

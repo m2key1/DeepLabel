@@ -50,9 +50,10 @@ const takes = (target: DropTarget, dragged: DraggedFolder) => {
 }
 
 /** Dragging a ticked dataset carries the selection with it, the way the bulk bar acts on
- *  it; an unticked one goes alone. A workspace's Managers drag its folders too. */
+ *  it; an unticked one goes alone. Only a dataset `canMove` allows is picked up. A workspace's
+ *  Managers drag its folders too. */
 export function useDatasetDrag(
-  selected: Set<string>, canDrag: boolean,
+  selected: Set<string>, canMove: (jobId: string) => boolean,
   onMove: (ids: string[], target: DropTarget) => void,
   onMoveFolder: (folder: Folder, target: DropTarget) => void,
 ) {
@@ -67,9 +68,9 @@ export function useDatasetDrag(
   }
 
   const dragSource = (jobId: string) => ({
-    draggable: canDrag,
+    draggable: canMove(jobId),
     onDragStart: (e: DragEvent) => {
-      if (!canDrag) return
+      if (!canMove(jobId)) return
       const ids = selected.has(jobId) ? [...selected] : [jobId]
       e.dataTransfer.setData(DATASETS_MIME, JSON.stringify(ids))
       e.dataTransfer.effectAllowed = 'move'

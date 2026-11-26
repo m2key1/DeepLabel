@@ -92,7 +92,11 @@ def matcher(query: str, mode: str = 'fuzzy') -> Callable[[str], Hit | None] | No
             return None
     if mode in ('exact', 'case'):
         flags = 0 if mode == 'case' else regex.IGNORECASE
-        return _pattern_matcher(regex.compile(regex.escape(query.strip()), flags), deadline)
+        # The words in a row are the phrase, whatever runs of spaces and line breaks the
+        # stored text holds between them (#169) - the fold collapses them, the raw text
+        # cannot be asked to.
+        return _pattern_matcher(
+            regex.compile(r'\s+'.join(regex.escape(word) for word in query.strip().split()), flags), deadline)
 
     terms = search_form(query).split()
     whole = ' '.join(terms)

@@ -304,6 +304,21 @@ class TestMigrations:
             'is created with.')
         assert not set(self.ORIGINAL_COLUMNS) - fresh_tables, 'a named table is gone from the schema'
 
+    def test_a_database_with_rights_but_no_transcription_licence_gains_the_column(self, tmp_path):
+        """An interrupted migration can have brought the rights column without the licence
+        one that shared its guard, so the licence needs a guard of its own."""
+        fresh = store.connect(tmp_path / 'fresh.db')
+        fresh_columns = cols(fresh, 'jobs')
+        fresh.close()
+
+        db = tmp_path / 'app.db'
+        store.connect(db).close()
+        strip_column(db, 'jobs', sorted(fresh_columns - {'transcription_licence'}))
+
+        conn = store.connect(db)
+        assert {'rights', 'transcription_licence'} <= cols(conn, 'jobs')
+        conn.close()
+
     def test_reopening_is_idempotent(self, tmp_path):
         db = tmp_path / 'app.db'
         store.connect(db).close()
@@ -1703,7 +1718,7 @@ class TestWorkspaces:
         assert [tuple(r) for r in conn.execute('SELECT job_id, username FROM job_assignees ORDER BY job_id')] == [
             ('given-1', 'erin'), ('given-2', 'erin')]
         assert [r[0] for r in conn.execute('SELECT action FROM job_log')] == ['data_use']
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == store.DATASET_ROLES
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == store.SEARCH_INDEX_REFOLDED
         conn.close()
 
     def test_a_role_set_on_one_dataset_moves_to_a_table_of_its_own(self, tmp_path):
@@ -1726,7 +1741,7 @@ class TestWorkspaces:
             ('j1', 'bob', 'reviewer')]
         assert [tuple(r) for r in conn.execute('SELECT job_id, username FROM job_assignees ORDER BY username')] == [
             ('j1', 'bob'), ('j1', 'erin')]
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == store.DATASET_ROLES
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == store.SEARCH_INDEX_REFOLDED
         conn.close()
 
     def test_it_runs_once(self, tmp_path):
@@ -1764,6 +1779,29 @@ def test_a_database_from_before_skipped_layout_marks_the_pages_layout_passed_by(
     conn.close()
 
 
+def test_a_page_layout_ran_on_before_it_was_switched_off_is_not_marked(tmp_path):
+    """Switched off later, layout still left its boxes (#163): only a page holding nothing but the
+    lines it was given without boxes counts as passed by, or running layout on it would take
+    those boxes."""
+    db = tmp_path / 'app.db'
+    conn = store.connect(db)
+    conn.execute("INSERT INTO jobs (id, name, task, run_layout) VALUES ('off', 'Layout off later', 'text', 0)")
+    conn.execute("INSERT INTO pages (id, job_id, idx, filename, source_file, status, layout_run_at) VALUES "
+                 "(1, 'off', 0, 'a.png', '/a.png', 'done', '2026-11-01 10:00:00'), "
+                 "(2, 'off', 1, 'b.png', '/b.png', 'done', NULL), (3, 'off', 2, 'c.png', '/c.png', 'done', NULL)")
+    conn.execute("INSERT INTO elements (page_id, order_idx, class_name, bbox, kind) VALUES "
+                 "(1, 0, 'Paragraph', '[0, 0, 1, 1]', 'content'), (2, 0, 'Paragraph', '[0, 0, 1, 1]', 'content'), "
+                 "(3, 0, 'Unassigned', '[0, 0, 1, 1]', 'orphan')")
+    conn.commit()
+    keep = sorted(cols(conn, 'pages') - {'layout_skipped'})
+    conn.close()
+    strip_column(db, 'pages', keep)
+
+    conn = store.connect(db)
+    assert dict(conn.execute('SELECT id, layout_skipped FROM pages ORDER BY id').fetchall()) == {1: 0, 2: 0, 3: 1}
+    conn.close()
+
+
 def test_a_database_from_before_the_search_index_indexes_its_lines(tmp_path):
     """The lines a database already holds are indexed once, on the first open that has the
     index (#41), under their corrected text where there is one."""
@@ -1788,6 +1826,38 @@ def test_a_database_from_before_the_search_index_indexes_its_lines(tmp_path):
         (1, 'mueller'), (2, 'hueber')]
     store.connect(db).close()
     assert conn.execute('SELECT COUNT(*) FROM line_search').fetchone()[0] == 2
+    conn.close()
+
+
+def test_an_index_that_kept_space_runs_is_folded_again(tmp_path):
+    """#169: the index once kept a carriage return and a long run of spaces in what it folded.
+    The first open past that version refolds every line in one pass, and the next open leaves
+    the index standing."""
+    db = tmp_path / 'app.db'
+    conn = store.connect(db)
+    conn.execute("INSERT INTO jobs (id, name) VALUES ('j1', 'Volume')")
+    conn.execute("INSERT INTO pages (id, job_id, idx, filename, source_file) VALUES (1, 'j1', 0, 'p.png', '/p.png')")
+    conn.execute("INSERT INTO elements (id, page_id, order_idx, class_name, bbox) VALUES (1, 1, 0, 'Paragraph', '[0,0,1,1]')")
+    conn.execute("INSERT INTO lines (id, element_id, order_idx, polygon, text) VALUES "
+                 "(1, 1, 0, '[]', 'Johann     Müller'), (2, 1, 1, '[]', 'Johann\r\nMüller'), "
+                 "(3, 1, 2, '[]', 'Johann Müller')")
+    folded = "SELECT rowid, folded FROM line_search ORDER BY rowid"
+    mueller = 'johann mueller'
+    # What the old fold left in the index is put back, to be refolded.
+    assert [tuple(r) for r in conn.execute(folded)] == [(1, mueller), (2, mueller), (3, mueller)]
+    version = conn.execute('PRAGMA user_version').fetchone()[0]
+    conn.execute('UPDATE line_search SET folded = ? WHERE rowid = ?', ('johann  müller', 1))
+    conn.execute('UPDATE line_search SET folded = ? WHERE rowid = ?', ('johann \r müller', 2))
+    conn.execute('UPDATE line_search SET folded = ? WHERE rowid = ?', ('johann müller', 3))
+    conn.execute(f'PRAGMA user_version = {version - 1}')
+    conn.commit()
+    conn.close()
+
+    conn = store.connect(db)
+    assert [tuple(r) for r in conn.execute(folded)] == [(1, mueller), (2, mueller), (3, mueller)]
+    conn.close()
+    conn = store.connect(db)
+    assert [tuple(r) for r in conn.execute(folded)] == [(1, mueller), (2, mueller), (3, mueller)]
     conn.close()
 
 

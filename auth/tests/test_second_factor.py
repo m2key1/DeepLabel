@@ -195,6 +195,17 @@ class TestGuessingCodes:
         assert response.json()['detail']['message'] == 'Too many attempts - try again in 1 minute.'
         assert enrolled.get('/api/me').status_code == 401
 
+    def test_the_password_again_does_not_forgive_the_wrong_codes(self, enrolled):
+        for _ in range(5):
+            pending = start(enrolled).json()['pending']
+            assert step(enrolled, pending, code='000000').status_code == 200
+
+        response = start(enrolled)
+
+        assert response.status_code == 429
+        assert response.json()['detail']['message'] == 'Too many attempts - try again in 1 minute.'
+        assert enrolled.get('/api/me').status_code == 401
+
     def test_answering_does_not_keep_a_sign_in_open_past_ten_minutes(self, enrolled):
         pending = start(enrolled).json()['pending']
         conn = store.connect(config.DB_PATH)

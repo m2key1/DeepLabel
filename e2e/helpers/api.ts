@@ -445,11 +445,14 @@ export async function shareJob(jobId: string, usernames: string[]) {
   })
 }
 
+/** Sets the workspace's members to `usernames`; its owner always stays one (#160). */
 export async function shareGroup(groupId: number, usernames: string[]) {
+  const groups: { id: number; owner: string }[] = await backendFetch('/api/groups')
+  const owner = groups.find((g) => g.id === groupId)?.owner
   return backendFetch(`/api/groups/${groupId}/share`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ usernames }),
+    body: JSON.stringify({ usernames: owner && !usernames.includes(owner) ? [owner, ...usernames] : usernames }),
   })
 }
 

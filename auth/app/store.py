@@ -634,8 +634,8 @@ def hold_sign_in(conn: sqlite3.Connection, token_hash: str, state: dict, next_pa
 def held_sign_in(conn: sqlite3.Connection, token_hash: str):
     """A sign-in still waiting on its second factor, taken off the list: each step holds it anew."""
     conn.execute(f"DELETE FROM pending_sign_ins WHERE created_at < datetime('now', '-{PENDING_MINUTES} minutes')")
-    row = conn.execute('SELECT * FROM pending_sign_ins WHERE token_hash = ?', (token_hash,)).fetchone()
-    conn.execute('DELETE FROM pending_sign_ins WHERE token_hash = ?', (token_hash,))
+    # One statement, so two answers arriving together cannot both take it.
+    row = conn.execute('DELETE FROM pending_sign_ins WHERE token_hash = ? RETURNING *', (token_hash,)).fetchone()
     return None if row is None else {**dict(row), 'state': json.loads(row['state'])}
 
 

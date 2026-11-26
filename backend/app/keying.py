@@ -106,6 +106,15 @@ def blind(conn, page_id: int, username: str) -> bool:
     return keying == 'keying' or (keying == 'keyed' and store.page_review(conn, page_id)['state'] != 'signed_off')
 
 
+def not_blind(pages: str = 'p') -> str:
+    """SQL that holds for a page of `pages` the person `:me` does not see through their own
+    keying (blind, as SQL): reading the dataset's text elsewhere - Search, the transcript -
+    must not show them the page their keying is to be compared on."""
+    return (f'NOT EXISTS (SELECT 1 FROM page_assignees a JOIN jobs kj ON kj.id = {pages}.job_id '
+            f'WHERE a.page_id = {pages}.id AND a.username = :me AND kj.double_keying = 1 '
+            f"AND NOT EXISTS (SELECT 1 FROM page_reviews r WHERE r.page_id = {pages}.id AND r.state = 'signed_off'))")
+
+
 def lens(conn, page_id: int, username: str):
     """How a keyer is shown the page's lines, as a function over a line's payload; None for
     anyone who sees them as they are. Keying from empty lines, nothing of the recognition shows."""
@@ -132,12 +141,15 @@ def compare(conn, page_id: int, second: str) -> list[int]:
     both are offered as readings. A line a keyer never typed carries what they started from, and
     that is kept as their keying, so that each goes on seeing their own version. Written under the
     first keyer, whose version it is. Returns the lines it changed."""
-    first = next(k['username'] for k in _keyers(conn, page_id) if k['username'] != second)
+    first, first_in = next((k['username'], k['handed_in_at']) for k in _keyers(conn, page_id) if k['username'] != second)
     from_empty = bool(_job(conn, page_id)['keying_from_empty'])
+    # A line made after the first keyer handed the page in is one they never saw (#169).
     lines = conn.execute(
-        'SELECT l.id, l.text, l.corrected_text, l.corrected_by, l.checked, l.check_source, l.polygon, l.order_idx '
+        'SELECT l.id, l.text, l.corrected_text, l.corrected_by, l.checked, l.check_source, l.polygon, l.order_idx, '
+        "(SELECT MIN(r.created_at) FROM revisions r WHERE r.target_type = 'line' AND r.target_id = l.id) > ? unseen "
         "FROM lines l JOIN elements e ON e.id = l.element_id "
-        "WHERE e.page_id = ? AND e.deleted = 0 AND e.kind != 'container' AND l.deleted = 0", (page_id,)).fetchall()
+        "WHERE e.page_id = ? AND e.deleted = 0 AND e.kind != 'container' AND l.deleted = 0",
+        (first_in, page_id)).fetchall()
     typed = {(row['line_id'], row['username']): row['text'] for row in conn.execute(
         'SELECT k.line_id, k.username, k.text FROM keyings k JOIN lines l ON l.id = k.line_id '
         'JOIN elements e ON e.id = l.element_id WHERE e.page_id = ?', (page_id,))}
@@ -149,8 +161,11 @@ def compare(conn, page_id: int, second: str) -> list[int]:
         for keyer, text in versions.items():
             if (line['id'], keyer) not in typed:
                 type_text(conn, line['id'], keyer, text)
-        agreed = agree(versions[first], versions[second])
-        if not agreed:
+        alike = agree(versions[first], versions[second])
+        # Alike only because neither touched a line one of them never saw: the Reviewer's.
+        nobodys = line['unseen'] and not any((line['id'], keyer) in typed for keyer in (first, second))
+        agreed = alike and not nobodys
+        if not alike:
             for keyer, version in versions.items():
                 candidates.add(conn, page_id, keyer, version, line_id=line['id'], polygon=line['polygon'],
                                order_idx=line['order_idx'])

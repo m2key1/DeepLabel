@@ -215,9 +215,9 @@ class TestSharing:
 
     def test_blanks_and_duplicates_are_not_people(self, client):
         response = client.put('/api/groups/1/share',
-                              json={'usernames': ['bob', ' bob ', '  ', 'carol']}, headers=ALICE)
+                              json={'usernames': ['alice', 'bob', ' bob ', '  ', 'carol']}, headers=ALICE)
 
-        assert response.json()['shared_with'] == ['bob', 'carol']
+        assert response.json()['shared_with'] == ['alice', 'bob', 'carol']
 
     def test_sharing_reaches_the_datasets_moved_in_later(self, client):
         """The point of sharing a project rather than each dataset."""

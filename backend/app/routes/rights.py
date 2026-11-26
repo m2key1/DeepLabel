@@ -84,17 +84,19 @@ def refresh_job_rights(job_id: str, conn=Depends(get_db), user: dict = Depends(c
 
 @router.post('/api/jobs/{job_id}/rights/training-permitted')
 def permit_training(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)):
-    """The owner's word, given once and logged, that training on the dataset's restricted
-    material is permitted - a research exception or a contract. Nothing switches by it."""
+    """The owner's word, logged, that training on the dataset's restricted material is
+    permitted - a research exception or a contract. It covers the restrictive statements on
+    the material now, while they own it: a stricter one, or a new owner, asks again."""
     require_job_access(conn, job_id, user)
     job = conn.execute('SELECT name, owner FROM jobs WHERE id = ?', (job_id,)).fetchone()
     if job['owner'] != user['username']:
         raise HTTPException(403, f'Only the owner of "{job["name"]}" can confirm that training on it is permitted')
-    if rights.restrictive_statement(conn, job_id) is None:
+    statements = rights.restrictive_statements(conn, job_id)
+    if not statements:
         raise HTTPException(409, f'No rights statement on "{job["name"]}" restricts training')
     if rights.training_permitted(conn, job_id) is None:
         conn.execute('INSERT INTO rights_log (job_id, field, old_value, new_value, author) VALUES (?, ?, NULL, ?, ?)',
-                     (job_id, rights.TRAINING_PERMITTED, 'permitted', user['username']))
+                     (job_id, rights.TRAINING_PERMITTED, json.dumps(statements), user['username']))
         conn.commit()
     return _held(conn, job_id)
 

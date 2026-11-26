@@ -428,6 +428,12 @@ def prepare_snapshot(conn, training: dict) -> dict:
     a snapshot that recorded its counts is complete, and a retry paying to rebuild
     tens of thousands of crops would only reproduce it. A kept snapshot cut in the
     in-process trainer's layout, from before every run trained on a backend, is cut again."""
+    # Checked again here, not only when the run was asked for, and for a kept snapshot too: an
+    # owner may have switched a dataset's training off while the run waited in the queue.
+    refused = data_use.refusal(conn, [*json.loads(training['dataset_job_ids']),
+                                      *json.loads(training.get('valid_job_ids') or '[]')], 'training')
+    if refused:
+        raise remote_training.CannotTrain(refused)
     tdir = config.training_dir(training['id'])
     kind = 'native' if training['task'] == 'ocr' else 'contract'
     counts = json.loads(training.get('snapshot_counts') or 'null')
@@ -435,12 +441,12 @@ def prepare_snapshot(conn, training: dict) -> dict:
     cut_as = marker.read_text(encoding='utf-8') if marker.is_file() else 'native'
     if counts and (tdir / 'snapshot').is_dir() and cut_as == kind:
         return counts
-    # Checked again here, not only when the run was asked for: an owner may have switched
-    # a dataset's training off while the run waited in the queue.
-    refused = data_use.refusal(conn, [*json.loads(training['dataset_job_ids']),
-                                      *json.loads(training.get('valid_job_ids') or '[]')], 'training')
-    if refused:
-        raise remote_training.CannotTrain(refused)
+    # Its checks and sign-offs may have lapsed in the queue too, leaving nothing to train on.
+    eligible = eligible_counts(conn, training['task'], json.loads(training['dataset_job_ids']),
+                               bool(training.get('human_checked_only')),
+                               signed_off_only=bool(training.get('signed_off_only')))
+    if sum(eligible.values()) == 0:
+        raise remote_training.CannotTrain('the selected datasets contain no checked material for this task')
     set_state(conn, training['id'], status='preparing', phase='snapshot')
     counts = train_snapshot.build(conn, training['id'], training['task'],
                                   json.loads(training['dataset_job_ids']),
@@ -644,9 +650,9 @@ def delete(conn, training: dict):
                  (training['id'],))
     conn.execute('UPDATE evaluations SET training_id = NULL WHERE training_id = ?', (training['id'],))
     conn.execute('DELETE FROM trainings WHERE id = ?', (training['id'],))
-    if training.get('model_id'):
-        weights.delete_model(conn, training['model_id'])
+    unused = weights.delete_model(conn, training['model_id']) if training.get('model_id') else []
     conn.commit()
+    weights.remove_unused(conn, unused)
     shutil.rmtree(config.training_dir(training['id']), ignore_errors=True)
     if training['target'] == 'slurm' and slurm_available():
         try:

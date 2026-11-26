@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listPageTypes, putPageMetadata, setPagesType, TEXT_PAGE_TYPE } from '../../api'
+import { conflictOf, listPageTypes, putPageMetadata, setPagesType, TEXT_PAGE_TYPE } from '../../api'
 import type { MetadataEntry, PageType } from '../../api'
 import { InfoIcon } from '../icons'
 import { MetadataEditor } from '../MetadataEditor'
@@ -75,9 +75,13 @@ export function PageInfo({ jobId, pageId, filename, pageType, metadata, canEdit,
           <section className="border-t border-line pt-2">
             <h3 className="mb-1 font-medium text-ink">Metadata</h3>
             <MetadataEditor entries={metadata} canEdit={canEdit} testId="page-metadata"
-                            onSave={(entries) => putPageMetadata(pageId, entries).then(({ metadata: saved }) => {
+                            onSave={(entries) => putPageMetadata(pageId, entries, metadata).then(({ metadata: saved }) => {
                               onChange({ metadata: saved })
                               return saved
+                            }, (e: unknown) => {
+                              const conflict = conflictOf<MetadataEntry[]>(e)
+                              if (conflict) onChange({ metadata: conflict.current })
+                              throw e
                             })} />
           </section>
           {error && <p role="alert" className="text-danger">{error}</p>}

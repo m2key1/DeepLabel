@@ -188,6 +188,31 @@ def annotation_text(annotation) -> str | None:
     return None
 
 
+def _target_marks(annotation: dict) -> list[str]:
+    """The addresses and selector values of an annotation's target ('on' in v2) that place or
+    name it: the target itself, a source or full canvas behind it, and its selectors."""
+    marks = []
+    for target in _listed(annotation.get('target') or annotation.get('on')):
+        marks.append(_id(target) or '')
+        if isinstance(target, dict):
+            marks += [source for source in (_id(target.get('source')), _id(target.get('full'))) if source]
+            marks += [str(s.get('value', '')) for s in _listed(target.get('selector')) if isinstance(s, dict)]
+    return marks
+
+
+def annotation_targets(annotation) -> list[str] | None:
+    """The canvases an annotation sits on, any fragment of theirs taken off, or None where a
+    target does not read: an archive that gives no target must not lose its annotations to
+    this check."""
+    if not isinstance(annotation, dict):
+        return None
+    canvases = []
+    for target in _listed(annotation.get('target') or annotation.get('on')):
+        behind = (_id(target.get('source')) or _id(target.get('full'))) if isinstance(target, dict) else None
+        canvases.append((behind or _id(target) or '').split('#')[0])
+    return [canvas for canvas in canvases if canvas] or None
+
+
 def annotation_outline(annotation: dict, width: float, height: float) -> list[list[float]] | None:
     """Where on the canvas an annotation sits, as a polygon over the page from 0 to 1: an SVG
     polygon where it gives one, else its xywh region, in pixels or percent. None for an
@@ -199,11 +224,7 @@ def annotation_outline(annotation: dict, width: float, height: float) -> list[li
 
 
 def _outline(annotation: dict, width: float, height: float) -> list[list[float]] | None:
-    marks = []
-    for target in _listed(annotation.get('target') or annotation.get('on')):
-        marks.append(_id(target) or '')
-        if isinstance(target, dict):
-            marks += [str(s.get('value', '')) for s in _listed(target.get('selector')) if isinstance(s, dict)]
+    marks = _target_marks(annotation)
     clamp = lambda v: max(0.0, min(v, 1.0))
     for mark in marks:
         if points := SVG_POINTS.search(mark):
@@ -252,7 +273,9 @@ def _transcript(canvas: dict, v3: bool) -> dict | None:
                 pages.append({'annotations': transcribed})
         elif _id(page):
             pages.append({'url': _id(page)})
-    return {'kind': 'annotations', 'pages': pages} if pages else None
+    # The canvas with it, so a page of annotations several canvases share hands each its own
+    # back; a transcript stored before this carried no canvas and keeps every annotation.
+    return {'kind': 'annotations', 'canvas': _id(canvas), 'pages': pages} if pages else None
 
 
 def _dimension(value) -> int | None:

@@ -2,6 +2,7 @@
 a background ingester works through it, two datasets at a time, and joins the queue only
 once every page is in - so a large PDF holds no GPU slot while only the CPU works."""
 import io
+import os
 
 import pytest
 from PIL import Image
@@ -160,13 +161,69 @@ class TestTheIngester:
         runner.tick(conn)
         assert status(conn, job_id) == 'cancelled'
 
-    def test_a_restart_takes_up_what_was_ingesting(self, ingester):
+    def test_a_restart_takes_up_what_was_ingesting(self, ingester, monkeypatch):
         runner, spawned, api, conn = ingester
         job_id = create(api, 'Interrupted')
         conn.execute('UPDATE jobs SET pid = 4242 WHERE id = ?', (job_id,))
         conn.commit()
+        monkeypatch.setattr(ingest_queue, 'live_ingest', lambda pid, job: False)
         ingest_queue.Ingester(runner.spawn).tick(conn)
         assert [j for j, _ in spawned] == [job_id]
+
+    def test_an_ingest_left_running_by_a_restart_keeps_the_dataset_to_itself(self, ingester, monkeypatch):
+        runner, spawned, api, conn = ingester
+        job_id = create(api, 'Adopted')
+        conn.execute('UPDATE jobs SET pid = 4242 WHERE id = ?', (job_id,))
+        conn.commit()
+        monkeypatch.setattr(ingest_queue, 'live_ingest', lambda pid, job: (pid, job) == (4242, job_id))
+
+        ingest_queue.Ingester(runner.spawn).tick(conn)
+        assert spawned == []
+        assert pid(conn, job_id) == 4242
+
+    def test_an_ingest_process_gone_since_the_restart_is_started_again(self, ingester, monkeypatch):
+        runner, spawned, api, conn = ingester
+        job_id = create(api, 'Restarted')
+        conn.execute('UPDATE jobs SET pid = 4242 WHERE id = ?', (job_id,))
+        conn.commit()
+        monkeypatch.setattr(ingest_queue, 'live_ingest', lambda pid, job: False)
+
+        ingest_queue.Ingester(runner.spawn).tick(conn)
+        assert [j for j, _ in spawned] == [job_id]
+        assert pid(conn, job_id) == 1000
+
+    def test_a_live_pid_of_another_command_is_started_again(self, ingester, monkeypatch):
+        runner, spawned, api, conn = ingester
+        job_id = create(api, 'Reused')
+        conn.execute('UPDATE jobs SET pid = 4242 WHERE id = ?', (job_id,))
+        conn.commit()
+        monkeypatch.setattr(ingest_queue.os, 'kill', lambda pid, sig: None)
+        monkeypatch.setattr(ingest_queue, 'cmdline',
+                            lambda pid: ['python', '-m', 'app.ingest_job', '--job-id', 'zzz'])
+        ingest_queue.Ingester(runner.spawn).tick(conn)
+        assert [j for j, _ in spawned] == [job_id]
+
+
+class TestRecognisingALiveIngest:
+    def test_the_ingest_command_is_its_module_and_its_dataset(self):
+        argv = ['python', '-m', 'app.ingest_job', '--job-id', 'abc123',
+                '--db-path', '/tmp/app.db', '--job-path', '/tmp/jobs/abc123']
+        assert ingest_queue.is_ingest_command(argv, 'abc123') is True
+        assert ingest_queue.is_ingest_command(['python', '-m', 'app.ingest_job', '--job-id', 'zzz'], 'abc123') is False
+        assert ingest_queue.is_ingest_command(['sh', '-c', 'sleep 1'], 'abc123') is False
+
+    def test_a_pid_no_process_holds_is_not_a_live_ingest(self):
+        assert ingest_queue.live_ingest(2 ** 30, 'abc123') is False
+
+    def test_a_live_command_that_is_not_an_ingest_is_not_taken_for_one(self):
+        assert ingest_queue.live_ingest(os.getpid(), 'abc123') is False
+
+    def test_a_live_ingest_of_the_dataset_says_so(self, monkeypatch):
+        argv = ['python', '-m', 'app.ingest_job', '--job-id', 'abc123',
+                '--db-path', '/tmp/app.db', '--job-path', '/tmp/jobs/abc123']
+        monkeypatch.setattr(ingest_queue.os, 'kill', lambda pid, sig: None)
+        monkeypatch.setattr(ingest_queue, 'cmdline', lambda pid: argv)
+        assert ingest_queue.live_ingest(4242, 'abc123') is True
 
 
 class TestIngestingIsBusy:

@@ -161,17 +161,21 @@ export function MembersDialog({ target, onClose, onChanged, onMoveInstead, onTra
       ? `${ROLE_LABEL[account.role]} elsewhere` : undefined
   }
 
+  // A workspace's owner reaches it only as a member, so they stay one until it is handed over.
+  const ownsWorkspace = (username: string) => !job && username === group?.owner
   const row = (username: string, removable: boolean) => (
     <MemberRow key={username} username={username} account={accounts?.get(username)} note={elsewhere(username)}>
       {roleCell(username)}
       {/* The same width with or without the button, so the roles line up in one column. */}
       <span className="flex w-16 justify-end">
-        {removable && (
-          <Button variant="ghost" size="xs" aria-label={`Remove ${username}`} disabled={busy}
-                  onClick={() => remove(username)}>
-            Remove
-          </Button>
-        )}
+        {ownsWorkspace(username)
+          ? <span data-testid="member-owner" className="px-2 text-xs text-ink-subtle">Owner</span>
+          : removable && (
+            <Button variant="ghost" size="xs" aria-label={`Remove ${username}`} disabled={busy}
+                    onClick={() => remove(username)}>
+              Remove
+            </Button>
+          )}
       </span>
     </MemberRow>
   )

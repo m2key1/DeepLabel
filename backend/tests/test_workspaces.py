@@ -195,6 +195,18 @@ class TestManagingAWorkspace:
         assert [r[0] for r in conn.execute(
             'SELECT username FROM group_assignees WHERE group_id = 1 ORDER BY username')] == ['anna', 'ben', 'lena', 'max']
 
+    def test_its_owner_is_not_taken_out_of_it(self, client):
+        """Its owner reaches it only as a member: taken out, they could not even hand it back."""
+        api, conn = client
+        api.put('/api/groups/1/share', json={'usernames': ['anna', 'ben', 'lena', 'max']}, headers=ANNA)
+
+        response = api.put('/api/groups/1/share', json={'usernames': ['ben', 'lena', 'max']}, headers=MAX)
+
+        assert (response.status_code, response.json()['detail']) == (
+            409, 'anna owns "Schematismus" and stays in it - transfer it to someone else first')
+        assert [r[0] for r in conn.execute(
+            'SELECT username FROM group_assignees WHERE group_id = 1 ORDER BY username')] == ['anna', 'ben', 'lena', 'max']
+
     def test_a_reviewer_in_it_may_not_and_someone_outside_does_not_see_it(self, client):
         api, conn = client
         assert api.patch('/api/groups/1', json={'name': 'Renamed'}, headers=BEN).status_code == 403

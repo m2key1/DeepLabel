@@ -140,23 +140,57 @@ def history(conn, job_id: str, page_id: int | None = None) -> list[dict]:
              'at': r['created_at']} for r in rows]
 
 
+def _confirmations(conn, job_id: str) -> list:
+    """The dataset's present owner's word that training is permitted, each time they gave it,
+    oldest first: a previous owner's does not pass to them (decision 369)."""
+    return conn.execute('SELECT l.author, l.created_at, l.new_value FROM rights_log l JOIN jobs j ON j.id = l.job_id '
+                        'WHERE l.job_id = ? AND l.page_id IS NULL AND l.field = ? AND l.author = j.owner '
+                        'ORDER BY l.id', (job_id, TRAINING_PERMITTED)).fetchall()
+
+
+def _covered(confirmations) -> set[str]:
+    """The restrictive statements the owner's word was given for, each time together."""
+    covered = set()
+    for row in confirmations:
+        try:
+            given = json.loads(row['new_value'])
+        except (TypeError, ValueError):
+            continue
+        covered |= {s for s in given if isinstance(s, str)} if isinstance(given, list) else set()
+    return covered
+
+
+def unconfirmed_statement(conn, job_id: str) -> str | None:
+    """The first restrictive statement on the dataset's material its owner has not confirmed
+    training under, or None when there is none."""
+    covered = _covered(_confirmations(conn, job_id))
+    return next((s for s in restrictive_statements(conn, job_id) if s not in covered), None)
+
+
 def training_permitted(conn, job_id: str) -> dict | None:
-    """Who confirmed that training on a dataset's material is permitted, and when."""
-    row = conn.execute('SELECT author, created_at FROM rights_log WHERE job_id = ? AND page_id IS NULL '
-                       'AND field = ? ORDER BY id LIMIT 1', (job_id, TRAINING_PERMITTED)).fetchone()
-    return {'by': row['author'], 'at': row['created_at']} if row else None
+    """Who confirmed that training on a dataset's material is permitted, and when - while that
+    holds: given by its present owner, for every restrictive statement on it now."""
+    confirmations = _confirmations(conn, job_id)
+    if not confirmations or unconfirmed_statement(conn, job_id):
+        return None
+    return {'by': confirmations[-1]['author'], 'at': confirmations[-1]['created_at']}
+
+
+def restrictive_statements(conn, job_id: str) -> list[str]:
+    """The restrictive statements a dataset's material is under: its own first, then those its
+    live pages carry."""
+    row = conn.execute('SELECT rights FROM jobs WHERE id = ?', (job_id,)).fetchone()
+    own = json.loads(row['rights'] or '{}').get('status') if row else None
+    pages = {r[0] for r in conn.execute("SELECT DISTINCT json_extract(rights, '$.status') FROM pages "
+                                        'WHERE job_id = ? AND rights IS NOT NULL AND deleted = 0', (job_id,))}
+    held = [own] if own in RESTRICTIVE else []
+    return held + [s for s in in_order(pages & RESTRICTIVE) if s != own]
 
 
 def restrictive_statement(conn, job_id: str) -> str | None:
     """The restrictive statement a dataset's material is under - its own, else the first its
     pages carry - or None when nothing in it restricts training."""
-    row = conn.execute('SELECT rights FROM jobs WHERE id = ?', (job_id,)).fetchone()
-    own = json.loads(row['rights'] or '{}').get('status') if row else None
-    if own in RESTRICTIVE:
-        return own
-    pages = {r[0] for r in conn.execute("SELECT DISTINCT json_extract(rights, '$.status') FROM pages "
-                                        'WHERE job_id = ? AND rights IS NOT NULL AND deleted = 0', (job_id,))}
-    return next(iter(in_order(pages & RESTRICTIVE)), None)
+    return next(iter(restrictive_statements(conn, job_id)), None)
 
 
 def training_refusal(conn, job_ids) -> str | None:
@@ -165,8 +199,8 @@ def training_refusal(conn, job_ids) -> str | None:
     reasons = []
     for row in conn.execute(f'SELECT id, name FROM jobs WHERE id IN ({",".join("?" * len(job_ids))}) ORDER BY name',
                             list(job_ids)):
-        statement = restrictive_statement(conn, row['id'])
-        if statement and not training_permitted(conn, row['id']):
+        statement = unconfirmed_statement(conn, row['id'])
+        if statement:
             reasons.append(f'"{row["name"]}" holds material under {LABELS[statement]} - '
                            'its owner has not yet confirmed that training on it is permitted')
     return '; '.join(reasons) or None

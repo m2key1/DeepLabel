@@ -16,7 +16,7 @@ test.describe('Scenario: the list as you left it', () => {
 
     await page.goto('/')
     const section = page.locator('section').filter({ hasText: name })
-    const header = section.getByRole('button', { name })
+    const header = section.getByTestId('section-toggle')
     await expect(header).toHaveAttribute('aria-expanded', 'true')
     await expect(section.getByText('No datasets in this workspace.')).toBeVisible()
 
@@ -29,7 +29,7 @@ test.describe('Scenario: the list as you left it', () => {
       (await (await page.request.get('/api/settings')).json()).collapsed_groups)
       .toEqual([group.id])
     await page.reload()
-    await expect(section.getByRole('button', { name })).toHaveAttribute('aria-expanded', 'false')
+    await expect(header).toHaveAttribute('aria-expanded', 'false')
     await expect(section.getByText('No datasets in this workspace.')).toHaveCount(0)
 
     await setCollapsedGroups(page, [])
@@ -61,9 +61,9 @@ test.describe('Scenario: organizing datasets in groups', () => {
     await expect(header.getByTestId('job-card').filter({ hasText: jobName })).toBeVisible()
 
     // Collapsing hides the cards without losing them.
-    await header.getByRole('button', { name: groupName }).click()
+    await header.getByTestId('section-toggle').click()
     await expect(header.getByTestId('job-card')).toHaveCount(0)
-    await header.getByRole('button', { name: groupName }).click()
+    await header.getByTestId('section-toggle').click()
     await expect(header.getByTestId('job-card').filter({ hasText: jobName })).toBeVisible()
 
     // Only an empty group is deleted (#131): while it holds the dataset, it says so and stays.

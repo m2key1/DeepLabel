@@ -47,14 +47,15 @@ under its toolbar and the workspace rail, which stay in place, and ends with the
   starts a new dataset there. **New job** asks which workspace the dataset is made in, and
   starts on the one the list is showing, else on the one your newest dataset is in, else on
   your Sandbox.
-- Drag a dataset onto a workspace you belong to, in the list or the rail, to move it there and
+- Drag a dataset you manage onto a workspace you belong to, in the list or the rail, to move it there and
   open it to that workspace's people; **Back to Sandbox** returns a selection to its creators'
   Sandboxes. A dataset moved into a Sandbox is taken from the people given it on its own, and
   the move says so first.
 - A workspace's people are its members. A Manager among them opens **Members…** on its
   heading, or clicks its member count, to see each member's role, add someone by typing their
-  name and remove people; each change is saved at once. They also rename it, and delete it once
-  it is empty.
+  name and remove people; each change is saved at once. Its owner stays a member, marked
+  **Owner**, until it is handed to someone else. They also rename it, and delete it once it is
+  empty.
 - A dataset's **Members…** gives it to someone on its own, who then finds it under **Shared
   with you**, without the workspace's name. It also makes an Annotator a Reviewer on that one
   dataset, or a Reviewer an Annotator, whether they were given the dataset or belong to the
@@ -178,7 +179,8 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
 - Every text dataset has its own page types, from a set of five: Text, Cover, Blank, Table and
   Image. A page nobody gave a type is text. **Page types…** in the dataset's More menu renames
   them and says which steps a run takes on each type's pages (find layout, find lines, read
-  text); Cover and Blank start with reading off.
+  text); Cover and Blank start with reading off. Reading reads the lines found, so a type
+  without line detection does not read either.
 - A dataset's Managers and its creator give a selection of pages a type with **Set type** in
   the page table. A type that switches a step off passes its pages by from the next run on, as
   the dataset's own switch would, and the dataset does not count them as pages that step missed.
@@ -195,7 +197,8 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
 
 - Datasets and pages carry free fields - a date, a folio, a shelfmark - kept in the order they
   were written. A dataset's are under **Info** in the dataset list, a page's under **Info** in
-  the page viewer; anyone who can edit the dataset writes them.
+  the page viewer; anyone who can edit the dataset writes them. A save over fields someone else
+  changed since they were opened is refused, and the fields as they are now are shown.
 - They are exported: a dataset's into the TEI header as a list in `notesStmt`, a page's into
   its `surface` as a `desc`; in PAGE XML every page carries its dataset's and then its own as
   `MetadataItem`s.
@@ -228,8 +231,11 @@ A dataset opens on a table of its pages with a preview of the selected scan besi
   dataset's.
 - Training on material In Copyright, or under contractual or other legal restrictions, waits for
   its owner: until they confirm in the rights dialog that a research exception or a contract
-  permits it, no run trains or validates on that dataset. The confirmation is given once and
-  logged, and switches nothing. A run's Data tab lists the rights of what it trained on.
+  permits it, no run trains or validates on that dataset. The confirmation is logged and
+  switches nothing. It covers the restricting statements on the material when it was given, and
+  only while the person who gave it owns the dataset: a restricting statement not covered yet, on
+  the dataset or on a page, or a transfer to someone else, asks the owner again. A run's Data tab
+  lists the rights of what it trained on.
 - Every export archive carries a `RIGHTS.txt`, naming the pages with rights of their own. The TEI
   header licenses the transcriptions in `publicationStmt` and gives the scans' rights and credit
   line in `sourceDesc`.
@@ -500,7 +506,8 @@ Press `e` to edit the page.
   original canvas, so an archive can show the transcription in its own viewer (Mirador,
   Universal Viewer).
 - A DeepLabel zip export can be uploaded to another instance and arrives with its classes,
-  text, corrections and review state intact.
+  text, corrections and review state intact, with its page types and its dataset's and each
+  page's free metadata.
 
 ## Existing transcriptions
 
@@ -776,7 +783,7 @@ polygons) and *line tracing* (boundary lines, open or closed).
   returns a handed-in page to its assignee with a note they see on the page; every edit and
   check made on it stays, and they hand it in again; given to someone else, the page starts
   afresh. A line that loses its check afterwards - an Annotator's correction, a new unchecked
-  line, a re-read - takes the sign-off back, and the page waits for a Reviewer again. Once any page has been handed in, the page table gains a
+  line, a re-read of a checked line - takes the sign-off back, and the page waits for a Reviewer again. Once any page has been handed in, the page table gains a
   **Review** column and the filters **Handed in**, **Sent back** and **Signed off**.
 - **Double-keying:** for ground truth that has to be independent, a Manager ticks **Two people
   key each page** in **Assign pages…** and gives each page two keyers. Each keyer types the text
@@ -787,7 +794,8 @@ polygons) and *line tracing* (boundary lines, open or closed).
   quotes and dashes count - are checked, and every other line waits for the Reviewer with both
   versions offered on it, their differences marked. The Reviewer takes one or types the text,
   checks the line and signs the page off; a double-keyed page is not sent back. Until it is signed off, each keyer sees
-  only their own version. While one keyer is in, the page shows **1 of 2 handed in**, a filter of
+  only their own version, and their Search and the dataset's transcript leave the page out. A line
+  drawn after the first keyer handed the page in waits for the Reviewer. While one keyer is in, the page shows **1 of 2 handed in**, a filter of
   its own, so a page whose second keyer never finishes can be found and given to someone else;
   whoever stays keeps their typing.
 - **Notes:** a dataset and each of its pages can carry one note everyone with access can read,

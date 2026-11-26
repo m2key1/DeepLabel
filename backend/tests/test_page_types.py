@@ -15,7 +15,7 @@ SECRET = 'test-secret'
 ALICE = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'alice', 'X-Auth-Role': 'member'}
 BOB = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'bob', 'X-Auth-Role': 'member'}
 RUNNER = {**ALICE, 'X-Auth-Caps': 'pipeline.layout pipeline.lines pipeline.ocr'}
-COVER, BLANK = 2, 3
+TEXT, COVER, BLANK = 1, 2, 3
 LINE = '[[0.1,0.1],[0.9,0.1],[0.9,0.2],[0.1,0.2]]'
 
 
@@ -86,6 +86,22 @@ class TestEveryDatasetHasItsOwn:
     def test_a_type_can_switch_a_step_back_on(self, api, conn):
         assert api.patch(f'/api/jobs/j1/page-types/{COVER}', json={'run_ocr': True}, headers=ALICE).status_code == 200
         assert types_of(conn)[1] == (2, 'Cover', True, True, True)
+
+    def test_turning_line_detection_off_takes_reading_with_it(self, api, conn):
+        """Reading reads the lines found, as a dataset's own switches have it: a type reading
+        without them would hold its pages after layout, never read (#169)."""
+        response = api.patch(f'/api/jobs/j1/page-types/{TEXT}', json={'run_lines': False}, headers=ALICE)
+
+        assert (response.json()['run_lines'], response.json()['run_ocr']) == (False, False)
+        assert types_of(conn)[0] == (1, 'Text', True, False, False)
+
+    def test_reading_is_not_switched_on_without_lines(self, api, conn):
+        api.patch(f'/api/jobs/j1/page-types/{TEXT}', json={'run_lines': False}, headers=ALICE)
+
+        response = api.patch(f'/api/jobs/j1/page-types/{TEXT}', json={'run_ocr': True}, headers=ALICE)
+
+        assert response.json()['run_ocr'] is False
+        assert types_of(conn)[0] == (1, 'Text', True, False, False)
 
     def test_two_types_of_one_dataset_cannot_share_a_name(self, api):
         response = api.patch(f'/api/jobs/j1/page-types/{COVER}', json={'name': ' blank '}, headers=ALICE)

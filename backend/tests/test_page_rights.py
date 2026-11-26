@@ -160,13 +160,22 @@ class TestFound:
         assert listed == {'j1': [CC_BY, IN_COPYRIGHT], 'j2': [rights.NOT_EVALUATED]}
 
     @pytest.mark.parametrize('statement, found', [
-        (CC_BY, ['Pfarrer Huber']), (IN_COPYRIGHT, ['Pfarrer Maier']), (rights.NOT_EVALUATED, ['Pfarrer Gruber'])])
+        (CC_BY, ['Pfarrer Huber']), (IN_COPYRIGHT, ['Pfarrer Maier']), (rights.NOT_EVALUATED, ['Pfarrer Gruber']),
+        ('https://creativecommons.org/licenses/by/4.0/legalcode', ['Pfarrer Huber']),
+        ('https://www.rightsstatements.org/page/InC/1.0/', ['Pfarrer Maier'])])
     def test_search_finds_a_page_by_its_own_rights_else_its_datasets(self, api, statement, found):
         set_pages(api, [2], {'status': IN_COPYRIGHT})
 
         hits = api.get('/api/search', params={'q': 'Pfarrer', 'rights': statement}, headers=ALICE).json()['hits']
 
         assert [hit['text'] for hit in hits] == found
+
+    def test_a_search_value_that_is_not_a_statement_is_refused(self, api):
+        response = api.get('/api/search', params={'q': 'Pfarrer', 'rights': 'https://example.org/terms'},
+                           headers=ALICE)
+
+        assert (response.status_code, response.json()['detail']) == (
+            400, 'https://example.org/terms is not one of the rights statements on offer')
 
 
 class TestExported:

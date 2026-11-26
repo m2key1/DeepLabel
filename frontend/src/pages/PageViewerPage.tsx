@@ -2278,7 +2278,7 @@ export function PageViewerPage() {
     // Last line of the page: on to the next one, first line focused. Within an element the
     // rest of the page is still ahead, so that stays put.
     if (stage === 'element' || !page) return
-    const next = stepPage(orderedPages, page.idx, 1, user)
+    const next = stepPage(orderedPages, page.idx, 1)
     if (next) {
       pendingFirstLine.current = next.id
       navigate(`/jobs/${jobId}/pages/${next.id}`)
@@ -2289,7 +2289,7 @@ export function PageViewerPage() {
     // From the open page's place, which an annotator's list need not hold: one of someone
     // else's pages opened from a link.
     const gotoPage = (delta: 1 | -1) => {
-      const next = openIdx !== undefined && stepPage(orderedPages, openIdx, delta, user)
+      const next = openIdx !== undefined && stepPage(orderedPages, openIdx, delta)
       if (next) navigate(`/jobs/${jobId}/pages/${next.id}`)
     }
     const onKey = (e: KeyboardEvent) => {

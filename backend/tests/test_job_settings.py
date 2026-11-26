@@ -332,7 +332,7 @@ class TestCancelling:
 
         assert response.status_code == 409
         assert response.json()['detail'] == (
-            'this dataset is already done - only a queued or running one can be cancelled')
+            'this dataset is already done - only a queued, running or ingesting one can be cancelled')
         assert job(conn)['status'] == 'done'
 
 

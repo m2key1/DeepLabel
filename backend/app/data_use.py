@@ -60,10 +60,11 @@ def require_export(conn, job_id: str, user: dict) -> None:
         raise HTTPException(403, 'the creator of this dataset keeps its exports to themselves')
 
 
-def log(conn, job_id: str, username: str, action: str, detail: dict | None = None) -> None:
+def log(conn, job_id: str, username: str, action: str, detail: dict | None = None, commit: bool = True) -> None:
     conn.execute('INSERT INTO job_log (job_id, username, action, detail) VALUES (?, ?, ?, ?)',
                  (job_id, username, action, json.dumps(detail or {})))
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def models_made_from(conn, job_id: str) -> list[dict]:

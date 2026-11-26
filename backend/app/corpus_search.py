@@ -1,7 +1,7 @@
 import unicodedata
 from collections import defaultdict
 
-from app import caches, rights, store
+from app import caches, keying, rights, store
 from app.caches import counted_page
 from app.folding import search_form
 from app.text_search import matcher
@@ -48,7 +48,7 @@ def search(conn, user: dict, visible_jobs: str, query: str, mode: str, checked_o
     if mode != 'regex' and lookup is None:
         return {**empty, 'too_short': True}
 
-    where = [f'p.job_id IN ({visible_jobs})']
+    where = [f'p.job_id IN ({visible_jobs})', keying.not_blind('p')]
     params: dict = {'me': user['username']}
     if group_id is not None:
         where.append('j.group_id = :group')

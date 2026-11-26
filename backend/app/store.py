@@ -905,6 +905,7 @@ ABBREVIATIONS_NOT_OFFERED = 7
 CONVENTION_EXAMPLES = 8
 WORKSPACES = 9
 DATASET_ROLES = 10
+SEARCH_INDEX_REFOLDED = 11
 
 # The dataset fields behind each data use a dataset's owner can switch off.
 DATA_USE_COLUMNS = {'training': 'use_training', 'test': 'use_test',
@@ -1217,9 +1218,13 @@ def connect(db_path: Path) -> sqlite3.Connection:
                 conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} TEXT')
         if 'metadata' not in {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN metadata TEXT NOT NULL DEFAULT '[]'")
-    if 'rights' not in {row[1] for row in conn.execute('PRAGMA table_info(jobs)')}:
-        conn.execute("ALTER TABLE jobs ADD COLUMN rights TEXT NOT NULL DEFAULT '{}'")
+    jobs_cols = {row[1] for row in conn.execute('PRAGMA table_info(jobs)')}
+    if 'transcription_licence' not in jobs_cols:
+        # Its own guard: rights.write reads the column, so it must be there before the
+        # backfill below - and rights alone can exist on a database whose migration ran half way.
         conn.execute('ALTER TABLE jobs ADD COLUMN transcription_licence TEXT')
+    if 'rights' not in jobs_cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN rights TEXT NOT NULL DEFAULT '{}'")
         # What a IIIF dataset's manifest said moves into the fields, marked as imported.
         for job in conn.execute('SELECT id, iiif_source FROM jobs WHERE iiif_source IS NOT NULL').fetchall():
             try:
@@ -1320,11 +1325,15 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.execute("UPDATE pages SET gt_source = 'sidecar' WHERE gt_text IS NOT NULL")
     if 'layout_skipped' not in page_cols:
         # A text dataset with layout off moved every page past layout untouched; those
-        # pages are the ones it has not run on.
+        # pages are the ones it has not run on. Layout switched off after it ran left a model's
+        # mark or boxes, and those pages are not passed by: running layout on them again would
+        # take the boxes (#163).
         conn.execute('ALTER TABLE pages ADD COLUMN layout_skipped INTEGER NOT NULL DEFAULT 0')
         if 'status' in page_cols:
             conn.execute("UPDATE pages SET layout_skipped = 1 WHERE status IN ('layout_done', 'lines_done', 'done') "
-                         "AND job_id IN (SELECT id FROM jobs WHERE run_layout = 0 AND task = 'text')")
+                         "AND job_id IN (SELECT id FROM jobs WHERE run_layout = 0 AND task = 'text') "
+                         'AND layout_run_at IS NULL AND NOT EXISTS (SELECT 1 FROM elements e '
+                         "WHERE e.page_id = pages.id AND e.deleted = 0 AND e.kind != 'orphan')")
     if 'reference_text' not in page_cols:
         # The corpus span this page is answerable for, with how well the cut is pinned
         # down: which document it came from, how many lines anchored, and how closely.
@@ -1453,6 +1462,13 @@ def connect(db_path: Path) -> sqlite3.Connection:
             conn.execute('INSERT OR IGNORE INTO job_roles (job_id, username, role) '
                          'SELECT job_id, username, role FROM job_assignees WHERE role IS NOT NULL')
         conn.execute(f'PRAGMA user_version = {DATASET_ROLES}')
+    # The index once left a decomposed accent, a carriage return and a long run of spaces in
+    # what it folded, so exact search missed those lines (#169). Made again below.
+    if conn.execute('PRAGMA user_version').fetchone()[0] < SEARCH_INDEX_REFOLDED:
+        for name in ('line_search_added', 'line_search_changed', 'line_search_removed'):
+            conn.execute(f'DROP TRIGGER IF EXISTS {name}')
+        conn.execute('DROP TABLE IF EXISTS line_search')
+        conn.execute(f'PRAGMA user_version = {SEARCH_INDEX_REFOLDED}')
     conn.commit()
     _index_line_text(conn)
     return conn

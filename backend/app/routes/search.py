@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from app import corpus_search
+from app import rights as rights_module
 from app.deps import VISIBLE_JOB_IDS, current_user, get_db
 from app.text_search import MODES, PatternTooSlow
 
@@ -16,9 +17,12 @@ def search(q: str, mode: str = 'fuzzy', checked: bool = False, group_id: int | N
     checked lines, or the pages under one rights statement - a screenful at a time."""
     if mode not in MODES:
         raise HTTPException(400, f'mode must be one of {", ".join(MODES)}')
+    statement = rights_module.canonical(rights) if rights is not None else None
+    if rights is not None and statement is None:
+        raise HTTPException(400, f'{rights} is not one of the rights statements on offer')
     visible = 'SELECT id FROM jobs' if user['role'] == 'admin' else VISIBLE_JOB_IDS
     try:
         return corpus_search.search(conn, user, visible, q, mode, checked, group_id, job_id,
-                                    max(0, offset), min(max(1, limit), 200), rights)
+                                    max(0, offset), min(max(1, limit), 200), statement)
     except PatternTooSlow:
         raise HTTPException(400, 'pattern too slow over every dataset - narrow it to a workspace or a dataset') from None

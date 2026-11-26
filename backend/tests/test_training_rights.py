@@ -4,7 +4,7 @@ shows the rights of what it was trained on."""
 import pytest
 from fastapi.testclient import TestClient
 
-from app import remote_training, rights, store, trainer
+from app import config, remote_training, rights, store, trainer
 from app.deps import get_db
 from app.main import app
 
@@ -16,6 +16,7 @@ ROOT = {'X-Frontend-Secret': SECRET, 'X-Auth-User': 'root', 'X-Auth-Role': 'admi
 CC_BY = 'http://creativecommons.org/licenses/by/4.0/'
 IN_COPYRIGHT = 'http://rightsstatements.org/vocab/InC/1.0/'
 CONTRACTUAL = 'http://rightsstatements.org/vocab/NoC-CR/1.0/'
+EDUCATIONAL = 'http://rightsstatements.org/vocab/InC-EDU/1.0/'
 NOT_PERMITTED = ' - its owner has not yet confirmed that training on it is permitted'
 
 
@@ -131,12 +132,24 @@ class TestTheGate:
         assert response.json()['training'] == {'restrictive': True,
                                                'permitted': {'by': 'alice', 'at': response.json()['history'][0]['at']}}
         latest = response.json()['history'][0]
-        assert (latest['field'], latest['old'], latest['new'], latest['author']) == ('training', None, 'permitted', 'alice')
+        # The statements the word covers (decision 369).
+        assert (latest['field'], latest['old'], latest['new'], latest['author']) == (
+            'training', None, f'["{IN_COPYRIGHT}"]', 'alice')
         assert start(client).status_code == 200
 
     def test_a_run_queued_before_the_rights_changed_stops_before_cutting_anything(self, conn):
         under(conn, 'j1', IN_COPYRIGHT)
         training = {'id': 7, 'task': 'ocr', 'dataset_job_ids': '["j1"]', 'valid_job_ids': '[]'}
+
+        with pytest.raises(remote_training.CannotTrain, match='"Council minutes" holds material under In Copyright'):
+            trainer.prepare_snapshot(conn, training)
+
+    def test_so_does_a_retried_run_whose_snapshot_was_kept(self, conn):
+        """A retry keeps the snapshot it cut, and is checked again all the same (#169)."""
+        training = {'id': 7, 'task': 'ocr', 'dataset_job_ids': '["j1"]', 'valid_job_ids': '[]',
+                    'snapshot_counts': '{"train": 1, "val": 0}'}
+        (config.training_dir(7) / 'snapshot').mkdir(parents=True)
+        under(conn, 'j1', IN_COPYRIGHT)
 
         with pytest.raises(remote_training.CannotTrain, match='"Council minutes" holds material under In Copyright'):
             trainer.prepare_snapshot(conn, training)
@@ -170,6 +183,53 @@ class TestTheConfirmation:
         assert permit(client).status_code == 200
         history = client.get('/api/jobs/j1/rights', headers=ALICE).json()['history']
         assert [h['field'] for h in history] == ['training', 'status']
+
+
+class TestTheConfirmationLapses:
+    """Decision 369: the owner's word covers the statements it was given for, while they own it."""
+
+    def refused(self, conn) -> str | None:
+        return rights.training_refusal(conn, ['j1'])
+
+    def test_a_transfer_asks_the_new_owner(self, client, conn):
+        under(conn, 'j1', IN_COPYRIGHT)
+        permit(client)
+
+        conn.execute("UPDATE jobs SET owner = 'bob' WHERE id = 'j1'")
+
+        assert self.refused(conn) == f'"Council minutes" holds material under In Copyright{NOT_PERMITTED}'
+        assert permit(client, headers=BOB).status_code == 200
+        assert self.refused(conn) is None
+
+    def test_a_restricting_statement_on_a_page_asks_again(self, client, conn):
+        under(conn, 'j1', IN_COPYRIGHT)
+        permit(client)
+
+        under(conn, 'j1', CONTRACTUAL, page_id=1)
+
+        assert self.refused(conn) == f'"Council minutes" holds material under No Copyright - Contractual Restrictions{NOT_PERMITTED}'
+        assert client.get('/api/jobs/j1/rights', headers=ALICE).json()['training']['permitted'] is None
+
+    def test_a_stricter_statement_on_the_dataset_asks_again(self, client, conn):
+        under(conn, 'j1', EDUCATIONAL)
+        permit(client)
+
+        under(conn, 'j1', IN_COPYRIGHT)
+
+        assert self.refused(conn) == f'"Council minutes" holds material under In Copyright{NOT_PERMITTED}'
+
+    def test_a_statement_already_confirmed_and_the_free_fields_ask_nothing(self, client, conn):
+        under(conn, 'j1', EDUCATIONAL)
+        permit(client)
+        under(conn, 'j1', IN_COPYRIGHT)
+        permit(client)
+
+        under(conn, 'j1', EDUCATIONAL)
+        rights.write(conn, 'j1', {'credit': 'Stadtarchiv', 'holder': 'Stadt Graz'}, 'bob')
+        conn.commit()
+
+        assert self.refused(conn) is None
+        assert client.get('/api/jobs/j1/rights', headers=ALICE).json()['training']['permitted']['by'] == 'alice'
 
 
 class TestARunsMaterial:

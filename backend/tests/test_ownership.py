@@ -4,7 +4,7 @@ hands it to someone else."""
 import pytest
 from fastapi.testclient import TestClient
 
-from app import page_rows, store
+from app import data_use, page_rows, store
 from app.deps import get_db
 from app.main import app
 
@@ -226,6 +226,27 @@ class TestHandingOverAWorkspace:
 
         assert response.status_code == 409
         assert response.json()['detail'] == 'A Sandbox stays with the person it belongs to'
+
+    def test_a_handover_failing_halfway_changes_nothing(self, client, monkeypatch):
+        """The workspace and its datasets change hands together or not at all (#169)."""
+        api, conn = client
+        logged = []
+        log = data_use.log
+
+        def log_then_fail(*args, **kwargs):
+            logged.append(args)
+            if len(logged) == 2:
+                raise RuntimeError('disk full')
+            log(*args, **kwargs)
+        monkeypatch.setattr('app.routes.transfers.data_use.log', log_then_fail)
+
+        with pytest.raises(RuntimeError):
+            api.post('/api/groups/1/transfer', headers=ANNA, json={'to': 'mia'})
+        conn.rollback()
+
+        assert conn.execute('SELECT owner FROM groups WHERE id = 1').fetchone()[0] == 'anna'
+        assert owners(conn) == {'j1': 'anna', 'j2': 'anna', 'j3': 'lena', 'j4': 'ben', 'j5': 'anna'}
+        assert members(conn, 1) == ['anna', 'ben', 'lena']
 
     def test_a_workspace_goes_to_someone_else(self, client):
         api, _ = client

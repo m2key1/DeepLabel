@@ -13,8 +13,7 @@ const rowOf = (page: Page, name: string) => page.getByTestId('job-card').filter(
 const sectionOf = (page: Page, title: string) =>
   page.locator(`[data-testid="list-section"][data-title="${title}"]`)
 
-const groupHeader = (page: Page, title: string) =>
-  sectionOf(page, title).getByRole('button', { name: new RegExp(`${escape(title)}$`) })
+const groupHeader = (page: Page, title: string) => sectionOf(page, title).getByTestId('section-toggle')
 
 const sidebarEntry = (page: Page, title: string) =>
   page.getByTestId('dataset-sidebar').getByRole('button', { name: new RegExp(`^${escape(title)}`) })
@@ -159,6 +158,26 @@ test.describe('Scenario: filing datasets by dragging them onto a group', () => {
     expect((await getJob(shared)).group_id).toBe(sharedGroup)
     await expect(page.getByText(new RegExp(`1 moved; 1 skipped: ${escape(sharedName)} \\(`)))
       .toBeVisible()
+    await context.close()
+  })
+
+  test('only a dataset one may move is dragged', async ({ browser }) => {
+    // A Reviewer manages what they made; one only given to them is not theirs to move (#167).
+    const username = `drag-reviewer-${Date.now()}`
+    const session = seedSession('reviewer', username)
+    const ownName = uniqueName('Drag made')
+    const own = await createJob(ownName, 1, undefined, identity(username, 'reviewer'))
+    const givenName = uniqueName('Drag given')
+    const given = await seedCompletedJob(givenName, 1)
+    await shareJob(given, [username])
+    await waitForJobStatus(own, 'done')
+
+    const context = await browser.newContext()
+    await useSession(context, session)
+    const page = await context.newPage()
+    await page.goto('/?sort=newest')
+    await expect(rowOf(page, ownName)).toHaveAttribute('draggable', 'true')
+    await expect(rowOf(page, givenName)).toHaveAttribute('draggable', 'false')
     await context.close()
   })
 

@@ -118,5 +118,7 @@ def take_review_back(page_id: int, conn=Depends(get_db), user: dict = Depends(cu
     require_page_access(conn, page_id, user)
     job_id = _text_page(conn, page_id)
     require_role_on(conn, 'page', page_id, user, 'reviewer')
+    # Under the lock a sign-off takes, so the two cannot cross.
+    store.write_lock(conn)
     conn.execute('DELETE FROM page_reviews WHERE page_id = ?', (page_id,))
     return _changed(conn, job_id, page_id)

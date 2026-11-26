@@ -226,6 +226,15 @@ class TestAssigningTwoKeyers:
         assert table(api, ANNA, 'assigned:lena') == [1, 2]
         assert table(api, ANNA, 'assigned:ben') == [1]
 
+    def test_the_viewer_steps_through_the_pages_i_key_second_too(self, client):
+        """The dataset names one keyer per page, the first by name; `mine` is what Next keeps to (#162)."""
+        api, _ = client
+
+        pages = api.get('/api/jobs/j1', headers=LENA).json()['pages']
+
+        assert [(page['idx'], page['assignee'], page['mine']) for page in pages] == [
+            (0, 'ben', True), (1, 'lena', True), (2, None, False)]
+
 
 class TestKeyingBlind:
     def test_a_keyers_typing_is_kept_apart_from_the_line(self, client):
@@ -267,6 +276,33 @@ class TestKeyingBlind:
         assert api.get('/api/jobs/j1/pages/11', headers=LENA).json()['reference'] is None
         assert api.get('/api/jobs/j1/pages/11', headers=RITA).json()['reference']['text'] == 'Johann Maier, Maria Hofer'
 
+    def test_search_and_the_transcript_leave_out_the_pages_one_keys(self, client):
+        api, conn = client
+        conn.execute("UPDATE jobs SET keying_from_empty = 1 WHERE id = 'j1'")
+
+        def found(headers) -> dict:
+            corpus = api.get('/api/search', headers=headers, params={'q': 'Johann Maier', 'mode': 'exact'})
+            volume = api.get('/api/jobs/j1/transcript/search', headers=headers,
+                             params={'q': 'Johann Maier', 'mode': 'exact'})
+            index = api.get('/api/jobs/j1/transcript', headers=headers)
+            return {'search': [hit['line_id'] for hit in corpus.json()['hits']],
+                    'volume': [hit['line'] for hit in volume.json()['hits']],
+                    'pages': [page['idx'] for page in index.json()['pages']],
+                    'page 1': api.get('/api/jobs/j1/transcript/pages/0', headers=headers).status_code}
+
+        assert found(LENA) == {'search': [], 'volume': [], 'pages': [2], 'page 1': 404}
+        assert found(RITA) == {'search': [1001], 'volume': [1001], 'pages': [0, 1, 2], 'page 1': 200}
+
+    def test_a_page_signed_off_is_searched_by_its_keyers_again(self, client):
+        api, conn = client
+        conn.execute("UPDATE page_assignees SET handed_in_at = datetime('now') WHERE page_id = 11")
+        conn.execute("INSERT INTO page_reviews (page_id, state, by_user, at) "
+                     "VALUES (11, 'signed_off', 'rita', datetime('now'))")
+
+        response = api.get('/api/search', headers=LENA, params={'q': 'Johann Maier', 'mode': 'exact'})
+
+        assert [hit['line_id'] for hit in response.json()['hits']] == [1001]
+
     def test_the_viewer_learns_who_keys_the_page(self, client):
         api, _ = client
         hand_in(api, LENA, 11)
@@ -306,6 +342,7 @@ class TestKeyingBlind:
         ('post', '/api/pages/11/turn', {'degrees': 90}),
         ('post', '/api/pages/11/run', {'phase': 'ocr'}),
         ('post', '/api/pages/11/revert', {'from_revision': 1, 'to_revision': 2, 'direction': 'undo'}),
+        ('delete', '/api/pages/11/llm/readings', None),
     ])
     def test_a_keyer_changes_the_text_only(self, client, method, url, body):
         api, conn = client
@@ -402,6 +439,22 @@ class TestComparingTheKeyings:
         assert line(conn, 1003) == ('wien', 'ben', 0, None)
         assert readings_seen(api, RITA) == [(1001, 'llm:gpt', 'Johann Mair'),
                                             (1003, 'ben', 'wien'), (1003, 'lena', 'Wien.')]
+
+    def test_a_line_drawn_after_the_first_hand_in_waits_for_the_reviewer(self, client):
+        """The first keyer never saw it, so the two cannot have agreed on it (#169)."""
+        api, conn = client
+        hand_in(api, LENA, 11)
+        conn.execute("UPDATE page_assignees SET handed_in_at = datetime('now', '-1 minute') "
+                     "WHERE page_id = 11 AND username = 'lena'")
+        drawn = api.post('/api/pages/11/lines', headers=ANNA,
+                         json={'polygon': [[0.1, 0.5], [0.9, 0.5], [0.9, 0.6], [0.1, 0.6]]})
+        assert drawn.status_code == 200, drawn.text
+        new_line = drawn.json()['id']
+
+        hand_in(api, BEN, 11)
+
+        assert conn.execute('SELECT checked, check_source FROM lines WHERE id = ?', (new_line,)).fetchone()[:] == (0, None)
+        assert line(conn, 1002) == (None, None, 1, 'keyed')
 
     def test_from_empty_lines_a_line_nobody_typed_is_agreed_empty(self, client):
         api, conn = client

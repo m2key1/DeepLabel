@@ -743,8 +743,12 @@ export function JobsPage() {
       setError((e as Error).message)
     }
   }
+  // Moving a dataset takes its Manager, so only those are picked up (#167).
+  const movable = useMemo(() => new Set(canEdit
+    ? (jobs ?? []).filter((job) => reaches(job.my_role, 'manager')).map((job) => job.id) : []), [jobs, canEdit])
   const { dragSource, folderSource, dropZone } = useDatasetDrag(
-    selected, canEdit, (ids, target) => void moveDatasets(ids, target.groupId, target.folderId ?? null),
+    selected, (jobId) => movable.has(jobId),
+    (ids, target) => void moveDatasets(ids, target.groupId, target.folderId ?? null),
     (folder, target) => void moveFolder(folder, target))
 
   // A card's three buttons stop their click from reaching the page, which is what shuts
@@ -995,6 +999,7 @@ export function JobsPage() {
         <div className={`flex items-center gap-2 ${
           overflows ? `sticky left-0 z-10 pr-2 ${zone?.lit ? 'bg-accent-wash' : 'bg-raised'}` : ''}`}>
           <button
+            data-testid="section-toggle"
             onClick={() => toggleSection(key)}
             aria-expanded={!collapsed.has(key)}
             className="flex items-center gap-1.5 font-serif text-sm font-semibold text-ink hover:text-accent-ink"

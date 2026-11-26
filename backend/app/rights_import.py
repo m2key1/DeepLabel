@@ -3,7 +3,7 @@ import zipfile
 from pathlib import PurePosixPath
 from xml.etree import ElementTree
 
-from app import ingest, rights
+from app import imports, ingest, rights
 
 # The namespaces rights facts hide in beside the scans: Dublin Core and its terms (also
 # inside a METS dmdSec), METSRights under a rightsMD, and xlink on a MODS accessCondition.
@@ -111,9 +111,10 @@ def from_metadata(content: bytes) -> dict:
 
 
 def _read(archive, name: str) -> bytes:
+    """A member too big to read whole counts as unreadable, like the rest: it says nothing."""
     try:
-        return archive.read(name)
-    except (OSError, KeyError, zipfile.BadZipFile):
+        return imports.read_within_limit(archive, name)
+    except (OSError, KeyError, zipfile.BadZipFile, imports.ImportError_):
         return b''
 
 

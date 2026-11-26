@@ -34,6 +34,7 @@ def _lines(transcript: dict, width: float | None, height: float | None, most_pag
     if not width or not height:
         raise iiif.IiifError('the canvas gives no size to place its annotations on')
     found = []
+    canvas_id = transcript.get('canvas')
     for page in transcript['pages'][:most_pages]:
         annotations = page.get('annotations')
         if annotations is None:
@@ -41,6 +42,9 @@ def _lines(transcript: dict, width: float | None, height: float | None, most_pag
             fetched = json.loads(body)
             annotations = (fetched.get('items') or fetched.get('resources')) if isinstance(fetched, dict) else None
         for annotation in annotations if isinstance(annotations, list) else []:
+            named = iiif.annotation_targets(annotation)
+            if canvas_id and named and canvas_id not in named:
+                continue
             said = iiif.annotation_text(annotation)
             outline = iiif.annotation_outline(annotation, width, height) if said else None
             if outline:

@@ -351,6 +351,19 @@ class TestDeleting:
         assert (response.status_code, response.json()['detail']) == \
             (409, 'dataset "Volume" is being read with this model - wait for it to finish or cancel it')
 
+    @pytest.mark.parametrize('status', ['queued', 'ingesting'])
+    def test_a_dataset_waiting_to_be_read_with_it_keeps_it(self, client, conn, status):
+        """Its run would start with the task default in its place, without a word."""
+        conn.execute("INSERT INTO jobs (id, name, owner, status, model_ocr_id) VALUES ('j1', 'Volume', 'alice', ?, 4)",
+                     (status,))
+        conn.commit()
+
+        response = self.delete(client, 4)
+
+        assert (response.status_code, response.json()['detail']) == \
+            (409, 'dataset "Volume" waits to be read with this model - wait for it to finish or cancel it')
+        assert conn.execute('SELECT model_ocr_id FROM jobs WHERE id = ?', ('j1',)).fetchone()[0] == 4
+
     def test_an_evaluation_running_on_it_keeps_it(self, client, conn):
         conn.execute("INSERT INTO evaluations (model_id, decode, owner, status) VALUES (4, 'greedy', 'root', 'running')")
         conn.commit()
@@ -359,6 +372,16 @@ class TestDeleting:
 
         assert (response.status_code, response.json()['detail']) == \
             (409, 'an evaluation of this model is running - wait for it to finish or cancel it')
+
+    def test_an_evaluation_waiting_to_run_keeps_it(self, client, conn):
+        conn.execute("INSERT INTO evaluations (model_id, decode, owner, status) VALUES (4, 'greedy', 'root', 'queued')")
+        conn.commit()
+
+        response = self.delete(client, 4)
+
+        assert (response.status_code, response.json()['detail']) == \
+            (409, 'an evaluation of this model waits to run - wait for it to finish or cancel it')
+        assert conn.execute('SELECT COUNT(*) FROM evaluations WHERE model_id = 4').fetchone()[0] == 1
 
     def test_a_model_that_does_not_exist_is_a_404(self, client):
         assert self.delete(client, 99).status_code == 404

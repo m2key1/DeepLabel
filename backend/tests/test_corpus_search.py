@@ -149,3 +149,26 @@ class TestTheIndexFollowsTheLines:
         conn.execute('UPDATE pages SET deleted = 1 WHERE id = 3')
         conn.commit()
         assert found(search(api, q='Müller')) == [10, 20]
+
+
+class TestTheIndexFoldsLikeTheQuery:
+    def test_a_line_with_space_runs_or_carriage_returns_is_found_exactly(self, client):
+        """#169: the index once kept a long run of spaces or a carriage return that the query's
+        fold takes out, and the per-row matcher wanted the spaces as typed, so an exact search
+        missed those lines."""
+        api, conn = client
+        conn.executemany('INSERT INTO lines (id, element_id, order_idx, polygon, text) VALUES (?, 1, ?, ?, ?)',
+                         [(50, 2, '[]', 'Johann     Müller, Pfarrer'), (51, 3, '[]', 'Johann\r\nMüller, Pfarrer')])
+        conn.commit()
+        assert found(search(api, q='Johann Müller, Pfarrer', mode='exact')) == [10, 50, 51]
+
+    def test_a_correction_with_an_accent_is_found_exactly(self, client):
+        """A correction is stored decomposed; the index puts each letter back together with its
+        accent, as the query's fold does, so exact search finds it (#169)."""
+        api, _ = client
+        for line_id, text in ((11, 'Josef Grünwald'), (20, 'Anna Bréton')):
+            res = api.patch(f'/api/lines/{line_id}', headers=ALICE, json={'corrected_text': text})
+            assert res.status_code == 200, res.text
+
+        assert found(search(api, q='Grünwald', mode='exact')) == [11]
+        assert found(search(api, q='Bréton', mode='case')) == [20]

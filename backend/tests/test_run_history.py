@@ -298,9 +298,91 @@ class TestWhatTheReviewFound:
 
         preview = api.get(f'/api/jobs/j1/runs/{run_id}/revert', headers=ALICE).json()
         assert (preview['remove'], preview['kept']) == ({'lines': 0, 'boxes': 0}, {'lines': 1, 'boxes': 1})
-        assert api.post(f'/api/jobs/j1/runs/{run_id}/revert', headers=ALICE).status_code == 200
+        # All of it is kept, so there is nothing to take back (#169).
+        assert api.post(f'/api/jobs/j1/runs/{run_id}/revert', headers=ALICE).status_code == 409
         box = conn.execute('SELECT deleted FROM elements WHERE id = ?', (made['box'],)).fetchone()[0]
         assert (box, texts(conn)[made['line']]) == (0, ('Pfarrer', 'Pfarrer zu Linz', 0))
+
+    def test_a_box_whose_lines_all_go_back_elsewhere_goes(self, client):
+        """The run made a box and moved a line into it; the line goes back, so the box has nothing to hold."""
+        api, conn = client
+        made = {}
+
+        def box_around_a_line(author):
+            made['box'] = conn.execute("INSERT INTO elements (page_id, order_idx, class_name, bbox, kind) "
+                                       "VALUES (1, 1, 'Paragraph', '[0, 0.15, 1, 0.35]', 'content')").lastrowid
+            store.log_element(conn, made['box'], author, 'create')
+            conn.execute('UPDATE lines SET element_id = ? WHERE id = 2', (made['box'],))
+            store.log_line(conn, 2, author, 'update')
+        run_id = a_run(conn, box_around_a_line)
+
+        preview = api.get(f'/api/jobs/j1/runs/{run_id}/revert', headers=ALICE).json()
+        assert (preview['restore'], preview['remove'], preview['kept']) == (
+            {'lines': 1, 'boxes': 0}, {'lines': 0, 'boxes': 1}, {'lines': 0, 'boxes': 0})
+        assert api.post(f'/api/jobs/j1/runs/{run_id}/revert', headers=ALICE).status_code == 200
+        assert conn.execute('SELECT element_id FROM lines WHERE id = 2').fetchone()[0] == 1
+        assert conn.execute('SELECT deleted FROM elements WHERE id = ?', (made['box'],)).fetchone()[0] == 1
+
+    def test_a_page_deleted_since_is_left_as_it_was_deleted(self, client):
+        """Restored later, the page comes back as it was when it went, not as before the run."""
+        api, conn = client
+        conn.executescript("""
+            INSERT INTO pages (id, job_id, idx, filename, source_file, status) VALUES (2, 'j1', 1, 'b.png', '/b.png', 'done');
+            INSERT INTO elements (id, page_id, order_idx, class_name, bbox, kind) VALUES (2, 2, 0, 'Paragraph', '[0, 0, 1, 1]', 'content');
+            INSERT INTO lines (id, element_id, order_idx, polygon, text) VALUES (3, 2, 0, '[[0, 0], [1, 0], [1, 0.1], [0, 0.1]]', 'Taufbuch');
+        """)
+        store.log_line(conn, 3, 'model:first', 'create')
+        run_id = a_run(conn, reread(conn, {1: 'Johann Miller', 3: 'Tauffbuch'}))
+        conn.execute('UPDATE pages SET deleted = 1 WHERE id = 2')
+        conn.commit()
+
+        assert api.get(f'/api/jobs/j1/runs/{run_id}/revert', headers=ALICE).json()['restore'] == {'lines': 1, 'boxes': 0}
+        assert api.post(f'/api/jobs/j1/runs/{run_id}/revert', headers=ALICE).status_code == 200
+        assert (texts(conn)[1], texts(conn)[3]) == (('Johann Muller', None, 0), ('Tauffbuch', None, 0))
+
+    def test_nothing_left_to_put_back_is_not_reverted(self, client):
+        api, conn = client
+        run_id = a_run(conn, reread(conn, {1: 'Johann Miller'}))
+        conn.execute("UPDATE lines SET text = 'Johann Muller' WHERE id = 1")
+        store.log_line(conn, 1, 'model:third', 'update')
+        conn.commit()
+
+        res = api.post(f'/api/jobs/j1/runs/{run_id}/revert', headers=ALICE)
+
+        assert (res.status_code, res.json()['detail']) == (409, 'Nothing this run changed is left to put back')
+        assert conn.execute('SELECT reverted_at FROM runs WHERE id = ?', (run_id,)).fetchone()[0] is None
+
+    def test_a_page_marked_layout_complete_is_marked_again(self, client):
+        """A re-run from Layout, forced past the mark, takes it off; taking the run back puts it back."""
+        api, conn = client
+        store.log_element(conn, 1, 'model:first', 'create')
+        conn.execute('UPDATE pages SET layout_checked = 1 WHERE id = 1')
+        conn.commit()
+        res = api.post('/api/jobs/j1/rerun', headers=ALICE, json={'from_phase': 'layout', 'force': True})
+        assert res.status_code == 200, res.text
+        assert conn.execute('SELECT layout_checked FROM pages WHERE id = 1').fetchone()[0] == 0
+
+        def detect(author):
+            box = conn.execute("INSERT INTO elements (page_id, order_idx, class_name, bbox, kind) "
+                               "VALUES (1, 0, 'Paragraph', '[0, 0, 1, 0.5]', 'content')").lastrowid
+            store.log_element(conn, box, author, 'create')
+        run_id = a_run(conn, detect)
+
+        assert api.post(f'/api/jobs/j1/runs/{run_id}/revert', headers=ALICE).status_code == 200
+        assert conn.execute('SELECT layout_checked FROM pages WHERE id = 1').fetchone()[0] == 1
+        assert conn.execute('SELECT deleted FROM elements WHERE id = 1').fetchone()[0] == 0
+
+    def test_a_page_marked_or_unmarked_since_keeps_that(self, client):
+        api, conn = client
+        conn.execute('UPDATE pages SET layout_checked = 1 WHERE id = 1')
+        conn.commit()
+        api.post('/api/jobs/j1/rerun', headers=ALICE, json={'from_phase': 'layout', 'force': True})
+        run_id = a_run(conn, lambda author: None)
+        api.patch('/api/pages/1', headers=ALICE, json={'layout_checked': True})
+        api.patch('/api/pages/1', headers=ALICE, json={'layout_checked': False})
+
+        assert api.post(f'/api/jobs/j1/runs/{run_id}/revert', headers=ALICE).status_code == 200
+        assert conn.execute('SELECT layout_checked FROM pages WHERE id = 1').fetchone()[0] == 0
 
     @pytest.mark.parametrize('on_the_way', [[], ['ingesting'], ['uploading', 'ingesting']])
     def test_a_new_dataset_opens_one_run_as_it_is_queued(self, client, on_the_way):

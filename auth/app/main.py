@@ -246,12 +246,13 @@ async def sign_in_with_password(body: SignIn, request: Request):
             raise HTTPException(400, {'message': 'Wrong email or password.'}) from None
         except sign_in.Unavailable as why:
             raise _provider_problem(why) from None
-        store.clear_sign_in_failures(conn, account)
         if isinstance(outcome, sign_in.Asked):
             # The account's name is all there is to judge the password against before the
-            # second factor names who signed in.
+            # second factor names who signed in. Its failures stand until that is answered too,
+            # or the password again would buy fresh tries at the code.
             weak = _below_the_rules(body.password, {'preferred_username': email, 'email': email})
             return _asked(conn, outcome, _safe_next(body.next), weak, account)
+        store.clear_sign_in_failures(conn, account)
     finally:
         conn.close()
     return _signed_in(outcome, _safe_next(body.next), weak=_below_the_rules(body.password, outcome))

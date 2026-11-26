@@ -89,6 +89,8 @@ the version in the app's footer opens.
 
 ### Changed
 
+- The owner's word that training on restricted material is permitted lapses when the dataset is
+  transferred, and is asked again for a restricting statement it did not cover (#168).
 - A step switched on after some pages went through without it is offered on just those pages,
   and a page layout passed by no longer counts as layout done (#138).
 - A dataset's pages are ingested beside the GPU queue, two datasets at a time, and the dataset
@@ -141,6 +143,27 @@ the version in the app's footer opens.
 
 ### Fixed
 
+- Wrong codes at the second factor count until the whole sign-in succeeds, so signing in with the
+  password again no longer starts the count afresh (#155).
+- Reading a checked line again takes its check off, and a sign-off of its page with it (#156).
+- A page someone keys blind is left out of their Search and transcript until it is signed off (#157).
+- A keyer cannot delete their page's language-model readings (#158).
+- Reverting a re-run from Layout marks its pages layout complete again (#159).
+- A workspace's owner stays among its members; the Members dialog shows them as its owner (#160).
+- Next and Previous in the page viewer keep to every page you key, as its second keyer too (#162).
+- Remembering which pages layout passed by leaves alone the pages it ran on before it was
+  switched off (#163).
+- An archived model is not deleted while a dataset waits to be read with it, or an evaluation of
+  it waits to run (#165).
+- Only a dataset you may move can be dragged in the dataset list (#167).
+- Exact search finds corrected lines with accents and lines with runs of spaces; imported archives
+  are read within a size limit; a queued or retried run is checked for its rights and its
+  signed-off material as it starts; and smaller fixes to reverting runs, transfers, page
+  assignment, folder names, page types, metadata saves and the ingest queue (#169).
+- A IIIF canvas keeps only the text annotations addressed to it, where one annotation page
+  serves several canvases of a manifest (#166).
+- A DeepLabel export carries a dataset's and each page's free metadata and its page types,
+  and importing it brings them back; before, they were left behind on the way across (#164).
 - Deleting a training run no longer fails when its model had read pages or was named as
   replaced by a newer one (#152).
 - A running layout or line run's page shows its best on its own headline (box mAP50, F1)

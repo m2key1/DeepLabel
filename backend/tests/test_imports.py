@@ -1,10 +1,11 @@
 import io
+import json
 import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app import imports, store
+from app import export, imports, ingest, page_types, store
 from app.deps import get_db
 from app.main import app
 
@@ -384,7 +385,6 @@ class TestAnExportItCannotRead:
 
 
 def _deeplabel_export(pages: list[dict]) -> bytes:
-    import json
     return json.dumps({'job': {'id': 'abc', 'name': 'Name register'}, 'pages': pages}).encode()
 
 
@@ -459,6 +459,147 @@ class TestADeepLabelExport:
         response = _import(client, {'job.json': _deeplabel_export([EXPORTED_PAGE])})
         assert (response.status_code, response.json()['detail']) == (
             400, 'job.json names NR_1876.108.jpg, which is not under images/ in the archive')
+
+
+class TestAMemberTooBigToRead:
+    """job.json and every XML file are read whole, so a tiny zip whose copy unpacks to
+    gigabytes must be refused before it fills memory with data nobody asked for."""
+
+    def test_a_job_json_over_the_limit_refuses_the_import(self, api, monkeypatch):
+        client, conn = api
+        monkeypatch.setattr(imports, 'TEXT_MEMBER_LIMIT', 100)
+        payload = _deeplabel_export([EXPORTED_PAGE])
+
+        response = _import(client, {'job.json': payload, 'images/NR_1876.108.jpg': b'JPEG'})
+
+        assert (response.status_code, response.json()['detail']) == (
+            400, f'job.json unpacks to {ingest.readable_size(len(payload))}, '
+                 f'over the import limit of {ingest.readable_size(100)}')
+        assert conn.execute('SELECT COUNT(*) c FROM jobs').fetchone()['c'] == 0
+
+    def test_a_page_xml_over_the_limit_refuses_the_export(self, monkeypatch):
+        monkeypatch.setattr(imports, 'TEXT_MEMBER_LIMIT', 100)
+        xml = PAGE_XML.encode()
+
+        with pytest.raises(imports.ImportError_) as error:
+            imports.read_export_zip(_zip({'page/folio_1.xml': xml, 'folio_1.png': b'PNGDATA'}))
+
+        assert error.value.detail == (
+            f'page/folio_1.xml unpacks to {ingest.readable_size(len(xml))}, '
+            f'over the import limit of {ingest.readable_size(100)}')
+
+    def test_a_member_that_lies_about_its_size_stops_being_read(self, monkeypatch):
+        monkeypatch.setattr(imports, 'TEXT_MEMBER_LIMIT', 999_999)
+
+        class LyingArchive:
+            def getinfo(self, name):
+                info = zipfile.ZipInfo(name)
+                info.file_size = 8
+                return info
+
+            def open(self, name):
+                return io.BytesIO(b'x' * (imports.TEXT_MEMBER_LIMIT + 1))
+
+        with pytest.raises(imports.ImportError_) as error:
+            imports.read_within_limit(LyingArchive(), 'job.json')
+
+        assert error.value.detail == 'job.json unpacks to 1.0 MB, over the import limit of 1000.0 KB'
+
+    def test_a_job_json_within_the_limit_still_imports(self, api):
+        client, _ = api
+        response = _import(client, {'job.json': _deeplabel_export([EXPORTED_PAGE]),
+                                    'images/NR_1876.108.jpg': b'JPEG'})
+
+        assert (response.status_code, response.json()['format']) == (200, 'deeplabel')
+
+
+def _typed_volume(conn):
+    conn.executescript("""
+        INSERT INTO jobs (id, name, owner, status, task, metadata)
+            VALUES ('j1', 'Volume', 'alice', 'done', 'text', '[{"key": "Fond", "value": "1"}]');
+        UPDATE job_page_types SET name = 'Deckblatt', run_layout = 0 WHERE type_id = 2;
+        UPDATE job_page_types SET run_lines = 0 WHERE type_id = 3;
+        INSERT INTO pages (id, job_id, idx, filename, source_file, status, page_type, metadata)
+            VALUES (1, 'j1', 0, 'a.png', '/a.png', 'done', NULL, '[{"key": "Language", "value": "German"}]'),
+                   (2, 'j1', 1, 'b.png', '/b.png', 'done', 2, '[]'),
+                   (3, 'j1', 2, 'c.png', '/c.png', 'done', 4, '[{"key": "Shelf mark", "value": "NR 1876/108"}]');
+    """)
+
+
+DEFAULT_TYPES = [
+    {'id': 1, 'name': 'Text', 'run_layout': True, 'run_lines': True, 'run_ocr': True},
+    {'id': 2, 'name': 'Cover', 'run_layout': True, 'run_lines': True, 'run_ocr': False},
+    {'id': 3, 'name': 'Blank', 'run_layout': True, 'run_lines': True, 'run_ocr': False},
+    {'id': 4, 'name': 'Table', 'run_layout': True, 'run_lines': True, 'run_ocr': True},
+    {'id': 5, 'name': 'Image', 'run_layout': True, 'run_lines': True, 'run_ocr': True}]
+
+RENAMED_TYPES = [
+    {'id': 1, 'name': 'Text', 'run_layout': True, 'run_lines': True, 'run_ocr': True},
+    {'id': 2, 'name': 'Deckblatt', 'run_layout': False, 'run_lines': True, 'run_ocr': False},
+    {'id': 3, 'name': 'Blank', 'run_layout': True, 'run_lines': False, 'run_ocr': False},
+    {'id': 4, 'name': 'Table', 'run_layout': True, 'run_lines': True, 'run_ocr': True},
+    {'id': 5, 'name': 'Image', 'run_layout': True, 'run_lines': True, 'run_ocr': True}]
+
+
+class TestADeepLabelExportTypesAndMetadata:
+    """A dataset's free metadata and page types travel in its export: the types replace the
+    defaults the new dataset was given, every page keeps its type and fields, and anything
+    malformed falls back to the defaults, never failing the import."""
+
+    def imported(self, api, data):
+        client, conn = api
+        response = _import(client, {**{f'images/{page["filename"]}': b'JPEG' for page in data['pages']},
+                                    'job.json': json.dumps(data).encode()})
+        assert response.status_code == 200, response.text
+        job_id = response.json()['job_id']
+        pages = conn.execute('SELECT filename, page_type, metadata FROM pages WHERE job_id = ? ORDER BY idx',
+                             (job_id,)).fetchall()
+        firm = conn.execute('SELECT metadata FROM jobs WHERE id = ?', (job_id,)).fetchone()
+        return job_id, firm['metadata'], [(page['filename'], page['page_type'], json.loads(page['metadata']))
+                                          for page in pages]
+
+    def test_it_brings_its_metadata_types_and_page_types_back(self, api):
+        _typed_volume(api[1])
+
+        job_id, job_metadata, pages = self.imported(api, export.collect_job(api[1], 'j1'))
+
+        assert json.loads(job_metadata) == [{'key': 'Fond', 'value': '1'}]
+        assert page_types.listed(api[1], job_id) == RENAMED_TYPES
+        assert pages == [('a.png', None, [{'key': 'Language', 'value': 'German'}]),
+                         ('b.png', 2, []),
+                         ('c.png', 4, [{'key': 'Shelf mark', 'value': 'NR 1876/108'}])]
+
+    def test_malformed_types_and_metadata_take_the_defaults(self, api):
+        _typed_volume(api[1])
+        data = export.collect_job(api[1], 'j1')
+        data['job']['page_types'] = [{'id': '2'}, 3]
+        data['job']['metadata'] = {'Language': 'German'}
+        data['pages'][0]['page_type'] = '2'
+        data['pages'][0]['metadata'] = [{'key': 'Language', 'value': 'German'},
+                                        {'key': 'Language', 'value': 'German'}]
+        data['pages'][1]['page_type'] = 9
+        data['pages'][1]['metadata'] = [{'key': 42, 'value': 43}, {'key': 'Shelf mark', 'value': 'NR 1876/108'}]
+
+        job_id, job_metadata, pages = self.imported(api, data)
+
+        assert json.loads(job_metadata) == []
+        assert page_types.listed(api[1], job_id) == DEFAULT_TYPES
+        assert pages == [('a.png', None, []),
+                         ('b.png', None, [{'key': 'Shelf mark', 'value': 'NR 1876/108'}]),
+                         ('c.png', None, [{'key': 'Shelf mark', 'value': 'NR 1876/108'}])]
+
+    def test_an_export_from_before_metadata_and_types_imports_as_it_did(self, api):
+        _typed_volume(api[1])
+        data = export.collect_job(api[1], 'j1')
+        data['job'] = {k: v for k, v in data['job'].items() if k not in ('metadata', 'page_types')}
+        data['pages'] = [{k: v for k, v in page.items() if k not in ('metadata', 'page_type')}
+                         for page in data['pages']]
+
+        job_id, job_metadata, pages = self.imported(api, data)
+
+        assert json.loads(job_metadata) == []
+        assert page_types.listed(api[1], job_id) == DEFAULT_TYPES
+        assert [(filename, ptype) for filename, ptype, _ in pages] == [('a.png', None), ('b.png', None), ('c.png', None)]
 
 
 def test_an_export_carries_each_pages_review_flags(tmp_path):

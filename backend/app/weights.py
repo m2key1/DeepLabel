@@ -95,19 +95,26 @@ def store_model_files(conn, model_id: int) -> list[str]:
     return missing
 
 
-def forget_model(conn, model_id: int) -> None:
-    """Drops a model's file records, and each stored file no other model still uses."""
+def forget_model(conn, model_id: int) -> list[str]:
+    """Drops a model's file records; the files they named, for remove_unused once that is committed."""
     shas = [row['sha256'] for row in conn.execute('SELECT sha256 FROM model_files WHERE model_id = ?', (model_id,))]
     conn.execute('DELETE FROM model_files WHERE model_id = ?', (model_id,))
+    return shas
+
+
+def remove_unused(conn, shas: list[str]) -> None:
+    """Deletes each stored file no model uses any more. Called after the commit that forgot
+    them, so a delete that fails leaves no model without its files (#169)."""
     for sha256 in shas:
         if conn.execute('SELECT 1 FROM model_files WHERE sha256 = ?', (sha256,)).fetchone() is None:
             blob_path(sha256).unlink(missing_ok=True)
 
 
-def delete_model(conn, model_id: int) -> None:
-    """Removes a model, its scores and its stored files. Datasets set to it fall back to
-    their task's default, and pages it ran on, runs based on it and models trained from it
-    or replacing it no longer name it. Lines keep its id, read as a deleted model's work."""
+def delete_model(conn, model_id: int) -> list[str]:
+    """Removes a model and its scores, returning its files for remove_unused after the commit.
+    Datasets set to it fall back to their task's default, and pages it ran on, runs based on
+    it and models trained from it or replacing it no longer name it. Lines keep its id, read
+    as a deleted model's work."""
     for column in registry.JOB_MODEL_COLUMNS.values():
         conn.execute(f'UPDATE jobs SET {column} = NULL WHERE {column} = ?', (model_id,))
     for stage in ('layout', 'lines'):
@@ -117,8 +124,9 @@ def delete_model(conn, model_id: int) -> None:
     conn.execute('UPDATE trainings SET base_model_id = NULL WHERE base_model_id = ?', (model_id,))
     for table in ('declined_models', 'layout_label_maps', 'evaluations'):
         conn.execute(f'DELETE FROM {table} WHERE model_id = ?', (model_id,))
-    forget_model(conn, model_id)
+    shas = forget_model(conn, model_id)
     conn.execute('DELETE FROM models WHERE id = ?', (model_id,))
+    return shas
 
 
 def import_map_registry(conn) -> list[int]:

@@ -33,7 +33,9 @@ export function PageTypesDialog({ jobId, canEdit, onClose, onChanged }: {
 
   const change = (type: PageType, body: Parameters<typeof patchPageType>[2]) => {
     setBusy(true)
-    setTypes((now) => now.map((t) => (t.id === type.id ? { ...t, ...body } : t)))
+    // Reading reads the lines found, so switching lines off takes reading with it, as the server does.
+    const shown = body.run_lines === false ? { ...body, run_ocr: false } : body
+    setTypes((now) => now.map((t) => (t.id === type.id ? { ...t, ...shown } : t)))
     patchPageType(jobId, type.id, body)
       .then(() => onChanged?.())
       .catch((e: Error) => setError(e.message))
@@ -71,9 +73,11 @@ export function PageTypesDialog({ jobId, canEdit, onClose, onChanged }: {
                 {STEPS.map((step) => (
                   <td key={step.key} className="px-2 py-1.5 text-center">
                     <input type="checkbox" aria-label={`${step.label} on ${type.name} pages`} data-step={step.key}
-                           checked={type[step.key]} disabled={!canEdit || busy}
+                           checked={type[step.key]}
+                           disabled={!canEdit || busy || (step.key === 'run_ocr' && !type.run_lines)}
+                           title={step.key === 'run_ocr' && !type.run_lines ? 'Reading needs the lines found' : undefined}
                            onChange={(e) => change(type, { [step.key]: e.target.checked })}
-                           className="cursor-pointer accent-accent disabled:cursor-default" />
+                           className="cursor-pointer accent-accent disabled:cursor-default disabled:opacity-40" />
                   </td>
                 ))}
                 <td className="py-1.5 pl-2 text-right tabular-nums text-ink-muted" data-testid="page-type-pages">

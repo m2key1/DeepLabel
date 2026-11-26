@@ -6,7 +6,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app import page_rows, store, trainer
+from app import page_rows, remote_training, store, trainer
 from app.deps import get_db
 from app.main import app
 
@@ -307,6 +307,32 @@ class TestASignOffLapses:
         assert response.status_code == 200, response.text
         assert state_of(conn, 12) == 'handed_in'
 
+    def test_reading_a_checked_line_again_takes_the_sign_off_back(self, client):
+        """The new reading would stand on the line unchecked by anyone, and train as signed off."""
+        api, conn = client
+        conn.execute("UPDATE jobs SET run_ocr = 1 WHERE id = 'j1'")
+        hand_in(api, LENA, 12)
+        sign_off(api, RITA, 12)
+
+        response = api.post('/api/lines/1003/reocr', headers=LENA)
+
+        assert response.status_code == 200, response.text
+        assert conn.execute('SELECT checked, needs_ocr FROM lines WHERE id = 1003').fetchone()[:] == (0, 1)
+        assert state_of(conn, 12) == 'handed_in'
+
+    def test_reading_a_corrected_line_again_keeps_it_signed_off(self, client):
+        """Its correction is what it reads as, and stays; only the machine reading beneath is new."""
+        api, conn = client
+        conn.execute("UPDATE jobs SET run_ocr = 1 WHERE id = 'j1'")
+        conn.execute("UPDATE lines SET corrected_text = 'Theresia Hueber' WHERE id = 1004")
+        sign_off(api, RITA, 14)
+
+        response = api.post('/api/lines/1004/reocr', headers=ANNA)
+
+        assert response.status_code == 200, response.text
+        assert conn.execute('SELECT checked, needs_ocr FROM lines WHERE id = 1004').fetchone()[:] == (1, 1)
+        assert state_of(conn, 14) == 'signed_off'
+
     def test_a_reviewers_checked_fix_keeps_it_signed_off(self, client):
         api, conn = client
         sign_off(api, RITA, 12)
@@ -416,6 +442,18 @@ class TestTrainingOnSignedOffPages:
         conn.execute("UPDATE lines SET check_source = 'llm' WHERE id = 1004")
 
         assert trainer.eligible_counts(conn, 'ocr', ['j1'], True, signed_off_only=True) == {'j1': 1}
+
+    def test_a_run_whose_sign_offs_lapsed_in_the_queue_stops_before_cutting(self, client, tmp_path, monkeypatch):
+        """Asked for with signed-off pages to train on; by the time it starts, none are (#169)."""
+        _, conn = client
+        monkeypatch.setattr('app.config.TRAININGS_DIR', tmp_path / 'trainings')
+        training = {'id': 9, 'task': 'ocr', 'dataset_job_ids': '["j1"]', 'valid_job_ids': '[]', 'signed_off_only': 1,
+                    'base_model_id': None}
+
+        with pytest.raises(remote_training.CannotTrain,
+                           match='^the selected datasets contain no checked material for this task$'):
+            trainer.prepare_snapshot(conn, training)
+        assert not (tmp_path / 'trainings' / '9' / 'snapshot').exists()
 
     def test_the_training_form_previews_the_signed_off_material(self, client):
         api, conn = client

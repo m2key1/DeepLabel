@@ -80,5 +80,10 @@ test.describe('Scenario: a Manager hands her datasets and her workspace to a col
     const members = page.getByRole('dialog', { name: `Members of "${workspaceName}"` })
     await expect(members.getByRole('button', { name: 'Done' })).toBeVisible()
     await expect(members.getByTestId('members-transfer')).toHaveCount(0)
+    // Its owner stays a member while it is theirs (#160).
+    const member = (username: string) => members.locator(`[data-testid="member"][data-username="${username}"]`)
+    await expect(member(ben).getByTestId('member-owner')).toHaveText('Owner')
+    await expect(member(ben).getByRole('button', { name: `Remove ${ben}` })).toHaveCount(0)
+    await expect(member(mona).getByRole('button', { name: `Remove ${mona}` })).toBeVisible()
   })
 })

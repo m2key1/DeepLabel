@@ -76,7 +76,8 @@ class TestWhatAManifestOffers:
         canvases = iiif.parse(MANIFEST, MANIFEST['id'])['canvases']
         assert [c.get('transcript', {}).get('kind') for c in canvases] == ['alto', 'annotations', None, 'annotations']
         assert canvases[0]['transcript'] == {'kind': 'alto', 'url': f'{ARCHIVE}/alto/1.xml'}
-        assert canvases[3]['transcript'] == {'kind': 'annotations', 'pages': [{'url': f'{ARCHIVE}/anno-page/4'}]}
+        assert canvases[3]['transcript'] == {'kind': 'annotations', 'canvas': f'{ARCHIVE}/t3/4',
+                                             'pages': [{'url': f'{ARCHIVE}/anno-page/4'}]}
 
     def test_a_v2_manifest_offers_its_annotation_lists(self):
         v2 = {'@context': 'http://iiif.io/api/presentation/2/context.json', '@type': 'sc:Manifest',
@@ -85,7 +86,7 @@ class TestWhatAManifestOffers:
                   'images': [{'resource': {'@id': f'{ARCHIVE}/plain/v.jpg', 'width': W, 'height': H}}],
                   'otherContent': [{'@id': f'{ARCHIVE}/list/1', '@type': 'sc:AnnotationList'}]}]}]}
         assert iiif.parse(v2, v2['@id'])['canvases'][0]['transcript'] == {
-            'kind': 'annotations', 'pages': [{'url': f'{ARCHIVE}/list/1'}]}
+            'kind': 'annotations', 'canvas': f'{ARCHIVE}/v2t/1', 'pages': [{'url': f'{ARCHIVE}/list/1'}]}
 
     def test_the_wizard_hears_how_many_pages_offer_one_from_a_sample(self, api):
         client, conn, routes, _ = api
@@ -156,6 +157,70 @@ class TestImportingThem:
         statuses = dict(conn.execute('SELECT filename, status FROM pages WHERE job_id = ?', (job_id,)).fetchall())
         assert statuses['0001_1.jpg'] == 'ingested'
         assert '0001_1.jpg' not in lines_of(conn, job_id)
+
+
+SHARED_PAGE = {'id': f'{ARCHIVE}/anno-page/shared', 'type': 'AnnotationPage', 'items': [
+    {'id': f'{ARCHIVE}/anno/shared/0', 'type': 'Annotation', 'motivation': 'supplementing',
+     'body': {'type': 'TextualBody', 'value': 'belonging to the first'},
+     'target': f'{ARCHIVE}/t3/1#xywh=100,100,400,100'},
+    {'id': f'{ARCHIVE}/anno/shared/1', 'type': 'Annotation', 'motivation': 'supplementing',
+     'body': {'type': 'TextualBody', 'value': 'belonging to the second'},
+     'target': {'type': 'SpecificResource', 'source': {'id': f'{ARCHIVE}/t3/2'},
+                'selector': {'type': 'FragmentSelector', 'value': 'xywh=200,200,400,100'}}},
+]}
+
+SHARED_MANIFEST = {
+    '@context': 'http://iiif.io/api/presentation/3/context.json', 'type': 'Manifest',
+    'id': f'{ARCHIVE}/t3/shared', 'label': {'en': ['Shared out']},
+    'items': [canvas(1, annotations=[SHARED_PAGE]), canvas(2, annotations=[SHARED_PAGE])],
+}
+
+
+class TestKeepingToItsCanvas:
+    def test_a_page_of_annotations_shared_by_two_canvases_gives_each_its_own(self):
+        canvases = iiif.parse(SHARED_MANIFEST, SHARED_MANIFEST['id'])['canvases']
+        assert [c['transcript']['canvas'] for c in canvases] == [f'{ARCHIVE}/t3/{n}' for n in (1, 2)]
+        first, second = (iiif_transcripts.lines(c['transcript'], W, H) for c in canvases)
+        assert first == [{'polygon': [[0.1, 0.05], [0.5, 0.05], [0.5, 0.1], [0.1, 0.1]],
+                          'text': 'belonging to the first'}]
+        assert second == [{'polygon': [[0.2, 0.1], [0.6, 0.1], [0.6, 0.15], [0.2, 0.15]],
+                           'text': 'belonging to the second'}]
+
+    def test_a_target_that_names_no_canvas_keeps_the_annotation_on_the_page_it_was_found_on(self):
+        annotation = {'motivation': 'supplementing',
+                      'body': {'type': 'TextualBody', 'value': 'an old archive omits the target'}}
+        assert iiif.annotation_targets(annotation) is None
+        targeted = {'motivation': 'supplementing', 'body': {'type': 'TextualBody', 'value': 'Taufbuch'},
+                    'target': f'{ARCHIVE}/t3/1#xywh=100,100,400,100'}
+        page = {'annotations': [annotation, targeted]}
+        assert iiif_transcripts.lines({'kind': 'annotations', 'canvas': f'{ARCHIVE}/t3/1',
+                                       'pages': [page]}, W, H) == [
+            {'polygon': [[0.1, 0.05], [0.5, 0.05], [0.5, 0.1], [0.1, 0.1]], 'text': 'Taufbuch'}]
+
+    def test_a_stored_transcript_without_the_canvas_id_keeps_its_pages_behaviour(self):
+        transcript = {'kind': 'annotations', 'pages': [{'annotations': list(SHARED_PAGE['items'])}]}
+        assert iiif_transcripts.lines(transcript, W, H) == [
+            {'polygon': [[0.1, 0.05], [0.5, 0.05], [0.5, 0.1], [0.1, 0.1]], 'text': 'belonging to the first'},
+            {'polygon': [[0.2, 0.1], [0.6, 0.1], [0.6, 0.15], [0.2, 0.15]], 'text': 'belonging to the second'}]
+
+    def test_a_v2_on_address_kicks_out_the_annotations_for_another_canvas(self):
+        page = {'resources': [
+            {'@id': f'{ARCHIVE}/anno/v2/0', 'motivation': 'sc:painting',
+             'resource': {'chars': 'written here'}, 'on': f'{ARCHIVE}/v2t/1#xywh=100,100,400,100'},
+            {'@id': f'{ARCHIVE}/anno/v2/1', 'motivation': 'sc:painting',
+             'resource': {'chars': 'written there'},
+             'on': {'@id': f'{ARCHIVE}/anno-page/v2/0', '@type': 'oa:SpecificResource',
+                    'full': {'@id': f'{ARCHIVE}/v2t/2'},
+                    'selector': {'@type': 'oa:FragmentSelector', 'value': 'xywh=200,200,400,100'}}}]}
+        canvas = {'@id': f'{ARCHIVE}/v2t/1', '@type': 'sc:Canvas', 'label': '1', 'width': W, 'height': H,
+                  'images': [{'resource': {'@id': f'{ARCHIVE}/plain/v.jpg', 'width': W, 'height': H}}],
+                  'otherContent': [page]}
+        v2 = {'@context': 'http://iiif.io/api/presentation/2/context.json', '@type': 'sc:Manifest',
+              '@id': f'{ARCHIVE}/v2t', 'label': 'x', 'sequences': [{'canvases': [canvas]}]}
+        transcript = iiif.parse(v2, v2['@id'])['canvases'][0]['transcript']
+        assert transcript['canvas'] == f'{ARCHIVE}/v2t/1'
+        assert iiif_transcripts.lines(transcript, W, H) == [
+            {'polygon': [[0.1, 0.05], [0.5, 0.05], [0.5, 0.1], [0.1, 0.1]], 'text': 'written here'}]
 
 
 class TestWhatTheReviewFound:

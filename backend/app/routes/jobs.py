@@ -347,6 +347,16 @@ def import_job(name: str = Form(...), reviewed: bool = Form(True), data_use: str
         # export's own record first, else its METS, Dublin Core or TEI.
         rights.write(conn, job_id, {**rights_import.from_zip(file.file), **imports.rights_of_export(file.file)},
                      'import', imported=True)
+        # So do its free metadata and its page types, in place of the defaults. The pages
+        # take their own type and metadata in ingest_pages, once these rows are in place.
+        described = imports.dataset_of_export(file.file)
+        if described['metadata']:
+            conn.execute('UPDATE jobs SET metadata = ? WHERE id = ?', (json.dumps(described['metadata']), job_id))
+        for held in described['page_types']:
+            conn.execute('UPDATE job_page_types SET name = ?, run_layout = ?, run_lines = ?, run_ocr = ? '
+                         'WHERE job_id = ? AND type_id = ?',
+                         (held['name'], int(held['run_layout']), int(held['run_lines']), int(held['run_ocr']),
+                          job_id, held['id']))
         _set_data_use(conn, job_id, uses)
         layout_templates.copy_into(conn, job_id)
         # An import may bring classes this instance's template lacks; they join the
@@ -872,7 +882,8 @@ def get_job(job_id: str, pages: bool = True, conn=Depends(get_db),
     # An annotator is listed the pages handed to them and the ones nobody has (#137).
     own_pages_only = job['my_role'] == 'annotator'
     job['pages'] = [
-        {**{key: p[key] for key in p.keys() if key != 'mine'},
+        {**{key: p[key] for key in p.keys()},
+         'mine': bool(p['mine']),
          'layout_checked': bool(p['layout_checked']),
          'lines_checked': bool(p['lines_checked']),
          'deleted': bool(p['deleted']),
@@ -1429,7 +1440,7 @@ def cancel(job_id: str, conn=Depends(get_db), user: dict = Depends(current_user)
         raise HTTPException(404)
     if not jobs.cancel_job(conn, job_id):
         raise HTTPException(409, f'this dataset is already {job["status"]} - '
-                                 'only a queued or running one can be cancelled')
+                                 'only a queued, running or ingesting one can be cancelled')
     return {'ok': True}
 
 

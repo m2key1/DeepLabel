@@ -245,6 +245,8 @@ export interface PageSummary {
   assignee?: string | null
   /** A double-keyed page's other keyer. */
   second_assignee?: string | null
+  /** Handed to the person asking, as its only keyer or one of two: Next and Previous keep to these. */
+  mine?: boolean
   /** Where the page stands in review, in the page table; a send-back's note beside it. */
   review?: ReviewState
   review_note?: string | null
@@ -1755,12 +1757,14 @@ export function setPageNote(pageId: number, text: string): Promise<Note | null> 
   return request(`/api/pages/${pageId}/note`, json('PUT', { text }))
 }
 
-export function putJobMetadata(jobId: string, entries: MetadataEntry[]): Promise<{ metadata: MetadataEntry[] }> {
-  return request(`/api/jobs/${jobId}/metadata`, json('PUT', { metadata: entries }))
+/** `base` is the fields as they were opened: a save over fields changed since is a 409 conflict
+ *  whose `current` is what they hold now (#169). */
+export function putJobMetadata(jobId: string, entries: MetadataEntry[], base: MetadataEntry[]): Promise<{ metadata: MetadataEntry[] }> {
+  return request(`/api/jobs/${jobId}/metadata`, json('PUT', { metadata: entries, base }))
 }
 
-export function putPageMetadata(pageId: number, entries: MetadataEntry[]): Promise<{ metadata: MetadataEntry[] }> {
-  return request(`/api/pages/${pageId}/metadata`, json('PUT', { metadata: entries }))
+export function putPageMetadata(pageId: number, entries: MetadataEntry[], base: MetadataEntry[]): Promise<{ metadata: MetadataEntry[] }> {
+  return request(`/api/pages/${pageId}/metadata`, json('PUT', { metadata: entries, base }))
 }
 
 export function setNewPagesTest(jobId: string, newPagesTest: boolean): Promise<{ new_pages_test: boolean }> {

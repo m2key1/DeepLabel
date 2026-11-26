@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import config, newer_models, registry, schemas, trainer, weights
+from app import config, newer_models, registry, schemas, store, trainer, weights
 from app.deps import WRITERS, get_db, has_capability, require_role
 
 router = APIRouter(tags=['models'])
@@ -157,25 +157,31 @@ def delete_model(model_id: int, conn=Depends(get_db), user: dict = Depends(requi
     if producer is not None:
         trainer.delete(conn, producer)
     else:
-        weights.delete_model(conn, model_id)
+        unused = weights.delete_model(conn, model_id)
         conn.commit()
+        weights.remove_unused(conn, unused)
     return {'ok': True}
 
 
 def _working_with(conn, model) -> str | None:
-    """Work that holds the model from its start and would lose it halfway: a run fine-tuning
-    it, a dataset being read with it, an evaluation of it."""
+    """Work that holds the model from its start and would lose it halfway, or start without
+    it: a run fine-tuning it, a dataset being read with it or waiting to be, an evaluation of
+    it running or waiting to."""
     run = conn.execute('SELECT name FROM trainings WHERE base_model_id = ? AND status IN (?, ?, ?)',
                        (model['id'], *trainer.CANCELLABLE_STATUSES)).fetchone()
     if run:
         return f'run "{run["name"]}" starts from this model'
     column = registry.JOB_MODEL_COLUMNS.get(model['task'])
-    dataset = column and conn.execute(f"SELECT name FROM jobs WHERE status = 'running' AND {column} = ?",
-                                      (model['id'],)).fetchone()
+    dataset = column and conn.execute(
+        f"SELECT name, status FROM jobs WHERE status IN ({store.JOB_BUSY_SQL}) AND {column} = ? "
+        "ORDER BY status = 'running' DESC, name", (model['id'],)).fetchone()
     if dataset:
-        return f'dataset "{dataset["name"]}" is being read with this model'
-    if conn.execute("SELECT 1 FROM evaluations WHERE model_id = ? AND status = 'running'", (model['id'],)).fetchone():
-        return 'an evaluation of this model is running'
+        doing = 'is being read' if dataset['status'] == 'running' else 'waits to be read'
+        return f'dataset "{dataset["name"]}" {doing} with this model'
+    evaluation = conn.execute("SELECT status FROM evaluations WHERE model_id = ? AND status IN ('queued', 'running') "
+                              "ORDER BY status = 'running' DESC", (model['id'],)).fetchone()
+    if evaluation:
+        return f"an evaluation of this model {'is running' if evaluation['status'] == 'running' else 'waits to run'}"
     return None
 
 

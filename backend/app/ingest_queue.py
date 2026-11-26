@@ -41,6 +41,28 @@ def spawn(job_id: str) -> subprocess.Popen:
             cwd=BACKEND_DIR, env=env, stdout=log, stderr=subprocess.STDOUT)
 
 
+def is_ingest_command(args: list[str], job_id: str) -> bool:
+    return 'app.ingest_job' in args and job_id in args
+
+
+def cmdline(pid: int) -> list[str] | None:
+    try:
+        return Path(f'/proc/{pid}/cmdline').read_bytes().decode('utf-8', 'replace').split('\0')
+    except OSError:
+        return None
+
+
+def live_ingest(pid: int, job_id: str) -> bool:
+    """Whether jobs.pid still names this dataset's own ingest. A restart leaves one running,
+    and os.kill alone would take a reused pid for it, so the command confirms the match."""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    args = cmdline(pid)
+    return args is not None and is_ingest_command(args, job_id)
+
+
 class Ingester:
     """Runs the ingest of the oldest ingesting datasets, AT_ONCE at a time, each in a process
     of its own, and hands each to the GPU queue as its process ends."""
@@ -57,11 +79,16 @@ class Ingester:
             del self.running[job_id]
             self._finished(conn, job_id, code)
         waiting = conn.execute(
-            'SELECT id FROM jobs WHERE status = ? ORDER BY created_at, rowid', (INGESTING,)).fetchall()
+            'SELECT id, pid FROM jobs WHERE status = ? ORDER BY created_at, rowid', (INGESTING,)).fetchall()
+        # An ingest a restart left running takes its place among those at once like any other.
+        left_running = 0
         for row in waiting:
-            if len(self.running) >= AT_ONCE:
+            if len(self.running) + left_running >= AT_ONCE:
                 break
             if row['id'] in self.running:
+                continue
+            if row['pid'] is not None and live_ingest(row['pid'], row['id']):
+                left_running += 1
                 continue
             process = self.spawn(row['id'])
             self.running[row['id']] = process

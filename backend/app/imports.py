@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree
 
-from app import ingest, rights, store
+from app import ingest, metadata, page_types, rights, store
 
 
 class ImportError_(Exception):
@@ -464,9 +464,11 @@ def ingest_pages(conn, job_id: str, pages: list[dict], author: str, reviewed: bo
         if page_id is None:
             continue
         counts['pages'] += 1
-        conn.execute('UPDATE pages SET width = ?, height = ?, layout_checked = ?, lines_checked = ? WHERE id = ?',
+        conn.execute('UPDATE pages SET width = ?, height = ?, layout_checked = ?, lines_checked = ?, '
+                     'page_type = ?, metadata = ? WHERE id = ?',
                      (parsed['width'], parsed['height'], int(parsed.get('layout_checked', False)),
-                      int(parsed.get('lines_checked', False)), page_id))
+                      int(parsed.get('lines_checked', False)), parsed.get('page_type'),
+                      json.dumps(parsed.get('metadata') or []), page_id))
         for order_idx, region in enumerate(parsed['regions']):
             cur = conn.execute(
                 'INSERT INTO elements (page_id, order_idx, class_name, raw_class_name, bbox, conf, kind, polygon) '
@@ -516,6 +518,26 @@ class ScansOnly(ImportError_):
     export to import."""
 
 
+TEXT_MEMBER_LIMIT = 64 << 20
+
+
+def read_within_limit(archive: zipfile.ZipFile, name: str) -> bytes:
+    """One zip member an import reads whole: a job.json, METS or XML file. Only when the
+    size it declares fits the limit, and never more than a limit's worth even if its
+    header lies, so a tiny zip cannot name a copy that unpacks to gigabytes. Images are
+    not read whole - extract_images streams them to disk."""
+    declared = archive.getinfo(name).file_size
+    if declared > TEXT_MEMBER_LIMIT:
+        raise ImportError_(f'{name} unpacks to {ingest.readable_size(declared)}, '
+                           f'over the import limit of {ingest.readable_size(TEXT_MEMBER_LIMIT)}')
+    with archive.open(name) as member:
+        data = member.read(TEXT_MEMBER_LIMIT + 1)
+    if len(data) > TEXT_MEMBER_LIMIT:
+        raise ImportError_(f'{name} unpacks to {ingest.readable_size(len(data))}, '
+                           f'over the import limit of {ingest.readable_size(TEXT_MEMBER_LIMIT)}')
+    return data
+
+
 def _parse_export_xml(xml_name: str, content: bytes) -> list[dict]:
     """The pages one file describes: one for PAGE, ALTO and hOCR, as many as it has
     surfaces for TEI, none for a file in none of these formats."""
@@ -548,21 +570,26 @@ def _deeplabel_pages(archive: zipfile.ZipFile, members: list[str], manifest: str
     image under images/): every class, container and checked flag as it was, coordinates
     already the page fractions DeepLabel stores."""
     try:
-        exported = json.loads(archive.read(manifest))
+        exported = json.loads(read_within_limit(archive, manifest))
     except ValueError:
         raise ImportError_(f'{manifest} is not readable JSON')
     root = PurePosixPath(manifest).parent
     images = {PurePosixPath(m).name: m for m in members if PurePosixPath(m).parent == root / 'images'}
+    job = exported.get('job') if isinstance(exported.get('job'), dict) else {}
+    type_ids = {row['id'] for row in _page_types(job.get('page_types'))}
     pages = []
     for page in sorted(exported.get('pages') or [], key=lambda p: p.get('idx', 0)):
         member = images.get(page['filename'])
         if member is None:
             raise ImportError_(f"job.json names {page['filename']}, which is not under images/ in the archive")
+        held_type = page.get('page_type')
         pages.append({
             'format': 'deeplabel', 'image': page['filename'], 'image_member': member, 'image_name': page['filename'],
             'width': page['width'], 'height': page['height'],
             'layout_checked': bool(page.get('layout_checked')), 'lines_checked': bool(page.get('lines_checked')),
             'rights': _page_rights(page.get('rights')),
+            'metadata': _metadata(page.get('metadata')),
+            'page_type': held_type if isinstance(held_type, int) and held_type in type_ids else None,
             'regions': [{'class_name': element['class_name'], 'raw_type': element['class_name'],
                          'kind': element.get('kind') or 'content', 'bbox': element['bbox'],
                          'polygon': element.get('polygon'), 'conf': element.get('conf'),
@@ -587,20 +614,56 @@ def _page_rights(held) -> dict | None:
     return {'status': status, **_text_fields(held)} if status else None
 
 
-def rights_of_export(fileobj) -> dict:
-    """The rights a DeepLabel export's job.json gives its dataset, as fields to fill: statements
-    only when they are on offer, the free fields as they are."""
+def _exported_job(fileobj) -> dict:
+    """A DeepLabel export's job object from its job.json; anything unreadable gives an empty one."""
     try:
         archive = zipfile.ZipFile(fileobj)
         manifests = sorted((n for n in archive.namelist() if PurePosixPath(n).name == 'job.json'),
                            key=lambda n: n.count('/'))
-        exported = json.loads(archive.read(manifests[0])) if manifests else {}
-    except (zipfile.BadZipFile, ValueError):
+        exported = json.loads(read_within_limit(archive, manifests[0])) if manifests else {}
+    except (zipfile.BadZipFile, ValueError, ImportError_):
         exported = {}
     finally:
         fileobj.seek(0)
     job = exported.get('job') if isinstance(exported, dict) else None
-    job = job if isinstance(job, dict) else {}
+    return job if isinstance(job, dict) else {}
+
+
+def _metadata(held) -> list[dict]:
+    """Free fields as an export gave them, kept only as a metadata edit would keep them."""
+    if not isinstance(held, list):
+        return []
+    try:
+        return metadata.cleaned([entry for entry in held if isinstance(entry, dict)
+                                 and isinstance(entry.get('key'), str) and isinstance(entry.get('value'), str)])
+    except metadata.Refused:
+        return []
+
+
+def _page_types(held) -> list[dict]:
+    """A dataset's page types as an export gave them, each kept only when whole."""
+    rows = []
+    for entry in held if isinstance(held, list) else []:
+        if isinstance(entry, dict) and isinstance(entry.get('id'), int) and isinstance(entry.get('name'), str) \
+                and all(isinstance(entry.get(f'run_{step}'), bool) for step in page_types.STEPS) \
+                and entry['name'].strip():
+            rows.append({'id': entry['id'], 'name': entry['name'].strip(),
+                         **{f'run_{step}': entry[f'run_{step}'] for step in page_types.STEPS},
+                         'run_ocr': entry['run_ocr'] and entry['run_lines']})
+    return rows
+
+
+def dataset_of_export(fileobj) -> dict:
+    """A DeepLabel export's dataset metadata and page types from its job.json, as an import
+    keeps them; anything malformed gives the defaults' nothing."""
+    job = _exported_job(fileobj)
+    return {'metadata': _metadata(job.get('metadata')), 'page_types': _page_types(job.get('page_types'))}
+
+
+def rights_of_export(fileobj) -> dict:
+    """The rights a DeepLabel export's job.json gives its dataset, as fields to fill: statements
+    only when they are on offer, the free fields as they are."""
+    job = _exported_job(fileobj)
     held = job.get('rights') if isinstance(job.get('rights'), dict) else {}
     fields = {'status': rights.canonical(held.get('status')),
               'transcription_licence': rights.canonical(job.get('transcription_licence')), **_text_fields(held)}
@@ -634,7 +697,7 @@ def read_export_zip(fileobj) -> list[dict]:
             by_stem.setdefault(path.stem, []).append(member)
     pages = []
     for xml_name in sorted(xml_names):
-        for parsed in _parse_export_xml(xml_name, archive.read(xml_name)):
+        for parsed in _parse_export_xml(xml_name, read_within_limit(archive, xml_name)):
             image_member = _nearest(by_name.get(PurePosixPath(parsed['image']).name)
                                     or by_stem.get(PurePosixPath(xml_name).stem, []), xml_name)
             # A blank leaf has an image and no regions; it is still a page of the export.
